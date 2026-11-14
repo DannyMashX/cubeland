@@ -126,7 +126,7 @@
 // 26.11.14_1 = the first update on 14 November 2026, 26.11.14_2 = the second update that day.
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.14_2';
+const GAME_VERSION = '26.11.14_3';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -2709,9 +2709,23 @@ document.getElementById('game-version').textContent = GAME_VERSION;
   try { seen = localStorage.getItem(SEEN_KEY); } catch (e) {}
   const panel = document.getElementById('whatsnew'), listEl = document.getElementById('whatsnew-list');
   panel.addEventListener('click', e => e.stopPropagation());
+  // the list of versions and their changes comes from versions.js (loaded as a script, which also works when you
+  // open the game straight from your computer, unlike fetching a file)
   let versions = null;
-  const loadVersions = () => versions ? Promise.resolve(versions) :
-    fetch(top + 'versions.json', { cache: 'no-cache' }).then(r => r.json()).then(v => (versions = v));
+  const loadVersions = () => versions ? Promise.resolve(versions) : new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = top + 'versions.js' + (location.protocol === 'file:' ? '' : '?t=' + Date.now());   // always the latest list online
+    s.onload = () => Array.isArray(window.VERSIONS) ? res(versions = window.VERSIONS) : rej();
+    s.onerror = rej;
+    document.head.append(s);
+  });
+  // a browser can keep showing the previous version for a few minutes after an update; if the list says there's
+  // a newer one, reload the main page so you get it (old versions in versions/ are left alone)
+  if (!top && location.protocol !== 'file:') loadVersions().then(all => {
+    const newest = all[0] && all[0].version;
+    if (newest && compareVersions(newest, GAME_VERSION) > 0 && new URLSearchParams(location.search).get('v') !== newest)
+      location.replace(location.pathname + '?v=' + encodeURIComponent(newest) + location.hash);
+  }).catch(() => {});
   function showChanges(since) {    // every version newer than `since` up to this one (or just this one)
     loadVersions().then(all => {
       const pick = all.filter(v => compareVersions(v.version, GAME_VERSION) <= 0 && (since ? compareVersions(v.version, since) > 0 : v.version === GAME_VERSION));

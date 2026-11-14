@@ -28,7 +28,14 @@
   <p class="warn">All versions share the same worlds. A world played in a newer version might not load right in an older one, so the game warns you before opening it.</p>
 </main>
 <script>
-fetch('versions.json', { cache: 'no-cache' }).then(r => r.json()).then(list => {
+// the list comes from versions.js (a script, so this page also works when opened straight from your computer)
+new Promise((res, rej) => {
+  const s = document.createElement('script');
+  s.src = 'versions.js' + (location.protocol === 'file:' ? '' : '?t=' + Date.now());
+  s.onload = () => Array.isArray(window.VERSIONS) ? res(window.VERSIONS) : rej();
+  s.onerror = rej;
+  document.head.append(s);
+}).then(list => {
   const el = document.getElementById('list');
   el.textContent = '';
   list.forEach((v, i) => {
