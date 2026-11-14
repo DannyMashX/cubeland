@@ -105,16 +105,15 @@
 <script src="textures.js"></script>
 <script>
 // ===================== Version =====================
-// MAJOR.MINOR.PATCH. publish-update.bat raises this for you each time you publish (don't edit it by hand):
-//   PATCH (0.1.0 -> 0.1.1): small fixes and tweaks
-//   MINOR (0.1.0 -> 0.2.0): new features (new blocks, mobs, terrain...)
-//   MAJOR (0.1.0 -> 1.0.0): huge milestones
+// The date it was published plus which update of that day it was: YY.MM.DD_N.
+// 26.11.14_1 = the first update on 14 November 2026, 26.11.14_2 = the second update that day.
+// publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '0.1.0';
+const GAME_VERSION = '26.11.14_1';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
-  const pa = String(a || '0').split('.').map(Number), pb = String(b || '0').split('.').map(Number);
-  for (let k = 0; k < 3; k++) if ((pa[k] || 0) !== (pb[k] || 0)) return (pa[k] || 0) - (pb[k] || 0);
+  const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
+  for (let k = 0; k < 4; k++) if ((pa[k] || 0) !== (pb[k] || 0)) return (pa[k] || 0) - (pb[k] || 0);
   return 0;
 }
 
