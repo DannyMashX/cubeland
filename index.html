@@ -158,7 +158,7 @@
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.14.417';
+const GAME_VERSION = '26.11.14.506';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -192,13 +192,10 @@ const BLOCKS = {
   13: { name: 'Bricks',      t: [14, 14, 14] },
   14: { name: 'Bricks',      t: [15, 15, 15] },
   15: { name: 'Bricks',      t: [16, 16, 16] },
-  // Ores: found in clusters inside stone underground
-  16: { name: 'Coal Ore',     t: [17, 17, 17] },
-  17: { name: 'Tin Ore',      t: [18, 18, 18] },
-  18: { name: 'Aluminum Ore', t: [19, 19, 19] },
-  19: { name: 'Ruby Ore',     t: [20, 20, 20] },
-  20: { name: 'Sapphire Ore', t: [21, 21, 21] },
-  21: { name: 'Silver Ore',   t: [22, 22, 22] },
+  // (16-21 were ores, now removed from the game; those numbers are left unused)
+  // (22-41 are torches and 50-57 water, see below)
+  60: { name: 'Crafting Bench', t: [28, 29, 8] },   // bottom is planks
+  61: { name: 'Stripped Log',  t: [30, 31, 31] },
 };
 // Torches: thin sticks (not full cubes) you can walk through, that light up the dark.
 // One block space holds 1-4 torches, either standing, or leaning 22.5 degrees off one of the 4 walls.
@@ -234,7 +231,7 @@ BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true };
 const isItem = id => !!(BLOCKS[id] && BLOCKS[id].item);
 const BRICK_VARIANTS = [12, 13, 14, 15];
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
-const ITEMS = [1, 2, 3, 8, 7, 4, 5, 6, 9, 12, 10, 11, 22, 16, 17, 18, 21, 19, 20, WATER];
+const ITEMS = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 22, WATER];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 const HOTBAR_DEFAULT = [1, 2, 3, 8, 7, 4, 10, 12, 22, 6];
 const HOTBAR = (() => {
@@ -259,7 +256,7 @@ const placeId = id => BRICK_VARIANTS.includes(id) ? BRICK_VARIANTS[Math.floor(Ma
 let selected = 0;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 28;
+const TILE = 16, NT = 32;
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -316,14 +313,6 @@ for (let t = 13; t <= 16; t++) for (let y = 0; y < TILE; y++) for (let x = 0; x 
   const mortar = y % 4 === 3 || (x + off) % 8 === 7;
   px(t, x, y, mortar ? vary([190, 185, 175], 0.05) : vary([170, 60, 45], 0.15));
 }
-// ore placeholders: stone with coloured specks (your *_ore.png files replace these)
-[[17, [35, 35, 35]], [18, [175, 180, 170]], [19, [205, 210, 220]], [20, [200, 30, 50]], [21, [40, 80, 200]], [22, [225, 228, 235]]].forEach(([t, c]) => {
-  noisy(t, [125, 125, 125], 0.25);
-  for (let i = 0; i < 7; i++) {
-    const sx = 1 + (rnd() * 12 | 0), sy = 1 + (rnd() * 12 | 0);
-    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) if (rnd() > 0.25) px(t, sx + dx, sy + dy, vary(c, 0.15));
-  }
-});
 
 // torch placeholders (your tortch_side / tortch_top / tortch_bottom files replace these)
 for (let y = 0; y < TILE; y++) for (let x = 6; x < 10; x++) px(23, x, y, y < 4 ? [255, 190, 60] : [110, 80, 45]);
@@ -338,11 +327,12 @@ for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) px(27, x, y, [40, 
 // slots with no file keep the generated placeholder above.
 const TEXTURE_SLOTS = {
   grass: 0, grass_top: 0, grass_side: 1, dirt: 2, stone: 3, log_side: 4, log_top: 5,
-  leaves: 6, sand: 7, planks: 8, cobblestone: 9, bricks: 10, brick: 10, glass: 11, gravel: 12,
-  bricks_a: 13, bricks_b: 14, bricks_c: 15, bricks_d: 16,
-  coal_ore: 17, tin_ore: 18, aluminum_ore: 19, aluminium_ore: 19, ruby_ore: 20, sapphire_ore: 21, saphire_ore: 21, silver_ore: 22,
+  leaves: 6, sand: 7, planks: 8, cobblestone: 9, stone_bricks: 10, bricks: 10, brick: 10, glass: 11, gravel: 12,
+  // red bricks: one picture fills all 4 brick looks; bricks_a.._d would give each look its own picture
+  red_bricks: [13, 14, 15, 16], bricks_a: 13, bricks_b: 14, bricks_c: 15, bricks_d: 16,
   torch_side: 23, torch_top: 24, torch_bottom: 25, tortch_side: 23, tortch_top: 24, tortch_bottom: 25,
   chocolate: 26, water: 27,
+  crafting_bench_side: 28, crafting_bench_top: 29, stripped_log_side: 30, stripped_log_top: 31,
 };
 function loadCustomTextures(onDone) {
   const entries = Object.entries(window.TEXTURES || {}).filter(([name]) => name in TEXTURE_SLOTS);
@@ -351,10 +341,11 @@ function loadCustomTextures(onDone) {
   for (const [name, src] of entries) {
     const img = new Image();
     img.onload = () => {
-      const t = TEXTURE_SLOTS[name];
-      g.clearRect(t * TILE, 0, TILE, TILE);
       g.imageSmoothingEnabled = false;
-      g.drawImage(img, t * TILE, 0, TILE, TILE);
+      for (const t of [].concat(TEXTURE_SLOTS[name])) {   // a texture can fill more than one slot
+        g.clearRect(t * TILE, 0, TILE, TILE);
+        g.drawImage(img, t * TILE, 0, TILE, TILE);
+      }
       if (--pending === 0) onDone();
     };
     img.onerror = () => { console.warn('Could not load texture', name); if (--pending === 0) onDone(); };
@@ -670,32 +661,8 @@ for (let i = 0, tries = 0; i < GRAVEL_PATCHES && tries < GRAVEL_PATCHES * 20; tr
       }
 }
 
-// --- Ores: small wandering clusters inside stone. Rarer ores are smaller and only found deep down ---
-const ORES = [
-  // id, clusters, highest y, blocks per cluster [min, max]
-  { id: 16, count: 9000, maxY: 120, size: [5, 12] },  // coal: common, almost anywhere
-  { id: 17, count: 4500, maxY: 80,  size: [4, 8] },   // tin
-  { id: 18, count: 3500, maxY: 65,  size: [3, 7] },   // aluminum
-  { id: 21, count: 1800, maxY: 48,  size: [3, 6] },   // silver: between aluminum and ruby
-  { id: 19, count: 900,  maxY: 32,  size: [2, 5] },   // ruby: rare and deep
-  { id: 20, count: 900,  maxY: 32,  size: [2, 5] },   // sapphire: rare and deep
-];
+// the six blocks touching a block (up, down and the four sides)
 const ORE_STEPS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-ORES.forEach((ore, k) => {
-  const s = 8000 + k * 10;
-  for (let i = 0, tries = 0; i < ore.count && tries < ore.count * 20; tries++) {
-    let x = Math.floor(hash(tries, 1, s) * WX), z = Math.floor(hash(tries, 2, s + 1) * WZ);
-    let y = 1 + Math.floor(hash(tries, 3, s + 2) * (ore.maxY - 1));
-    if (world[idx(x, y, z)] !== 3) continue; // only start inside stone
-    i++;
-    const n = ore.size[0] + Math.floor(hash(tries, 4, s + 3) * (ore.size[1] - ore.size[0] + 1));
-    for (let b = 0; b < n; b++) {
-      if (x >= 0 && z >= 0 && x < WX && z < WZ && y >= 1 && y < WY && world[idx(x, y, z)] === 3) world[idx(x, y, z)] = ore.id;
-      const st = ORE_STEPS[Math.floor(hash(tries * 31 + b, 5, s + 4) * 6)];
-      x += st[0]; y += st[1]; z += st[2];
-    }
-  }
-});
 
 // --- Water: every low spot open to the sky fills up to sea level (the sandy lowlands become lakes and seas) ---
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++)
@@ -1486,7 +1453,7 @@ const Sound = (() => {
   // which sound recipe each block uses (block id: recipe). Recipe names describe the sound, not the block:
   // stone-type blocks use 'rock' (deep bm / crk), dirt uses the crumbly 'dirt' crunch, gravel uses the sharp 'stone' chk.
   const MATERIAL = { 1: 'grass', 2: 'dirt', 3: 'rock', 4: 'wood', 5: 'grass', 6: 'sand', 7: 'wood', 8: 'cobble', 9: 'rock', 10: 'glass', 11: 'stone', 12: 'brick', 13: 'brick', 14: 'brick', 15: 'brick',
-    16: 'rock', 17: 'rock', 18: 'rock', 19: 'rock', 20: 'rock', 21: 'rock' };   // torches use 'wood' (see mat below)   // ores sound like stone
+    60: 'wood', 61: 'wood' };   // torches use 'wood' (see mat below)
   // materials whose placing sound is their footstep sound instead of their dig sound
   // materials with their own placing sound (others reuse the breaking sound, softer)
   const PLACE_RECIPES = {
