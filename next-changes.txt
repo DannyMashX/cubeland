@@ -1,0 +1,2 @@
+# Changes for the next update, one per line. publish-update.bat shows this list when you publish,
+# puts it in the change log, then empties this file. Lines starting with # are ignored.

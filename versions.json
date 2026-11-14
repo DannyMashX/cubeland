@@ -1,7 +1,20 @@
 [
     {
+        "version":  "26.11.14_2",
+        "date":  "2026-11-14",
+        "notes":  "Added a change log: \"What\u0027s new\" pops up when you open a newer version, showing everything that changed since you last played",
+        "changes":  [
+                        "Added a change log: \"What\u0027s new\" pops up when you open a newer version, showing everything that changed since you last played",
+                        "Added a \"What\u0027s new\" link on the title screen to see this version\u0027s changes any time",
+                        "The All versions page now lists every change in each version"
+                    ]
+    },
+    {
         "version":  "26.11.14_1",
         "date":  "2026-11-14",
-        "notes":  "First release"
+        "notes":  "First release",
+        "changes":  [
+                        "First release"
+                    ]
     }
 ]

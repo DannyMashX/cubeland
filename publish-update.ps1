@@ -7,6 +7,8 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $utf8 = New-Object System.Text.UTF8Encoding($false)   # write files as plain UTF-8 (no BOM)
+$draftHeader = "# Changes for the next update, one per line. publish-update.bat shows this list when you publish,`r`n" +
+               "# puts it in the change log, then empties this file. Lines starting with # are ignored.`r`n"
 
 Write-Host 'Packing textures and models...'
 & "$PSScriptRoot\build-textures.ps1" | Out-Null
@@ -21,14 +23,33 @@ if (-not (git status --porcelain)) {
 # today's date, plus one more than the number of updates already published today
 $listFile = "$PSScriptRoot\versions.json"
 $list = @()
-if (Test-Path $listFile) { $list = @([IO.File]::ReadAllText($listFile) | ConvertFrom-Json) }
+if (Test-Path $listFile) { foreach ($v in (ConvertFrom-Json ([IO.File]::ReadAllText($listFile)))) { $list += $v } }
 $today = Get-Date -Format 'yy.MM.dd'
 $n = 1
 foreach ($v in $list) { if ($v.version -match "^$([regex]::Escape($today))_(\d+)$") { $n = [Math]::Max($n, [int]$Matches[1] + 1) } }
 $ver = "${today}_$n"
 
-$notes = Read-Host "What's in version ${ver}? (a few words, or just press Enter)"
-if (-not $notes) { $notes = 'Updates' }
+# the change log for this version: the list in next-changes.txt (Claude adds a line there for each change we make),
+# or one you type in now. Players see it in the game's "What's new" and on the All versions page.
+$draftFile = "$PSScriptRoot\next-changes.txt"
+$changes = @()
+if (Test-Path $draftFile) {
+  $changes = @([IO.File]::ReadAllLines($draftFile) | ForEach-Object { $_.Trim() -replace '^[-*]\s*', '' } | Where-Object { $_ -and -not $_.StartsWith('#') })
+}
+if ($changes.Count) {
+  Write-Host ''
+  Write-Host "Changes in version ${ver}:"
+  $changes | ForEach-Object { Write-Host "  - $_" }
+  $ok = Read-Host 'Press Enter to use this list, or type N to write your own'
+  if ($ok -match '^[nN]') { $changes = @() }
+}
+if (-not $changes.Count) {
+  Write-Host ''
+  Write-Host "List what changed in version $ver, one thing per line. Press Enter on an empty line when you're done."
+  while ($true) { $line = Read-Host '-'; if (-not $line) { break }; $changes += $line.Trim() }
+}
+if (-not $changes.Count) { $changes = @('Small fixes and tweaks') }
+$notes = $changes[0]
 
 # put the new number in the game, and keep a copy of this version in versions\<number>\
 $html = [IO.File]::ReadAllText("$PSScriptRoot\index.html")
@@ -41,15 +62,23 @@ New-Item -ItemType Directory -Force $dir | Out-Null
 Copy-Item "$PSScriptRoot\index.html", "$PSScriptRoot\textures.js" $dir -Force
 
 # add it to the top of the list of versions
-$entry = [pscustomobject]@{ version = $ver; date = (Get-Date -Format 'yyyy-MM-dd'); notes = $notes }
+$entry = [pscustomobject]@{ version = $ver; date = (Get-Date -Format 'yyyy-MM-dd'); notes = $notes; changes = [object[]]$changes }
 $list = @($entry) + @($list | Where-Object { $_.version -ne $ver })
-[IO.File]::WriteAllText($listFile, (ConvertTo-Json -InputObject $list -Depth 3), $utf8)
+[IO.File]::WriteAllText($listFile, (ConvertTo-Json -InputObject $list -Depth 4), $utf8)
+# start a fresh draft list for the next update
+[IO.File]::WriteAllText($draftFile, $draftHeader, $utf8)
 
+# (the commit message goes through a file, so quote marks in the change log can't confuse git)
+$msgFile = Join-Path $env:TEMP 'cubeland-commit-message.txt'
+$trailer = if ($env:CUBELAND_COMMIT_TRAILER) { "`n$env:CUBELAND_COMMIT_TRAILER`n" } else { '' }   # (used when Claude publishes for you)
+[IO.File]::WriteAllText($msgFile, "Version ${ver}: $notes`n`n" + (($changes | ForEach-Object { "- $_" }) -join "`n") + "`n" + $trailer, $utf8)
 git add -A
-git commit -q -m "Version ${ver}: $notes"
+git commit -q -F $msgFile
+if ($LASTEXITCODE) { throw 'Saving the update failed (git commit). Nothing was uploaded.' }
 git tag "v$ver"
 Write-Host 'Uploading...'
 git push -q
+if ($LASTEXITCODE) { throw 'Uploading failed (git push). Check your internet connection and run this again.' }
 git push -q --tags
 Write-Host ''
 Write-Host "Done! Version $ver will be live in a minute or two."
