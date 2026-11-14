@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubeland versions</title>
+<style>
+  body { margin: 0; min-height: 100vh; background: #15171c; color: #fff; font-family: system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 32px; letter-spacing: 2px; margin: 0 0 4px; }
+  .sub { opacity: .65; margin: 0 0 24px; font-size: 14px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.12); }
+  .row > div { flex: 1; min-width: 0; }
+  .ver { font-weight: 700; font-size: 17px; }
+  .tag { font-size: 11px; font-weight: 700; background: #3d8b3d; border-radius: 4px; padding: 2px 6px; margin-left: 6px; vertical-align: 2px; }
+  .notes { font-size: 14px; opacity: .8; margin-top: 2px; }
+  .date { font-size: 12px; opacity: .5; margin-top: 2px; }
+  a.play { color: #fff; text-decoration: none; border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 5px 14px; white-space: nowrap; }
+  a.play:hover { background: rgba(255,255,255,.15); }
+  .warn { font-size: 13px; color: #ffd27a; margin-top: 24px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CUBELAND</h1>
+  <p class="sub">Every version of the game. The newest is at the top.</p>
+  <div id="list">Loading...</div>
+  <p class="warn">All versions share the same worlds. A world played in a newer version might not load right in an older one, so the game warns you before opening it.</p>
+</main>
+<script>
+fetch('versions.json', { cache: 'no-cache' }).then(r => r.json()).then(list => {
+  const el = document.getElementById('list');
+  el.textContent = '';
+  list.forEach((v, i) => {
+    const row = document.createElement('div'); row.className = 'row';
+    const info = document.createElement('div');
+    const name = document.createElement('div'); name.className = 'ver'; name.textContent = 'Version ' + v.version;
+    if (i === 0) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = 'NEWEST'; name.append(t); }
+    const notes = document.createElement('div'); notes.className = 'notes'; notes.textContent = v.notes || '';
+    const date = document.createElement('div'); date.className = 'date'; date.textContent = v.date || '';
+    info.append(name, notes, date);
+    const a = document.createElement('a'); a.className = 'play'; a.textContent = 'Play';
+    a.href = i === 0 ? 'index.html' : `versions/${v.version}/index.html`;
+    row.append(info, a);
+    el.append(row);
+  });
+}).catch(() => { document.getElementById('list').textContent = 'Could not load the list of versions.'; });
+</script>
+</body>
+</html>

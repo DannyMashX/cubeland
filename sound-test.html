@@ -1,0 +1,708 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound Tester</title>
+<style>
+  :root { --bg: #1d2128; --card: #272c35; --text: #eef1f5; --muted: #a3acb9; --accent: #6cbf4a; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 24px 16px; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; max-width: 900px; }
+  .card { background: var(--card); border-radius: 8px; padding: 14px; }
+  .card h2 { margin: 0 0 4px; font-size: 18px; }
+  .card h2 span { color: var(--accent); }
+  .card p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  button { background: #3a414d; color: var(--text); border: 0; border-radius: 6px; padding: 8px 12px; font-size: 14px; cursor: pointer; margin-right: 6px; }
+  button:hover { background: #4a5260; }
+  button:active { background: var(--accent); color: #111; }
+</style>
+</head>
+<body>
+<h1>Sound Tester</h1>
+<p class="lead">Click to hear each sound. Tell Claude which sounds best (or which is closest, and what to change).</p>
+<h2>Dirt</h2>
+<div class="grid" id="dirt"></div>
+<h2>Cobblestone (placing and breaking)</h2>
+<div class="grid" id="cobble"></div>
+<h2>Stone placing</h2>
+<div class="grid" id="stoneplace"></div>
+<h2>Sand ("tss")</h2>
+<div class="grid" id="sand"></div>
+<h2>Logs and planks ("tok-ik")</h2>
+<div class="grid" id="wood"></div>
+<h2>Stone breaking ("crk")</h2>
+<div class="grid" id="stone"></div>
+<h2>Glass breaking</h2>
+<div class="grid" id="glass"></div>
+<h2>Grass</h2>
+<div class="grid" id="grid"></div>
+
+<script>
+// ---- same sound-building toolkit as the game ----
+let ctx = null;
+function rng(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function filter(buf, type, freq, q, sr) {
+  const w = 2 * Math.PI * Math.min(freq, sr * 0.45) / sr, cs = Math.cos(w), al = Math.sin(w) / (2 * q);
+  let b0, b1, b2;
+  if (type === 'lp') { b0 = (1 - cs) / 2; b1 = 1 - cs; b2 = b0; }
+  else if (type === 'hp') { b0 = (1 + cs) / 2; b1 = -(1 + cs); b2 = b0; }
+  else { b0 = al; b1 = 0; b2 = -al; }
+  const a0 = 1 + al, a1 = -2 * cs, a2 = 1 - al;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const x = buf[i], y = (b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0;
+    x2 = x1; x1 = x; y2 = y1; y1 = y; buf[i] = y;
+  }
+  return buf;
+}
+function crackles(out, r, sr, { count, spread, start = 0, len, freq, q = 1.5, amp = 1, bunch = 1.5 }) {
+  for (let k = 0; k < count; k++) {
+    const p = Math.pow(r(), bunch), t0 = start + p * spread;
+    const n = Math.max(8, Math.floor((len[0] + r() * (len[1] - len[0])) * sr));
+    const g = new Float32Array(n);
+    for (let i = 0; i < n; i++) g[i] = r() * 2 - 1;
+    filter(g, 'bp', freq[0] + r() * (freq[1] - freq[0]), q, sr);
+    const a = amp * (0.25 + 0.75 * r()) * (1 - p * 0.75), o = Math.floor(t0 * sr);
+    for (let i = 0; i < n && o + i < out.length; i++) out[o + i] += g[i] * Math.sin(Math.PI * i / n) * a;
+  }
+}
+function burst(out, r, sr, { attack, decay, type, freq, q = 0.7, amp = 1, start = 0 }) {
+  const n = Math.floor((attack + decay * 6) * sr), g = new Float32Array(n);
+  for (let i = 0; i < n; i++) g[i] = r() * 2 - 1;
+  filter(g, type, freq, q, sr);
+  const o = Math.floor(start * sr);
+  for (let i = 0; i < n && o + i < out.length; i++) {
+    const t = i / sr, env = t < attack ? t / attack : Math.exp(-(t - attack) / decay);
+    out[o + i] += g[i] * env * amp;
+  }
+}
+function ring(out, sr, { freq, decay, amp, start = 0 }) {
+  const o = Math.floor(start * sr), n = Math.floor(decay * 7 * sr);
+  for (let i = 0; i < n && o + i < out.length; i++) {
+    const t = i / sr;
+    out[o + i] += amp * Math.exp(-t / decay) * Math.sin(2 * Math.PI * freq * t) * Math.min(1, i / (0.0006 * sr));
+  }
+}
+function finish(out, sr, peak) {
+  let m = 0;
+  for (let i = 0; i < out.length; i++) m = Math.max(m, Math.abs(out[i]));
+  const s = m ? peak / m : 0, fade = Math.floor(0.006 * sr);
+  for (let i = 0; i < out.length; i++) out[i] *= s * Math.min(1, (out.length - 1 - i) / fade);
+  return out;
+}
+
+// ---- grass candidates (dig = true for breaking) ----
+const CANDIDATES = [
+  { id: 'A', name: 'Current', desc: 'Crisp, dry crunch (what the game has now).', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.32 : 0.18)));
+    crackles(out, r, sr, { count: dig ? 75 : 32, spread: dig ? 0.22 : 0.1, len: [0.002, 0.006], freq: [2500, 6500], q: 1.6 });
+    burst(out, r, sr, { attack: 0.004, decay: 0.025, type: 'lp', freq: 450, amp: 0.5 });
+    return finish(out, sr, dig ? 0.85 : 0.55);
+  } },
+  { id: 'B', name: 'Soft', desc: 'Softer, lower crunch with fewer, rounder crackles.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.32 : 0.2)));
+    crackles(out, r, sr, { count: dig ? 45 : 20, spread: dig ? 0.2 : 0.1, len: [0.004, 0.01], freq: [1200, 3500], q: 1.2 });
+    burst(out, r, sr, { attack: 0.005, decay: 0.03, type: 'lp', freq: 500, amp: 0.45 });
+    return finish(out, sr, dig ? 0.8 : 0.5);
+  } },
+  { id: 'C', name: 'Swishy', desc: 'Brushing through grass blades: a soft "shff" with a little crunch.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.36 : 0.24)));
+    burst(out, r, sr, { attack: dig ? 0.025 : 0.015, decay: dig ? 0.06 : 0.04, type: 'bp', freq: 3200, q: 0.6, amp: 0.8 });
+    crackles(out, r, sr, { count: dig ? 35 : 14, spread: dig ? 0.2 : 0.1, start: 0.005, len: [0.002, 0.006], freq: [2000, 5000], q: 1.5, amp: 0.6 });
+    burst(out, r, sr, { attack: 0.004, decay: 0.02, type: 'lp', freq: 400, amp: 0.35 });
+    return finish(out, sr, dig ? 0.75 : 0.5);
+  } },
+  { id: 'D', name: 'Chunky', desc: 'Denser, mid-pitched crunch with a soft thud under it.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.34 : 0.2)));
+    crackles(out, r, sr, { count: dig ? 90 : 40, spread: dig ? 0.2 : 0.1, len: [0.003, 0.008], freq: [900, 2800], q: 2 });
+    crackles(out, r, sr, { count: dig ? 25 : 10, spread: dig ? 0.18 : 0.08, len: [0.002, 0.004], freq: [3000, 5500], q: 2, amp: 0.4 });
+    burst(out, r, sr, { attack: 0.004, decay: 0.035, type: 'lp', freq: 350, amp: 0.7 });
+    return finish(out, sr, dig ? 0.9 : 0.6);
+  } },
+  { id: 'E', name: 'Muffled', desc: 'Dull, padded crunch, like stepping on thick turf.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.32 : 0.2)));
+    crackles(out, r, sr, { count: dig ? 60 : 28, spread: dig ? 0.2 : 0.1, len: [0.004, 0.012], freq: [500, 1600], q: 1.3 });
+    burst(out, r, sr, { attack: 0.006, decay: 0.04, type: 'lp', freq: 300, amp: 0.8 });
+    burst(out, r, sr, { attack: 0.01, decay: 0.03, type: 'bp', freq: 2500, q: 0.6, amp: 0.15 });
+    return finish(out, sr, dig ? 0.85 : 0.6);
+  } },
+  { id: 'F', name: 'Rustly', desc: 'Quick little rustles spread out over time, like leaves but heavier.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.4 : 0.26)));
+    crackles(out, r, sr, { count: dig ? 90 : 42, spread: dig ? 0.3 : 0.17, len: [0.003, 0.01], freq: [1800, 6000], q: 1, bunch: 1.1 });
+    burst(out, r, sr, { attack: 0.004, decay: 0.025, type: 'lp', freq: 450, amp: 0.4 });
+    return finish(out, sr, dig ? 0.75 : 0.5);
+  } },
+];
+
+// ---- C + D blends (w: 0 = all C swish, 1 = all D crunch). H is what the game uses now. ----
+function blend(w) {
+  return (dig, r, sr) => {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.36 : 0.24)));
+    burst(out, r, sr, { attack: dig ? 0.02 : 0.012, decay: dig ? 0.055 : 0.038, type: 'bp', freq: 3200, q: 0.6, amp: 0.85 * (1 - w) + 0.25 * w });
+    crackles(out, r, sr, { count: Math.round((dig ? 90 : 40) * (0.35 + 0.65 * w)), spread: dig ? 0.2 : 0.1, len: [0.003, 0.008], freq: [900, 2800], q: 2 });
+    crackles(out, r, sr, { count: Math.round((dig ? 35 : 14) * (1 - 0.4 * w)), spread: dig ? 0.2 : 0.1, start: 0.005, len: [0.002, 0.006], freq: [2000, 5000], q: 1.5, amp: 0.5 });
+    burst(out, r, sr, { attack: 0.004, decay: 0.032, type: 'lp', freq: 350, amp: 0.35 + 0.4 * w });
+    return finish(out, sr, dig ? 0.85 : 0.55);
+  };
+}
+CANDIDATES.push(
+  { id: 'G', name: 'C+D, more swish', desc: 'The mix, leaning toward C: more "shff", lighter crunch.', make: blend(0.3) },
+  { id: 'H', name: 'C+D, even', desc: 'Half swish, half crunch.', make: blend(0.5) },
+  { id: 'I', name: 'C+D, more crunch', desc: 'The mix, leaning toward D: chunkier crunch, a bit more thud.', make: blend(0.7) },
+  { id: 'J', name: 'Final (in game)', desc: 'Walking: just the swish. Breaking: G, a little quieter. This is what the game uses now.', make(dig, r, sr) {
+    if (!dig) {
+      const out = new Float32Array(Math.floor(sr * 0.24));
+      burst(out, r, sr, { attack: 0.012, decay: 0.038, type: 'bp', freq: 3200 * (0.9 + r() * 0.2), q: 0.6, amp: 1 });
+      burst(out, r, sr, { attack: 0.004, decay: 0.025, type: 'lp', freq: 300, amp: 0.15 });
+      return finish(out, sr, 0.5);
+    }
+    const out = blend(0.3)(true, r, sr);
+    for (let i = 0; i < out.length; i++) out[i] *= 0.7 / 0.85;
+    return out;
+  } },
+);
+
+// ---- glass breaking: old vs new ----
+const GLASS = [
+  { id: 'old', name: 'Old', desc: 'The previous glass break (tinkly, "fairy dust").', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.6));
+    burst(out, r, sr, { attack: 0.001, decay: 0.05, type: 'hp', freq: 3500, amp: 0.9 });
+    for (let i = 0; i < 18; i++) ring(out, sr, { freq: 2200 + r() * 6000, decay: 0.015 + r() * 0.07, amp: 0.3 + r() * 0.7, start: Math.pow(r(), 1.8) * 0.3 });
+    crackles(out, r, sr, { count: 40, spread: 0.25, len: [0.001, 0.004], freq: [4000, 9000], q: 2, amp: 0.5 });
+    return finish(out, sr, 0.95);
+  } },
+  { id: 'new', name: 'New (in game)', desc: 'Sharp crack, a burst of jagged shards, then falling bits.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.45));
+    burst(out, r, sr, { attack: 0.0003, decay: 0.008, type: 'hp', freq: 2500, amp: 1 });
+    burst(out, r, sr, { attack: 0.0005, decay: 0.015, type: 'bp', freq: 1800, q: 0.8, amp: 0.6 });
+    crackles(out, r, sr, { count: 70, spread: 0.06, len: [0.0008, 0.003], freq: [2500, 7000], q: 3, bunch: 2.5 });
+    for (let i = 0; i < 8; i++) ring(out, sr, { freq: 1500 + r() * 4000, decay: 0.004 + r() * 0.018, amp: 0.3 + r() * 0.5, start: Math.pow(r(), 2.5) * 0.08 });
+    crackles(out, r, sr, { count: 35, spread: 0.25, start: 0.04, len: [0.001, 0.004], freq: [1500, 4500], q: 2.5, amp: 0.45, bunch: 1.6 });
+    return finish(out, sr, 0.9);
+  } },
+];
+const glassBank = {};
+
+// ---- stone breaking: previous vs new (lower) ----
+function crk(scale) {
+  return (r, sr) => {
+    const out = new Float32Array(Math.floor(sr * 0.3));
+    burst(out, r, sr, { attack: 0.0004, decay: 0.007 / Math.sqrt(scale), type: 'bp', freq: 900 * scale, q: 0.9, amp: 1 });
+    crackles(out, r, sr, { count: 55, spread: 0.09, len: [0.003 / scale, 0.009 / scale], freq: [400 * scale, 1300 * scale], q: 2.5, bunch: 2.2 });
+    crackles(out, r, sr, { count: 20, spread: 0.18, start: 0.03, len: [0.004 / scale, 0.012 / scale], freq: [250 * scale, 800 * scale], q: 2, amp: 0.45 });
+    burst(out, r, sr, { attack: 0.001, decay: 0.03, type: 'lp', freq: 350 * scale, amp: 0.5 });
+    return finish(out, sr, 0.9);
+  };
+}
+const STONE = [
+  { id: 'prev', name: 'Previous', desc: 'The "crk" you said was a little too high.', make: crk(1) },
+  { id: 'new', name: 'New (in game)', desc: 'Lower crack and crackles, high fizz trimmed, more weight underneath.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.3));
+    burst(out, r, sr, { attack: 0.0004, decay: 0.008, type: 'bp', freq: 600, q: 0.9, amp: 1 });
+    crackles(out, r, sr, { count: 55, spread: 0.09, len: [0.004, 0.011], freq: [260, 850], q: 2.5, bunch: 2.2 });
+    crackles(out, r, sr, { count: 20, spread: 0.18, start: 0.03, len: [0.005, 0.014], freq: [160, 520], q: 2, amp: 0.45 });
+    burst(out, r, sr, { attack: 0.001, decay: 0.035, type: 'lp', freq: 240, amp: 0.55 });
+    filter(out, 'lp', 1600, 0.7, sr);
+    return finish(out, sr, 0.9);
+  } },
+];
+const stoneBank = {};
+
+// ---- stone placing: current "bm" vs more stony options ----
+function clack(out, r, sr, amp = 1) {   // hard stone-on-stone contact: bright, dry, very short, no ringing
+  burst(out, r, sr, { attack: 0.0003, decay: 0.004, type: 'bp', freq: 1800 + r() * 400, q: 1.5, amp: 0.8 * amp });
+  burst(out, r, sr, { attack: 0.0005, decay: 0.012, type: 'bp', freq: 900 + r() * 200, q: 1.2, amp: 0.7 * amp });
+}
+const STONEPLACE = [
+  { id: 'A', name: 'A. Old "bm"', desc: 'The old deep "bm" placing sound (sounded like deeper wood).', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.25));
+    const f0 = 110 + r() * 30;
+    burst(out, r, sr, { attack: 0.0008, decay: 0.005, type: 'lp', freq: 1200, amp: 0.3 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.035, type: 'lp', freq: 220, amp: 1 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.04, type: 'bp', freq: f0, q: 1.2, amp: 0.6 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.02, type: 'bp', freq: 400, q: 0.8, amp: 0.35 });
+    crackles(out, r, sr, { count: 8, spread: 0.03, len: [0.004, 0.01], freq: [200, 600], q: 1.5, amp: 0.3 });
+    return finish(out, sr, 0.8);
+  } },
+  { id: 'B', name: 'B. Stone clack', desc: 'A hard, dry "tchk" of stone hitting stone, with weight underneath.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.2));
+    clack(out, r, sr);
+    burst(out, r, sr, { attack: 0.0015, decay: 0.025, type: 'lp', freq: 200, amp: 0.8 });
+    crackles(out, r, sr, { count: 14, spread: 0.025, len: [0.002, 0.006], freq: [1000, 3000], q: 2, amp: 0.35 });
+    return finish(out, sr, 0.8);
+  } },
+  { id: 'C', name: 'C. Gritty set-down', desc: 'A thump with a short gritty scrape, like setting a rough block down.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    burst(out, r, sr, { attack: 0.0006, decay: 0.004, type: 'lp', freq: 1500, amp: 0.4 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.03, type: 'lp', freq: 220, amp: 0.9 });
+    crackles(out, r, sr, { count: 40, spread: 0.06, start: 0.005, len: [0.003, 0.008], freq: [600, 2200], q: 2, amp: 0.5, bunch: 1.6 });
+    return finish(out, sr, 0.8);
+  } },
+  { id: 'D', name: 'D. Heavy chunk', desc: 'A short, low version of the breaking "crk": a solid chunk.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.2));
+    burst(out, r, sr, { attack: 0.0004, decay: 0.006, type: 'bp', freq: 700, q: 0.9, amp: 1 });
+    crackles(out, r, sr, { count: 30, spread: 0.04, len: [0.004, 0.01], freq: [300, 1100], q: 2.5, bunch: 2.2 });
+    burst(out, r, sr, { attack: 0.001, decay: 0.04, type: 'lp', freq: 180, amp: 0.8 });
+    filter(out, 'lp', 2500, 0.7, sr);
+    return finish(out, sr, 0.85);
+  } },
+  { id: 'J', name: 'J. As deep as breaking (in game)', desc: 'G lowered to match the depth of the stone breaking "crk", with the same high-end trim.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    burst(out, r, sr, { attack: 0.0003, decay: 0.005, type: 'bp', freq: 600 + r() * 120, q: 1.2, amp: 0.8 });
+    burst(out, r, sr, { attack: 0.0005, decay: 0.016, type: 'bp', freq: 300 + r() * 60, q: 1.2, amp: 0.9 });
+    burst(out, r, sr, { attack: 0.0015, decay: 0.032, type: 'lp', freq: 170, amp: 0.95 });
+    crackles(out, r, sr, { count: 18, spread: 0.05, start: 0.006, len: [0.004, 0.011], freq: [260, 900], q: 2, amp: 0.22, bunch: 1.6 });
+    filter(out, 'lp', 1600, 0.7, sr);
+    return finish(out, sr, 0.8);
+  } },
+  { id: 'G', name: 'G. Deeper B, less C', desc: 'F with the clack a little lower and louder, and the gritty scrape pulled back behind it.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    burst(out, r, sr, { attack: 0.0003, decay: 0.0045, type: 'bp', freq: 900 + r() * 200, q: 1.5, amp: 0.8 });
+    burst(out, r, sr, { attack: 0.0005, decay: 0.014, type: 'bp', freq: 450 + r() * 100, q: 1.2, amp: 0.9 });
+    burst(out, r, sr, { attack: 0.0015, decay: 0.03, type: 'lp', freq: 180, amp: 0.95 });
+    crackles(out, r, sr, { count: 18, spread: 0.05, start: 0.006, len: [0.003, 0.008], freq: [500, 1800], q: 2, amp: 0.22, bunch: 1.6 });
+    return finish(out, sr, 0.8);
+  } },
+  { id: 'F', name: 'F. Deeper B + C', desc: 'B\'s clack pitched lower with more weight, mixed with C\'s thump and gritty scrape.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    burst(out, r, sr, { attack: 0.0003, decay: 0.004, type: 'bp', freq: 1100 + r() * 250, q: 1.5, amp: 0.7 });
+    burst(out, r, sr, { attack: 0.0005, decay: 0.013, type: 'bp', freq: 550 + r() * 120, q: 1.2, amp: 0.75 });
+    burst(out, r, sr, { attack: 0.0015, decay: 0.03, type: 'lp', freq: 190, amp: 0.95 });
+    crackles(out, r, sr, { count: 30, spread: 0.055, start: 0.005, len: [0.003, 0.008], freq: [500, 1800], q: 2, amp: 0.4, bunch: 1.6 });
+    return finish(out, sr, 0.8);
+  } },
+  { id: 'E', name: 'E. Clack + grit', desc: 'B\'s hard clack plus a little of C\'s gritty scrape.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    clack(out, r, sr);
+    burst(out, r, sr, { attack: 0.0015, decay: 0.028, type: 'lp', freq: 200, amp: 0.85 });
+    crackles(out, r, sr, { count: 24, spread: 0.05, start: 0.004, len: [0.003, 0.007], freq: [700, 2400], q: 2, amp: 0.35, bunch: 1.6 });
+    return finish(out, sr, 0.8);
+  } },
+];
+const stonePlaceBank = {};
+
+// ---- cobblestone: C made deeper (dig = breaking, longer and grittier) ----
+function gritty(r, sr, dig, s) {   // s = how deep: 1 = original C, smaller = deeper
+  const out = new Float32Array(Math.floor(sr * (dig ? 0.3 : 0.24)));
+  burst(out, r, sr, { attack: 0.0008, decay: 0.005, type: 'lp', freq: 1500 * s, amp: s < 1 ? 0.5 : 0.4 });
+  burst(out, r, sr, { attack: 0.002, decay: 0.03 + (1 - s) * 0.01, type: 'lp', freq: Math.max(150, 220 * s), amp: s < 1 ? 1 : 0.9 });
+  crackles(out, r, sr, { count: dig ? 50 : 40, spread: dig ? 0.09 : 0.065, start: 0.005, len: [0.003 / Math.sqrt(s), 0.008 / Math.sqrt(s)], freq: [600 * s, 2200 * s], q: 2, amp: s < 1 ? 0.6 : 0.5, bunch: 1.6 });
+  return finish(out, sr, dig ? 0.9 : 0.8);
+}
+const COBBLE = [
+  { id: 'cC', name: 'C. Original C', desc: 'The gritty set-down from Stone placing, as it was.', make: (dig, r, sr) => gritty(r, sr, dig, 1) },
+  { id: 'cH', name: 'H. Deeper C', desc: 'C pitched down a fair bit.', make: (dig, r, sr) => gritty(r, sr, dig, 0.6) },
+  { id: 'cI', name: 'I. Way deeper C (in game)', desc: 'C pitched way down: a low thump with a rumbly, gravelly scrape.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.3 : 0.24)));
+    burst(out, r, sr, { attack: 0.0008, decay: 0.005, type: 'lp', freq: 700, amp: 0.5 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.035, type: 'lp', freq: 150, amp: 1 });
+    crackles(out, r, sr, { count: dig ? 50 : 40, spread: dig ? 0.09 : 0.065, start: 0.005, len: [0.006, 0.014], freq: [180, 750], q: 2, amp: 0.6, bunch: 1.6 });
+    return finish(out, sr, dig ? 0.9 : 0.8);
+  } },
+];
+
+// ---- wood "tok-ik": previous vs new (less hollow) ----
+// the "ik" used by C-F: a short, tight, noise-based tap (no long ringing)
+function ik(out, r, sr, t2, freq, amp = 0.45) {
+  burst(out, r, sr, { attack: 0.0004, decay: 0.003, type: 'hp', freq: 2000, amp: amp * 0.7, start: t2 });
+  burst(out, r, sr, { attack: 0.0006, decay: 0.01, type: 'bp', freq, q: 3, amp, start: t2 });
+}
+const WOOD = [
+  { id: 'C', name: 'C. Dry knock', desc: 'A dry, tight "tok" made from noise (no ringing tones), then a quick "ik".', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.2));
+    const f0 = 380 + r() * 120;
+    burst(out, r, sr, { attack: 0.0004, decay: 0.004, type: 'lp', freq: 3500, amp: 0.6 });
+    burst(out, r, sr, { attack: 0.0008, decay: 0.022, type: 'bp', freq: f0, q: 4, amp: 1 });
+    burst(out, r, sr, { attack: 0.0008, decay: 0.012, type: 'bp', freq: f0 * 2.3, q: 3, amp: 0.4 });
+    ik(out, r, sr, 0.045 + r() * 0.01, f0 * 2.2);
+    return finish(out, sr, 0.6);
+  } },
+  { id: 'D', name: 'D. Thick plank', desc: 'Lower and heavier, like a thick board: "dok-ik".', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    const f0 = 230 + r() * 70;
+    burst(out, r, sr, { attack: 0.0006, decay: 0.004, type: 'lp', freq: 2500, amp: 0.5 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.03, type: 'lp', freq: 220, amp: 0.8 });
+    burst(out, r, sr, { attack: 0.001, decay: 0.028, type: 'bp', freq: f0, q: 3, amp: 0.9 });
+    crackles(out, r, sr, { count: 8, spread: 0.02, len: [0.002, 0.005], freq: [600, 1600], q: 2, amp: 0.3 });
+    ik(out, r, sr, 0.05 + r() * 0.01, f0 * 2.6, 0.4);
+    return finish(out, sr, 0.65);
+  } },
+  { id: 'E', name: 'E. Clacky', desc: 'Brighter and sharper, like two wooden blocks clacking: "tak-ik".', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.18));
+    const f0 = 800 + r() * 250;
+    burst(out, r, sr, { attack: 0.0003, decay: 0.003, type: 'hp', freq: 2500, amp: 0.7 });
+    burst(out, r, sr, { attack: 0.0005, decay: 0.014, type: 'bp', freq: f0, q: 6, amp: 1 });
+    burst(out, r, sr, { attack: 0.0005, decay: 0.008, type: 'bp', freq: f0 * 1.9, q: 4, amp: 0.4 });
+    ik(out, r, sr, 0.04 + r() * 0.01, f0 * 1.7, 0.5);
+    return finish(out, sr, 0.55);
+  } },
+  { id: 'F', name: 'F. Creaky boards', desc: 'A knock with a woody, fibrous crunch, like stepping on floorboards.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.24));
+    const f0 = 300 + r() * 100;
+    burst(out, r, sr, { attack: 0.0006, decay: 0.004, type: 'lp', freq: 3000, amp: 0.5 });
+    burst(out, r, sr, { attack: 0.001, decay: 0.024, type: 'bp', freq: f0, q: 3, amp: 0.85 });
+    crackles(out, r, sr, { count: 30, spread: 0.07, len: [0.003, 0.009], freq: [500, 1800], q: 2.5, amp: 0.55, bunch: 1.8 });
+    ik(out, r, sr, 0.05 + r() * 0.01, f0 * 2.4, 0.35);
+    return finish(out, sr, 0.6);
+  } },
+  { id: 'G', name: 'G. Single tok (in game)', desc: 'Just one solid wooden "tok", no second "ik". This is what the game uses now.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.16));
+    const f0 = 320 + r() * 100;
+    burst(out, r, sr, { attack: 0.0005, decay: 0.004, type: 'lp', freq: 3000, amp: 0.6 });
+    burst(out, r, sr, { attack: 0.001, decay: 0.025, type: 'bp', freq: f0, q: 3.5, amp: 1 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.02, type: 'lp', freq: 260, amp: 0.45 });
+    crackles(out, r, sr, { count: 8, spread: 0.02, len: [0.002, 0.005], freq: [800, 2000], q: 2, amp: 0.3 });
+    return finish(out, sr, 0.6);
+  } },
+];
+WOOD.unshift(
+  { id: 'prev', name: 'A. Previous', desc: 'The older, ringing "tok-ik".', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    const f0 = 160 + r() * 90;
+    burst(out, r, sr, { attack: 0.0005, decay: 0.004, type: 'lp', freq: 3000, amp: 0.6 });
+    [[1, 1, 0.06], [2.31, 0.5, 0.04], [3.93, 0.28, 0.025]].forEach(([m, a, d]) => ring(out, sr, { freq: f0 * m * (0.98 + r() * 0.04), decay: d, amp: a }));
+    burst(out, r, sr, { attack: 0.001, decay: 0.02, type: 'bp', freq: f0 * 2.5, q: 3, amp: 0.35 });
+    const t2 = 0.04 + r() * 0.012, f1 = f0 * (2.1 + r() * 0.3);
+    burst(out, r, sr, { attack: 0.0004, decay: 0.003, type: 'hp', freq: 2000, amp: 0.35, start: t2 });
+    [[1, 0.55, 0.028], [2.31, 0.25, 0.016]].forEach(([m, a, d]) => ring(out, sr, { freq: f1 * m, decay: d, amp: a, start: t2 }));
+    return finish(out, sr, 0.6);
+  } },
+  { id: 'new', name: 'B. Less-hollow tok-ik', desc: 'The previous "tok-ik" with shorter rings and a solid woody body.', make(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.22));
+    const f0 = 160 + r() * 90;
+    burst(out, r, sr, { attack: 0.0005, decay: 0.004, type: 'lp', freq: 3000, amp: 0.6 });
+    [[1, 0.55, 0.03], [2.31, 0.35, 0.022], [3.93, 0.2, 0.015]].forEach(([m, a, d]) => ring(out, sr, { freq: f0 * m * (0.98 + r() * 0.04), decay: d, amp: a }));
+    burst(out, r, sr, { attack: 0.001, decay: 0.025, type: 'bp', freq: f0 * 1.8, q: 2, amp: 0.8 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.02, type: 'lp', freq: 300, amp: 0.4 });
+    crackles(out, r, sr, { count: 10, spread: 0.02, len: [0.002, 0.005], freq: [800, 2200], q: 2, amp: 0.35 });
+    const t2 = 0.04 + r() * 0.012, f1 = f0 * (2.1 + r() * 0.3);
+    burst(out, r, sr, { attack: 0.0004, decay: 0.003, type: 'hp', freq: 2000, amp: 0.35, start: t2 });
+    [[1, 0.4, 0.018], [2.31, 0.18, 0.01]].forEach(([m, a, d]) => ring(out, sr, { freq: f1 * m, decay: d, amp: a, start: t2 }));
+    burst(out, r, sr, { attack: 0.0008, decay: 0.012, type: 'bp', freq: f1, q: 2, amp: 0.35, start: t2 });
+    return finish(out, sr, 0.6);
+  } },
+);
+const woodBank = {};
+
+// ---- dirt: less crunchy options (dig = breaking/placing) ----
+const DIRT = [
+  { id: 'dA', name: 'A. Previous', desc: 'The old crumbly crunch (too crunchy, like snow).', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.34 : 0.2)));
+    crackles(out, r, sr, { count: dig ? 90 : 38, spread: dig ? 0.24 : 0.12, len: [0.008, 0.02], freq: [150, 600], q: 1.4 });
+    crackles(out, r, sr, { count: dig ? 14 : 6, spread: dig ? 0.2 : 0.1, len: [0.003, 0.006], freq: [700, 1200], q: 2, amp: 0.15 });
+    burst(out, r, sr, { attack: 0.006, decay: dig ? 0.05 : 0.03, type: 'lp', freq: 300, amp: 0.35 });
+    return finish(out, sr, dig ? 0.95 : 0.7);
+  } },
+  { id: 'dB', name: 'B. Softer crumble', desc: 'Half as many grains, smoother and duller, over a soft body.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.34 : 0.2)));
+    crackles(out, r, sr, { count: dig ? 45 : 18, spread: dig ? 0.22 : 0.11, len: [0.01, 0.025], freq: [150, 500], q: 0.9, amp: 0.7 });
+    burst(out, r, sr, { attack: 0.01, decay: dig ? 0.05 : 0.035, type: 'lp', freq: 350, amp: 0.6 });
+    filter(out, 'lp', 1200, 0.7, sr);
+    return finish(out, sr, dig ? 0.95 : 0.7);
+  } },
+  { id: 'dC', name: 'C. Muffled thud', desc: 'Mostly a soft, padded thud with just a hint of crumble.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.3 : 0.18)));
+    burst(out, r, sr, { attack: 0.008, decay: dig ? 0.06 : 0.04, type: 'lp', freq: 400, amp: 1 });
+    crackles(out, r, sr, { count: dig ? 12 : 5, spread: dig ? 0.15 : 0.08, len: [0.01, 0.02], freq: [200, 500], q: 1, amp: 0.4 });
+    filter(out, 'lp', 900, 0.7, sr);
+    return finish(out, sr, dig ? 0.9 : 0.65);
+  } },
+  { id: 'dD', name: 'D. Loose soil', desc: 'A soft, loose shuffle, like dry earth shifting.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.36 : 0.22)));
+    crackles(out, r, sr, { count: dig ? 60 : 25, spread: dig ? 0.25 : 0.13, len: [0.015, 0.03], freq: [200, 700], q: 0.8, amp: 0.6, bunch: 1.2 });
+    burst(out, r, sr, { attack: 0.01, decay: dig ? 0.05 : 0.035, type: 'bp', freq: 500, q: 0.5, amp: 0.5 });
+    filter(out, 'lp', 1500, 0.7, sr);
+    return finish(out, sr, dig ? 0.9 : 0.65);
+  } },
+  { id: 'dE', name: 'E. Clearer D + soft break (in game)', desc: 'Walking: D, a little less muffled. Breaking: a soft padded "thff" with only a few smooth grains.', make(dig, r, sr) {
+    if (!dig) return dirtWalk(r, sr);
+    const out = new Float32Array(Math.floor(sr * 0.32));
+    burst(out, r, sr, { attack: 0.008, decay: 0.05, type: 'lp', freq: 450, amp: 1 });
+    burst(out, r, sr, { attack: 0.012, decay: 0.04, type: 'bp', freq: 600, q: 0.5, amp: 0.45 });
+    crackles(out, r, sr, { count: 18, spread: 0.18, start: 0.01, len: [0.02, 0.04], freq: [200, 600], q: 0.7, amp: 0.4, bunch: 1.2 });
+    filter(out, 'lp', 1400, 0.7, sr);
+    return finish(out, sr, 0.9);
+  } },
+  { id: 'dF', name: 'F. Clearer D + thud break', desc: 'Walking: same as E. Breaking: C\'s muffled thud, almost no crumble at all.', make(dig, r, sr) {
+    if (!dig) return dirtWalk(r, sr);
+    const out = new Float32Array(Math.floor(sr * 0.3));
+    burst(out, r, sr, { attack: 0.008, decay: 0.06, type: 'lp', freq: 400, amp: 1 });
+    crackles(out, r, sr, { count: 12, spread: 0.15, len: [0.01, 0.02], freq: [200, 500], q: 1, amp: 0.4 });
+    filter(out, 'lp', 900, 0.7, sr);
+    return finish(out, sr, 0.9);
+  } },
+];
+function dirtWalk(r, sr) {   // D's loose shuffle, a little less muffled
+  const out = new Float32Array(Math.floor(sr * 0.22));
+  crackles(out, r, sr, { count: 25, spread: 0.13, len: [0.015, 0.03], freq: [200, 750], q: 0.8, amp: 0.6, bunch: 1.2 });
+  burst(out, r, sr, { attack: 0.01, decay: 0.035, type: 'bp', freq: 550, q: 0.5, amp: 0.5 });
+  filter(out, 'lp', 2200, 0.7, sr);
+  return finish(out, sr, 0.65);
+}
+
+// ---- sand: previous "shff" vs "tss" options (dig = breaking/placing) ----
+const SAND = [
+  { id: 'sandA', name: 'A. Previous', desc: 'The old smooth, soft "shff".', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.38 : 0.24)));
+    burst(out, r, sr, { attack: dig ? 0.05 : 0.03, decay: dig ? 0.07 : 0.045, type: 'bp', freq: 2400, q: 0.45, amp: 1 });
+    crackles(out, r, sr, { count: dig ? 25 : 10, spread: dig ? 0.2 : 0.12, start: 0.01, len: [0.002, 0.005], freq: [3000, 6000], amp: 0.25 });
+    return finish(out, sr, dig ? 0.7 : 0.45);
+  } },
+  { id: 'sandB', name: 'B. Tss', desc: 'Bright, airy hiss with a fast start: "tss".', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.3 : 0.18)));
+    burst(out, r, sr, { attack: 0.004, decay: dig ? 0.06 : 0.035, type: 'hp', freq: 5000, amp: 1 });
+    burst(out, r, sr, { attack: 0.004, decay: dig ? 0.05 : 0.03, type: 'bp', freq: 7000, q: 1, amp: 0.5 });
+    burst(out, r, sr, { attack: 0.003, decay: 0.02, type: 'bp', freq: 2400, q: 0.7, amp: 0.15 });
+    crackles(out, r, sr, { count: dig ? 20 : 8, spread: dig ? 0.12 : 0.06, start: 0.005, len: [0.001, 0.003], freq: [5000, 9000], amp: 0.2 });
+    return finish(out, sr, dig ? 0.65 : 0.4);
+  } },
+  { id: 'sandC', name: 'C. Short tss', desc: 'Tighter and crisper, almost a "ts".', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.2 : 0.12)));
+    burst(out, r, sr, { attack: 0.0015, decay: dig ? 0.035 : 0.02, type: 'hp', freq: 6500, amp: 1 });
+    burst(out, r, sr, { attack: 0.0008, decay: 0.004, type: 'bp', freq: 4000, q: 1.5, amp: 0.4 });
+    crackles(out, r, sr, { count: dig ? 12 : 5, spread: dig ? 0.06 : 0.03, len: [0.001, 0.002], freq: [6000, 10000], amp: 0.2 });
+    return finish(out, sr, dig ? 0.6 : 0.38);
+  } },
+  { id: 'sandD', name: 'D. Grainy tss', desc: 'A hiss made of many tiny sand grains trickling.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.32 : 0.2)));
+    burst(out, r, sr, { attack: 0.005, decay: dig ? 0.05 : 0.03, type: 'hp', freq: 4500, amp: 0.6 });
+    crackles(out, r, sr, { count: dig ? 140 : 60, spread: dig ? 0.12 : 0.06, start: 0.003, len: [0.0008, 0.002], freq: [4500, 9500], q: 1, amp: 0.5, bunch: 1.8 });
+    return finish(out, sr, dig ? 0.65 : 0.4);
+  } },
+  { id: 'sandF', name: 'F. Sss walk + E break (in game)', desc: 'Walking: a smooth, soft "sss" with no thump or grains. Breaking: same as E.', make(dig, r, sr) {
+    if (!dig) {
+      const out = new Float32Array(Math.floor(sr * 0.22));
+      burst(out, r, sr, { attack: 0.02, decay: 0.045, type: 'hp', freq: 4500, amp: 1 });
+      burst(out, r, sr, { attack: 0.02, decay: 0.04, type: 'bp', freq: 6500, q: 0.8, amp: 0.5 });
+      return finish(out, sr, 0.4);
+    }
+    return SAND.find(c => c.id === 'sandE').make(dig, r, sr);
+  } },
+  { id: 'sandE', name: 'E. Grainy tss + bass', desc: 'D with a soft low thump at the start.', make(dig, r, sr) {
+    const out = new Float32Array(Math.floor(sr * (dig ? 0.32 : 0.2)));
+    burst(out, r, sr, { attack: 0.002, decay: dig ? 0.03 : 0.02, type: 'lp', freq: 220, amp: dig ? 0.6 : 0.5 });
+    burst(out, r, sr, { attack: 0.002, decay: 0.012, type: 'bp', freq: 700, q: 0.8, amp: 0.25 });
+    burst(out, r, sr, { attack: 0.005, decay: dig ? 0.05 : 0.03, type: 'hp', freq: 4500, amp: 0.6 });
+    crackles(out, r, sr, { count: dig ? 140 : 60, spread: dig ? 0.12 : 0.06, start: 0.003, len: [0.0008, 0.002], freq: [4500, 9500], q: 1, amp: 0.5, bunch: 1.8 });
+    return finish(out, sr, dig ? 0.65 : 0.4);
+  } },
+];
+
+// build 4 variations of each, like the game does
+const bank = {};
+function build() {
+  const sr = ctx.sampleRate;
+  WOOD.forEach((c, ci) => {
+    woodBank[c.id] = [];
+    for (let v = 0; v < 4; v++) {
+      const data = c.make(rng(6000 + v * 17), sr); // same seeds for both, so only the recipe differs
+      const b = ctx.createBuffer(1, data.length, sr);
+      b.copyToChannel(data, 0);
+      woodBank[c.id].push(b);
+    }
+  });
+  STONE.forEach((c, ci) => {
+    stoneBank[c.id] = [];
+    for (let v = 0; v < 4; v++) {
+      const data = c.make(rng(7000 + ci * 101 + v * 17), sr);
+      const b = ctx.createBuffer(1, data.length, sr);
+      b.copyToChannel(data, 0);
+      stoneBank[c.id].push(b);
+    }
+  });
+  STONEPLACE.forEach((c) => {
+    stonePlaceBank[c.id] = [];
+    for (let v = 0; v < 4; v++) {
+      const data = c.make(rng(11000 + v * 17), sr); // same seeds for all options
+      const b = ctx.createBuffer(1, data.length, sr);
+      b.copyToChannel(data, 0);
+      stonePlaceBank[c.id].push(b);
+    }
+  });
+  GLASS.forEach((c, ci) => {
+    glassBank[c.id] = [];
+    for (let v = 0; v < 4; v++) {
+      const data = c.make(rng(9000 + ci * 101 + v * 17), sr);
+      const b = ctx.createBuffer(1, data.length, sr);
+      b.copyToChannel(data, 0);
+      glassBank[c.id].push(b);
+    }
+  });
+  COBBLE.forEach((c) => {
+    bank[c.id] = {};
+    for (const kind of ['step', 'dig']) {   // 'step' = placing here
+      bank[c.id][kind] = [];
+      for (let v = 0; v < 4; v++) {
+        const data = c.make(kind === 'dig', rng(12000 + v * 17 + (kind === 'dig' ? 5000 : 0)), sr);
+        const b = ctx.createBuffer(1, data.length, sr);
+        b.copyToChannel(data, 0);
+        bank[c.id][kind].push(b);
+      }
+    }
+  });
+  [...DIRT, ...SAND].forEach((c) => {
+    bank[c.id] = {};
+    for (const kind of ['step', 'dig']) {
+      bank[c.id][kind] = [];
+      for (let v = 0; v < 4; v++) {
+        const data = c.make(kind === 'dig', rng(3000 + v * 17 + (kind === 'dig' ? 5000 : 0)), sr); // same seeds for all sand options
+        const b = ctx.createBuffer(1, data.length, sr);
+        b.copyToChannel(data, 0);
+        bank[c.id][kind].push(b);
+      }
+    }
+  });
+  CANDIDATES.forEach((c, ci) => {
+    bank[c.id] = {};
+    for (const kind of ['step', 'dig']) {
+      bank[c.id][kind] = [];
+      for (let v = 0; v < 4; v++) {
+        const data = c.make(kind === 'dig', rng(500 + ci * 101 + v * 17 + (kind === 'dig' ? 5000 : 0)), sr);
+        const b = ctx.createBuffer(1, data.length, sr);
+        b.copyToChannel(data, 0);
+        bank[c.id][kind].push(b);
+      }
+    }
+  });
+}
+function ensureAudio() {
+  if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); build(); }
+  if (ctx.state === 'suspended') ctx.resume();
+}
+// same playback as the game: random variation, slight random pitch
+function play(id, kind, when = 0) {
+  const list = bank[id][kind], b = list[Math.floor(Math.random() * list.length)];
+  const src = ctx.createBufferSource(), g = ctx.createGain();
+  src.buffer = b;
+  src.playbackRate.value = (kind === 'dig' ? 0.8 : 1) * (0.92 + Math.random() * 0.16);
+  g.gain.value = (kind === 'dig' ? 1 : 0.45) * 0.7;
+  src.connect(g).connect(ctx.destination);
+  src.start(ctx.currentTime + when);
+}
+
+const cobbleGrid = document.getElementById('cobble');
+for (const c of COBBLE) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<h2>${c.name}</h2><p>${c.desc}</p>`;
+  const playC = (kind, vol) => {
+    const list = bank[c.id][kind], src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    g.gain.value = vol * 0.7;
+    src.connect(g).connect(ctx.destination);
+    src.start();
+  };
+  const mk = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { ensureAudio(); fn(); }; card.append(b); };
+  mk('Place', () => playC('step', 0.9));
+  mk('Break', () => playC('dig', 1));
+  cobbleGrid.append(card);
+}
+
+for (const [gridId, list] of [['dirt', DIRT], ['sand', SAND]]) for (const c of list) {
+  const sandGrid = document.getElementById(gridId);
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<h2>${c.name}</h2><p>${c.desc}</p>`;
+  const mk = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { ensureAudio(); fn(); }; card.append(b); };
+  mk('Step', () => play(c.id, 'step'));
+  mk('Walk', () => { for (let i = 0; i < 6; i++) play(c.id, 'step', i * 0.4); });
+  mk('Break', () => play(c.id, 'dig'));
+  sandGrid.append(card);
+}
+
+const woodGrid = document.getElementById('wood');
+for (const c of WOOD) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<h2>${c.name}</h2><p>${c.desc}</p>`;
+  const playWood = (when, rate, vol) => {
+    const list = woodBank[c.id], src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = rate * (0.92 + Math.random() * 0.16);
+    g.gain.value = vol * 0.7;
+    src.connect(g).connect(ctx.destination);
+    src.start(ctx.currentTime + when);
+  };
+  const mk = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { ensureAudio(); fn(); }; card.append(b); };
+  mk('Step', () => playWood(0, 1, 0.45));
+  mk('Walk', () => { for (let i = 0; i < 6; i++) playWood(i * 0.4, 1, 0.45); });
+  mk('Break', () => playWood(0, 0.8, 1));
+  woodGrid.append(card);
+}
+
+const stoneGrid = document.getElementById('stone');
+for (const c of STONE) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<h2>${c.name}</h2><p>${c.desc}</p>`;
+  const b = document.createElement('button');
+  b.textContent = 'Break';
+  b.onclick = () => {
+    ensureAudio();
+    const list = stoneBank[c.id], src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    g.gain.value = 0.7;
+    src.connect(g).connect(ctx.destination);
+    src.start();
+  };
+  card.append(b);
+  stoneGrid.append(card);
+}
+
+const stonePlaceGrid = document.getElementById('stoneplace');
+for (const c of STONEPLACE) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<h2>${c.name}</h2><p>${c.desc}</p>`;
+  const playIt = (when) => {
+    const list = stonePlaceBank[c.id], src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    g.gain.value = 0.9 * 0.7;
+    src.connect(g).connect(ctx.destination);
+    src.start(ctx.currentTime + when);
+  };
+  const mk = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { ensureAudio(); fn(); }; card.append(b); };
+  mk('Place', () => playIt(0));
+  mk('Place x4', () => { for (let i = 0; i < 4; i++) playIt(i * 0.35); });
+  stonePlaceGrid.append(card);
+}
+
+const glassGrid = document.getElementById('glass');
+for (const c of GLASS) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<h2>${c.name}</h2><p>${c.desc}</p>`;
+  const b = document.createElement('button');
+  b.textContent = 'Break';
+  b.onclick = () => {
+    ensureAudio();
+    const list = glassBank[c.id], src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    g.gain.value = 0.9 * 0.7;
+    src.connect(g).connect(ctx.destination);
+    src.start();
+  };
+  card.append(b);
+  glassGrid.append(card);
+}
+
+const grid = document.getElementById('grid');
+for (const c of CANDIDATES) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `<h2><span>${c.id}.</span> ${c.name}</h2><p>${c.desc}</p>`;
+  const mk = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { ensureAudio(); fn(); }; card.append(b); };
+  mk('Step', () => play(c.id, 'step'));
+  mk('Walk', () => { for (let i = 0; i < 6; i++) play(c.id, 'step', i * 0.4); });
+  mk('Break', () => play(c.id, 'dig'));
+  grid.append(card);
+}
+</script>
+</body>
+</html>
