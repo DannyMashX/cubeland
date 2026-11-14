@@ -1,5 +1,16 @@
 [
     {
+        "version":  "26.11.14.417",
+        "date":  "2026-11-14",
+        "notes":  "Multiplayer! Host your world from the Multiplayer button and give friends the 5-letter code, or type a friend\u0027s code to join them",
+        "changes":  [
+                        "Multiplayer! Host your world from the Multiplayer button and give friends the 5-letter code, or type a friend\u0027s code to join them",
+                        "Other players show up as a Grr in a cool colour (blue, purple, magenta or cyan) with their name above them",
+                        "Grrs are now as tall as you",
+                        "Version numbers now show the date and time of the update (like 26.11.14.1608)"
+                    ]
+    },
+    {
         "version":  "26.11.14_3",
         "date":  "2026-11-14",
         "notes":  "The change log (\"What\u0027s new\" and All versions) now also works when the game is opened straight from your computer",

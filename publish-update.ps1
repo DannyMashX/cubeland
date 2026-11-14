@@ -1,7 +1,7 @@
 # Publishes a new version of Cubeland to the web (GitHub Pages). Run it by double-clicking publish-update.bat.
 #
-# Each update is numbered by the date it's published plus which update of the day it is: YY.MM.DD_N.
-#   The first update on 14 November 2026 is 26.11.14_1, the second that day is 26.11.14_2, and so on.
+# Each update is numbered by the date and time it's published (24-hour clock): YY.MM.DD.HHMM.
+#   An update at 4:08 pm on 14 November 2026 is 26.11.14.1608. (The first three versions used an older style, 26.11.14_1 to _3.)
 # The newest version is what players get at the main link (the next time they refresh, after a minute or two).
 # A copy of every version is kept in versions\<number>\, and versions.html lists them all so people can still play old ones.
 $ErrorActionPreference = 'Stop'
@@ -20,14 +20,14 @@ if (-not (git status --porcelain)) {
   exit
 }
 
-# today's date, plus one more than the number of updates already published today
+# the version number: today's date and the time right now (24-hour clock), YY.MM.DD.HHMM
+# e.g. 4:08 pm on 14 November 2026 = 26.11.14.1608 (9:05 am = 26.11.14.905)
 $listFile = "$PSScriptRoot\versions.json"
 $list = @()
 if (Test-Path $listFile) { foreach ($v in (ConvertFrom-Json ([IO.File]::ReadAllText($listFile)))) { $list += $v } }
-$today = Get-Date -Format 'yy.MM.dd'
-$n = 1
-foreach ($v in $list) { if ($v.version -match "^$([regex]::Escape($today))_(\d+)$") { $n = [Math]::Max($n, [int]$Matches[1] + 1) } }
-$ver = "${today}_$n"
+$now = Get-Date
+$ver = $now.ToString('yy.MM.dd') + '.' + [int]$now.ToString('HHmm')
+if ($list | Where-Object { $_.version -eq $ver }) { throw "Version $ver was already published this minute. Wait a minute and run this again." }
 
 # the change log for this version: the list in next-changes.txt (Claude adds a line there for each change we make),
 # or one you type in now. Players see it in the game's "What's new" and on the All versions page.

@@ -64,6 +64,18 @@
   .new-world button { margin-left: 0 !important; }
   .new-world select option { color: #000; }
   #worlds .bottom { margin-top: 14px; text-align: right; }
+  #multi { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
+  #multi .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+  #multi h2 { margin: 0 0 10px; font-size: 20px; letter-spacing: 1px; }
+  #multi h3 { margin: 16px 0 6px; font-size: 15px; }
+  #multi .mp-help { font-size: 13px; opacity: .7; margin: 0 0 8px; }
+  #multi .mp-status { font-size: 13px; color: #ffd27a; min-height: 18px; margin: 10px 0 0; }
+  #multi .mp-code { font-size: 26px; letter-spacing: 4px; margin-left: 6px; }
+  #multi #mp-code { text-transform: uppercase; letter-spacing: 2px; }
+  #multi button { font: inherit; font-size: 14px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; }
+  #multi button:hover { background: rgba(255,255,255,.25); }
+  #multi input:disabled { opacity: .5; }
+  #multi .bottom { margin-top: 14px; text-align: right; }
   #overlay .start { margin-top: 18px; font-size: 18px; padding: 10px 24px; border: 2px solid #fff; border-radius: 6px; display: inline-block; }
 </style>
 </head>
@@ -87,7 +99,7 @@
     <p>Left click break &middot; Right click place &middot; 1-9, 0 or scroll wheel pick a block &middot; E inventory</p>
     <p>F or double-tap Space to fly (Space up, Shift down) &middot; P toggles the PS2 look &middot; M mutes sound &middot; T skips time &middot; Esc pauses</p>
     <div class="start">Click to play</div>
-    <div class="world-line">World: <b id="world-name"></b> <button id="worlds-btn">Worlds</button></div>
+    <div class="world-line">World: <b id="world-name"></b> <button id="worlds-btn">Worlds</button> <button id="multi-btn">Multiplayer</button></div>
     <p class="saved-note">Your world saves automatically.</p>
     <p class="newer-note" id="newer-note"></p>
     <p class="version-line">Version <span id="game-version"></span> &middot; <a id="whatsnew-link" href="#">What's new</a> &middot; <a id="versions-link" href="versions.html">All versions</a></p>
@@ -117,16 +129,36 @@
     <div class="bottom"><button id="worlds-close">Back</button></div>
   </div>
 </div>
+<div id="multi">
+  <div class="panel">
+    <h2>Multiplayer</h2>
+    <div class="new-world"><input id="mp-name" maxlength="16" placeholder="Your name"></div>
+    <div id="mp-off">
+      <h3>Host this world</h3>
+      <p class="mp-help">Friends can join the world you're in now. You'll get a code to give them.</p>
+      <button id="mp-host">Host</button>
+      <h3>Join a friend</h3>
+      <div class="new-world"><input id="mp-code" maxlength="5" placeholder="Their code" autocomplete="off"><button id="mp-join">Join</button></div>
+    </div>
+    <div id="mp-on" style="display:none">
+      <p id="mp-now"></p>
+      <p class="mp-help" id="mp-who"></p>
+      <button id="mp-leave">Leave</button>
+    </div>
+    <p class="mp-status" id="mp-status"></p>
+    <div class="bottom"><button id="mp-close">Back</button></div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="textures.js"></script>
 <script>
 // ===================== Version =====================
-// The date it was published plus which update of that day it was: YY.MM.DD_N.
-// 26.11.14_1 = the first update on 14 November 2026, 26.11.14_2 = the second update that day.
+// The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
+// 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.14_3';
+const GAME_VERSION = '26.11.14.417';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -358,12 +390,22 @@ const Worlds = (() => {
   }
   // which world to open: the one named in the address (#world=...), else the last one played, else a new one
   const want = (location.hash.match(/world=([\w-]+)/) || [])[1];
-  let last = null;
-  try { last = localStorage.getItem(LAST_KEY); } catch (e) {}
-  const current = list.find(w => w.id === want) || list.find(w => w.id === last) ||
-    list.slice().sort((a, b) => b.played - a.played)[0] || create('World 1');
-  current.played = Date.now(); saveList();
-  try { localStorage.setItem(LAST_KEY, current.id); } catch (e) {}
+  // joining a friend's game (#join=CODE): play their world for now. It isn't one of your worlds and isn't saved here;
+  // the details (seed, terrain style) were fetched from their game just before the page reloaded.
+  const joinCode = (location.hash.match(/join=(\w+)/) || [])[1];
+  let joined = null;
+  try { joined = JSON.parse(sessionStorage.getItem('cubeland-join')); } catch (e) {}
+  let current;
+  if (joinCode && joined && joined.code === joinCode && isFinite(joined.seed)) {
+    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, temp: true, code: joinCode };
+  } else {
+    let last = null;
+    try { last = localStorage.getItem(LAST_KEY); } catch (e) {}
+    current = list.find(w => w.id === want) || list.find(w => w.id === last) ||
+      list.slice().sort((a, b) => b.played - a.played)[0] || create('World 1');
+    current.played = Date.now(); saveList();
+    try { localStorage.setItem(LAST_KEY, current.id); } catch (e) {}
+  }
 
   let dbp = null;
   const db = () => dbp || (dbp = new Promise((res, rej) => {
@@ -396,9 +438,14 @@ const Worlds = (() => {
       location.reload();
     },
     // ver = the newest game version that has saved this world (so older versions can warn before opening it)
-    touch() { current.played = Date.now(); if (compareVersions(GAME_VERSION, current.ver) > 0) current.ver = GAME_VERSION; saveList(); },
+    touch() { if (current.temp) return; current.played = Date.now(); if (compareVersions(GAME_VERSION, current.ver) > 0) current.ver = GAME_VERSION; saveList(); },
   };
 })();
+
+// Multiplayer (filled in further down, in "Multiplayer"). These do nothing when you're playing on your own.
+// client = you joined a friend's game (their game runs the mobs, water and items; yours shows them)
+const Net = { client: !!Worlds.current.temp, hosting: false, applying: false,
+  blockChanged() {}, hitMob() {}, pickup() {}, pickedUpByFriend() { return false; }, farthestPlayer() { return 0; }, update() {}, infoLine() { return ''; } };
 
 // ===================== Terrain generation =====================
 const seed = Worlds.current.seed;
@@ -1303,6 +1350,7 @@ function setBlock(x, y, z, id) {
   if (isTorch(id) || isTorch(old) || nearTorch(x, y, z)) relight(dirty);
   for (const k of dirty) { buildChunk(k % NCX, Math.floor(k / NCX)); rebuildSoon.delete(k); }
   wakeWater(x, y, z);
+  Net.blockChanged(i, id);   // multiplayer: tell the other players
 }
 
 // ---- Water flow ----
@@ -1312,6 +1360,7 @@ function setBlock(x, y, z, id) {
 let waterQueue = new Set(), waterTimer = 0;
 const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 function wakeWater(x, y, z) {
+  if (Net.client) return;   // in a joined game the host's game runs the water
   for (const [dx, dy, dz] of [[0, 0, 0], ...ORE_STEPS]) {
     const xx = x + dx, yy = y + dy, zz = z + dz;
     if (xx >= 0 && zz >= 0 && xx < WX && zz < WZ && yy >= 0 && yy < WY) waterQueue.add(idx(xx, yy, zz));
@@ -1333,6 +1382,7 @@ function waterWants(x, y, z, cur) {
   return isWater(cur) ? 0 : cur;                                  // nothing feeding it: dries up
 }
 function updateWater(dt) {
+  if (Net.client) return;
   waterTimer -= dt;
   if (waterTimer > 0 || !waterQueue.size) return;
   waterTimer = 0.25;
@@ -1355,6 +1405,7 @@ function updateWater(dt) {
     if (id) chunkTop[c] = Math.max(chunkTop[c], y + 1);
     markDirty(x, z, dirty);
     wakeWater(x, y, z);
+    Net.blockChanged(i, id);
   }
   for (const k of dirty) { if (chunkMeshes[k]) buildChunk(k % NCX, Math.floor(k / NCX)); rebuildSoon.delete(k); }
 }
@@ -2078,8 +2129,9 @@ const MOB_TYPES = {
   // growl: the mob's voice, heard every so often (and when hit) up to ~28 blocks away. 'growl' = Grr's low grumble, 'hrr' = Dan's cat-like trill
   // curious: drawn to block-breaking/placing sounds (within hearing) and torches (within lightRange)
   danthechocolateman: { name: 'Dan The Chocolate Man', health: 5, speed: 1.3, max: 6, drops: [[CHOCOLATE, 1, 2]], growl: 'hrr' },
-  grrangry: { name: 'Grr Angry', health: 8, speed: 1.5, max: 5, hostile: true, night: true, damage: 3, sight: 16, reach: 1.4, glow: true,
-    curious: true, hearing: 24, lightRange: 16, growl: 'growl' },
+  // scale: how much bigger than the model to draw it (Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks, as tall as the player)
+  grrangry: { name: 'Grr Angry', health: 8, speed: 1.5, max: 5, hostile: true, night: true, damage: 3, sight: 16, reach: 1.8, glow: true,
+    curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 1.6 },
 };
 // play a mob's growl from where it stands: fades out by ~28 blocks, and comes from the left or right speaker
 function mobGrowl(m) {
@@ -2115,36 +2167,72 @@ function hurtPlayer(amount, from) {
   const d = Math.hypot(player.x - from.x, player.z - from.z) || 1;
   player.vx += (player.x - from.x) / d * 7; player.vz += (player.z - from.z) / d * 7; player.vy = Math.max(player.vy, 5);
 }
-function mobTexture(key) {
+// hue (optional, 0-360): recolour the skin, turning its main colour to this hue (used for player bodies)
+function mobTexture(key, hue) {
   const c = document.createElement('canvas'); c.width = c.height = 1;   // placeholder until the picture loads
   const t = new THREE.Texture(c);
   t.magFilter = t.minFilter = ps2 ? THREE.LinearFilter : THREE.NearestFilter;
   t.generateMipmaps = false;
   const src = (window.TEXTURES || {})[key];
-  if (src) { const img = new Image(); img.onload = () => { t.image = img; t.needsUpdate = true; }; img.src = src; }
+  if (src) { const img = new Image(); img.onload = () => { t.image = hue === undefined ? img : recolor(img, hue); t.needsUpdate = true; }; img.src = src; }
   t.needsUpdate = true;
   MOB_TEXTURES.push(t);
   return t;
 }
+// shift every pixel's colour around the colour wheel so the skin's main colour (its most common hue) becomes `hue`;
+// shading and the darker/lighter details stay the same
+function recolor(img, hue) {
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g2 = c.getContext('2d'); g2.drawImage(img, 0, 0);
+  const d = g2.getImageData(0, 0, c.width, c.height), p = d.data;
+  const hsl = (r, g, b) => {
+    r /= 255; g /= 255; b /= 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+    if (mx === mn) return [0, 0, l];
+    const dd = mx - mn, s = l > 0.5 ? dd / (2 - mx - mn) : dd / (mx + mn);
+    const h = mx === r ? (g - b) / dd + (g < b ? 6 : 0) : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4;
+    return [h * 60, s, l];
+  };
+  const counts = new Array(36).fill(0);
+  for (let i = 0; i < p.length; i += 4) if (p[i + 3] > 128) { const [h, s] = hsl(p[i], p[i + 1], p[i + 2]); if (s > 0.25) counts[Math.floor(h / 10) % 36]++; }
+  const shift = hue - (counts.indexOf(Math.max(...counts)) * 10 + 5);
+  for (let i = 0; i < p.length; i += 4) {
+    if (p[i + 3] === 0) continue;
+    let [h, s, l] = hsl(p[i], p[i + 1], p[i + 2]);
+    h = (((h + shift) % 360) + 360) % 360 / 360;
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s, pp = 2 * l - q;
+    const ch = t => { t = (t + 1) % 1; return t < 1 / 6 ? pp + (q - pp) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? pp + (q - pp) * (2 / 3 - t) * 6 : pp; };
+    p[i] = ch(h + 1 / 3) * 255; p[i + 1] = ch(h) * 255; p[i + 2] = ch(h - 1 / 3) * 255;
+  }
+  g2.putImageData(d, 0, 0);
+  return c;
+}
 const mobTexCache = {};
 // Blockbench face name -> BoxGeometry face slot (+x, -x, +y, -y, +z, -z)
 const MC_FACES = ['east', 'west', 'up', 'down', 'south', 'north'];
-function buildMobMesh(type) {
+// opts.scale: draw bigger or smaller (default: the type's own scale). opts.hue: recolour the skin (player bodies).
+function buildMobMesh(type, opts = {}) {
   const model = (window.MODELS || {})[type];
   const root = new THREE.Group(), legs = [], arms = [], mats = [];
-  if (!model) return { root, legs, arms, mats };
+  if (!model) return { root, legs, arms, mats, half: 0.3, height: 1 };
+  const S = opts.scale || (MOB_TYPES[type] && MOB_TYPES[type].scale) || 1;
+  const body = new THREE.Group();    // the model itself, scaled; root is what gets moved, turned and tipped over
+  body.scale.setScalar(S);
+  root.add(body);
   const els = model.elements;
   // centre the model on its footprint so it turns around its middle
   let mnx = Infinity, mxx = -Infinity, mnz = Infinity, mxz = -Infinity, top = 0;
   for (const e of els) { mnx = Math.min(mnx, e.from[0]); mxx = Math.max(mxx, e.to[0]); mnz = Math.min(mnz, e.from[2]); mxz = Math.max(mxz, e.to[2]); top = Math.max(top, e.to[1]); }
   const cx = (mnx + mxx) / 2, cz = (mnz + mxz) / 2;
+  let foot = 0;   // width of the body and legs (not the arms), worked out below
   const matFor = ref => {
     const name = model.textures[String(ref).replace('#', '')] || 'missing';
     // a plain name ("body") lives in the mob's own folder; a path ("Textures/entity/mobs/GrrAngry/grr_angry") is used as-is
     const key = (name.includes('/') ? name.replace(/^textures\//i, '') : `entity/mobs/${type}/${name}`).toLowerCase();
-    if (!mobTexCache[key]) mobTexCache[key] = mobTexture(key);
-    let m = mats.find(m => m.map === mobTexCache[key]);
-    if (!m) { m = new THREE.MeshBasicMaterial({ map: mobTexCache[key], alphaTest: 0.5 }); /* cut-out, not see-through, so water draws over the parts underwater */ mats.push(m); }
+    const ck = opts.hue === undefined ? key : key + '#hue' + opts.hue;
+    if (!mobTexCache[ck]) mobTexCache[ck] = mobTexture(key, opts.hue);
+    let m = mats.find(m => m.map === mobTexCache[ck]);
+    if (!m) { m = new THREE.MeshBasicMaterial({ map: mobTexCache[ck], alphaTest: 0.5 }); /* cut-out, not see-through, so water draws over the parts underwater */ mats.push(m); }
     return m;
   };
   // Blockbench groups (outliner folders) named like "arms" / "legs" mark which parts are arms and legs
@@ -2174,13 +2262,15 @@ function buildMobMesh(type) {
     const mesh = new THREE.Mesh(g, faceMats);
     const mx = ((x0 + x1) / 2 - cx) / 16, my = (y0 + y1) / 2 / 16, mz = ((z0 + z1) / 2 - cz) / 16;
     const part = /arm/i.test(e.name || '') ? 'arm' : /leg/i.test(e.name || '') ? 'leg' : groupOf[ei];
+    if (part !== 'arm')   // arms sticking out don't count
+      foot = Math.max(foot, Math.abs(x0 - cx) * 2, Math.abs(x1 - cx) * 2, Math.abs(z0 - cz) * 2, Math.abs(z1 - cz) * 2);
     if (part === 'leg' || (!part && y0 === 0 && y1 < top)) {
       // a leg: swings from its top; diagonal pairs move together
       const pivot = new THREE.Group();
       pivot.position.set(mx, y1 / 16, mz);
       mesh.position.set(0, -h / 2, 0);
       pivot.add(mesh);
-      root.add(pivot);
+      body.add(pivot);
       legs.push({ pivot, phase: Math.sign((mx || 1) * (mz || 1)) });
     } else if (part === 'arm') {
       // an arm (named "...arm" in Blockbench): swings from its pivot point (the shoulder) when attacking
@@ -2189,7 +2279,7 @@ function buildMobMesh(type) {
       pivot.position.set((o[0] - cx) / 16, o[1] / 16, (o[2] - cz) / 16);
       mesh.position.set(mx - pivot.position.x, my - pivot.position.y, mz - pivot.position.z);
       pivot.add(mesh);
-      root.add(pivot);
+      body.add(pivot);
       arms.push({ pivot });
     } else {
       const r = e.rotation;
@@ -2199,17 +2289,19 @@ function buildMobMesh(type) {
         pivot.rotation[r.axis] = r.angle * Math.PI / 180;
         mesh.position.set(mx - pivot.position.x, my - pivot.position.y, mz - pivot.position.z);
         pivot.add(mesh);
-        root.add(pivot);
+        body.add(pivot);
       } else {
         mesh.position.set(mx, my, mz);
-        root.add(mesh);
+        body.add(mesh);
       }
     }
   }
-  return { root, legs, arms, mats, half: Math.max(mxx - mnx, mxz - mnz) / 32 * 0.85, height: top / 16 };
+  // half = half the width of its body for bumping into blocks; height = how tall it stands (both in blocks)
+  return { root, legs, arms, mats, half: Math.min(0.49, foot / 32 * 0.85 * S), height: top / 16 * S };
 }
 
 const mobs = [];
+let mobCount = 0;   // every mob gets its own number (k), so players in a multiplayer game know which one is which
 function mobBlocked(m, x, y, z) {
   const x0 = Math.floor(x - m.half), x1 = Math.floor(x + m.half - 1e-6);
   const z0 = Math.floor(z - m.half), z1 = Math.floor(z + m.half - 1e-6);
@@ -2220,7 +2312,7 @@ function mobBlocked(m, x, y, z) {
 function spawnMob(type, x, y, z) {
   const t = MOB_TYPES[type];
   const body = buildMobMesh(type);
-  const m = { type, x, y, z, vx: 0, vy: 0, vz: 0, yaw: Math.random() * Math.PI * 2, walk: 0, stride: 0,
+  const m = { k: ++mobCount, type, x, y, z, vx: 0, vy: 0, vz: 0, yaw: Math.random() * Math.PI * 2, walk: 0, stride: 0,
     state: 'idle', timer: 1 + Math.random() * 3, health: t.health, hurt: 0, flee: 0, dead: 0, onGround: false, bumped: false,
     light: new THREE.Color(1, 1, 1), lightTimer: 0, ...body };
   scene.add(m.root);
@@ -2250,7 +2342,8 @@ let mobSpawnTimer = 0;
 function updateMobs(dt) {
   // keep a few Dans around the player: spawn out of the way, forget ones that wandered far off
   mobSpawnTimer -= dt;
-  if (mobSpawnTimer <= 0 && buildQueue && buildDone >= buildQueue.length) {
+  // (when you've joined someone else's game, their game runs the mobs and yours just shows them)
+  if (mobSpawnTimer <= 0 && buildQueue && buildDone >= buildQueue.length && !Net.client) {
     mobSpawnTimer = 3;
     for (const type in MOB_TYPES) {
       if (!(window.MODELS || {})[type]) continue;
@@ -2264,12 +2357,19 @@ function updateMobs(dt) {
   }
   for (const m of [...mobs]) {
     const t = MOB_TYPES[m.type];
-    if (Math.hypot(m.x - player.x, m.z - player.z) > 110) { removeMob(m); continue; }
+    let ox = m.x, oz = m.z;
     if (m.dead) {             // tips over, then disappears
       m.dead += dt;
       m.root.rotation.z = Math.min(1, m.dead / 0.35) * Math.PI / 2;
       if (m.dead > 0.9) { removeMob(m); continue; }
-    } else {
+    } else if (Net.client) {  // joined game: glide toward where the host's game says it is
+      const a = Math.min(1, dt * 10);
+      m.x += (m.tx - m.x) * a; m.y += (m.ty - m.y) * a; m.z += (m.tz - m.z) * a;
+      m.yaw += Math.atan2(Math.sin(m.tyaw - m.yaw), Math.cos(m.tyaw - m.yaw)) * a;
+    }
+    if (Net.client || m.dead) { /* no thinking or walking of its own */ }
+    else if (Math.hypot(m.x - player.x, m.z - player.z) > Math.max(110, Net.farthestPlayer(m))) { removeMob(m); continue; }
+    else {
       // wander: stand around for a bit, then walk somewhere for a bit. After being hit, run away from the player.
       m.timer -= dt;
       m.attackCool = Math.max(0, (m.attackCool || 0) - dt);
@@ -2320,12 +2420,13 @@ function updateMobs(dt) {
         else if (m.flee <= 0) m.turnTo = m.yaw + Math.PI * (0.6 + Math.random() * 0.8);
       }
     }
+    if (!Net.client) {   // falling, swimming and bumping into blocks (in a joined game the host's game does this)
     if (waterAt(m.x, m.y + 0.5, m.z)) {    // in water: float up to the surface, and paddle out over edges
       m.vy += (2 - m.vy) * Math.min(1, dt * 3);
       if (m.bumped) m.vy = 5;
     } else m.vy = Math.max(-40, m.vy - 28 * dt);
     // move one axis at a time, stopping at blocks
-    const ox = m.x, oz = m.z;
+    ox = m.x; oz = m.z;
     m.onGround = false; m.bumped = false;
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(m.vx), Math.abs(m.vy), Math.abs(m.vz)) * dt / 0.3));
     for (let s = 0; s < steps; s++) {
@@ -2342,6 +2443,7 @@ function updateMobs(dt) {
       }
     }
     if (m.y < -10) { removeMob(m); continue; }
+    }
     // walking animation: legs swing in diagonal pairs while moving
     const moved = Math.hypot(m.x - ox, m.z - oz);
     m.stride += moved * 5.5;
@@ -2397,9 +2499,11 @@ function mobInSights(max = 4) {
   if (hit && Math.hypot(hit.x + 0.5 - o.x, hit.y + 0.5 - o.y, hit.z + 0.5 - o.z) - 0.5 < bt) return null;
   return best;
 }
-function hitMob(m) {
-  const d = Math.hypot(m.x - player.x, m.z - player.z) || 1;
-  m.vx = (m.x - player.x) / d * 6; m.vz = (m.z - player.z) / d * 6; m.vy = 5;
+// from: who hit it (you, or another player in a multiplayer game); it gets knocked away from them
+function hitMob(m, from = player) {
+  if (Net.client) { Net.hitMob(m); m.hurt = 0.3; return; }   // joined game: tell the host's game, which does the rest
+  const d = Math.hypot(m.x - from.x, m.z - from.z) || 1;
+  m.vx = (m.x - from.x) / d * 6; m.vz = (m.z - from.z) / d * 6; m.vy = 5;
   m.hurt = 0.3; m.health--;
   if (!MOB_TYPES[m.type].hostile) m.flee = 4;   // peaceful mobs run off; hostile ones don't back down
   if (MOB_TYPES[m.type].growl) { mobGrowl(m); m.growlIn = 4 + Math.random() * 6; }   // growls when hit
@@ -2425,8 +2529,11 @@ function dropItem(id, x, y, z) {
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), mat);
   scene.add(mesh);
   const a = Math.random() * Math.PI * 2;
-  drops.push({ id, x, y, z, vx: Math.cos(a) * 1.5, vy: 4, vz: Math.sin(a) * 1.5, age: 0, spin: Math.random() * 6, mesh, light: 0 });
+  const d = { k: ++dropCount, id, x, y, z, vx: Math.cos(a) * 1.5, vy: 4, vz: Math.sin(a) * 1.5, age: 0, spin: Math.random() * 6, mesh, light: 0 };
+  drops.push(d);
+  return d;
 }
+let dropCount = 0;   // every drop gets its own number (k), for multiplayer
 function removeDrop(d) {
   scene.remove(d.mesh); d.mesh.geometry.dispose(); d.mesh.material.dispose();
   drops.splice(drops.indexOf(d), 1);
@@ -2434,6 +2541,14 @@ function removeDrop(d) {
 function updateDrops(dt) {
   for (const d of [...drops]) {
     d.age += dt;
+    if (Net.client) {
+      // joined game: the host's game moves drops around; walking into one asks the host for it
+      const a = Math.min(1, dt * 10);
+      d.x += (d.tx - d.x) * a; d.y += (d.ty - d.y) * a; d.z += (d.tz - d.z) * a;
+      if (!d.asked && Math.abs(d.x - player.x) < 1.1 && Math.abs(d.y + 0.25 - player.y - 0.9) < 1.4 && Math.abs(d.z - player.z) < 1.1) {
+        d.asked = true; Net.pickup(d);
+      }
+    } else {
     if (d.age > 300) { removeDrop(d); continue; }           // gone after 5 minutes
     // fall and slide to a stop, resting on top of blocks
     d.vy = Math.max(-30, d.vy - 22 * dt);
@@ -2450,6 +2565,8 @@ function updateDrops(dt) {
     if (d.age > 0.5 && Math.abs(d.x - px) < 1.1 && Math.abs(d.y + 0.25 - py) < 1.4 && Math.abs(d.z - pz) < 1.1 && giveItem(d.id)) {
       removeDrop(d);
       continue;
+    }
+    if (d.age > 0.5 && Net.pickedUpByFriend(d)) { removeDrop(d); continue; }   // a friend walked into it
     }
     d.spin += dt * 2;
     d.mesh.position.set(d.x, d.y + 0.25 + Math.sin(d.age * 3) * 0.06, d.z);
@@ -2632,15 +2749,20 @@ function gatherSave() {
   };
 }
 async function saveWorld() {
-  if (!worldLoaded || saving || !Worlds.list().some(w => w.id === Worlds.current.id)) return;   // (not if it was just deleted)
+  // (not if it was just deleted, or if it's a friend's world you joined: their game saves it)
+  if (!worldLoaded || saving || !Worlds.list().some(w => w.id === Worlds.current.id)) return;
   saving = true; lastSave = performance.now();
   try { await Worlds.save(Worlds.current.id, gatherSave()); Worlds.touch(); }
   catch (e) { console.warn('Could not save the world', e); }
   saving = false;
 }
 function applySave(s) {
-  // blocks you changed, put back on top of the freshly grown terrain
-  const idxs = new Uint32Array(s.idxs), ids = new Uint8Array(s.ids), cols = new Set();
+  applyEdits(new Uint32Array(s.idxs), new Uint8Array(s.ids));
+  applyPlayerSave(s);
+}
+// blocks you changed, put back on top of the freshly grown terrain (also used when joining a friend's game)
+function applyEdits(idxs, ids) {
+  const cols = new Set();
   for (let k = 0; k < idxs.length; k++) {
     const i = idxs[k], id = ids[k];
     if (i >= world.length || (id && !BLOCKS[id])) continue;
@@ -2653,6 +2775,8 @@ function applySave(s) {
   }
   for (const c of cols) skyTop[c] = computeSkyTop(c % WX, Math.floor(c / WX), WY - 1);
   if (torches.size) relight(new Set());
+}
+function applyPlayerSave(s) {
   // you
   const p = s.player || {};
   if (isFinite(p.x)) Object.assign(player, { x: p.x, y: p.y, z: p.z, yaw: p.yaw || 0, pitch: p.pitch || 0, fly: !!p.fly, vx: 0, vy: 0, vz: 0 });
@@ -2675,6 +2799,7 @@ function applySave(s) {
   }
 }
 (async () => {
+  if (Worlds.current.temp) return;   // a friend's world: it loads once their game sends it (see Multiplayer)
   try {
     const s = await Worlds.load(Worlds.current.id);
     if (s && s.seed === seed) applySave(s);
@@ -2690,8 +2815,356 @@ function applySave(s) {
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveWorld(); });
 addEventListener('pagehide', () => saveWorld());
 
+// ===================== Multiplayer =====================
+// One player hosts the world they're in and gets a short code; friends type the code to join.
+// Games talk to each other directly (WebRTC, through the free PeerJS service, which only introduces them).
+// The host's game is the boss: it runs the mobs, water and dropped items, and saves the world. Joined games
+// send the host what their player does (moving, breaking and placing blocks, hitting mobs, picking things up).
+// Everyone has to be on the same version of the game. Players look like a Grr, recoloured a cool colour.
+{
+  const PREFIX = 'cubeland-', CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const HUES = [200, 265, 300, 180, 235, 320, 215, 285];       // blues, purples, magentas, cyans (never green or orange)
+  const NAME_KEY = 'cubeland-name';
+  const el = id => document.getElementById(id);
+  let peer = null, hostConn = null, myId = 'host', lastHeard = 0, joinTimeout = 0;
+  const others = new Map();     // id -> another player: { name, hue, x, y, z, yaw, av (their body) }
+  const friends = new Map();    // (host only) id -> { conn, ...player }
+  let pending = [];             // block changes waiting to be sent: [index, id, index, id, ...]
+  let myName = 'Player';
+  try { myName = localStorage.getItem(NAME_KEY) || myName; } catch (e) {}
+
+  const loadPeer = () => window.Peer ? Promise.resolve() : new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
+    s.onload = res; s.onerror = () => rej(new Error('offline'));
+    document.head.append(s);
+  });
+  const makeCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+  const r2 = v => Math.round(v * 100) / 100;
+  const toBuf = b => b instanceof ArrayBuffer ? b : b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+  function status(text) { el('mp-status').textContent = text || ''; }
+
+  // ---- other players' bodies: a recoloured Grr as tall as you, with their name above it ----
+  function makeBody(p) {
+    const b = buildMobMesh('grrangry', { scale: 1.6, hue: p.hue });
+    const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+    const g = c.getContext('2d');
+    g.font = 'bold 34px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const w = Math.min(250, g.measureText(p.name).width + 24);
+    g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(128 - w / 2, 8, w, 48);
+    g.fillStyle = '#fff'; g.fillText(p.name, 128, 33);
+    const tex = new THREE.CanvasTexture(c);
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    tag.scale.set(1.6, 0.4, 1);
+    tag.position.y = b.height + 0.35;
+    b.root.add(tag);
+    scene.add(b.root);
+    return { ...b, tag, stride: 0, walk: 0, light: new THREE.Color(1, 1, 1), lightTimer: 0 };
+  }
+  function removeBody(p) {
+    if (!p.av) return;
+    scene.remove(p.av.root);
+    p.av.root.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    p.av.mats.forEach(m => m.dispose());
+    p.av.tag.material.map.dispose(); p.av.tag.material.dispose();
+    p.av = null;
+  }
+  function setOther(id, d) {      // d: { name, hue, x, y, z, yaw }
+    let p = others.get(id);
+    if (!p) { p = { ...d, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw }; others.set(id, p); }
+    if (p.av && (p.name !== d.name || p.hue !== d.hue)) removeBody(p);
+    Object.assign(p, { name: d.name, hue: d.hue, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw });
+    if (!p.av) p.av = makeBody(p);
+    return p;
+  }
+  function removeOther(id) { const p = others.get(id); if (p) { removeBody(p); others.delete(id); } }
+  function animateOthers(dt) {
+    const a = Math.min(1, dt * 10);
+    for (const p of others.values()) {
+      const av = p.av; if (!av) continue;
+      const ox = p.x, oz = p.z;
+      p.x += (p.tx - p.x) * a; p.y += (p.ty - p.y) * a; p.z += (p.tz - p.z) * a;
+      p.yaw += Math.atan2(Math.sin(p.tyaw - p.yaw), Math.cos(p.tyaw - p.yaw)) * a;
+      const moved = Math.hypot(p.x - ox, p.z - oz);
+      av.stride += moved * 5.5;
+      av.walk += ((moved > 0.002 ? 1 : 0) - av.walk) * Math.min(1, dt * 8);
+      for (const l of av.legs) l.pivot.rotation.x = Math.sin(av.stride) * 0.6 * av.walk * l.phase;
+      av.arms.forEach((ar, k) => { ar.pivot.rotation.x = Math.sin(av.stride + k * Math.PI) * 0.12 * av.walk; });
+      av.root.position.set(p.x, p.y, p.z);
+      av.root.rotation.y = p.yaw;
+      // lit like mobs: sky light by time of day, or torch light, whichever is brighter
+      if ((av.lightTimer -= dt) <= 0) {
+        av.lightTimer = 0.25;
+        const bx = Math.floor(p.x), by = Math.floor(p.y + 0.4), bz = Math.floor(p.z);
+        av.sky = skyExposure(bx, by, bz, new Map()); av.torch = LIGHT_CURVE(lightAt(bx, by, bz));
+      }
+      const t = DAY_TINT.value, s = av.sky === undefined ? 1 : av.sky, tl = av.torch || 0;
+      av.light.setRGB(Math.max(t.r * s, tl * TORCH_COLOR.r), Math.max(t.g * s, tl * TORCH_COLOR.g), Math.max(t.b * s, tl * TORCH_COLOR.b));
+      for (const m of av.mats) m.color.copy(av.light);
+    }
+  }
+
+  // apply block changes from someone else (without sending them back out again, unless you're the host)
+  function applySets(list) {
+    Net.applying = true;
+    for (let k = 0; k + 1 < list.length; k += 2) {
+      const i = list[k], id = list[k + 1];
+      if (!(i >= 0 && i < world.length) || (id && !BLOCKS[id]) || world[i] === id) continue;
+      setBlock(i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ, id);
+    }
+    Net.applying = false;
+  }
+
+  // ---------------- hosting ----------------
+  async function host() {
+    if (Worlds.current.temp) return status("This is a friend's world, so only they can host it.");
+    status('Starting...');
+    try { await loadPeer(); } catch (e) { return status("Couldn't start multiplayer. Are you online?"); }
+    const code = makeCode();
+    peer = new Peer(PREFIX + code, { debug: 0 });
+    peer.on('open', () => { Net.hosting = true; Net.code = code; status(''); refreshUI(); });
+    peer.on('error', err => {
+      if (err.type === 'unavailable-id') { peer.destroy(); peer = null; host(); }   // that code is taken: pick another
+      else if (!Net.hosting) { peer.destroy(); peer = null; status("Couldn't start multiplayer. Are you online?"); }
+    });
+    peer.on('disconnected', () => { if (Net.hosting && peer && !peer.destroyed) peer.reconnect(); });
+    peer.on('connection', conn => {
+      conn.on('data', d => { try { hostGot(conn, d); } catch (e) { console.warn(e); } });
+      conn.on('close', () => dropFriend(conn.peer));
+    });
+  }
+  function stopHosting() {
+    for (const id of [...friends.keys()]) dropFriend(id);
+    if (peer) peer.destroy();
+    peer = null; Net.hosting = false; Net.code = null;
+    refreshUI();
+  }
+  function dropFriend(id) {
+    const f = friends.get(id);
+    if (!f) return;
+    friends.delete(id); removeOther(id);
+    try { f.conn.close(); } catch (e) {}
+    refreshUI();
+  }
+  function hostGot(conn, d) {
+    const f = friends.get(conn.peer);
+    if (f) f.seen = performance.now();
+    if (d.t === 'hello') {          // someone checking which world this is, before they load it
+      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, host: myName });
+    } else if (d.t === 'join') {
+      if (d.ver !== GAME_VERSION) { conn.send({ t: 'refuse', why: `You need the same version of the game. They have ${GAME_VERSION}, you have ${d.ver}.` }); return; }
+      const used = new Set([HUES[0], ...[...friends.values()].map(x => x.hue)]);
+      const hue = HUES.find(h => !used.has(h)) || HUES[1 + friends.size % (HUES.length - 1)];
+      const name = String(d.name || 'Player').slice(0, 16);
+      friends.set(conn.peer, { conn, name, hue, seen: performance.now() });
+      setOther(conn.peer, { name, hue, x: player.x + 1, y: player.y, z: player.z, yaw: 0 });
+      const save = gatherSave();
+      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ids: save.ids, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
+      refreshUI();
+    } else if (!f) {
+      return;
+    } else if (d.t === 'me') {
+      setOther(conn.peer, { name: f.name, hue: f.hue, x: +d.x || 0, y: +d.y || 0, z: +d.z || 0, yaw: +d.yaw || 0 });
+    } else if (d.t === 'sets' && Array.isArray(d.l)) {
+      applySets(d.l);
+    } else if (d.t === 'hit') {
+      const m = mobs.find(m => m.k === d.k && !m.dead), p = others.get(conn.peer);
+      if (m && p) hitMob(m, p);
+    } else if (d.t === 'pickup') {
+      const dr = drops.find(x => x.k === d.k);
+      if (dr && dr.age > 0.5) { removeDrop(dr); conn.send({ t: 'give', id: dr.id }); }
+    }
+  }
+  function hostTick() {
+    const players = [{ id: 'host', name: myName, hue: HUES[0], x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw) }];
+    for (const [id, f] of friends) { const p = others.get(id); if (p) players.push({ id, name: f.name, hue: f.hue, x: r2(p.tx), y: r2(p.ty), z: r2(p.tz), yaw: r2(p.tyaw) }); }
+    const ms = mobs.map(m => [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0]);
+    const ds = drops.map(d => [d.k, d.id, r2(d.x), r2(d.y), r2(d.z)]);
+    const msg = { t: 'tick', time: timeOfDay, players, mobs: ms, drops: ds };
+    const now = performance.now();
+    for (const [id, f] of friends) {
+      if (now - f.seen > 30000) { dropFriend(id); continue; }    // not heard from them in a while: they've gone
+      if (f.conn.open) f.conn.send(msg);
+    }
+  }
+
+  // ---------------- joining ----------------
+  // step 1 (from your own world): ask their game which world it is, then reload into it
+  async function join(code) {
+    code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length !== 5) return status('Codes are 5 letters and numbers.');
+    if (Net.hosting) return status('Stop hosting first.');
+    status('Looking for the game...');
+    try { await loadPeer(); } catch (e) { return status("Couldn't start multiplayer. Are you online?"); }
+    const p = new Peer({ debug: 0 });
+    const fail = text => { clearTimeout(joinTimeout); status(text); try { p.destroy(); } catch (e) {} };
+    joinTimeout = setTimeout(() => fail(`Couldn't find a game with the code ${code}.`), 12000);
+    p.on('error', err => fail(err.type === 'peer-unavailable' ? `Couldn't find a game with the code ${code}.` : "Couldn't connect. Are you online?"));
+    p.on('open', () => {
+      const c = p.connect(PREFIX + code, { reliable: true });
+      c.on('open', () => c.send({ t: 'hello' }));
+      c.on('data', async d => {
+        if (d.t !== 'info') return;
+        if (d.ver !== GAME_VERSION) return fail(`${d.host} is playing version ${d.ver}, and you have ${GAME_VERSION}. You both need the same version.`);
+        clearTimeout(joinTimeout);
+        status('Joining...');
+        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, host: d.host })); } catch (e) {}
+        p.destroy();
+        await saveWorld();
+        location.hash = 'join=' + code;
+        location.reload();
+      });
+    });
+  }
+  // step 2 (after the reload, in their world): connect for real and get the blocks they've changed
+  async function connectToHost() {
+    const code = Worlds.current.code;
+    const giveUp = text => { alert(text); leave(); };
+    try { await loadPeer(); } catch (e) { return giveUp("Couldn't connect to your friend's game. Are you online?"); }
+    peer = new Peer({ debug: 0 });
+    peer.on('error', err => { if (!worldLoaded) giveUp(err.type === 'peer-unavailable' ? `The game with the code ${code} has closed.` : "Couldn't connect to your friend's game."); });
+    peer.on('open', () => {
+      hostConn = peer.connect(PREFIX + code, { reliable: true });
+      hostConn.on('open', () => hostConn.send({ t: 'join', name: myName, ver: GAME_VERSION }));
+      hostConn.on('data', d => { try { clientGot(d); } catch (e) { console.warn(e); } });
+      hostConn.on('close', hostGone);
+    });
+    lastHeard = performance.now();
+  }
+  function hostGone() {
+    if (Net.left) return;
+    Net.left = true;
+    try { document.exitPointerLock(); } catch (e) {}
+    alert(`${Worlds.current.name.replace(/'s world$/, '')} stopped hosting (or the connection was lost). Back to your own worlds.`);
+    leave();
+  }
+  function leave() {
+    Net.left = true;
+    try { sessionStorage.removeItem('cubeland-join'); } catch (e) {}
+    try { if (peer) peer.destroy(); } catch (e) {}
+    location.hash = '';
+    location.reload();
+  }
+  function clientGot(d) {
+    lastHeard = performance.now();
+    if (d.t === 'refuse') { alert(d.why); leave(); }
+    else if (d.t === 'welcome') {
+      myId = d.id;
+      applyEdits(new Uint32Array(toBuf(d.idxs)), new Uint8Array(toBuf(d.ids)));
+      Object.assign(player, { x: d.x, y: d.y, z: d.z, yaw: d.yaw || 0, vx: 0, vy: 0, vz: 0 });
+      timeOfDay = d.time;
+      worldLoaded = true;
+      refreshUI();
+    } else if (d.t === 'tick' && worldLoaded) {
+      timeOfDay = d.time;
+      const seenP = new Set();
+      for (const p of d.players) { if (p.id === myId) continue; seenP.add(p.id); setOther(p.id, p); }
+      for (const id of [...others.keys()]) if (!seenP.has(id)) removeOther(id);
+      // mobs: make, move or remove ours to match the host's
+      const byK = new Map(mobs.map(m => [m.k, m])), seenM = new Set();
+      for (const [k, type, x, y, z, yaw, dead, hurt] of d.mobs) {
+        seenM.add(k);
+        let m = byK.get(k);
+        if (!m) {
+          if (dead || Net.gone.has(k) || !MOB_TYPES[type] || !(window.MODELS || {})[type]) continue;
+          m = spawnMob(type, x, y, z); m.k = k; m.yaw = yaw;
+        }
+        Object.assign(m, { tx: x, ty: y, tz: z, tyaw: yaw });
+        if (dead && !m.dead) { m.dead = 0.001; Net.gone.add(k); }
+        if (hurt && !m.netHurt) m.hurt = 0.3;
+        m.netHurt = hurt;
+      }
+      for (const m of [...mobs]) if (!m.dead && !seenM.has(m.k)) removeMob(m);
+      // dropped items
+      const byD = new Map(drops.map(x => [x.k, x])), seenD = new Set();
+      for (const [k, id, x, y, z] of d.drops) {
+        seenD.add(k);
+        let dr = byD.get(k);
+        if (!dr) { if (!BLOCKS[id]) continue; dr = dropItem(id, x, y, z); dr.k = k; dr.vx = dr.vy = dr.vz = 0; }
+        Object.assign(dr, { tx: x, ty: y, tz: z });
+      }
+      for (const dr of [...drops]) if (!seenD.has(dr.k)) removeDrop(dr);
+    } else if (d.t === 'sets' && Array.isArray(d.l)) {
+      applySets(d.l);
+    } else if (d.t === 'give') {
+      giveItem(d.id);
+    }
+  }
+
+  function flush() {
+    if (!pending.length) return;
+    const msg = { t: 'sets', l: pending }; pending = [];
+    if (Net.hosting) { for (const f of friends.values()) if (f.conn.open) f.conn.send(msg); }
+    else if (hostConn && hostConn.open) hostConn.send(msg);
+  }
+  // ten times a second, on a timer rather than each frame, so it keeps going while the game is in a background tab
+  setInterval(() => {
+    flush();
+    if (Net.hosting && friends.size) hostTick();
+    if (Net.client && worldLoaded && hostConn && hostConn.open)
+      hostConn.send({ t: 'me', x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw) });
+    if (Net.client && worldLoaded && performance.now() - lastHeard > 30000) hostGone();
+  }, 100);
+
+  // ---------------- what the rest of the game calls ----------------
+  Object.assign(Net, {
+    gone: new Set(),
+    blockChanged(i, id) {
+      if (Net.hosting ? friends.size : (Net.client && !Net.applying)) pending.push(i, id);
+    },
+    hitMob(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'hit', k: m.k }); },
+    pickup(d) { if (hostConn && hostConn.open) hostConn.send({ t: 'pickup', k: d.k }); },
+    // (host) keep a mob around if it's near any friend, even when it's far from you
+    farthestPlayer(m) {
+      for (const p of others.values()) if (Math.hypot(m.x - p.x, m.z - p.z) < 110) return Infinity;
+      return 0;
+    },
+    update(dt) { flush(); animateOthers(dt); },
+    infoLine() {
+      if (Net.hosting) return `\nHosting: code ${Net.code} · ${friends.size} friend${friends.size === 1 ? '' : 's'} here`;
+      if (Net.client) return `\nIn ${Worlds.current.name}`;
+      return '';
+    },
+  });
+
+  // ---------------- the Multiplayer menu ----------------
+  const panel = el('multi');
+  panel.addEventListener('click', e => e.stopPropagation());
+  el('mp-name').value = myName;
+  el('mp-name').addEventListener('input', () => {
+    myName = el('mp-name').value.trim().slice(0, 16) || 'Player';
+    try { localStorage.setItem(NAME_KEY, myName); } catch (e) {}
+  });
+  el('mp-code').addEventListener('keydown', e => { if (e.key === 'Enter') join(el('mp-code').value); });
+  function refreshUI() {
+    const busy = Net.hosting || Net.client;
+    el('mp-off').style.display = busy ? 'none' : 'block';
+    el('mp-on').style.display = busy ? 'block' : 'none';
+    el('mp-name').disabled = busy;
+    if (Net.hosting) {
+      el('mp-now').innerHTML = '';
+      el('mp-now').append('Your code: ', Object.assign(document.createElement('b'), { className: 'mp-code', textContent: Net.code }));
+      el('mp-who').textContent = friends.size ? 'Here with you: ' + [...friends.values()].map(f => f.name).join(', ') : 'Give your friends the code. They type it under "Join a friend".';
+      el('mp-leave').textContent = 'Stop hosting';
+    } else if (Net.client) {
+      el('mp-now').textContent = `You're in ${Worlds.current.name}.`;
+      el('mp-who').textContent = 'Their game saves this world. Leaving takes you back to your own worlds.';
+      el('mp-leave').textContent = 'Leave';
+    }
+    el('multi-btn').textContent = Net.hosting ? `Hosting (${Net.code})` : 'Multiplayer';
+  }
+  el('multi-btn').addEventListener('click', e => { e.stopPropagation(); refreshUI(); panel.style.display = 'flex'; });
+  el('mp-close').addEventListener('click', () => { panel.style.display = 'none'; });
+  el('mp-host').addEventListener('click', () => host());
+  el('mp-join').addEventListener('click', () => join(el('mp-code').value));
+  el('mp-leave').addEventListener('click', () => { if (Net.hosting) stopHosting(); else leave(); });
+  addEventListener('pagehide', () => { try { if (peer) peer.destroy(); } catch (e) {} });
+
+  if (Net.client) connectToHost();
+}
+
 // ===================== World menu =====================
-const worldsEl = document.getElementById('worlds'), worldListEl = document.getElementById('world-list');
+const worldsEl =document.getElementById('worlds'), worldListEl = document.getElementById('world-list');
 document.getElementById('world-name').textContent = Worlds.current.name;
 document.getElementById('game-version').textContent = GAME_VERSION;
 {
@@ -2870,6 +3343,7 @@ function frame(now) {
   updateMobs(dt);
   updateDrops(dt);
   updateWater(dt);
+  Net.update(dt);
   // the further you are from open sky, the darker the haze, until it's black (no glowing fog deep underground)
   camSkyTimer -= dt;
   if (camSkyTimer <= 0) {
@@ -2912,7 +3386,7 @@ function frame(now) {
 
   fpsAcc += dt; fpsFrames++;
   if (fpsAcc >= 0.5) { fps = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }
-  infoEl.textContent = `${fps} fps\nX ${player.x.toFixed(1)}  Y ${player.y.toFixed(1)}  Z ${player.z.toFixed(1)}${player.fly ? '\nFlying' : ''}\n${ps2 ? 'PS2 look' : 'Crisp look'} (P)${Sound.muted ? '\nSound off (M)' : ''}${!buildQueue ? '\nLoading save...' : buildDone < buildQueue.length ? `\nLoading world ${Math.floor(100 * buildDone / buildQueue.length)}%` : ''}`;
+  infoEl.textContent = `${fps} fps\nX ${player.x.toFixed(1)}  Y ${player.y.toFixed(1)}  Z ${player.z.toFixed(1)}${player.fly ? '\nFlying' : ''}\n${ps2 ? 'PS2 look' : 'Crisp look'} (P)${Sound.muted ? '\nSound off (M)' : ''}${Net.infoLine()}${!buildQueue ? (Net.client ? '\nJoining...' : '\nLoading save...') : buildDone < buildQueue.length ? `\nLoading world ${Math.floor(100 * buildDone / buildQueue.length)}%` : ''}`;
 
   if (ps2) {
     renderer.setRenderTarget(lowRT);
