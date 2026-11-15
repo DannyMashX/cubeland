@@ -1,5 +1,13 @@
 [
     {
+        "version":  "26.11.14.2215",
+        "date":  "2026-11-14",
+        "notes":  "Fixed numbers and % showing in the wrong font after an update (the game now always loads the newest letters and textures)",
+        "changes":  [
+                        "Fixed numbers and % showing in the wrong font after an update (the game now always loads the newest letters and textures)"
+                    ]
+    },
+    {
         "version":  "26.11.14.2209",
         "date":  "2026-11-14",
         "notes":  "The % sign now uses the pixel font too",

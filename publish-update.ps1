@@ -56,6 +56,8 @@ $html = [IO.File]::ReadAllText("$PSScriptRoot\index.html")
 $m = [regex]::Match($html, "const GAME_VERSION = '[^']*';")
 if (-not $m.Success) { throw 'Could not find GAME_VERSION in index.html' }
 $html = $html.Remove($m.Index, $m.Length).Insert($m.Index, "const GAME_VERSION = '$ver';")
+# tag textures.js with the version too, so browsers load the new letters/textures instead of an old saved copy
+$html = [regex]::Replace($html, 'src="textures\.js(\?v=[^"]*)?"', "src=`"textures.js?v=$ver`"")
 [IO.File]::WriteAllText("$PSScriptRoot\index.html", $html, $utf8)
 $dir = "$PSScriptRoot\versions\$ver"
 New-Item -ItemType Directory -Force $dir | Out-Null
