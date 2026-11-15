@@ -1,5 +1,13 @@
 [
     {
+        "version":  "26.11.14.2207",
+        "date":  "2026-11-14",
+        "notes":  "New pixel font: all the game\u0027s text now uses Cubeland\u0027s own letters",
+        "changes":  [
+                        "New pixel font: all the game\u0027s text now uses Cubeland\u0027s own letters"
+                    ]
+    },
+    {
         "version":  "26.11.14.2117",
         "date":  "2026-11-14",
         "notes":  "Creative mode: pieces never run out, just like whole blocks, and you can pick them straight from the inventory (E)",

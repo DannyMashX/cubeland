@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cubeland</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; user-select: none; }
+  :root { --f1: 16px; --f2: 24px; --f3: 32px; --f6: 64px; }   /* text sizes, set to fit your screen by fitFontSizes() */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: Cubeland, system-ui, sans-serif; font-synthesis: none; user-select: none; }
+  /* Cubeland is your pixel font (textures/font): 12px = 1 screen pixel per letter pixel, 24px = 2, 36px = 3 */
+  input, select, button { font-family: inherit; }
   canvas { display: block; }
   #crosshair { position: fixed; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); pointer-events: none; }
   #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; mix-blend-mode: difference; }
@@ -15,24 +18,24 @@
   .slot { width: 44px; height: 44px; border: 2px solid rgba(255,255,255,.2); border-radius: 4px; position: relative; box-sizing: border-box; }
   .slot.sel { border-color: #fff; background: rgba(255,255,255,.15); }
   .slot canvas { width: 32px; height: 32px; margin: 4px; image-rendering: pixelated; }
-  .slot span { position: absolute; top: 0; left: 3px; font-size: 10px; color: #fff; text-shadow: 0 1px 1px #000; }
-  .slot span.count { top: auto; left: auto; bottom: 1px; right: 3px; font-size: 12px; font-weight: 600; }
-  #blockname { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 14px; text-shadow: 0 1px 2px #000; transition: opacity .4s; }
-  #info { position: fixed; top: 8px; left: 8px; color: #fff; font-size: 12px; line-height: 1.5; text-shadow: 0 1px 2px #000; white-space: pre; }
+  .slot span { position: absolute; top: 0; left: 3px; font-size: var(--f1); color: #fff; text-shadow: 0 1px 1px #000; }
+  .slot span.count { top: auto; left: auto; bottom: 1px; right: 3px; font-size: var(--f1); font-weight: 600; }
+  #blockname { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); color: #fff; font-size: var(--f1); text-shadow: 0 1px 2px #000; transition: opacity .4s; }
+  #info { position: fixed; top: 8px; left: 8px; color: #fff; font-size: var(--f1); line-height: 1.5; text-shadow: 0 1px 2px #000; white-space: pre; }
   #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; text-align: center; cursor: pointer; }
-  #overlay h1 { font-size: 48px; margin: 0 0 8px; letter-spacing: 2px; }
+  #overlay h1 { font-size: var(--f6); margin: 0 0 8px; letter-spacing: 2px; }
   #overlay p { margin: 4px 0; opacity: .9; }
   #hotbar { z-index: 10; }
   #inventory { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
   #inventory .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; }
-  #inventory h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+  #inventory h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
   #inv-grid { display: grid; grid-template-columns: repeat(9, 44px); gap: 4px; }
   #inv-grid .slot, #hotbar.open .slot { cursor: pointer; }
   #inv-grid .slot:hover, #hotbar.open .slot:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
-  #inv-name { height: 18px; margin-top: 10px; font-size: 14px; }
+  #inv-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
   #bench { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
   #bench .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(100vw - 32px); box-sizing: border-box; }
-  #bench h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+  #bench h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
   #bench .bench-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
   #bench-grid { display: grid; grid-template-columns: repeat(7, 44px); gap: 4px; }
   #bench-grid .slot, #bench-out { cursor: pointer; }
@@ -40,56 +43,56 @@
   #bench .bench-craft { display: flex; align-items: center; gap: 10px; }
   #bench .bench-craft .slot { width: 56px; height: 56px; }
   #bench .bench-craft .slot canvas { width: 40px; height: 40px; margin: 6px; }
-  #bench .arrow { font-size: 26px; opacity: .8; }
-  #bench-name { height: 18px; margin-top: 10px; font-size: 14px; }
-  #bench .hint { margin-top: 4px; font-size: 11px; opacity: .65; }
-  #inventory .hint { margin-top: 4px; font-size: 11px; opacity: .65; }
-  #overlay .world-line { margin-top: 18px; font-size: 15px; }
-  #overlay .saved-note { font-size: 12px; opacity: .6; }
-  #overlay .newer-note { font-size: 13px; color: #ffd27a; max-width: 520px; margin: 6px auto 0; }
+  #bench .arrow { font-size: var(--f3); opacity: .8; }
+  #bench-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
+  #bench .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
+  #inventory .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
+  #overlay .world-line { margin-top: 18px; font-size: var(--f1); }
+  #overlay .saved-note { font-size: var(--f1); opacity: .6; }
+  #overlay .newer-note { font-size: var(--f1); color: #ffd27a; max-width: 520px; margin: 6px auto 0; }
   #overlay .newer-note:empty { display: none; }
-  #overlay .version-line { margin-top: 14px; font-size: 12px; opacity: .6; }
+  #overlay .version-line { margin-top: 14px; font-size: var(--f1); opacity: .6; }
   #overlay .version-line a { color: #fff; }
   #whatsnew { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 25; color: #fff; }
   #whatsnew .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
-  #whatsnew h2 { margin: 0 0 10px; font-size: 20px; letter-spacing: 1px; }
-  #whatsnew h3 { margin: 14px 0 4px; font-size: 15px; }
-  #whatsnew h3 span { font-weight: 400; font-size: 12px; opacity: .55; margin-left: 6px; }
-  #whatsnew ul { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.5; }
+  #whatsnew h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
+  #whatsnew h3 { margin: 14px 0 4px; font-size: var(--f1); }
+  #whatsnew h3 span { font-weight: 400; font-size: var(--f1); opacity: .55; margin-left: 6px; }
+  #whatsnew ul { margin: 0; padding-left: 20px; font-size: var(--f1); line-height: 1.5; }
   #whatsnew .bottom { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; }
-  #whatsnew .bottom a { color: #fff; font-size: 13px; opacity: .7; }
-  #whatsnew button { font: inherit; font-size: 14px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 16px; cursor: pointer; }
+  #whatsnew .bottom a { color: #fff; font-size: var(--f1); opacity: .7; }
+  #whatsnew button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 16px; cursor: pointer; }
   #whatsnew button:hover { background: rgba(255,255,255,.25); }
-  #overlay button, #worlds button { font: inherit; font-size: 14px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; margin-left: 6px; }
+  #overlay button, #worlds button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; margin-left: 6px; }
   #overlay button:hover, #worlds button:hover:not(:disabled) { background: rgba(255,255,255,.25); }
   #worlds button:disabled { opacity: .35; cursor: default; }
   #worlds button.danger { border-color: rgba(255,120,110,.7); }
   #worlds { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
   #worlds .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
-  #worlds h2 { margin: 0 0 10px; font-size: 20px; letter-spacing: 1px; }
-  #worlds h3 { margin: 16px 0 8px; font-size: 15px; }
+  #worlds h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
+  #worlds h3 { margin: 16px 0 8px; font-size: var(--f1); }
   .world-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.12); }
   .world-row > div { flex: 1; min-width: 0; }
   .world-row .wname { font-weight: 600; }
-  .world-row .wsub { font-size: 12px; opacity: .6; }
+  .world-row .wsub { font-size: var(--f1); opacity: .6; }
   .new-world { display: flex; flex-wrap: wrap; gap: 6px; }
-  .new-world input, .new-world select { flex: 1 1 140px; font: inherit; font-size: 14px; padding: 5px 8px; border-radius: 5px; border: 2px solid rgba(255,255,255,.3); background: rgba(0,0,0,.35); color: #fff; }
+  .new-world input, .new-world select { flex: 1 1 140px; font: inherit; font-size: var(--f1); padding: 5px 8px; border-radius: 5px; border: 2px solid rgba(255,255,255,.3); background: rgba(0,0,0,.35); color: #fff; }
   .new-world button { margin-left: 0 !important; }
   .new-world select option { color: #000; }
   #worlds .bottom { margin-top: 14px; text-align: right; }
   #multi { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
   #multi .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
-  #multi h2 { margin: 0 0 10px; font-size: 20px; letter-spacing: 1px; }
-  #multi h3 { margin: 16px 0 6px; font-size: 15px; }
-  #multi .mp-help { font-size: 13px; opacity: .7; margin: 0 0 8px; }
-  #multi .mp-status { font-size: 13px; color: #ffd27a; min-height: 18px; margin: 10px 0 0; }
-  #multi .mp-code { font-size: 26px; letter-spacing: 4px; margin-left: 6px; }
+  #multi h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
+  #multi h3 { margin: 16px 0 6px; font-size: var(--f1); }
+  #multi .mp-help { font-size: var(--f1); opacity: .7; margin: 0 0 8px; }
+  #multi .mp-status { font-size: var(--f1); color: #ffd27a; min-height: 18px; margin: 10px 0 0; }
+  #multi .mp-code { font-size: var(--f3); letter-spacing: 4px; margin-left: 6px; }
   #multi #mp-code { text-transform: uppercase; letter-spacing: 2px; }
-  #multi button { font: inherit; font-size: 14px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; }
+  #multi button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; }
   #multi button:hover { background: rgba(255,255,255,.25); }
   #multi input:disabled { opacity: .5; }
   #multi .bottom { margin-top: 14px; text-align: right; }
-  #overlay .start { margin-top: 18px; font-size: 18px; padding: 10px 24px; border: 2px solid #fff; border-radius: 6px; display: inline-block; }
+  #overlay .start { margin-top: 18px; font-size: var(--f2); padding: 10px 24px; border: 2px solid #fff; border-radius: 6px; display: inline-block; }
 </style>
 </head>
 <body>
@@ -186,7 +189,7 @@
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.14.2117';
+const GAME_VERSION = '26.11.14.2207';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -392,6 +395,196 @@ function loadCustomTextures(onDone) {
     img.src = src;
   }
 }
+
+// ===================== Your font (from textures/font) =====================
+// Every 8x8 letter picture in textures/font/<any folder>/ becomes a letter of a real font ("Cubeland"),
+// so all the game's text (menus, buttons, inventory, name tags) is drawn with your letters.
+// Pictures in the "upper" folder are capitals. A file named with one character (a.png, 7.png, !.png) is that
+// character; for characters a file name can't hold, use a name from FONT_NAMES (e.g. q_mark.png for "?").
+// Characters without a picture yet (like numbers) are shown in the computer's normal font.
+// Sizes: font-size 12px draws each letter pixel as 1 screen pixel, 24px as 2, 36px as 3, and so on.
+const FONT_NAMES = {
+  asterisk: '*', dash: '-', hyphen: '-', minus: '-', period: '.', dot: '.', full_stop: '.', plus: '+',
+  q_mark: '?', question: '?', question_mark: '?', exclamation: '!', exclamation_mark: '!', ampersand: '&', and: '&',
+  caret: '^', comma: ',', colon: ':', semicolon: ';', slash: '/', forward_slash: '/', backslash: '\\',
+  apostrophe: "'", quote: '"', quotes: '"', lparen: '(', left_paren: '(', open_paren: '(', rparen: ')', right_paren: ')',
+  close_paren: ')', lbracket: '[', rbracket: ']', equals: '=', underscore: '_', percent: '%', hash: '#', at: '@',
+  dollar: '$', less_than: '<', greater_than: '>', tilde: '~', space: ' ',
+  times: '·', middot: '·', middle_dot: '·',   // the raised dot between the controls on the start screen (·)
+  zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9',
+};
+function fontChar(key) {   // "font/upper/a" -> "A", "font/symbol/q_mark" -> "?"
+  const parts = key.split('/'), name = parts[parts.length - 1], folder = parts[parts.length - 2] || '';
+  if ([...name].length === 1) return folder === 'upper' ? name.toUpperCase() : name;
+  return FONT_NAMES[name] || null;
+}
+// builds a TrueType font file (as bytes) from letter pictures: glyphs = [{ ch, rows: 8 strings of '#'/'.' }]
+function buildPixelFont(glyphs) {
+  const U = 128, EM = 12 * U, ASC = 10 * U, DESC = 2 * U;   // one letter pixel = 128 font units; 1em = 12 pixels
+  // outline of the filled pixels: walk the edges between filled and empty pixels, clockwise around each shape
+  function outline(rows) {
+    const on = (x, y) => y >= 0 && y < rows.length && x >= 0 && x < rows[y].length && rows[y][x] === '#';
+    const edges = new Map(), key = (x, y) => x + ',' + y;
+    const add = (x0, y0, x1, y1) => { const k = key(x0, y0); if (!edges.has(k)) edges.set(k, []); edges.get(k).push([x1, y1]); };
+    for (let r = 0; r < rows.length; r++) for (let x = 0; x < rows[r].length; x++) {
+      if (!on(x, r)) continue;
+      const Y = rows.length - 1 - r;   // font y goes up from the bottom row
+      if (!on(x, r - 1)) add(x, Y + 1, x + 1, Y + 1);
+      if (!on(x + 1, r)) add(x + 1, Y + 1, x + 1, Y);
+      if (!on(x, r + 1)) add(x + 1, Y, x, Y);
+      if (!on(x - 1, r)) add(x, Y, x, Y + 1);
+    }
+    const contours = [];
+    for (const [start, list] of edges) {
+      while (list.length) {
+        const pts = [start.split(',').map(Number)];
+        let next = list.pop();
+        while (next) {
+          const k = key(next[0], next[1]);
+          if (k === start) break;
+          pts.push(next);
+          const l = edges.get(k); next = l && l.pop();
+        }
+        // drop points in the middle of straight lines
+        const out = pts.filter((p, i) => {
+          const a = pts[(i + pts.length - 1) % pts.length], b = pts[(i + 1) % pts.length];
+          return !((a[0] === p[0] && p[0] === b[0]) || (a[1] === p[1] && p[1] === b[1]));
+        });
+        if (out.length >= 3) contours.push(out);
+      }
+    }
+    return contours;
+  }
+  // glyph 0 = missing letter, then a space (if you haven't drawn one), then your letters
+  const list = [{ ch: null, contours: [], adv: 4, xMin: 0 }];
+  if (!glyphs.some(g => g.ch === ' ')) list.push({ ch: ' ', contours: [], adv: 4, xMin: 0 });
+  for (const gl of glyphs) {
+    let x0 = 99, x1 = -1;
+    gl.rows.forEach(row => [...row].forEach((c, x) => { if (c === '#') { x0 = Math.min(x0, x); x1 = Math.max(x1, x); } }));
+    if (x1 < 0) { list.push({ ch: gl.ch, contours: [], adv: 4, xMin: 0 }); continue; }
+    const rows = gl.rows.map(row => row.slice(x0, x1 + 1));   // trim the empty columns at the sides
+    list.push({ ch: gl.ch, contours: outline(rows), adv: x1 - x0 + 2, xMin: 0 });   // +1 pixel gap after each letter
+  }
+  // ---- glyf + loca
+  const glyfParts = [], loca = [0];
+  let maxPts = 0, maxCont = 0, gxMin = 0, gyMin = 0, gxMax = 0, gyMax = 0, glyfLen = 0;
+  for (const g of list) {
+    if (!g.contours.length) { loca.push(glyfLen); continue; }
+    const pts = [].concat(...g.contours).map(([x, y]) => [x * U, y * U]);
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    g.box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    gxMax = Math.max(gxMax, g.box[2]); gyMax = Math.max(gyMax, g.box[3]);
+    maxPts = Math.max(maxPts, pts.length); maxCont = Math.max(maxCont, g.contours.length);
+    const len = 10 + 2 * g.contours.length + 2 + pts.length + 4 * pts.length;
+    const b = new DataView(new ArrayBuffer((len + 3) & ~3));
+    let o = 0;
+    b.setInt16(o, g.contours.length); b.setInt16(o + 2, g.box[0]); b.setInt16(o + 4, g.box[1]); b.setInt16(o + 6, g.box[2]); b.setInt16(o + 8, g.box[3]); o += 10;
+    let end = -1;
+    for (const c of g.contours) { end += c.length; b.setUint16(o, end); o += 2; }
+    b.setUint16(o, 0); o += 2;   // no hinting instructions
+    for (let i = 0; i < pts.length; i++) b.setUint8(o++, 1);   // every point is on the line (straight edges)
+    let px = 0; for (const p of pts) { b.setInt16(o, p[0] - px); px = p[0]; o += 2; }
+    let py = 0; for (const p of pts) { b.setInt16(o, p[1] - py); py = p[1]; o += 2; }
+    glyfParts.push(new Uint8Array(b.buffer)); glyfLen += b.byteLength; loca.push(glyfLen);
+  }
+  const glyf = new Uint8Array(glyfLen); { let o = 0; for (const p of glyfParts) { glyf.set(p, o); o += p.length; } }
+  const T = {};
+  const dv = n => { const b = new DataView(new ArrayBuffer(n)); return b; };
+  { const b = dv(loca.length * 4); loca.forEach((v, i) => b.setUint32(i * 4, v)); T.loca = b; }
+  T.glyf = new DataView(glyf.buffer);
+  // ---- head
+  { const b = dv(54); b.setUint32(0, 0x10000); b.setUint32(4, 0x10000); b.setUint32(12, 0x5F0F3CF5); b.setUint16(16, 0x000B); b.setUint16(18, EM);
+    b.setInt16(36, gxMin); b.setInt16(38, gyMin); b.setInt16(40, gxMax); b.setInt16(42, gyMax);
+    b.setUint16(46, 8); b.setInt16(48, 2); b.setInt16(50, 1); T.head = b; }
+  // ---- hhea + hmtx
+  const advMax = Math.max(...list.map(g => g.adv)) * U;
+  { const b = dv(36); b.setUint32(0, 0x10000); b.setInt16(4, ASC); b.setInt16(6, -DESC); b.setInt16(8, 0); b.setUint16(10, advMax);
+    b.setInt16(12, 0); b.setInt16(14, 0); b.setInt16(16, gxMax); b.setInt16(18, 1); b.setUint16(34, list.length); T.hhea = b; }
+  { const b = dv(list.length * 4); list.forEach((g, i) => { b.setUint16(i * 4, g.adv * U); b.setInt16(i * 4 + 2, g.box ? g.box[0] : 0); }); T.hmtx = b; }
+  // ---- maxp
+  { const b = dv(32); b.setUint32(0, 0x10000); b.setUint16(4, list.length); b.setUint16(6, maxPts); b.setUint16(8, maxCont); b.setUint16(14, 2); T.maxp = b; }
+  // ---- cmap (format 4, one segment per letter)
+  const codes = list.map((g, i) => [g.ch ? g.ch.codePointAt(0) : -1, i]).filter(([c]) => c >= 0 && c < 0xFFFF).sort((a, b) => a[0] - b[0]);
+  { const seg = codes.length + 1, len = 16 + seg * 8;
+    const b = dv(12 + len);
+    b.setUint16(0, 0); b.setUint16(2, 1); b.setUint16(4, 3); b.setUint16(6, 1); b.setUint32(8, 12);
+    const s = 12; let p2 = 1, e = 0; while (p2 * 2 <= seg) { p2 *= 2; e++; }
+    b.setUint16(s, 4); b.setUint16(s + 2, len); b.setUint16(s + 4, 0); b.setUint16(s + 6, seg * 2);
+    b.setUint16(s + 8, p2 * 2); b.setUint16(s + 10, e); b.setUint16(s + 12, seg * 2 - p2 * 2);
+    const endO = s + 14, startO = endO + seg * 2 + 2, deltaO = startO + seg * 2, rangeO = deltaO + seg * 2;
+    codes.forEach(([c, gi], i) => { b.setUint16(endO + i * 2, c); b.setUint16(startO + i * 2, c); b.setUint16(deltaO + i * 2, (gi - c + 65536) & 0xFFFF); });
+    b.setUint16(endO + codes.length * 2, 0xFFFF); b.setUint16(startO + codes.length * 2, 0xFFFF); b.setUint16(deltaO + codes.length * 2, 1);
+    T.cmap = b; }
+  // ---- OS/2
+  { const b = dv(96); b.setUint16(0, 4); b.setInt16(2, 5 * U); b.setUint16(4, 400); b.setUint16(6, 5);
+    b.setInt16(10, 6 * U); b.setInt16(12, 6 * U); b.setInt16(16, U); b.setInt16(18, 6 * U); b.setInt16(20, 6 * U); b.setInt16(24, 4 * U);
+    b.setInt16(26, U); b.setInt16(28, 4 * U); b.setUint32(42, 1);   // Basic Latin
+    'CUBE'.split('').forEach((c, i) => b.setUint8(58 + i, c.charCodeAt(0)));
+    b.setUint16(62, 0x40 | 0x80); b.setUint16(64, codes.length ? codes[0][0] : 32); b.setUint16(66, codes.length ? codes[codes.length - 1][0] : 32);
+    b.setInt16(68, ASC); b.setInt16(70, -DESC); b.setInt16(72, 0); b.setUint16(74, ASC); b.setUint16(76, DESC);
+    b.setUint32(78, 1); b.setInt16(86, 5 * U); b.setInt16(88, 8 * U); b.setUint16(92, 32); b.setUint16(94, 1); T['OS/2'] = b; }
+  // ---- name
+  { const names = [[1, 'Cubeland'], [2, 'Regular'], [3, 'Cubeland Regular'], [4, 'Cubeland Regular'], [5, 'Version 1.0'], [6, 'Cubeland-Regular']];
+    const strLen = names.reduce((n, [, s]) => n + s.length * 2, 0);
+    const b = dv(6 + names.length * 12 + strLen);
+    b.setUint16(2, names.length); b.setUint16(4, 6 + names.length * 12);
+    let so = 0;
+    names.forEach(([id, s], i) => {
+      const r = 6 + i * 12; b.setUint16(r, 3); b.setUint16(r + 2, 1); b.setUint16(r + 4, 0x409); b.setUint16(r + 6, id); b.setUint16(r + 8, s.length * 2); b.setUint16(r + 10, so);
+      for (let k = 0; k < s.length; k++) b.setUint16(6 + names.length * 12 + so + k * 2, s.charCodeAt(k));
+      so += s.length * 2;
+    });
+    T.name = b; }
+  // ---- post
+  { const b = dv(32); b.setUint32(0, 0x30000); b.setInt16(8, -U); b.setInt16(10, U); T.post = b; }
+  // ---- put the tables together
+  const tags = Object.keys(T).sort();
+  let p2 = 1, e = 0; while (p2 * 2 <= tags.length) { p2 *= 2; e++; }
+  let total = 12 + tags.length * 16; const offs = {};
+  for (const t of tags) { offs[t] = total; total += (T[t].byteLength + 3) & ~3; }
+  const out = new DataView(new ArrayBuffer(total)), bytes = new Uint8Array(out.buffer);
+  out.setUint32(0, 0x10000); out.setUint16(4, tags.length); out.setUint16(6, p2 * 16); out.setUint16(8, e); out.setUint16(10, tags.length * 16 - p2 * 16);
+  const sum = (o, len) => { let s = 0; for (let i = 0; i < len; i += 4) s = (s + out.getUint32(o + i)) >>> 0; return s; };
+  tags.forEach((t, i) => {
+    bytes.set(new Uint8Array(T[t].buffer, T[t].byteOffset, T[t].byteLength), offs[t]);
+    const r = 12 + i * 16;
+    for (let k = 0; k < 4; k++) out.setUint8(r + k, t.charCodeAt(k));
+    out.setUint32(r + 4, sum(offs[t], (T[t].byteLength + 3) & ~3)); out.setUint32(r + 8, offs[t]); out.setUint32(r + 12, T[t].byteLength);
+  });
+  out.setUint32(offs.head + 8, (0xB1B0AFBA - sum(0, total)) >>> 0);
+  return out.buffer;
+}
+// Text sizes: each letter pixel is made a whole number of screen pixels so your letters stay sharp
+// (screens with display scaling, like 150%, need different sizes than plain ones). Tiers: small, normal, heading, title.
+function fitFontSizes() {
+  const dpr = window.devicePixelRatio || 1, root = document.documentElement.style;
+  const size = target => Math.max(1, Math.round(target * dpr)) / dpr * 12;   // target = screen pixels per letter pixel (at 100%)
+  root.setProperty('--f1', size(1.34) + 'px'); root.setProperty('--f2', size(2) + 'px');
+  root.setProperty('--f3', size(2.67) + 'px'); root.setProperty('--f6', size(5.34) + 'px');
+}
+fitFontSizes();
+addEventListener('resize', fitFontSizes);   // zooming the page changes the screen scale
+// reads the letter pictures and adds the font to the page; the CSS asks for "Cubeland" first everywhere
+const fontReady = (() => {
+  const entries = Object.entries(window.TEXTURES || {}).filter(([k]) => k.startsWith('font/')).map(([k, src]) => [fontChar(k), src]).filter(([ch]) => ch);
+  if (!entries.length || !window.FontFace) return Promise.resolve(false);
+  return Promise.all(entries.map(([ch, src]) => new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const g2 = c.getContext('2d'); g2.drawImage(img, 0, 0);
+      const d = g2.getImageData(0, 0, c.width, c.height).data, rows = [];
+      for (let y = 0; y < c.height; y++) { let s = ''; for (let x = 0; x < c.width; x++) s += d[(y * c.width + x) * 4 + 3] > 127 ? '#' : '.'; rows.push(s); }
+      // pictures taller than 8 are lined up by their bottom row, which sits on the line the letters stand on
+      res({ ch, rows });
+    };
+    img.onerror = () => res(null);
+    img.src = src;
+  }))).then(glyphs => {
+    const face = new FontFace('Cubeland', buildPixelFont(glyphs.filter(Boolean)));
+    return face.load().then(f => { document.fonts.add(f); return true; });
+  }).catch(e => { console.warn('Could not build the font', e); return false; });
+})();
 
 // ===================== Worlds (saves) =====================
 // The same seed always grows the same terrain, so a save only needs the seed plus what you changed.
@@ -3069,7 +3262,7 @@ addEventListener('pagehide', () => saveWorld());
     const b = buildMobMesh('grrangry', { scale: 1.6, hue: p.hue });
     const c = document.createElement('canvas'); c.width = 256; c.height = 64;
     const g = c.getContext('2d');
-    g.font = 'bold 34px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '36px Cubeland, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     const w = Math.min(250, g.measureText(p.name).width + 24);
     g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(128 - w / 2, 8, w, 48);
     g.fillStyle = '#fff'; g.fillText(p.name, 128, 33);
