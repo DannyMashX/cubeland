@@ -1,5 +1,13 @@
 [
     {
+        "version":  "26.11.14.2117",
+        "date":  "2026-11-14",
+        "notes":  "Creative mode: pieces never run out, just like whole blocks, and you can pick them straight from the inventory (E)",
+        "changes":  [
+                        "Creative mode: pieces never run out, just like whole blocks, and you can pick them straight from the inventory (E)"
+                    ]
+    },
+    {
         "version":  "26.11.14.2109",
         "date":  "2026-11-14",
         "notes":  "Pieces! Right-click a Crafting Bench to split any block into 8 pieces (each an eighth of a block)",

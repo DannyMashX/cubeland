@@ -117,7 +117,7 @@
       </div>
     </div>
     <div id="bench-name"></div>
-    <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces &middot; E to close</div>
+    <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces (in creative mode they never run out) &middot; E to close</div>
   </div>
 </div>
 <div id="overlay">
@@ -186,7 +186,7 @@
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.14.2109';
+const GAME_VERSION = '26.11.14.2117';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -2738,7 +2738,8 @@ addEventListener('mousedown', e => {
     if (overlapsPlayer || !setPiece(x, y, z, (p[0] - 2 * x) + (p[1] - 2 * y) * 2 + (p[2] - 2 * z) * 4, block)) return;
     Sound.place(block);
     mobNoise(x, y, z);
-    if (--HOTBAR_COUNT[selected] <= 0) { HOTBAR[selected] = 0; HOTBAR_COUNT[selected] = 0; }
+    // creative mode: pieces never run out (like whole blocks). Survival will use them up.
+    if (gameMode === 'survival' && --HOTBAR_COUNT[selected] <= 0) { HOTBAR[selected] = 0; HOTBAR_COUNT[selected] = 0; }
     saveHotbar(); drawHotbarIcons(); selectSlot(selected);
     return;
   }
@@ -2835,12 +2836,16 @@ HOTBAR.forEach((id, i) => {
 function drawHotbarIcons() {
   HOTBAR.forEach((id, i) => {
     drawIcon(hotbarIcons[i], id);
-    hotbarCounts[i].textContent = isItem(id) && HOTBAR_COUNT[i] > 1 ? HOTBAR_COUNT[i] : '';
+    hotbarCounts[i].textContent = isItem(id) && !infinitePiece(id) && HOTBAR_COUNT[i] > 1 ? HOTBAR_COUNT[i] : '';
   });
 }
+// in creative mode pieces are unlimited, like whole blocks (no count, never used up)
+const infinitePiece = id => isPiece(id) && gameMode !== 'survival';
 function setSlot(i, id, n = 1) { HOTBAR[i] = id; HOTBAR_COUNT[i] = isItem(id) ? n : 0; saveHotbar(); drawHotbarIcons(); if (i === selected) selectSlot(i); }
 // picking up an item: top up a stack of it, otherwise the first empty slot. Returns false if there's no room.
 function giveItem(id) {
+  // creative mode: a piece already in the hotbar never runs out, so there's nothing to add
+  if (infinitePiece(id) && HOTBAR.includes(id)) return true;
   let i = HOTBAR.findIndex((h, k) => h === id && HOTBAR_COUNT[k] < STACK_MAX);
   if (i >= 0) { HOTBAR_COUNT[i]++; saveHotbar(); drawHotbarIcons(); return true; }
   i = HOTBAR.indexOf(0);
@@ -2854,7 +2859,9 @@ function giveItem(id) {
 // ===================== Inventory (E) =====================
 const invEl = document.getElementById('inventory'), invGrid = document.getElementById('inv-grid'), invName = document.getElementById('inv-name');
 const invIcons = [];
-ITEMS.forEach(id => {
+// creative mode: every block's pieces can be picked here too (after the blocks)
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : SPLITTABLE.map(b => PIECE_ITEM + b));
+INV_LIST.forEach(id => {
   const slot = document.createElement('div');
   slot.className = 'slot';
   const c = document.createElement('canvas'); c.width = c.height = TILE;
@@ -2891,16 +2898,18 @@ function drawBench() {
   benchIcons.forEach(([c, id]) => drawIcon(c, id));
   drawIcon(benchIn, benchBlock);
   drawIcon(benchOut, benchBlock ? PIECE_ITEM + benchBlock : 0);
-  document.getElementById('bench-count').textContent = benchBlock ? '8' : '';
+  document.getElementById('bench-count').textContent = benchBlock && !infinitePiece(PIECE_ITEM + benchBlock) ? '8' : '';
 }
 document.getElementById('bench-out').addEventListener('click', () => {
   if (!benchBlock) return;
+  const piece = PIECE_ITEM + benchBlock;
   let n = 0;
-  for (let k = 0; k < 8; k++) if (giveItem(PIECE_ITEM + benchBlock)) n++;
-  benchName.textContent = n ? `Took ${n} ${BLOCKS[benchBlock].name} Pieces` : 'No room in your hotbar';
+  if (infinitePiece(piece)) n = giveItem(piece) ? 1 : 0;   // creative: one slot that never runs out
+  else for (let k = 0; k < 8; k++) if (giveItem(piece)) n++;
+  benchName.textContent = !n ? 'No room in your hotbar' : infinitePiece(piece) ? `${BLOCKS[benchBlock].name} Pieces are in your hotbar` : `Took ${n} ${BLOCKS[benchBlock].name} Pieces`;
   Sound.place(benchBlock);
 });
-document.getElementById('bench-out').addEventListener('mouseenter', () => { if (benchBlock) benchName.textContent = `${BLOCKS[benchBlock].name} Piece x8 (click to take)`; });
+document.getElementById('bench-out').addEventListener('mouseenter', () => { if (benchBlock) benchName.textContent = infinitePiece(PIECE_ITEM + benchBlock) ? `${BLOCKS[benchBlock].name} Piece (click to take)` : `${BLOCKS[benchBlock].name} Piece x8 (click to take)`; });
 function openBench() { drawBench(); setInventory(true, benchEl); }
 
 function drawInventoryIcons() { invIcons.forEach(([c, id]) => drawIcon(c, id)); }
