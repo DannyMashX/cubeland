@@ -91,12 +91,12 @@
   #multi button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; }
   #multi button:hover { background: rgba(255,255,255,.25); }
   /* buttons, text boxes and menu boxes drawn with your textures/gui/gui_atlas.png (turned on once the picture has loaded) */
-  .skinned :is(button, input, select, .start, .panel), .skinned :is(#overlay, #worlds, #multi, #whatsnew, .new-world) :is(button, input, select) {
+  .skinned :is(button, input, select, .start, .panel), .skinned :is(#overlay, #worlds, #multi, #whatsnew, .new-world) :is(button, input, select, .start) {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
   }
   .skinned :is(button:not(:disabled), input:not(:disabled), select, .start):is(:hover, :focus-visible),
-  .skinned :is(#overlay, #worlds, #multi, #whatsnew, .new-world) :is(button:not(:disabled), input:not(:disabled), select):is(:hover, :focus-visible) {
+  .skinned :is(#overlay, #worlds, #multi, #whatsnew, .new-world) :is(button:not(:disabled), input:not(:disabled), select, .start):is(:hover, :focus-visible) {
     background: none; border-image-source: var(--btn-hover); outline: none;
   }
   .skinned :is(#inventory, #bench, #whatsnew, #worlds, #multi) .panel {
@@ -104,6 +104,18 @@
     border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
   }
   .skinned #worlds button.danger { color: #ffb4ac; }
+  /* the hotbar is a menu box; slots are drawn like buttons, and light up when selected or under the mouse */
+  .skinned #hotbar {
+    background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
+    border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
+  }
+  .skinned :is(#hotbar, #inv-grid, #bench) .slot {
+    background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
+    border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .skinned :is(#hotbar, #inv-grid, #bench) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
+  .skinned :is(#hotbar, #inv-grid, #bench) .slot canvas { margin: 0; }
   #multi input:disabled { opacity: .5; }
   #multi .bottom { margin-top: 14px; text-align: right; }
   #overlay .start { margin-top: 18px; font-size: var(--f2); padding: 10px 24px; border: 2px solid #fff; border-radius: 6px; display: inline-block; }
@@ -197,14 +209,14 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=26.11.15.1632"></script>
+<script src="textures.js?v=26.11.15.1637"></script>
 <script>
 // ===================== Version =====================
 // The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.15.1632';
+const GAME_VERSION = '26.11.15.1637';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
