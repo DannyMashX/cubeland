@@ -1,5 +1,16 @@
 [
     {
+        "version":  "26.11.15.1647",
+        "date":  "2026-11-15",
+        "notes":  "New main menu: Singleplayer, Multiplayer, Settings and What\u0027s new",
+        "changes":  [
+                        "New main menu: Singleplayer, Multiplayer, Settings and What\u0027s new",
+                        "New pause screen (Esc): back to game, settings, multiplayer, or save and quit to the main menu",
+                        "The world menu is now Singleplayer, and Play on the open world takes you straight in",
+                        "New settings menu: mouse sensitivity, field of view, PS2 or crisp look, sound, showing FPS and position, and the controls list"
+                    ]
+    },
+    {
         "version":  "26.11.15.1637",
         "date":  "2026-11-15",
         "notes":  "The Click to play button now uses the GUI atlas too",

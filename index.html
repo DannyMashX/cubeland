@@ -22,9 +22,15 @@
   .slot span.count { top: auto; left: auto; bottom: 1px; right: 3px; font-size: var(--f1); font-weight: 600; }
   #blockname { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); color: #fff; font-size: var(--f1); text-shadow: 0 1px 2px #000; transition: opacity .4s; }
   #info { position: fixed; top: 8px; left: 8px; color: #fff; font-size: var(--f1); line-height: 1.5; text-shadow: 0 1px 2px #000; white-space: pre; }
-  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; text-align: center; cursor: pointer; }
-  #overlay h1 { font-size: var(--f6); margin: 0 0 8px; letter-spacing: 2px; }
-  #overlay p { margin: 4px 0; opacity: .9; }
+  /* full-screen menus: the main menu (title screen) and the pause screen (#overlay) */
+  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; text-align: center; z-index: 15; }
+  #mainmenu { display: flex; background: rgba(0,0,0,.6); }
+  .screen h1 { font-size: var(--f6); margin: 0 0 20px; letter-spacing: 2px; }
+  .screen h2 { font-size: var(--f3); margin: 0 0 6px; letter-spacing: 1px; }
+  .screen p { margin: 4px 0; }
+  .screen .menu { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .screen .menu > button { width: min(320px, calc(100vw - 32px)); font: inherit; font-size: var(--f2); padding: 8px 12px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; cursor: pointer; margin: 0; }
+  .screen .menu > button:hover { background: rgba(255,255,255,.25); }
   #hotbar { z-index: 10; }
   #inventory { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
   #inventory .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; }
@@ -47,12 +53,12 @@
   #bench-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
   #bench .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
   #inventory .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
-  #overlay .world-line { margin-top: 18px; font-size: var(--f1); }
-  #overlay .saved-note { font-size: var(--f1); opacity: .6; }
-  #overlay .newer-note { font-size: var(--f1); color: #ffd27a; max-width: 520px; margin: 6px auto 0; }
-  #overlay .newer-note:empty { display: none; }
-  #overlay .version-line { margin-top: 14px; font-size: var(--f1); opacity: .6; }
-  #overlay .version-line a { color: #fff; }
+  .screen .world-line { font-size: var(--f1); margin-bottom: 10px; opacity: .8; }
+  .screen .saved-note { font-size: var(--f1); opacity: .6; margin-top: 6px; }
+  .screen .newer-note { font-size: var(--f1); color: #ffd27a; max-width: 520px; margin: 6px auto 0; }
+  .screen .newer-note:empty { display: none; }
+  .screen .version-line { margin-top: 14px; font-size: var(--f1); opacity: .6; }
+  .screen .version-line a { color: #fff; }
   #whatsnew { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 25; color: #fff; }
   #whatsnew .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
   #whatsnew h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
@@ -63,8 +69,19 @@
   #whatsnew .bottom a { color: #fff; font-size: var(--f1); opacity: .7; }
   #whatsnew button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 16px; cursor: pointer; }
   #whatsnew button:hover { background: rgba(255,255,255,.25); }
-  #overlay button, #worlds button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; margin-left: 6px; }
-  #overlay button:hover, #worlds button:hover:not(:disabled) { background: rgba(255,255,255,.25); }
+  #worlds button, #settings button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; margin-left: 6px; }
+  #worlds button:hover:not(:disabled), #settings button:hover { background: rgba(255,255,255,.25); }
+  #settings { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
+  #settings .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+  #settings h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
+  #settings h3 { margin: 16px 0 6px; font-size: var(--f1); }
+  #settings .set-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: var(--f1); }
+  #settings .set-row > span { flex: 0 0 44%; }
+  #settings .set-row input[type=range] { flex: 1; min-width: 0; accent-color: #7fbfff; }
+  #settings .set-row b { min-width: 48px; text-align: right; font-weight: 400; }
+  #settings .set-row button { margin-left: 0; flex: 1; }
+  #settings ul { margin: 0; padding-left: 20px; font-size: var(--f1); line-height: 1.5; opacity: .85; }
+  #settings .bottom { margin-top: 14px; text-align: right; }
   #worlds button:disabled { opacity: .35; cursor: default; }
   #worlds button.danger { border-color: rgba(255,120,110,.7); }
   #worlds { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
@@ -91,15 +108,15 @@
   #multi button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; }
   #multi button:hover { background: rgba(255,255,255,.25); }
   /* buttons, text boxes and menu boxes drawn with your textures/gui/gui_atlas.png (turned on once the picture has loaded) */
-  .skinned :is(button, input, select, .start, .panel), .skinned :is(#overlay, #worlds, #multi, #whatsnew, .new-world) :is(button, input, select, .start) {
+  .skinned :is(button, input:not([type=range]), select, .panel), .skinned :is(#overlay, #mainmenu, #settings, #worlds, #multi, #whatsnew, .new-world) :is(button, input:not([type=range]), select) {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
   }
-  .skinned :is(button:not(:disabled), input:not(:disabled), select, .start):is(:hover, :focus-visible),
-  .skinned :is(#overlay, #worlds, #multi, #whatsnew, .new-world) :is(button:not(:disabled), input:not(:disabled), select, .start):is(:hover, :focus-visible) {
+  .skinned :is(button:not(:disabled), input:not(:disabled):not([type=range]), select):is(:hover, :focus-visible),
+  .skinned :is(#overlay, #mainmenu, #settings, #worlds, #multi, #whatsnew, .new-world) :is(button:not(:disabled), input:not(:disabled):not([type=range]), select):is(:hover, :focus-visible) {
     background: none; border-image-source: var(--btn-hover); outline: none;
   }
-  .skinned :is(#inventory, #bench, #whatsnew, #worlds, #multi) .panel {
+  .skinned :is(#inventory, #bench, #whatsnew, #worlds, #multi, #settings) .panel {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
   }
@@ -118,7 +135,6 @@
   .skinned :is(#hotbar, #inv-grid, #bench) .slot canvas { margin: 0; }
   #multi input:disabled { opacity: .5; }
   #multi .bottom { margin-top: 14px; text-align: right; }
-  #overlay .start { margin-top: 18px; font-size: var(--f2); padding: 10px 24px; border: 2px solid #fff; border-radius: 6px; display: inline-block; }
 </style>
 </head>
 <body>
@@ -149,17 +165,45 @@
     <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces (in creative mode they never run out) &middot; E to close</div>
   </div>
 </div>
-<div id="overlay">
-  <div>
+<!-- main menu: the first thing you see -->
+<div id="mainmenu" class="screen">
+  <div class="menu">
     <h1>CUBELAND</h1>
-    <p>WASD move &middot; Mouse look &middot; Space jump &middot; Shift sprint</p>
-    <p>Left click break &middot; Right click place &middot; 1-9, 0 or scroll wheel pick a block &middot; E inventory</p>
-    <p>F or double-tap Space to fly (Space up, Shift down) &middot; P toggles the PS2 look &middot; M mutes sound &middot; T skips time &middot; Esc pauses</p>
-    <div class="start">Click to play</div>
-    <div class="world-line">World: <b id="world-name"></b> <button id="worlds-btn">Worlds</button> <button id="multi-btn">Multiplayer</button></div>
+    <button id="mm-single">Singleplayer</button>
+    <button id="mm-multi">Multiplayer</button>
+    <button id="mm-settings">Settings</button>
+    <button id="mm-whatsnew">What's new</button>
+    <p class="version-line">Version <span id="game-version"></span> &middot; <a id="versions-link" href="versions.html">All versions</a></p>
+  </div>
+</div>
+<!-- pause screen: shows when you press Esc (and when a world has just opened, before you click Play) -->
+<div id="overlay" class="screen">
+  <div class="menu">
+    <h2 id="pause-title">Paused</h2>
+    <div class="world-line">World: <b id="world-name"></b></div>
+    <button id="pause-resume">Back to game</button>
+    <button id="pause-settings">Settings</button>
+    <button id="multi-btn">Multiplayer</button>
+    <button id="pause-quit">Save &amp; quit to main menu</button>
     <p class="saved-note">Your world saves automatically.</p>
     <p class="newer-note" id="newer-note"></p>
-    <p class="version-line">Version <span id="game-version"></span> &middot; <a id="whatsnew-link" href="#">What's new</a> &middot; <a id="versions-link" href="versions.html">All versions</a></p>
+  </div>
+</div>
+<div id="settings">
+  <div class="panel">
+    <h2>Settings</h2>
+    <div class="set-row"><span>Mouse sensitivity</span><input type="range" id="set-sens" min="20" max="300" step="10"><b id="set-sens-v"></b></div>
+    <div class="set-row"><span>Field of view</span><input type="range" id="set-fov" min="50" max="110" step="5"><b id="set-fov-v"></b></div>
+    <div class="set-row"><span>Look (P)</span><button id="set-look"></button></div>
+    <div class="set-row"><span>Sound (M)</span><button id="set-sound"></button></div>
+    <div class="set-row"><span>FPS and position</span><button id="set-info"></button></div>
+    <h3>Controls</h3>
+    <ul>
+      <li>WASD move &middot; Mouse look &middot; Space jump &middot; Shift sprint</li>
+      <li>Left click break &middot; Right click place &middot; 1-9, 0 or scroll wheel pick a block &middot; E inventory</li>
+      <li>F or double-tap Space to fly (Space up, Shift down) &middot; T skips time &middot; Esc pauses</li>
+    </ul>
+    <div class="bottom"><button id="settings-close">Back</button></div>
   </div>
 </div>
 <div id="whatsnew">
@@ -171,7 +215,7 @@
 </div>
 <div id="worlds">
   <div class="panel">
-    <h2>Worlds</h2>
+    <h2>Singleplayer</h2>
     <div id="world-list"></div>
     <h3>New world</h3>
     <div class="new-world">
@@ -209,14 +253,14 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=26.11.15.1637"></script>
+<script src="textures.js?v=26.11.15.1647"></script>
 <script>
 // ===================== Version =====================
 // The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.15.1637';
+const GAME_VERSION = '26.11.15.1647';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -707,7 +751,7 @@ const Worlds = (() => {
     },
     open(id) {                       // switch worlds: the page reloads and grows the other world
       try { localStorage.setItem(LAST_KEY, id); } catch (e) {}
-      location.hash = 'world=' + id;
+      location.hash = 'world=' + id + '&play';   // &play: skip the main menu after the reload
       location.reload();
     },
     // ver = the newest game version that has saved this world (so older versions can warn before opening it)
@@ -2375,19 +2419,71 @@ function blockUnderPlayer() {   // (or the piece under them)
 // ===================== Input =====================
 const keys = {};
 let locked = false;
-const overlay = document.getElementById('overlay');
-overlay.addEventListener('click', () => { Sound.init(); lockPointer(); });
-let invOpen = false;
+// Screens: the main menu shows when the game opens; the pause screen (overlay) shows whenever you're not playing
+// and not in the main menu. The game keeps running behind both.
+const overlay = document.getElementById('overlay'), mainMenuEl = document.getElementById('mainmenu');
+let invOpen = false, mainMenuOpen = true;
+addEventListener('pointerdown', () => Sound.init(), true);   // sound can only start after a click
+function showPause() { if (!invOpen && !mainMenuOpen && !locked) overlay.style.display = 'flex'; }
+function showMainMenu(open) {
+  mainMenuOpen = open;
+  mainMenuEl.style.display = open ? 'flex' : 'none';
+  if (open) { overlay.style.display = 'none'; if (locked) document.exitPointerLock(); }
+}
+function play() {                     // into the game (needs a click, so it's only called from buttons)
+  showMainMenu(false);
+  document.getElementById('pause-title').textContent = 'Paused';
+  document.getElementById('pause-resume').textContent = 'Back to game';
+  lockPointer();
+}
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
-  overlay.style.display = locked || invOpen ? 'none' : 'flex';
+  if (locked) overlay.style.display = 'none'; else showPause();
   if (!locked) for (const k in keys) keys[k] = false;
   if (!locked && !invOpen) saveWorld();          // paused: save
 });
-document.addEventListener('pointerlockerror', () => { if (!invOpen) overlay.style.display = 'flex'; });
+document.addEventListener('pointerlockerror', showPause);
 function lockPointer() {
-  try { const p = renderer.domElement.requestPointerLock(); if (p && p.catch) p.catch(() => { if (!invOpen) overlay.style.display = 'flex'; }); } catch (e) {}
+  try { const p = renderer.domElement.requestPointerLock(); if (p && p.catch) p.catch(showPause); } catch (e) {}
 }
+// a world that was just opened from the Singleplayer menu (or a friend's game) skips the main menu
+{
+  const fromMenu = /[#&]play\b/.test(location.hash), joining = /join=/.test(location.hash);
+  if (fromMenu) history.replaceState(null, '', location.pathname + location.search + location.hash.replace(/&play\b/, ''));
+  if (fromMenu || joining) {
+    showMainMenu(false);
+    document.getElementById('pause-title').textContent = joining ? 'Joining a friend' : 'Ready';
+    document.getElementById('pause-resume').textContent = 'Play';
+    overlay.style.display = 'flex';
+  }
+}
+document.getElementById('pause-resume').addEventListener('click', play);
+document.getElementById('pause-quit').addEventListener('click', () => { saveWorld(); showMainMenu(true); });
+
+// ---- Settings (saved in this browser) ----
+const settings = { sens: 100, fov: 75, info: true };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('cubeland-settings'))); } catch (e) {}
+const settingsEl = document.getElementById('settings');
+function applySettings() {
+  camera.fov = settings.fov; camera.updateProjectionMatrix();
+  document.getElementById('info').style.display = settings.info ? '' : 'none';
+  document.getElementById('set-sens').value = settings.sens; document.getElementById('set-sens-v').textContent = settings.sens + '%';
+  document.getElementById('set-fov').value = settings.fov; document.getElementById('set-fov-v').textContent = settings.fov;
+  document.getElementById('set-look').textContent = ps2 ? 'PS2 look' : 'Crisp look';
+  document.getElementById('set-sound').textContent = Sound.muted ? 'Off' : 'On';
+  document.getElementById('set-info').textContent = settings.info ? 'Shown' : 'Hidden';
+  try { localStorage.setItem('cubeland-settings', JSON.stringify(settings)); } catch (e) {}
+}
+document.getElementById('set-sens').addEventListener('input', e => { settings.sens = +e.target.value; applySettings(); });
+document.getElementById('set-fov').addEventListener('input', e => { settings.fov = +e.target.value; applySettings(); });
+document.getElementById('set-look').addEventListener('click', () => { ps2 = !ps2; applyRenderMode(); applySettings(); });
+document.getElementById('set-sound').addEventListener('click', () => { Sound.toggleMute(); applySettings(); });
+document.getElementById('set-info').addEventListener('click', () => { settings.info = !settings.info; applySettings(); });
+const showSettings = open => { if (open) applySettings(); settingsEl.style.display = open ? 'flex' : 'none'; };
+document.getElementById('mm-settings').addEventListener('click', () => showSettings(true));
+document.getElementById('pause-settings').addEventListener('click', () => showSettings(true));
+document.getElementById('settings-close').addEventListener('click', () => showSettings(false));
+applySettings();
 let lastSpaceTap = 0;
 function toggleFly() { player.fly = !player.fly; player.vy = 0; }
 addEventListener('keydown', e => {
@@ -2409,8 +2505,8 @@ addEventListener('keydown', e => {
     if (now - lastSpaceTap < 300) { toggleFly(); lastSpaceTap = 0; }
     else lastSpaceTap = now;
   }
-  if (e.code === 'KeyP') { ps2 = !ps2; applyRenderMode(); }
-  if (e.code === 'KeyM') Sound.toggleMute();
+  if (e.code === 'KeyP') { ps2 = !ps2; applyRenderMode(); applySettings(); }
+  if (e.code === 'KeyM') { Sound.toggleMute(); applySettings(); }
   if (e.code === 'KeyT') timeOfDay = (timeOfDay + 0.125) % 1;   // skip ahead 1/8 of a day
   const num = e.code.match(/^Digit(\d)$/);
   if (num) selectSlot(num[1] === '0' ? 9 : +num[1] - 1);
@@ -2419,8 +2515,9 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('mousemove', e => {
   if (!locked) return;
-  player.yaw -= e.movementX * 0.0022;
-  player.pitch -= e.movementY * 0.0022;
+  const turn = 0.0022 * settings.sens / 100;
+  player.yaw -= e.movementX * turn;
+  player.pitch -= e.movementY * turn;
   player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
 });
 addEventListener('wheel', e => { if (locked) selectSlot((selected + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length); });
@@ -3710,13 +3807,13 @@ document.getElementById('game-version').textContent = GAME_VERSION;
     }).catch(() => {});            // no list (e.g. playing the file straight from your computer): nothing to show
   }
   document.getElementById('whatsnew-close').addEventListener('click', () => { panel.style.display = 'none'; });
-  document.getElementById('whatsnew-link').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); showChanges(null); });
+  document.getElementById('mm-whatsnew').addEventListener('click', () => showChanges(null));
   if (seen && compareVersions(GAME_VERSION, seen) > 0) showChanges(seen);
   // remember the newest version you've played (an older version never lowers it)
   if (!seen || compareVersions(GAME_VERSION, seen) > 0) { try { localStorage.setItem(SEEN_KEY, GAME_VERSION); } catch (e) {} }
   if (compareVersions(Worlds.current.ver, GAME_VERSION) > 0)
     document.getElementById('newer-note').textContent = `Careful: this world was last played in version ${Worlds.current.ver}, which is newer than this one. ` +
-      `It might not look right here. Pick another world from Worlds, or play it in the newest version.`;
+      `It might not look right here. Pick another world from Singleplayer in the main menu, or play it in the newest version.`;
 }
 const stop = e => e.stopPropagation();          // clicks in the menu shouldn't start the game
 worldsEl.addEventListener('click', stop);
@@ -3727,12 +3824,12 @@ function showWorlds(open) {
   for (const w of Worlds.list()) {
     const row = document.createElement('div'); row.className = 'world-row';
     const info = document.createElement('div');
-    const nm = document.createElement('div'); nm.className = 'wname'; nm.textContent = w.name + (w.id === Worlds.current.id ? '  (playing now)' : '');
+    const nm = document.createElement('div'); nm.className = 'wname'; nm.textContent = w.name + (w.id === Worlds.current.id ? '  (open now)' : '');
     const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 2 ? 'Rolling hills' : 'Plateaus'}${w.ver ? ` · v${w.ver}` : ''}`;
     info.append(nm, sub);
-    const play = document.createElement('button'); play.textContent = 'Play';
-    play.disabled = w.id === Worlds.current.id;
-    play.onclick = async () => {
+    const playBtn = document.createElement('button'); playBtn.textContent = 'Play';
+    playBtn.onclick = async () => {
+      if (w.id === Worlds.current.id && !Net.client) { showWorlds(false); play(); return; }   // already open: just go in
       if (compareVersions(w.ver, GAME_VERSION) > 0 &&
           !confirm(`"${w.name}" was last played in version ${w.ver}, which is newer than this one (${GAME_VERSION}). It might not load right here, and playing it could mess it up. Open it anyway?`)) return;
       await saveWorld(); Worlds.open(w.id);
@@ -3740,11 +3837,12 @@ function showWorlds(open) {
     const del = document.createElement('button'); del.textContent = 'Delete'; del.className = 'danger';
     del.disabled = w.id === Worlds.current.id;
     del.onclick = async () => { if (confirm(`Delete "${w.name}"? This can't be undone.`)) { await Worlds.remove(w.id); showWorlds(true); } };
-    row.append(info, play, del);
+    row.append(info, playBtn, del);
     worldListEl.append(row);
   }
 }
-document.getElementById('worlds-btn').addEventListener('click', e => { e.stopPropagation(); showWorlds(true); });
+document.getElementById('mm-single').addEventListener('click', () => showWorlds(true));
+document.getElementById('mm-multi').addEventListener('click', () => document.getElementById('multi-btn').click());
 document.getElementById('worlds-close').addEventListener('click', () => showWorlds(false));
 document.getElementById('new-create').addEventListener('click', async () => {
   const w = Worlds.create(document.getElementById('new-name').value, document.getElementById('new-seed').value, +document.getElementById('new-gen').value);
