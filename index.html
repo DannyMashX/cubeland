@@ -197,6 +197,12 @@
     <div class="set-row"><span>Look (P)</span><button id="set-look"></button></div>
     <div class="set-row"><span>Sound (M)</span><button id="set-sound"></button></div>
     <div class="set-row"><span>FPS and position</span><button id="set-info"></button></div>
+    <h3>Volume</h3>
+    <div class="set-row"><span>Master</span><input type="range" class="set-vol" data-vol="master" min="0" max="100" step="5"><b></b></div>
+    <div class="set-row"><span>Blocks</span><input type="range" class="set-vol" data-vol="block" min="0" max="100" step="5"><b></b></div>
+    <div class="set-row"><span>Player</span><input type="range" class="set-vol" data-vol="player" min="0" max="100" step="5"><b></b></div>
+    <div class="set-row"><span>Mobs</span><input type="range" class="set-vol" data-vol="mob" min="0" max="100" step="5"><b></b></div>
+    <div class="set-row"><span>Music</span><input type="range" class="set-vol" data-vol="music" min="0" max="100" step="5"><b></b></div>
     <h3>Controls</h3>
     <ul>
       <li>WASD move &middot; Mouse look &middot; Space jump &middot; Shift sprint</li>
@@ -253,14 +259,14 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=26.11.15.1647"></script>
+<script src="textures.js?v=26.11.15.1653"></script>
 <script>
 // ===================== Version =====================
 // The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.15.1647';
+const GAME_VERSION = '26.11.15.1653';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -1867,6 +1873,8 @@ function waterAt(x, y, z) {
 //  - hard materials (stone, wood, glass) = short ringing tones, like a struck object
 const Sound = (() => {
   let ctx = null, master = null, muffle = null, bank = null, muted = false;
+  const levels = { master: 1, block: 1, player: 1, mob: 1, music: 1 };   // the volume sliders in Settings, 0 to 1
+  const musicLevel = () => muted ? 0 : 0.32 * levels.master * levels.music;
   try { muted = localStorage.getItem('cubeland-muted') === '1'; } catch (e) {}
   // which sound recipe each block uses (block id: recipe). Recipe names describe the sound, not the block:
   // stone-type blocks use 'rock' (deep bm / crk), dirt uses the crumbly 'dirt' crunch, gravel uses the sharp 'stone' chk.
@@ -2226,8 +2234,10 @@ const Sound = (() => {
     });
   }
   const lastPlayed = {};
-  function play(mat, kind, vol, rate, pan = 0) {
-    if (!ctx || muted) return;
+  // ch = which volume slider this sound follows: 'block', 'player' or 'mob' (all of them also follow the master volume)
+  function play(mat, kind, vol, rate, pan = 0, ch = 'block') {
+    vol *= levels.master * levels[ch];
+    if (!ctx || muted || vol <= 0) return;
     const list = bank[mat][kind];
     let i = Math.floor(Math.random() * list.length);
     if (list.length > 1 && i === lastPlayed[mat + kind]) i = (i + 1) % list.length; // don't repeat the same variation twice
@@ -2372,16 +2382,17 @@ const Sound = (() => {
         muffle.type = 'lowpass'; muffle.frequency.value = 20000;
         master.connect(muffle).connect(ctx.destination);
         musicGain = ctx.createGain();
-        musicGain.gain.value = muted ? 0 : 0.32;
+        musicGain.gain.value = musicLevel();
         musicGain.connect(ctx.destination);
         buildBank();
       }
       if (ctx.state === 'suspended') ctx.resume();
     },
-    step(id) { play(mat(id), 'step', 0.45, 1); },
-    growl(vol, pan, voice = 'growl') { if (vol > 0.01) play(voice, 'say', vol, 1, pan); },   // quieter the further away, panned left/right
-    splash(speed) { play('water', 'splash', Math.min(1, 0.3 + speed / 14), speed > 12 ? 0.85 : 1); },   // harder falls = bigger, deeper splash
-    swim() { play('water', 'swim', 0.55, 1); },   // (low sounds seem quieter, so this is turned up a little)
+    // player sounds: footsteps, jumping, landing, splashing and swimming
+    step(id) { play(mat(id), 'step', 0.45, 1, 0, 'player'); },
+    growl(vol, pan, voice = 'growl') { if (vol > 0.01) play(voice, 'say', vol, 1, pan, 'mob'); },   // quieter the further away, panned left/right
+    splash(speed) { play('water', 'splash', Math.min(1, 0.3 + speed / 14), speed > 12 ? 0.85 : 1, 0, 'player'); },   // harder falls = bigger, deeper splash
+    swim() { play('water', 'swim', 0.55, 1, 0, 'player'); },   // (low sounds seem quieter, so this is turned up a little)
     pour() { play('water', 'place', 0.8, 1); },
     // head underwater: everything (except the music) sounds muffled
     underwater(on) {
@@ -2389,8 +2400,8 @@ const Sound = (() => {
       muffle.on = on;
       muffle.frequency.setTargetAtTime(on ? 650 : 20000, ctx.currentTime, 0.05);
     },
-    jump(id) { play(mat(id), 'step', 0.3, 1.05); },
-    land(id, speed) { play(mat(id), 'step', Math.min(1, 0.4 + speed / 18), 0.85); },
+    jump(id) { play(mat(id), 'step', 0.3, 1.05, 0, 'player'); },
+    land(id, speed) { play(mat(id), 'step', Math.min(1, 0.4 + speed / 18), 0.85, 0, 'player'); },
     place(id) { const m = mat(id); if (PLACE_RECIPES[m]) play(m, 'place', 0.9, 1); else play(m, 'dig', 0.75, 0.9); },
     break(id) {
       const m = mat(id);
@@ -2399,8 +2410,12 @@ const Sound = (() => {
     },
     toggleMute() {
       muted = !muted;
-      if (musicGain) musicGain.gain.setTargetAtTime(muted ? 0 : 0.32, ctx.currentTime, 0.05);
+      if (musicGain) musicGain.gain.setTargetAtTime(musicLevel(), ctx.currentTime, 0.05);
       try { localStorage.setItem('cubeland-muted', muted ? '1' : '0'); } catch (e) {}
+    },
+    setVolumes(v) {                    // v = { master, block, player, mob, music }, each 0 to 100
+      for (const k in levels) if (isFinite(v[k])) levels[k] = Math.max(0, Math.min(1, v[k] / 100));
+      if (musicGain) musicGain.gain.setTargetAtTime(musicLevel(), ctx.currentTime, 0.05);
     },
     get muted() { return muted; },
     get bank() { return bank; },
@@ -2461,8 +2476,13 @@ document.getElementById('pause-resume').addEventListener('click', play);
 document.getElementById('pause-quit').addEventListener('click', () => { saveWorld(); showMainMenu(true); });
 
 // ---- Settings (saved in this browser) ----
-const settings = { sens: 100, fov: 75, info: true };
-try { Object.assign(settings, JSON.parse(localStorage.getItem('cubeland-settings'))); } catch (e) {}
+const settings = { sens: 100, fov: 75, info: true, vol: { master: 100, block: 100, player: 100, mob: 100, music: 100 } };
+try {
+  const saved = JSON.parse(localStorage.getItem('cubeland-settings')) || {};
+  Object.assign(settings, saved, { vol: Object.assign(settings.vol, saved.vol) });
+} catch (e) {}
+const volSliders = [...document.querySelectorAll('.set-vol')];
+volSliders.forEach(r => r.addEventListener('input', () => { settings.vol[r.dataset.vol] = +r.value; applySettings(); }));
 const settingsEl = document.getElementById('settings');
 function applySettings() {
   camera.fov = settings.fov; camera.updateProjectionMatrix();
@@ -2472,6 +2492,8 @@ function applySettings() {
   document.getElementById('set-look').textContent = ps2 ? 'PS2 look' : 'Crisp look';
   document.getElementById('set-sound').textContent = Sound.muted ? 'Off' : 'On';
   document.getElementById('set-info').textContent = settings.info ? 'Shown' : 'Hidden';
+  for (const r of volSliders) { r.value = settings.vol[r.dataset.vol]; r.nextElementSibling.textContent = r.value + '%'; }
+  Sound.setVolumes(settings.vol);
   try { localStorage.setItem('cubeland-settings', JSON.stringify(settings)); } catch (e) {}
 }
 document.getElementById('set-sens').addEventListener('input', e => { settings.sens = +e.target.value; applySettings(); });

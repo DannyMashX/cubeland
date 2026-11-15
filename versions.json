@@ -1,5 +1,13 @@
 [
     {
+        "version":  "26.11.15.1653",
+        "date":  "2026-11-15",
+        "notes":  "Volume sliders in Settings: master, blocks, player, mobs and music",
+        "changes":  [
+                        "Volume sliders in Settings: master, blocks, player, mobs and music"
+                    ]
+    },
+    {
         "version":  "26.11.15.1647",
         "date":  "2026-11-15",
         "notes":  "New main menu: Singleplayer, Multiplayer, Settings and What\u0027s new",
