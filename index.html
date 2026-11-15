@@ -30,6 +30,19 @@
   #inv-grid .slot, #hotbar.open .slot { cursor: pointer; }
   #inv-grid .slot:hover, #hotbar.open .slot:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   #inv-name { height: 18px; margin-top: 10px; font-size: 14px; }
+  #bench { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
+  #bench .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(100vw - 32px); box-sizing: border-box; }
+  #bench h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+  #bench .bench-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  #bench-grid { display: grid; grid-template-columns: repeat(7, 44px); gap: 4px; }
+  #bench-grid .slot, #bench-out { cursor: pointer; }
+  #bench-grid .slot:hover, #bench-out:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
+  #bench .bench-craft { display: flex; align-items: center; gap: 10px; }
+  #bench .bench-craft .slot { width: 56px; height: 56px; }
+  #bench .bench-craft .slot canvas { width: 40px; height: 40px; margin: 6px; }
+  #bench .arrow { font-size: 26px; opacity: .8; }
+  #bench-name { height: 18px; margin-top: 10px; font-size: 14px; }
+  #bench .hint { margin-top: 4px; font-size: 11px; opacity: .65; }
   #inventory .hint { margin-top: 4px; font-size: 11px; opacity: .65; }
   #overlay .world-line { margin-top: 18px; font-size: 15px; }
   #overlay .saved-note { font-size: 12px; opacity: .6; }
@@ -90,6 +103,21 @@
     <div id="inv-grid"></div>
     <div id="inv-name"></div>
     <div class="hint">Click a block to put it in the selected slot &middot; drag it onto any slot &middot; right-click a hotbar slot to empty it &middot; E to close</div>
+  </div>
+</div>
+<div id="bench">
+  <div class="panel">
+    <h2>Crafting Bench</h2>
+    <div class="bench-row">
+      <div id="bench-grid"></div>
+      <div class="bench-craft">
+        <div class="slot" id="bench-in"></div>
+        <div class="arrow">&#10140;</div>
+        <div class="slot" id="bench-out"><span class="count" id="bench-count"></span></div>
+      </div>
+    </div>
+    <div id="bench-name"></div>
+    <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces &middot; E to close</div>
   </div>
 </div>
 <div id="overlay">
@@ -158,7 +186,7 @@
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.14.506';
+const GAME_VERSION = '26.11.14.2109';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -230,6 +258,18 @@ const CHOCOLATE = 200;
 BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true };
 const isItem = id => !!(BLOCKS[id] && BLOCKS[id].item);
 const BRICK_VARIANTS = [12, 13, 14, 15];
+// ---- Pieces: every cube block can be split into 8 pieces (an eighth of a block each: half as wide, tall and deep)
+// at the Crafting Bench. Pieces are placed one at a time, and one block space can hold pieces of different blocks.
+// A space holding pieces is block 70 in the world; which block fills each of its 8 spots is kept in pieceMap.
+// Spot number = x + y*2 + z*4, where x, y and z are 0 (low half) or 1 (high half) of the block space.
+const PIECES = 70, CRAFTING_BENCH = 60;
+BLOCKS[PIECES] = { name: 'Pieces', t: [3, 3, 3], transparent: true, shape: 'pieces' };
+const pieceMap = new Map();     // world index -> Uint8Array(8) of block ids (0 = empty spot)
+// a piece is an item you carry (ids 100+): the piece of block b is 100 + b
+const PIECE_ITEM = 100;
+const SPLITTABLE = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11];   // cube blocks (not torches or water)
+for (const b of SPLITTABLE) BLOCKS[PIECE_ITEM + b] = { name: BLOCKS[b].name + ' Piece', t: BLOCKS[b].t, item: true, piece: b };
+const isPiece = id => !!(BLOCKS[id] && BLOCKS[id].piece);
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
 const ITEMS = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 22, WATER];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
@@ -743,6 +783,13 @@ function getBlock(x, y, z) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y >= WY) return 0;
   return world[idx(x, y, z)];
 }
+// the block at a spot on the half-block grid (X, Y, Z = 2x the world position): a piece, or the whole block there
+function subBlock(X, Y, Z) {
+  const x = Math.floor(X / 2), y = Math.floor(Y / 2), z = Math.floor(Z / 2), b = getBlock(x, y, z);
+  if (b !== PIECES) return b;
+  const a = pieceMap.get(idx(x, y, z));
+  return a ? a[(X - 2 * x) + (Y - 2 * y) * 2 + (Z - 2 * z) * 4] : 0;
+}
 
 // ===================== Three.js setup =====================
 const SKY = 0x8ec9ff;
@@ -1190,6 +1237,7 @@ function buildChunk(cx, cz) {
     const b = BLOCKS[id];
     if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind); continue; }
     if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
+    if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     for (const f of FACES) {
       const n = getBlock(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
       if (n && (n === id || !BLOCKS[n].transparent)) continue;
@@ -1232,6 +1280,48 @@ function buildChunk(cx, cz) {
   scene.add(chunkMeshes[k]);
   if (waterMeshes[k]) { scene.remove(waterMeshes[k]); waterMeshes[k].geometry.dispose(); waterMeshes[k] = null; }
   if (wind.length) { waterMeshes[k] = new THREE.Mesh(makeGeo(wpos, wuv, wcol, wlt, wsk, wind), waterMat); scene.add(waterMeshes[k]); }
+}
+// Pieces: each one is a half-size cube showing its own quarter of the block's texture, so 8 pieces of
+// the same block look exactly like the whole block. Faces hidden by a neighbouring piece or block aren't drawn.
+// For each face: which axis the texture's u and v run along (and whether backwards), worked out from FACES.
+const FACE_UV = FACES.map(f => {
+  const along = k => {
+    for (let a = 0; a < 3; a++) {
+      if (f.c.every(c => c[a] === c[k])) return [a, false];
+      if (f.c.every(c => c[a] === 1 - c[k])) return [a, true];
+    }
+  };
+  return { u: along(3), v: along(4) };
+});
+function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
+  const a = pieceMap.get(idx(x, y, z));
+  if (!a) return;
+  const depth = 0.75 + 0.25 * Math.min(1, y / 20);
+  for (let s = 0; s < 8; s++) {
+    const id = a[s];
+    if (!id || !BLOCKS[id]) continue;
+    const b = BLOCKS[id], sx = s & 1, sy = (s >> 1) & 1, sz = s >> 2;
+    const X = x * 2 + sx, Y = y * 2 + sy, Z = z * 2 + sz;
+    FACES.forEach((f, fi) => {
+      const n = subBlock(X + f.dir[0], Y + f.dir[1], Z + f.dir[2]);
+      if (n && (n === id || !BLOCKS[n].transparent)) return;
+      const tile = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.t[0];
+      const fu = FACE_UV[fi], base = pos.length / 3;
+      // lit by the block space in front of the face (or its own space, for faces inside it)
+      const fx = Math.floor((X + f.dir[0]) / 2), fy = Math.floor((Y + f.dir[1]) / 2), fz = Math.floor((Z + f.dir[2]) / 2);
+      const light = anyLight ? LIGHT_CURVE(lightAt(fx, fy, fz)) : 0, sky = skyExposure(fx, fy, fz, skyCache);
+      const shade = f.shade * depth;
+      f.c.forEach(c => {
+        const lp = [(sx + c[0]) * 0.5, (sy + c[1]) * 0.5, (sz + c[2]) * 0.5];   // corner, inside the block space
+        pos.push(x + lp[0], y + lp[1], z + lp[2]);
+        const u = fu.u[1] ? 1 - lp[fu.u[0]] : lp[fu.u[0]], v = fu.v[1] ? 1 - lp[fu.v[0]] : lp[fu.v[0]];
+        uv.push((tile * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+        col.push(shade, shade, shade);
+        lt.push(light); sk.push(sky);
+      });
+      ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+    });
+  }
 }
 function makeGeo(pos, uv, col, lt, sk, ind) {
   const geo = new THREE.BufferGeometry();
@@ -1301,6 +1391,7 @@ function setBlock(x, y, z, id) {
   const i = idx(x, y, z), old = world[i];
   world[i] = id;
   edits.set(i, id);
+  if (id !== PIECES) pieceMap.delete(i);
   if (isTorch(old)) torches.delete(i);
   if (isTorch(id)) torches.add(i);
   // keep the sky map up to date, and relight nearby chunks if what can see the sky changed
@@ -1318,6 +1409,22 @@ function setBlock(x, y, z, id) {
   for (const k of dirty) { buildChunk(k % NCX, Math.floor(k / NCX)); rebuildSoon.delete(k); }
   wakeWater(x, y, z);
   Net.blockChanged(i, id);   // multiplayer: tell the other players
+}
+// put a piece of block `id` in spot s (0-7) of block space (x, y, z), or take one out (id 0).
+// Pieces go into empty space or water, or into a free spot of a space that already holds pieces.
+function setPiece(x, y, z, s, id) {
+  if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false;
+  const i = idx(x, y, z), cur = world[i];
+  let a = cur === PIECES ? pieceMap.get(i) : null;
+  if (!a) {
+    if (!id || (cur && !isWater(cur))) return false;
+    a = new Uint8Array(8);
+  }
+  if (id && a[s]) return false;
+  a = a.slice(); a[s] = id;
+  if (a.some(v => v)) { pieceMap.set(i, a); setBlock(x, y, z, PIECES); }
+  else setBlock(x, y, z, 0);
+  return true;
 }
 
 // ---- Water flow ----
@@ -1414,27 +1521,52 @@ function solid(x, y, z) {
   const b = world[idx(x, y, z)];
   return b !== 0 && !BLOCKS[b].noCollide;   // torches don't block movement
 }
-function collides(p) {
-  const x0 = Math.floor(p.x - P_HALF), x1 = Math.floor(p.x + P_HALF - 1e-6);
-  const z0 = Math.floor(p.z - P_HALF), z1 = Math.floor(p.z + P_HALF - 1e-6);
-  const y0 = Math.floor(p.y), y1 = Math.floor(p.y + P_H - 1e-6);
-  for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) if (solid(x, y, z)) return true;
-  return false;
+// every solid box touching the box from (x0, y0, z0) to (x1, y1, z1): whole blocks, or single pieces
+// in a space that holds pieces. Each box is [x0, y0, z0, x1, y1, z1].
+function solidBoxes(x0, y0, z0, x1, y1, z1) {
+  const out = [];
+  for (let y = Math.floor(y0); y <= Math.floor(y1 - 1e-6); y++)
+    for (let z = Math.floor(z0); z <= Math.floor(z1 - 1e-6); z++)
+      for (let x = Math.floor(x0); x <= Math.floor(x1 - 1e-6); x++) {
+        if (!solid(x, y, z)) continue;
+        const inside = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY;
+        const a = inside && world[idx(x, y, z)] === PIECES ? pieceMap.get(idx(x, y, z)) : null;
+        if (!a) { out.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
+        for (let s = 0; s < 8; s++) {
+          if (!a[s]) continue;
+          const bx = x + (s & 1) * 0.5, by = y + ((s >> 1) & 1) * 0.5, bz = z + (s >> 2) * 0.5;
+          if (bx < x1 && bx + 0.5 > x0 && by < y1 && by + 0.5 > y0 && bz < z1 && bz + 0.5 > z0) out.push([bx, by, bz, bx + 0.5, by + 0.5, bz + 0.5]);
+        }
+      }
+  return out;
 }
+const playerBoxes = p => solidBoxes(p.x - P_HALF, p.y, p.z - P_HALF, p.x + P_HALF, p.y + P_H, p.z + P_HALF);
+function collides(p) { return playerBoxes(p).length > 0; }
 function moveAxis(axis, d) {
   if (!d) return;
   player[axis] += d;
-  if (!collides(player)) return;
+  const bs = playerBoxes(player);
+  if (!bs.length) return;
   if (axis === 'y') {
-    if (d < 0) { player.y = Math.floor(player.y) + 1; player.onGround = true; player.impact = -player.vy; }
-    else player.y = Math.floor(player.y + P_H) - P_H - 0.001;
+    if (d < 0) { player.y = Math.max(...bs.map(b => b[4])); player.onGround = true; player.impact = -player.vy; }
+    else player.y = Math.min(...bs.map(b => b[1])) - P_H - 0.001;
     player.vy = 0;
-  } else {
-    if (d > 0) player[axis] = Math.floor(player[axis] + P_HALF) - P_HALF - 0.001;
-    else player[axis] = Math.floor(player[axis] - P_HALF) + 1 + P_HALF + 0.001;
-    if (axis === 'x') player.vx = 0; else player.vz = 0;
-    player.hitWall = true;
+    return;
   }
+  // walking into something only half a block high (pieces): step up onto it, like a stair
+  const top = Math.max(...bs.map(b => b[4]));
+  if (!player.fly && top > player.y && top - player.y <= 0.5 + 1e-6 &&
+      solidBoxes(player.x - P_HALF, player.y - 0.05, player.z - P_HALF, player.x + P_HALF, player.y, player.z + P_HALF).length) {
+    const was = player.y;
+    player.y = top;
+    if (!collides(player)) { player.vy = Math.max(0, player.vy); return; }
+    player.y = was;
+  }
+  const a = axis === 'x' ? 0 : 2;
+  if (d > 0) player[axis] = Math.min(...bs.map(b => b[a])) - P_HALF - 0.001;
+  else player[axis] = Math.max(...bs.map(b => b[a + 3])) + P_HALF + 0.001;
+  if (axis === 'x') player.vx = 0; else player.vz = 0;
+  player.hitWall = true;
 }
 // water at a point in the world (counting how high the surface is in that block)
 function waterAt(x, y, z) {
@@ -1990,10 +2122,9 @@ const Sound = (() => {
 })();
 
 // the block the player is standing on (checks the corners too, for when you're on an edge)
-function blockUnderPlayer() {
-  const y = Math.floor(player.y - 0.05);
+function blockUnderPlayer() {   // (or the piece under them)
   for (const [dx, dz] of [[0, 0], [-P_HALF, -P_HALF], [P_HALF, -P_HALF], [-P_HALF, P_HALF], [P_HALF, P_HALF]]) {
-    const b = getBlock(Math.floor(player.x + dx), y, Math.floor(player.z + dz));
+    const b = subBlock(Math.floor((player.x + dx) * 2), Math.floor((player.y - 0.05) * 2), Math.floor((player.z + dz) * 2));
     if (b) return b;
   }
   return 1;
@@ -2065,6 +2196,22 @@ function rayHitsBox(o, d, x, y, z, box, max) {   // slab test against a box insi
   }
   return true;
 }
+// where a ray enters a box (world coordinates [x0, y0, z0, x1, y1, z1]): distance t and the face's direction n
+function rayBox(o, d, box, max) {
+  let t0 = 0, t1 = max, ax = -1;
+  const org = [o.x, o.y, o.z], dir = [d.x, d.y, d.z];
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(dir[k]) < 1e-9) { if (org[k] < box[k] || org[k] > box[k + 3]) return null; continue; }
+    let a = (box[k] - org[k]) / dir[k], b = (box[k + 3] - org[k]) / dir[k];
+    if (a > b) [a, b] = [b, a];
+    if (a > t0) { t0 = a; ax = k; }
+    t1 = Math.min(t1, b);
+    if (t0 > t1) return null;
+  }
+  const n = [0, 0, 0];
+  if (ax >= 0) n[ax] = dir[ax] > 0 ? -1 : 1;
+  return { t: t0, n };
+}
 function raycast(max = 6) {
   const o = camera.position, d = new THREE.Vector3();
   camera.getWorldDirection(d);
@@ -2075,10 +2222,25 @@ function raycast(max = 6) {
   let tmy = d.y > 0 ? (y + 1 - o.y) * tdy : d.y < 0 ? (o.y - y) * tdy : Infinity;
   let tmz = d.z > 0 ? (z + 1 - o.z) * tdz : d.z < 0 ? (o.z - z) * tdz : Infinity;
   let px = x, py = y, pz = z, t = 0;
+  // where exactly the ray hit, and which way the face it hit is facing (used for placing pieces)
+  const at = (h, extra) => ({ x, y, z, px, py, pz, t: h.t, n: h.n, pt: [o.x + d.x * h.t, o.y + d.y * h.t, o.z + d.z * h.t], ...extra });
   while (t <= max) {
     const b = y >= 0 ? getBlock(x, y, z) : 0;
+    if (b === PIECES) {
+      // a space with pieces: only counts if the ray touches one of them (the nearest one is the hit)
+      const a = pieceMap.get(idx(x, y, z)) || [];
+      let best = null, slot = -1;
+      for (let s = 0; s < 8; s++) {
+        if (!a[s]) continue;
+        const bx = x + (s & 1) * 0.5, by = y + ((s >> 1) & 1) * 0.5, bz = z + (s >> 2) * 0.5;
+        const h = rayBox(o, d, [bx, by, bz, bx + 0.5, by + 0.5, bz + 0.5], max);
+        if (h && (!best || h.t < best.t)) { best = h; slot = s; }
+      }
+      if (best) return at(best, { slot });
+    }
     // torches only count as hit if the ray actually touches the sticks, not the whole block space
-    if (b && !isWater(b) && (!isTorch(b) || rayHitsBox(o, d, x, y, z, torchGeo(b).box, max))) return { x, y, z, px, py, pz };
+    else if (b && !isWater(b) && (!isTorch(b) || rayHitsBox(o, d, x, y, z, torchGeo(b).box, max)))
+      return at(rayBox(o, d, [x, y, z, x + 1, y + 1, z + 1], max + 2) || { t, n: [px - x, py - y, pz - z] });
     px = x; py = y; pz = z;
     if (tmx < tmy && tmx < tmz) { x += sx; t = tmx; tmx += tdx; }
     else if (tmy < tmz) { y += sy; t = tmy; tmy += tdy; }
@@ -2555,6 +2717,31 @@ addEventListener('mousedown', e => {
   const hit = raycast();
   if (!hit) return;
   const hb = getBlock(hit.x, hit.y, hit.z);
+  // pieces: break just the one you're looking at
+  if (e.button === 0 && hit.slot !== undefined) {
+    const a = pieceMap.get(idx(hit.x, hit.y, hit.z));
+    Sound.break(a ? a[hit.slot] : 3);
+    setPiece(hit.x, hit.y, hit.z, hit.slot, 0);
+    mobNoise(hit.x, hit.y, hit.z);
+    return;
+  }
+  // right-click a Crafting Bench to use it (hold Shift to build against it instead)
+  if (e.button === 2 && hb === CRAFTING_BENCH && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(); return; }
+  // placing a piece: it goes in the half-block spot just in front of whatever you're looking at
+  if (e.button === 2 && isPiece(HOTBAR[selected])) {
+    const p = [0, 1, 2].map(k => Math.floor((hit.pt[k] + hit.n[k] * 0.25) * 2));   // on the half-block grid
+    const x = Math.floor(p[0] / 2), y = Math.floor(p[1] / 2), z = Math.floor(p[2] / 2);
+    const bx = p[0] / 2, by = p[1] / 2, bz = p[2] / 2;
+    const overlapsPlayer = bx < player.x + P_HALF && bx + 0.5 > player.x - P_HALF && bz < player.z + P_HALF && bz + 0.5 > player.z - P_HALF &&
+      by < player.y + P_H && by + 0.5 > player.y;
+    const block = BLOCKS[HOTBAR[selected]].piece;
+    if (overlapsPlayer || !setPiece(x, y, z, (p[0] - 2 * x) + (p[1] - 2 * y) * 2 + (p[2] - 2 * z) * 4, block)) return;
+    Sound.place(block);
+    mobNoise(x, y, z);
+    if (--HOTBAR_COUNT[selected] <= 0) { HOTBAR[selected] = 0; HOTBAR_COUNT[selected] = 0; }
+    saveHotbar(); drawHotbarIcons(); selectSlot(selected);
+    return;
+  }
   if (e.button === 0 && hit.y > 0) {
     Sound.break(hb);
     if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1)); // take one torch off
@@ -2603,7 +2790,9 @@ const hotbarIcons = [], hotbarCounts = [];
 function drawIcon(canvas, id) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, TILE, TILE);
-  if (id) ctx.drawImage(atlas, BLOCKS[id].t[0] * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
+  // a piece: a half-size square (one quarter of the block's side texture)
+  if (isPiece(id)) ctx.drawImage(atlas, BLOCKS[id].t[0] * TILE, TILE / 2, TILE / 2, TILE / 2, TILE / 4, TILE / 4, TILE / 2, TILE / 2);
+  else if (id) ctx.drawImage(atlas, BLOCKS[id].t[0] * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
 }
 HOTBAR.forEach((id, i) => {
   const slot = document.createElement('div');
@@ -2678,10 +2867,48 @@ ITEMS.forEach(id => {
   slot.addEventListener('mouseleave', () => { invName.textContent = ''; });
   invGrid.append(slot);
 });
+// ===================== Crafting Bench (right-click one) =====================
+// Pick a block to put on the bench; it splits into 8 pieces, which you click to take into your hotbar.
+const benchEl = document.getElementById('bench'), benchName = document.getElementById('bench-name');
+const benchIn = document.createElement('canvas'), benchOut = document.createElement('canvas');
+benchIn.width = benchIn.height = benchOut.width = benchOut.height = TILE;
+document.getElementById('bench-in').append(benchIn);
+document.getElementById('bench-out').append(benchOut);
+let benchBlock = 0;
+const benchIcons = [];
+SPLITTABLE.forEach(id => {
+  const slot = document.createElement('div');
+  slot.className = 'slot';
+  const c = document.createElement('canvas'); c.width = c.height = TILE;
+  benchIcons.push([c, id]);
+  slot.append(c);
+  slot.addEventListener('click', () => { benchBlock = id; drawBench(); });
+  slot.addEventListener('mouseenter', () => { benchName.textContent = BLOCKS[id].name; });
+  slot.addEventListener('mouseleave', () => { benchName.textContent = ''; });
+  document.getElementById('bench-grid').append(slot);
+});
+function drawBench() {
+  benchIcons.forEach(([c, id]) => drawIcon(c, id));
+  drawIcon(benchIn, benchBlock);
+  drawIcon(benchOut, benchBlock ? PIECE_ITEM + benchBlock : 0);
+  document.getElementById('bench-count').textContent = benchBlock ? '8' : '';
+}
+document.getElementById('bench-out').addEventListener('click', () => {
+  if (!benchBlock) return;
+  let n = 0;
+  for (let k = 0; k < 8; k++) if (giveItem(PIECE_ITEM + benchBlock)) n++;
+  benchName.textContent = n ? `Took ${n} ${BLOCKS[benchBlock].name} Pieces` : 'No room in your hotbar';
+  Sound.place(benchBlock);
+});
+document.getElementById('bench-out').addEventListener('mouseenter', () => { if (benchBlock) benchName.textContent = `${BLOCKS[benchBlock].name} Piece x8 (click to take)`; });
+function openBench() { drawBench(); setInventory(true, benchEl); }
+
 function drawInventoryIcons() { invIcons.forEach(([c, id]) => drawIcon(c, id)); }
-function setInventory(open) {
+// panel: which screen to show (the inventory, or the Crafting Bench); both pause the game the same way
+function setInventory(open, panel = invEl) {
   invOpen = open;
-  invEl.style.display = open ? 'flex' : 'none';
+  invEl.style.display = open && panel === invEl ? 'flex' : 'none';
+  benchEl.style.display = open && panel === benchEl ? 'flex' : 'none';
   hotbarEl.classList.toggle('open', open);
   invName.textContent = '';
   for (const k in keys) keys[k] = false;
@@ -2708,6 +2935,7 @@ function gatherSave() {
   return {
     version: 1, seed, savedAt: Date.now(),
     idxs: idxs.buffer, ids: ids.buffer,
+    pieces: gatherPieces(),
     player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly },
     time: timeOfDay,
     hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), selected,
@@ -2723,7 +2951,21 @@ async function saveWorld() {
   catch (e) { console.warn('Could not save the world', e); }
   saving = false;
 }
+// every space holding pieces: [index, 8 block ids, index, 8 block ids, ...]
+function gatherPieces() {
+  const out = [];
+  for (const [i, a] of pieceMap) out.push(i, ...a);
+  return out;
+}
+function applyPieces(list) {
+  if (!Array.isArray(list)) return;
+  for (let k = 0; k + 8 < list.length; k += 9) {
+    const a = Uint8Array.from(list.slice(k + 1, k + 9), id => BLOCKS[id] && !BLOCKS[id].item && BLOCKS[id].shape !== 'pieces' ? id : 0);
+    if (a.some(v => v)) pieceMap.set(list[k], a);
+  }
+}
 function applySave(s) {
+  applyPieces(s.pieces);
   applyEdits(new Uint32Array(s.idxs), new Uint8Array(s.ids));
   applyPlayerSave(s);
 }
@@ -2733,6 +2975,8 @@ function applyEdits(idxs, ids) {
   for (let k = 0; k < idxs.length; k++) {
     const i = idxs[k], id = ids[k];
     if (i >= world.length || (id && !BLOCKS[id])) continue;
+    if (id === PIECES && !pieceMap.has(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
+    if (id !== PIECES) pieceMap.delete(i);
     world[i] = id; edits.set(i, id);
     const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
     if (isTorch(id)) torches.add(i);
@@ -2872,11 +3116,16 @@ addEventListener('pagehide', () => saveWorld());
   }
 
   // apply block changes from someone else (without sending them back out again, unless you're the host)
-  function applySets(list) {
+  // pcs: the spaces holding pieces among them, with what's in each ([index, 8 block ids, ...], like a save)
+  function applySets(list, pcs) {
     Net.applying = true;
+    const before = new Map(pieceMap);
+    applyPieces(pcs);
     for (let k = 0; k + 1 < list.length; k += 2) {
       const i = list[k], id = list[k + 1];
-      if (!(i >= 0 && i < world.length) || (id && !BLOCKS[id]) || world[i] === id) continue;
+      if (!(i >= 0 && i < world.length) || (id && !BLOCKS[id]) || (world[i] === id && id !== PIECES)) continue;
+      if (id === PIECES && !pieceMap.has(i)) continue;
+      if (id === PIECES && world[i] === PIECES && before.get(i) && pieceMap.get(i).every((v, s) => v === before.get(i)[s])) continue;
       setBlock(i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ, id);
     }
     Net.applying = false;
@@ -2926,14 +3175,14 @@ addEventListener('pagehide', () => saveWorld());
       friends.set(conn.peer, { conn, name, hue, seen: performance.now() });
       setOther(conn.peer, { name, hue, x: player.x + 1, y: player.y, z: player.z, yaw: 0 });
       const save = gatherSave();
-      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ids: save.ids, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
+      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ids: save.ids, pieces: save.pieces, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
       refreshUI();
     } else if (!f) {
       return;
     } else if (d.t === 'me') {
       setOther(conn.peer, { name: f.name, hue: f.hue, x: +d.x || 0, y: +d.y || 0, z: +d.z || 0, yaw: +d.yaw || 0 });
     } else if (d.t === 'sets' && Array.isArray(d.l)) {
-      applySets(d.l);
+      applySets(d.l, d.p);
     } else if (d.t === 'hit') {
       const m = mobs.find(m => m.k === d.k && !m.dead), p = others.get(conn.peer);
       if (m && p) hitMob(m, p);
@@ -3017,6 +3266,7 @@ addEventListener('pagehide', () => saveWorld());
     if (d.t === 'refuse') { alert(d.why); leave(); }
     else if (d.t === 'welcome') {
       myId = d.id;
+      applyPieces(d.pieces);
       applyEdits(new Uint32Array(toBuf(d.idxs)), new Uint8Array(toBuf(d.ids)));
       Object.assign(player, { x: d.x, y: d.y, z: d.z, yaw: d.yaw || 0, vx: 0, vy: 0, vz: 0 });
       timeOfDay = d.time;
@@ -3052,7 +3302,7 @@ addEventListener('pagehide', () => saveWorld());
       }
       for (const dr of [...drops]) if (!seenD.has(dr.k)) removeDrop(dr);
     } else if (d.t === 'sets' && Array.isArray(d.l)) {
-      applySets(d.l);
+      applySets(d.l, d.p);
     } else if (d.t === 'give') {
       giveItem(d.id);
     }
@@ -3060,7 +3310,12 @@ addEventListener('pagehide', () => saveWorld());
 
   function flush() {
     if (!pending.length) return;
-    const msg = { t: 'sets', l: pending }; pending = [];
+    const p = [];
+    for (let k = 0; k < pending.length; k += 2) {
+      const a = pending[k + 1] === PIECES && pieceMap.get(pending[k]);
+      if (a) p.push(pending[k], ...a);
+    }
+    const msg = { t: 'sets', l: pending, p }; pending = [];
     if (Net.hosting) { for (const f of friends.values()) if (f.conn.open) f.conn.send(msg); }
     else if (hostConn && hostConn.open) hostConn.send(msg);
   }
@@ -3339,7 +3594,11 @@ function frame(now) {
   outline.visible = !!hit;
   if (hit) {
     const hb = getBlock(hit.x, hit.y, hit.z);
-    if (isTorch(hb)) {             // outline just the torch sticks
+    if (hit.slot !== undefined) {  // outline just the piece you're looking at
+      const s = hit.slot;
+      outline.scale.set(0.5, 0.5, 0.5);
+      outline.position.set(hit.x + (s & 1) * 0.5 + 0.25, hit.y + ((s >> 1) & 1) * 0.5 + 0.25, hit.z + (s >> 2) * 0.5 + 0.25);
+    } else if (isTorch(hb)) {      // outline just the torch sticks
       const bx = torchGeo(hb).box;
       outline.scale.set(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2]);
       outline.position.set(hit.x + (bx[0] + bx[3]) / 2, hit.y + (bx[1] + bx[4]) / 2, hit.z + (bx[2] + bx[5]) / 2);
