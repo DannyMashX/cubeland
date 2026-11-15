@@ -1,5 +1,14 @@
 [
     {
+        "version":  "26.11.14.2310",
+        "date":  "2026-11-14",
+        "notes":  "Multiplayer works between different homes now: when two players can\u0027t connect directly, the game goes through a relay server",
+        "changes":  [
+                        "Multiplayer works between different homes now: when two players can\u0027t connect directly, the game goes through a relay server",
+                        "Multiplayer now tells you when it found your friend\u0027s game but couldn\u0027t link up with it, instead of saying the code wasn\u0027t found"
+                    ]
+    },
+    {
         "version":  "26.11.14.2215",
         "date":  "2026-11-14",
         "notes":  "Fixed numbers and % showing in the wrong font after an update (the game now always loads the newest letters and textures)",

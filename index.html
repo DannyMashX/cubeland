@@ -183,14 +183,14 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=26.11.14.2215"></script>
+<script src="textures.js?v=26.11.14.2310"></script>
 <script>
 // ===================== Version =====================
 // The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.14.2215';
+const GAME_VERSION = '26.11.14.2310';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -3253,6 +3253,21 @@ addEventListener('pagehide', () => saveWorld());
     s.onload = res; s.onerror = () => rej(new Error('offline'));
     document.head.append(s);
   });
+  // Relay server (Metered): used when two players' internet connections can't reach each other directly.
+  // Fill in your Metered app name and the credential's API key (Dashboard -> TURN Server -> Credentials).
+  // That key is made for use in web pages; it can only fetch relay logins, nothing else on your account.
+  const RELAY_APP = 'cubeland', RELAY_KEY = '85e6efd2e639c189f35cc67fb7ea57d7ce5b';
+  let relayServers = null;
+  async function peerOptions() {
+    if (!relayServers && RELAY_APP && RELAY_KEY) {
+      try {
+        const r = await fetch(`https://${RELAY_APP}.metered.live/api/v1/turn/credentials?apiKey=${RELAY_KEY}`);
+        if (r.ok) relayServers = await r.json();
+      } catch (e) { console.warn('Could not reach the relay server', e); }
+    }
+    const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }].concat(relayServers || []);
+    return { debug: 0, config: { iceServers } };
+  }
   const makeCode = () => Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
   const r2 = v => Math.round(v * 100) / 100;
   const toBuf = b => b instanceof ArrayBuffer ? b : b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
@@ -3340,7 +3355,7 @@ addEventListener('pagehide', () => saveWorld());
     status('Starting...');
     try { await loadPeer(); } catch (e) { return status("Couldn't start multiplayer. Are you online?"); }
     const code = makeCode();
-    peer = new Peer(PREFIX + code, { debug: 0 });
+    peer = new Peer(PREFIX + code, await peerOptions());
     peer.on('open', () => { Net.hosting = true; Net.code = code; status(''); refreshUI(); });
     peer.on('error', err => {
       if (err.type === 'unavailable-id') { peer.destroy(); peer = null; host(); }   // that code is taken: pick another
@@ -3415,17 +3430,23 @@ addEventListener('pagehide', () => saveWorld());
     if (Net.hosting) return status('Stop hosting first.');
     status('Looking for the game...');
     try { await loadPeer(); } catch (e) { return status("Couldn't start multiplayer. Are you online?"); }
-    const p = new Peer({ debug: 0 });
-    const fail = text => { clearTimeout(joinTimeout); status(text); try { p.destroy(); } catch (e) {} };
-    joinTimeout = setTimeout(() => fail(`Couldn't find a game with the code ${code}.`), 12000);
+    const p = new Peer(await peerOptions());
+    let done = false;
+    const fail = text => { if (done) return; done = true; clearTimeout(joinTimeout); status(text); try { p.destroy(); } catch (e) {} };
+    let reaching = false;   // true once the game was found and we're trying to link up with it
+    joinTimeout = setTimeout(() => fail(reaching
+      ? `Found the game ${code}, but couldn't link up with it. Your two internet connections can't reach each other directly (this happens with some home routers, school networks and phone hotspots).`
+      : `Couldn't find a game with the code ${code}.`), 15000);
     p.on('error', err => fail(err.type === 'peer-unavailable' ? `Couldn't find a game with the code ${code}.` : "Couldn't connect. Are you online?"));
     p.on('open', () => {
+      // the server says "peer-unavailable" within a second or two when there's no such game, so after that it was found
+      setTimeout(() => { if (done) return; reaching = true; status('Found the game, linking up...'); }, 2500);
       const c = p.connect(PREFIX + code, { reliable: true });
       c.on('open', () => c.send({ t: 'hello' }));
       c.on('data', async d => {
         if (d.t !== 'info') return;
         if (d.ver !== GAME_VERSION) return fail(`${d.host} is playing version ${d.ver}, and you have ${GAME_VERSION}. You both need the same version.`);
-        clearTimeout(joinTimeout);
+        clearTimeout(joinTimeout); done = true;
         status('Joining...');
         try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, host: d.host })); } catch (e) {}
         p.destroy();
@@ -3440,7 +3461,7 @@ addEventListener('pagehide', () => saveWorld());
     const code = Worlds.current.code;
     const giveUp = text => { alert(text); leave(); };
     try { await loadPeer(); } catch (e) { return giveUp("Couldn't connect to your friend's game. Are you online?"); }
-    peer = new Peer({ debug: 0 });
+    peer = new Peer(await peerOptions());
     peer.on('error', err => { if (!worldLoaded) giveUp(err.type === 'peer-unavailable' ? `The game with the code ${code} has closed.` : "Couldn't connect to your friend's game."); });
     peer.on('open', () => {
       hostConn = peer.connect(PREFIX + code, { reliable: true });
