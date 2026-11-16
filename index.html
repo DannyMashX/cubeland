@@ -32,6 +32,10 @@
   .screen .menu > button { width: min(320px, calc(100vw - 32px)); font: inherit; font-size: var(--f2); padding: 8px 12px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; cursor: pointer; margin: 0; }
   .screen .menu > button:hover { background: rgba(255,255,255,.25); }
   #hotbar { z-index: 10; }
+  /* survival: your hearts, just above the left end of the hotbar (placed and sized by layoutHearts) */
+  #hearts { position: fixed; display: none; image-rendering: pixelated; pointer-events: none; z-index: 10; }
+  #death { background: rgba(120,0,0,.5); z-index: 16; }
+  #hurt { position: fixed; inset: 0; pointer-events: none; background: rgba(200,0,0,.35); opacity: 0; }
   #inventory { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
   #inventory .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; }
   #inventory h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
@@ -140,6 +144,15 @@
 <body>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
+<canvas id="hearts" width="99" height="9"></canvas>
+<!-- survival: shows when your hearts run out -->
+<div id="death" class="screen">
+  <div class="menu">
+    <h1>You died!</h1>
+    <p id="death-note"></p>
+    <button id="respawn">Respawn</button>
+  </div>
+</div>
 <div id="blockname"></div>
 <div id="info"></div>
 <div id="inventory">
@@ -147,7 +160,7 @@
     <h2>Inventory</h2>
     <div id="inv-grid"></div>
     <div id="inv-name"></div>
-    <div class="hint">Click a block to put it in the selected slot &middot; drag it onto any slot &middot; right-click a hotbar slot to empty it &middot; E to close</div>
+    <div class="hint" id="inv-hint">Click a block to put it in the selected slot &middot; drag it onto any slot &middot; right-click a hotbar slot to empty it &middot; E to close</div>
   </div>
 </div>
 <div id="bench">
@@ -162,7 +175,7 @@
       </div>
     </div>
     <div id="bench-name"></div>
-    <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces (in creative mode they never run out) &middot; E to close</div>
+    <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces (in creative they never run out; in survival it uses up one of that block from your hotbar) &middot; E to close</div>
   </div>
 </div>
 <!-- main menu: the first thing you see -->
@@ -210,7 +223,8 @@
     <ul>
       <li>WASD move &middot; Mouse look &middot; Space jump &middot; Shift sprint</li>
       <li>Left click break &middot; Right click place &middot; 1-9, 0 or scroll wheel pick a block &middot; E inventory</li>
-      <li>F or double-tap Space to fly (Space up, Shift down) &middot; T skips time &middot; Esc pauses</li>
+      <li>Survival: right-click while holding chocolate to eat it and get health back</li>
+      <li>F or double-tap Space to fly in creative (Space up, Shift down) &middot; T skips time &middot; Esc pauses</li>
     </ul>
     <div class="bottom"><button id="settings-close">Back</button></div>
   </div>
@@ -233,6 +247,10 @@
       <select id="new-gen" title="Terrain style">
         <option value="2">Rolling hills</option>
         <option value="1">Plateaus</option>
+      </select>
+      <select id="new-mode" title="Game mode">
+        <option value="creative">Creative</option>
+        <option value="survival">Survival</option>
       </select>
       <button id="new-create">Create &amp; play</button>
     </div>
@@ -262,18 +280,25 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=26.11.15.1936"></script>
+<script src="textures.js?v=alpha-0.0.1.0"></script>
 <script>
 // ===================== Version =====================
-// The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
-// 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
+// Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
+// The ones before that were the date and time they were published: YY.MM.DD.HHMM (26.11.14.1608 = 4:08 pm, 14 Nov 2026;
+// the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
-// Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.15.1936';
-// compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
+// Every published version stays playable in versions/<folder>/ (see versions.html).
+const GAME_VERSION = 'Alpha 0.0.1.0';
+// compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
+// The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
-  const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
-  for (let k = 0; k < 4; k++) if ((pa[k] || 0) !== (pb[k] || 0)) return (pa[k] || 0) - (pb[k] || 0);
+  const parse = v => {
+    const s = String(v || '0').trim(), m = s.match(/^([a-z]+)\s*/i);
+    const stage = !m ? 0 : { alpha: 1, beta: 2 }[m[1].toLowerCase()] || 3;
+    return [stage, ...s.slice(m ? m[0].length : 0).split(/[._]/).map(Number)];
+  };
+  const pa = parse(a), pb = parse(b);
+  for (let k = 0; k < 5; k++) if ((pa[k] || 0) !== (pb[k] || 0)) return (pa[k] || 0) - (pb[k] || 0);
   return 0;
 }
 
@@ -338,7 +363,7 @@ const wallIndex = (dx, dz) => TORCH_WALLS.findIndex(w => w && w[0] === dx && w[1
 // Items: things you carry but can't place (ids 200+). They share the block list so icons and names work the same way.
 // They aren't in the inventory: you get them from drops, and they stack in the hotbar.
 const CHOCOLATE = 200;
-BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true };
+BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true, food: 8 };   // food: eating it heals 2 hearts (survival)
 const isItem = id => !!(BLOCKS[id] && BLOCKS[id].item);
 // Stick and tools (ids 201-211), from your pictures in textures/items. Tools don't stack.
 // damage = how much a hit takes off a mob (a hand or any other item does 1)
@@ -388,7 +413,8 @@ const HOTBAR_COUNT = (() => {
   return HOTBAR.map(id => isItem(id) ? 1 : 0);
 })();
 const STACK_MAX = 64;
-function saveHotbar() { try { localStorage.setItem('cubeland-hotbar', JSON.stringify(HOTBAR)); localStorage.setItem('cubeland-hotbar-count', JSON.stringify(HOTBAR_COUNT)); } catch (e) {} }
+// (the hotbar remembered between worlds is your creative one; a survival hotbar is only kept in its world's save)
+function saveHotbar() { if (SURVIVAL) return; try { localStorage.setItem('cubeland-hotbar', JSON.stringify(HOTBAR)); localStorage.setItem('cubeland-hotbar-count', JSON.stringify(HOTBAR_COUNT)); } catch (e) {} }
 // the block id to actually place for a hotbar block (bricks pick a random variant)
 const placeId = id => BRICK_VARIANTS.includes(id) ? BRICK_VARIANTS[Math.floor(Math.random() * BRICK_VARIANTS.length)] : id;
 let selected = 0;
@@ -725,9 +751,10 @@ const Worlds = (() => {
   }
   // gen = terrain style: 1 = plateaus (the original style; worlds made before hills existed have no gen and stay plateaus),
   // 2 = rolling hills (the default for new worlds)
-  function create(name, seedText, gen = 2) {
+  // mode = 'creative' or 'survival' (worlds made before survival existed have none and are creative)
+  function create(name, seedText, gen = 2, mode = 'creative') {
     const w = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name || '').trim().slice(0, 32) || `World ${list.length + 1}`,
-      seed: seedFrom(seedText), gen, ver: GAME_VERSION, created: Date.now(), played: Date.now() };
+      seed: seedFrom(seedText), gen, mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
     list.push(w); saveList();
     return w;
   }
@@ -740,7 +767,7 @@ const Worlds = (() => {
   try { joined = JSON.parse(sessionStorage.getItem('cubeland-join')); } catch (e) {}
   let current;
   if (joinCode && joined && joined.code === joinCode && isFinite(joined.seed)) {
-    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, temp: true, code: joinCode };
+    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, mode: joined.mode, temp: true, code: joinCode };
   } else {
     let last = null;
     try { last = localStorage.getItem(LAST_KEY); } catch (e) {}
@@ -793,6 +820,13 @@ const Net = { client: !!Worlds.current.temp, hosting: false, applying: false,
 // ===================== Terrain generation =====================
 const seed = Worlds.current.seed;
 const GEN = Worlds.current.gen || 1;   // terrain style (see Worlds.create)
+// Game mode, picked when the world is made (a friend's world uses theirs).
+// creative: fly, take any block from the inventory, nothing runs out.
+// survival: no flying, you only have what you collect (breaking a block drops it), placing uses it up, and you have health.
+const gameMode = Worlds.current.mode === 'survival' ? 'survival' : 'creative', SURVIVAL = gameMode === 'survival';
+// in survival every slot has a count (blocks too); in creative only items do
+const counted = id => !!id && (SURVIVAL || isItem(id));
+if (SURVIVAL) { HOTBAR.fill(0); HOTBAR_COUNT.fill(0); }   // you start with nothing (the world's save fills in what you had)
 function hash(x, z, s = 0) {
   let h = (Math.imul(x, 374761393) + Math.imul(z, 668265263) + Math.imul(seed + s, 1442695041)) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -1797,11 +1831,13 @@ function updateWater(dt) {
 }
 // when a block is removed, torches standing on it or stuck to its sides fall off
 function dropTorchesAround(x, y, z) {
+  // (in survival they drop as torches you can pick up)
+  const fall = (tx, ty, tz, t) => { for (let n = BLOCKS[t].count; n > 0; n--) collect(TORCH, tx, ty, tz); setBlock(tx, ty, tz, 0); };
   const above = getBlock(x, y + 1, z);
-  if (isTorch(above) && !BLOCKS[above].wall) setBlock(x, y + 1, z, 0);
+  if (isTorch(above) && !BLOCKS[above].wall) fall(x, y + 1, z, above);
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const n = getBlock(x + dx, y, z + dz);
-    if (isTorch(n) && BLOCKS[n].wall && BLOCKS[n].wall[0] === -dx && BLOCKS[n].wall[1] === -dz) setBlock(x + dx, y, z + dz, 0);
+    if (isTorch(n) && BLOCKS[n].wall && BLOCKS[n].wall[0] === -dx && BLOCKS[n].wall[1] === -dz) fall(x + dx, y, z + dz, n);
   }
 }
 
@@ -1826,6 +1862,7 @@ const player = { x: WX / 2 + 0.5, y: 0, z: WZ / 2 + 0.5, vx: 0, vy: 0, vz: 0, ya
   }
   player.y = top(Math.floor(player.x), Math.floor(player.z)) + 1;
 })();
+const SPAWN = { x: player.x, y: player.y, z: player.z };   // where you come back after dying (survival)
 
 function solid(x, y, z) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0) return true; // invisible walls at world edge
@@ -2459,7 +2496,7 @@ let locked = false;
 const overlay = document.getElementById('overlay'), mainMenuEl = document.getElementById('mainmenu');
 let invOpen = false, mainMenuOpen = true;
 addEventListener('pointerdown', () => Sound.init(), true);   // sound can only start after a click
-function showPause() { if (!invOpen && !mainMenuOpen && !locked) overlay.style.display = 'flex'; }
+function showPause() { if (!invOpen && !mainMenuOpen && !locked && !player.dead) overlay.style.display = 'flex'; }
 function showMainMenu(open) {
   mainMenuOpen = open;
   mainMenuEl.style.display = open ? 'flex' : 'none';
@@ -2554,7 +2591,7 @@ document.getElementById('pause-settings').addEventListener('click', () => showSe
 document.getElementById('settings-close').addEventListener('click', () => showSettings(false));
 applySettings();
 let lastSpaceTap = 0;
-function toggleFly() { player.fly = !player.fly; player.vy = 0; }
+function toggleFly() { if (SURVIVAL) return; player.fly = !player.fly; player.vy = 0; }   // (no flying in survival)
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;      // typing a world name or seed
   // E opens/closes the inventory; while it's open, only the number keys (pick a slot) and Esc work
@@ -2696,14 +2733,122 @@ function nearestTorchGoal(m, range) {
   }
   return best;
 }
-// Game mode. Survival (health, taking damage) isn't built yet, so hostile mobs leave you alone for now.
-let gameMode = 'creative';
+// ---- Health (survival only; see gameMode) ----
+// 10 hearts, and each heart is split in quarters, so health goes from 0 to 40.
+// The hearts are your pictures in textures/gui/heart_atlas.png: the white ones are normal health.
+const MAX_HEALTH = 40;
+player.health = MAX_HEALTH;
+let hurtFlash = 0;
+// amount is in half hearts (a mob's damage: 3 = one and a half hearts). from = what hit you (knocks you away from it)
 function hurtPlayer(amount, from) {
-  if (gameMode !== 'survival') return;
-  // knocked back away from the attacker. (Health and dying come with survival mode.)
-  const d = Math.hypot(player.x - from.x, player.z - from.z) || 1;
-  player.vx += (player.x - from.x) / d * 7; player.vz += (player.z - from.z) / d * 7; player.vy = Math.max(player.vy, 5);
+  if (!SURVIVAL || player.dead) return;
+  if (!locked && !invOpen) return;   // nothing hurts you while the game is paused or in a menu
+  if (from) {
+    const d = Math.hypot(player.x - from.x, player.z - from.z) || 1;
+    player.vx += (player.x - from.x) / d * 7; player.vz += (player.z - from.z) / d * 7; player.vy = Math.max(player.vy, 5);
+  }
+  showChange(player.health, 'red');
+  player.health = Math.max(0, player.health - Math.round(amount * 2));
+  hurtFlash = 0.35;
+  drawHearts();
+  if (player.health <= 0) die();
 }
+function die() {
+  player.dead = true;
+  // everything you carried falls where you died (in a friend's world items live in their game, so you keep yours)
+  if (!Net.client) {
+    HOTBAR.forEach((id, i) => { for (let n = HOTBAR_COUNT[i]; n > 0; n--) dropItem(id, player.x, player.y + 1, player.z); HOTBAR[i] = 0; HOTBAR_COUNT[i] = 0; });
+    drawHotbarIcons(); selectSlot(selected);
+  }
+  document.getElementById('death-note').textContent = Net.client ? 'You kept your things.' : 'Your things are where you fell.';
+  if (invOpen) { invOpen = false; invEl.style.display = benchEl.style.display = 'none'; hotbarEl.classList.remove('open'); }
+  overlay.style.display = 'none';
+  document.getElementById('death').style.display = 'flex';
+  if (locked) document.exitPointerLock();
+}
+document.getElementById('respawn').addEventListener('click', () => {
+  // back at the world's starting spot (moved up if something was built there since)
+  let y = Math.ceil(SPAWN.y);
+  const x = Math.floor(SPAWN.x), z = Math.floor(SPAWN.z);
+  while (y < WY - 2 && (solid(x, y, z) || solid(x, y + 1, z))) y++;
+  Object.assign(player, { x: SPAWN.x, y, z: SPAWN.z, vx: 0, vy: 0, vz: 0, health: MAX_HEALTH, dead: false });
+  document.getElementById('death').style.display = 'none';
+  drawHearts();
+  play();
+});
+// Health never comes back on its own: you eat food (right-click while holding it) to heal.
+// food = how much it heals, in quarter hearts (8 = 2 hearts)
+function eat() {
+  const id = HOTBAR[selected], food = BLOCKS[id] && BLOCKS[id].food;
+  if (!SURVIVAL || !food || player.dead || player.health >= MAX_HEALTH) return false;
+  showChange(player.health, 'green');
+  player.health = Math.min(MAX_HEALTH, player.health + food);
+  if (--HOTBAR_COUNT[selected] <= 0) { HOTBAR[selected] = 0; HOTBAR_COUNT[selected] = 0; selectSlot(selected); }
+  drawHotbarIcons(); drawHearts();
+  return true;
+}
+function updateHealth(dt) {
+  if (!SURVIVAL || player.dead) return;
+  if (heartChange.time > 0 && (heartChange.time -= dt) <= 0) drawHearts();   // the red/green part turns back to normal
+  if (player.y < -20) hurtPlayer(99);   // fell out of the world
+}
+// For a moment after your health changes, the part that changed is a different colour:
+// red = what you just lost, green = what just came back. from = the health before the change.
+const heartChange = { from: 0, color: 'red', time: 0 };
+function showChange(from, color) {
+  // hit again while still red: keep the red reaching back to where it started
+  if (heartChange.time > 0 && heartChange.color === color && color === 'red') from = Math.max(from, heartChange.from);
+  if (heartChange.time > 0 && heartChange.color === color && color === 'green') from = Math.min(from, heartChange.from);
+  Object.assign(heartChange, { from, color, time: 0.8 });
+}
+const heartsEl = document.getElementById('hearts');
+const heartImg = new Image();
+// The atlas is a grid of 9x9 hearts, 10 pixels apart. Each heart picture is [column, row] in it.
+// White (normal health): 2nd row, columns 4-7 = full, 3/4, 1/2, 1/4. Red: 1st row and green: 4th row, columns 0-3 the same way.
+// The empty heart is the bottom-right one.
+const HEART_CELL = { white: q => [8 - q, 1], red: q => [4 - q, 0], green: q => [4 - q, 3], empty: () => [9, 9] };
+let whiteFillOnly = null;   // the white hearts with their dark outline and empty part cut out, to lay over a red/green one
+heartImg.onload = () => {
+  const c = document.createElement('canvas'); c.width = 40; c.height = 9;
+  const g = c.getContext('2d');
+  for (let q = 1; q <= 4; q++) { const [cx, cy] = HEART_CELL.white(q); g.drawImage(heartImg, cx * 10, cy * 10, 9, 9, (q - 1) * 10, 0, 9, 9); }
+  const d = g.getImageData(0, 0, 40, 9), p = d.data;
+  for (let k = 0; k < p.length; k += 4) if (p[k] < 20 && p[k + 1] < 20 && p[k + 2] < 20) p[k + 3] = 0;
+  g.putImageData(d, 0, 0);
+  whiteFillOnly = c;
+  drawHearts();
+};
+if ((window.TEXTURES || {})['gui/heart_atlas']) heartImg.src = TEXTURES['gui/heart_atlas'];
+function drawHearts() {
+  heartsEl.style.display = SURVIVAL ? 'block' : 'none';
+  if (!SURVIVAL || !whiteFillOnly) return;
+  const g = heartsEl.getContext('2d');
+  g.clearRect(0, 0, 99, 9);
+  const cell = (kind, q, i) => { const [cx, cy] = HEART_CELL[kind](q); g.drawImage(heartImg, cx * 10, cy * 10, 9, 9, i * 10, 0, 9, 9); };
+  // white up to `low`, then red or green up to `high` (just the normal hearts when nothing changed lately)
+  const changing = heartChange.time > 0;
+  const low = changing ? Math.min(player.health, heartChange.from) : player.health;
+  const high = changing ? Math.max(player.health, heartChange.from) : player.health;
+  for (let i = 0; i < 10; i++) {
+    const w = Math.max(0, Math.min(4, low - i * 4)), all = Math.max(0, Math.min(4, high - i * 4));
+    if (!all) cell('empty', 0, i);
+    else if (all === w) cell('white', w, i);
+    else {
+      cell(heartChange.color, all, i);   // the whole filled part in red/green...
+      if (w) g.drawImage(whiteFillOnly, (w - 1) * 10, 0, 9, 9, i * 10, 0, 9, 9);   // ...with the part you still have in white on top
+    }
+  }
+  layoutHearts();
+}
+// just above the hotbar's left end, at a whole-number size so the pixels stay sharp; the block name moves up above them
+function layoutHearts() {
+  if (!SURVIVAL) return;
+  const r = hotbarEl.getBoundingClientRect(), s = Math.max(1, Math.floor(r.width / 2 / 99));
+  const bottom = innerHeight - r.top + 4;
+  Object.assign(heartsEl.style, { width: 99 * s + 'px', height: 9 * s + 'px', left: r.left + 'px', bottom: bottom + 'px' });
+  nameEl.style.bottom = bottom + 9 * s + 8 + 'px';
+}
+addEventListener('resize', () => setTimeout(layoutHearts));
 // hue (optional, 0-360): recolour the skin, turning its main colour to this hue (used for player bodies)
 function mobTexture(key, hue) {
   const c = document.createElement('canvas'); c.width = c.height = 1;   // placeholder until the picture loads
@@ -3124,6 +3269,7 @@ function updateDrops(dt) {
 addEventListener('mousedown', e => {
   if (!locked) return;
   if (e.button === 0) { const m = mobInSights(); if (m) { hitMob(m); return; } }
+  if (e.button === 2 && eat()) return;   // holding food (survival): right-click eats it
   const hit = raycast();
   if (!hit) return;
   const hb = getBlock(hit.x, hit.y, hit.z);
@@ -3131,6 +3277,7 @@ addEventListener('mousedown', e => {
   if (e.button === 0 && hit.slot !== undefined) {
     const a = pieceMap.get(idx(hit.x, hit.y, hit.z));
     Sound.break(a ? a[hit.slot] : 3);
+    if (a) collect(PIECE_ITEM + a[hit.slot], hit.x, hit.y, hit.z);
     setPiece(hit.x, hit.y, hit.z, hit.slot, 0);
     mobNoise(hit.x, hit.y, hit.z);
     return;
@@ -3155,6 +3302,7 @@ addEventListener('mousedown', e => {
   }
   if (e.button === 0 && hit.y > 0) {
     Sound.break(hb);
+    collect(dropFor(hb), hit.x, hit.y, hit.z);
     if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1)); // take one torch off
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
     mobNoise(hit.x, hit.y, hit.z);
@@ -3163,7 +3311,7 @@ addEventListener('mousedown', e => {
   if (e.button === 2 && HOTBAR[selected] === TORCH) {
     // clicking a torch adds another one to that spot (up to 4 standing, 2 on a wall)
     if (isTorch(hb)) {
-      if (BLOCKS[hb].count < torchMax(BLOCKS[hb].wi)) { setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count + 1)); Sound.place(TORCH); mobNoise(hit.x, hit.y, hit.z); }
+      if (BLOCKS[hb].count < torchMax(BLOCKS[hb].wi)) { setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count + 1)); Sound.place(TORCH); mobNoise(hit.x, hit.y, hit.z); useOne(); }
       return;
     }
     // otherwise: on top of a block (standing) or on its side (leaning off the wall), never underneath
@@ -3177,6 +3325,7 @@ addEventListener('mousedown', e => {
     else return;
     Sound.place(TORCH);
     mobNoise(bx, by, bz);
+    useOne();
     return;
   }
   if (e.button === 2) {
@@ -3184,14 +3333,28 @@ addEventListener('mousedown', e => {
     const there = getBlock(bx, by, bz);
     if (there && !isWater(there)) return;   // don't overwrite a torch the ray passed by (water can be built over)
     const id = HOTBAR[selected];
-    if (id === WATER) { setBlock(bx, by, bz, WATER); Sound.pour(); mobNoise(bx, by, bz); return; }   // water can go anywhere, even where you stand
+    if (id === WATER) { setBlock(bx, by, bz, WATER); Sound.pour(); mobNoise(bx, by, bz); useOne(); return; }   // water can go anywhere, even where you stand
     const overlapsPlayer =
       bx < player.x + P_HALF && bx + 1 > player.x - P_HALF &&
       bz < player.z + P_HALF && bz + 1 > player.z - P_HALF &&
       by < player.y + P_H && by + 1 > player.y;
-    if (!overlapsPlayer) { setBlock(bx, by, bz, placeId(HOTBAR[selected])); Sound.place(HOTBAR[selected]); mobNoise(bx, by, bz); }
+    if (!overlapsPlayer) { setBlock(bx, by, bz, placeId(HOTBAR[selected])); Sound.place(HOTBAR[selected]); mobNoise(bx, by, bz); useOne(); }
   }
 });
+// survival: placing something uses one up from the selected slot
+function useOne() {
+  if (!SURVIVAL) return;
+  if (--HOTBAR_COUNT[selected] <= 0) { HOTBAR[selected] = 0; HOTBAR_COUNT[selected] = 0; selectSlot(selected); }
+  drawHotbarIcons();
+}
+// survival: what breaking a block gives you. Any of the 4 brick looks gives Bricks, a torch spot gives one torch,
+// water gives nothing.
+const dropFor = b => isTorch(b) ? TORCH : BRICK_VARIANTS.includes(b) ? BRICK_VARIANTS[0] : ITEMS.includes(b) && !isWater(b) ? b : 0;
+function collect(id, x, y, z) {
+  if (!SURVIVAL || !id || !BLOCKS[id]) return;
+  if (Net.client) { giveItem(id); return; }   // a friend's world: items on the ground live in their game, so it goes straight to your hotbar
+  dropItem(id, x + 0.5, y + 0.3, z + 0.5);
+}
 
 // ===================== Hotbar UI =====================
 const hotbarEl = document.getElementById('hotbar');
@@ -3218,7 +3381,7 @@ HOTBAR.forEach((id, i) => {
   // inventory open: click picks this slot, right-click empties it, drag moves/swaps, drop puts a block here
   slot.addEventListener('mousedown', e => {
     if (!invOpen) return;
-    if (e.button === 2) { setSlot(i, 0); return; }
+    if (e.button === 2) { if (SURVIVAL) throwSlot(i); else setSlot(i, 0); return; }
     selectSlot(i);
   });
   slot.draggable = true;
@@ -3229,7 +3392,7 @@ HOTBAR.forEach((id, i) => {
     const d = e.dataTransfer.getData('text/plain');
     if (d.startsWith('slot:')) {
       const j = +d.slice(5);
-      if (i !== j && HOTBAR[i] === HOTBAR[j] && isItem(HOTBAR[i])) {      // same item: stack them together
+      if (i !== j && HOTBAR[i] === HOTBAR[j] && counted(HOTBAR[i])) {      // same item: stack them together
         const moved = Math.min(HOTBAR_COUNT[j], stackMax(HOTBAR[i]) - HOTBAR_COUNT[i]);
         HOTBAR_COUNT[i] += moved; HOTBAR_COUNT[j] -= moved;
         if (!HOTBAR_COUNT[j]) HOTBAR[j] = 0;
@@ -3246,12 +3409,20 @@ HOTBAR.forEach((id, i) => {
 function drawHotbarIcons() {
   HOTBAR.forEach((id, i) => {
     drawIcon(hotbarIcons[i], id);
-    hotbarCounts[i].textContent = isItem(id) && !infinitePiece(id) && HOTBAR_COUNT[i] > 1 ? HOTBAR_COUNT[i] : '';
+    hotbarCounts[i].textContent = counted(id) && !infinitePiece(id) && HOTBAR_COUNT[i] > 1 ? HOTBAR_COUNT[i] : '';
   });
+}
+// survival: right-click a hotbar slot (inventory open) to throw that stack out in front of you
+function throwSlot(i) {
+  if (!HOTBAR[i]) return;
+  if (Net.client) { invName.textContent = "You can't throw things out in a friend's world yet"; return; }
+  const fx = player.x - Math.sin(player.yaw) * 1.2, fz = player.z - Math.cos(player.yaw) * 1.2;
+  for (let n = HOTBAR_COUNT[i]; n > 0; n--) Object.assign(dropItem(HOTBAR[i], fx, player.y + 1.2, fz), { age: -1 });   // (can't be picked straight back up)
+  setSlot(i, 0);
 }
 // in creative mode pieces are unlimited, like whole blocks (no count, never used up)
 const infinitePiece = id => isPiece(id) && gameMode !== 'survival';
-function setSlot(i, id, n = 1) { HOTBAR[i] = id; HOTBAR_COUNT[i] = isItem(id) ? n : 0; saveHotbar(); drawHotbarIcons(); if (i === selected) selectSlot(i); }
+function setSlot(i, id, n = 1) { HOTBAR[i] = id; HOTBAR_COUNT[i] = counted(id) ? n : 0; saveHotbar(); drawHotbarIcons(); if (i === selected) selectSlot(i); }
 // picking up an item: top up a stack of it, otherwise the first empty slot. Returns false if there's no room.
 function giveItem(id) {
   // creative mode: a piece already in the hotbar never runs out, so there's nothing to add
@@ -3259,8 +3430,9 @@ function giveItem(id) {
   let i = HOTBAR.findIndex((h, k) => h === id && HOTBAR_COUNT[k] < stackMax(id));
   if (i >= 0) { HOTBAR_COUNT[i]++; saveHotbar(); drawHotbarIcons(); return true; }
   i = HOTBAR.indexOf(0);
-  // no empty slot: take over the right-most block slot (blocks can always be picked again from the inventory)
-  if (i < 0) for (let k = HOTBAR.length - 1; k >= 0; k--) if (!isItem(HOTBAR[k])) { i = k; break; }
+  // no empty slot: take over the right-most block slot (blocks can always be picked again from the inventory).
+  // Not in survival, where blocks are things you collected.
+  if (i < 0 && !SURVIVAL) for (let k = HOTBAR.length - 1; k >= 0; k--) if (!isItem(HOTBAR[k])) { i = k; break; }
   if (i < 0) return false;
   setSlot(i, id, 1);
   return true;
@@ -3284,6 +3456,11 @@ INV_LIST.forEach(id => {
   slot.addEventListener('mouseleave', () => { invName.textContent = ''; });
   invGrid.append(slot);
 });
+// survival: no picking blocks from a list; you only have what's in your hotbar
+if (SURVIVAL) {
+  invGrid.style.display = 'none';
+  document.getElementById('inv-hint').textContent = 'Survival: break blocks to collect them · drag hotbar slots to move or stack them · right-click a hotbar slot to throw it out · E to close';
+}
 // ===================== Crafting Bench (right-click one) =====================
 // Pick a block to put on the bench; it splits into 8 pieces, which you click to take into your hotbar.
 const benchEl = document.getElementById('bench'), benchName = document.getElementById('bench-name');
@@ -3314,6 +3491,15 @@ document.getElementById('bench-out').addEventListener('click', () => {
   if (!benchBlock) return;
   const piece = PIECE_ITEM + benchBlock;
   let n = 0;
+  if (SURVIVAL) {
+    // uses up one of that block from your hotbar, and needs room for all 8 pieces
+    const s = HOTBAR.indexOf(benchBlock);
+    if (s < 0) { benchName.textContent = `You need a ${BLOCKS[benchBlock].name} block in your hotbar`; return; }
+    let room = 0;
+    HOTBAR.forEach((id, k) => { room += !id || (k === s && HOTBAR_COUNT[k] === 1) ? STACK_MAX : id === piece ? STACK_MAX - HOTBAR_COUNT[k] : 0; });
+    if (room < 8) { benchName.textContent = 'No room in your hotbar for 8 pieces'; return; }
+    if (--HOTBAR_COUNT[s] <= 0) { HOTBAR[s] = 0; HOTBAR_COUNT[s] = 0; }
+  }
   if (infinitePiece(piece)) n = giveItem(piece) ? 1 : 0;   // creative: one slot that never runs out
   else for (let k = 0; k < 8; k++) if (giveItem(piece)) n++;
   benchName.textContent = !n ? 'No room in your hotbar' : infinitePiece(piece) ? `${BLOCKS[benchBlock].name} Pieces are in your hotbar` : `Took ${n} ${BLOCKS[benchBlock].name} Pieces`;
@@ -3355,7 +3541,7 @@ function gatherSave() {
     version: 1, seed, savedAt: Date.now(),
     idxs: idxs.buffer, ids: ids.buffer,
     pieces: gatherPieces(),
-    player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly },
+    player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health },
     time: timeOfDay,
     hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), selected,
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health })),
@@ -3420,10 +3606,11 @@ function applyEdits(idxs, ids) {
 function applyPlayerSave(s) {
   // you
   const p = s.player || {};
-  if (isFinite(p.x)) Object.assign(player, { x: p.x, y: p.y, z: p.z, yaw: p.yaw || 0, pitch: p.pitch || 0, fly: !!p.fly, vx: 0, vy: 0, vz: 0 });
+  if (isFinite(p.x)) Object.assign(player, { x: p.x, y: p.y, z: p.z, yaw: p.yaw || 0, pitch: p.pitch || 0, fly: !!p.fly && !SURVIVAL, vx: 0, vy: 0, vz: 0 });
+  if (p.health > 0) { player.health = Math.min(MAX_HEALTH, p.health); drawHearts(); }
   if (isFinite(s.time)) timeOfDay = s.time;
   if (Array.isArray(s.hotbar) && s.hotbar.length === 10) {
-    s.hotbar.forEach((id, i) => { HOTBAR[i] = id === 0 || ITEMS.includes(id) || isItem(id) ? id : 0; HOTBAR_COUNT[i] = isItem(HOTBAR[i]) ? Math.max(1, (s.counts || [])[i] | 0) : 0; });
+    s.hotbar.forEach((id, i) => { HOTBAR[i] = id === 0 || ITEMS.includes(id) || isItem(id) ? id : 0; HOTBAR_COUNT[i] = counted(HOTBAR[i]) ? Math.max(1, (s.counts || [])[i] | 0) : 0; });
     drawHotbarIcons();
     selectSlot(Math.min(9, Math.max(0, s.selected | 0)));
   }
@@ -3611,7 +3798,7 @@ addEventListener('pagehide', () => autoSave());
     const f = friends.get(conn.peer);
     if (f) f.seen = performance.now();
     if (d.t === 'hello') {          // someone checking which world this is, before they load it
-      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, host: myName });
+      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, mode: gameMode, host: myName });
     } else if (d.t === 'join') {
       if (d.ver !== GAME_VERSION) { conn.send({ t: 'refuse', why: `You need the same version of the game. They have ${GAME_VERSION}, you have ${d.ver}.` }); return; }
       const used = new Set([HUES[0], ...[...friends.values()].map(x => x.hue)]);
@@ -3675,7 +3862,7 @@ addEventListener('pagehide', () => autoSave());
         if (d.ver !== GAME_VERSION) return fail(`${d.host} is playing version ${d.ver}, and you have ${GAME_VERSION}. You both need the same version.`);
         clearTimeout(joinTimeout); done = true;
         status('Joining...');
-        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, host: d.host })); } catch (e) {}
+        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, mode: d.mode, host: d.host })); } catch (e) {}
         p.destroy();
         await saveBeforeLeaving();
         location.hash = 'join=' + code;
@@ -3907,7 +4094,7 @@ function showWorlds(open) {
     const row = document.createElement('div'); row.className = 'world-row';
     const info = document.createElement('div');
     const nm = document.createElement('div'); nm.className = 'wname'; nm.textContent = w.name + (w.id === Worlds.current.id ? '  (open now)' : '');
-    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 2 ? 'Rolling hills' : 'Plateaus'}${w.ver ? ` · v${w.ver}` : ''}`;
+    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 2 ? 'Rolling hills' : 'Plateaus'} · ${w.mode === 'survival' ? 'Survival' : 'Creative'}${w.ver ? ` · v${w.ver}` : ''}`;
     info.append(nm, sub);
     const playBtn = document.createElement('button'); playBtn.textContent = 'Play';
     playBtn.onclick = async () => {
@@ -3927,7 +4114,7 @@ document.getElementById('mm-single').addEventListener('click', () => showWorlds(
 document.getElementById('mm-multi').addEventListener('click', () => document.getElementById('multi-btn').click());
 document.getElementById('worlds-close').addEventListener('click', () => showWorlds(false));
 document.getElementById('new-create').addEventListener('click', async () => {
-  const w = Worlds.create(document.getElementById('new-name').value, document.getElementById('new-seed').value, +document.getElementById('new-gen').value);
+  const w = Worlds.create(document.getElementById('new-name').value, document.getElementById('new-seed').value, +document.getElementById('new-gen').value, document.getElementById('new-mode').value);
   await saveBeforeLeaving();
   Worlds.open(w.id);
 });
@@ -3939,6 +4126,8 @@ const infoEl = document.getElementById('info');
 const underwaterEl = document.createElement('div');
 underwaterEl.style.cssText = 'position:fixed;inset:0;pointer-events:none;background:rgba(20,70,190,0.28);display:none';
 renderer.domElement.after(underwaterEl);   // just above the game picture, under the hotbar and menus
+const hurtEl = document.createElement('div'); hurtEl.id = 'hurt';   // red flash when you get hurt (survival)
+underwaterEl.after(hurtEl);
 let last = performance.now(), fpsAcc = 0, fpsFrames = 0, fps = 0, stepDistance = 0, swimDistance = 0, fallSpeed = 0;
 function frame(now) {
   requestAnimationFrame(frame);
@@ -4008,6 +4197,8 @@ function frame(now) {
   }
   if (player.onGround && !player.fly && !swimming) {
     if (!wasOnGround && player.impact > 5) Sound.land(blockUnderPlayer(), player.impact);
+    // survival: falling more than 3 blocks hurts, half a heart for each block past that (landing in water is safe)
+    if (!wasOnGround) { const fell = player.impact * player.impact / 56; if (fell > 3.5) hurtPlayer(Math.floor(fell - 3)); }
     stepDistance += Math.hypot(player.x - prevX, player.z - prevZ);
     if (stepDistance > 1.7) { stepDistance = 0; Sound.step(blockUnderPlayer()); }
   }
@@ -4018,6 +4209,8 @@ function frame(now) {
   updateMobs(dt);
   updateDrops(dt);
   updateWater(dt);
+  updateHealth(dt);
+  if (hurtFlash > 0 || hurtEl.style.opacity !== '0') { hurtFlash = Math.max(0, hurtFlash - dt); hurtEl.style.opacity = String(Math.min(1, hurtFlash / 0.2)); }
   Net.update(dt);
   // the further you are from open sky, the darker the haze, until it's black (no glowing fog deep underground)
   camSkyTimer -= dt;

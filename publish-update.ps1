@@ -1,7 +1,8 @@
 # Publishes a new version of Cubeland to the web (GitHub Pages). Run it by double-clicking publish-update.bat.
 #
-# Each update is numbered by the date and time it's published (24-hour clock): YY.MM.DD.HHMM.
-#   An update at 4:08 pm on 14 November 2026 is 26.11.14.1608. (The first three versions used an older style, 26.11.14_1 to _3.)
+# You name each update's version when you publish (e.g. Alpha 0.0.1.1). Press Enter instead to use the date and time
+#   it's published (24-hour clock), YY.MM.DD.HHMM: 4:08 pm on 14 November 2026 is 26.11.14.1608. That was the style
+#   before Alpha 0.0.1.0 (and the first three versions used 26.11.14_1 to _3).
 # The newest version is what players get at the main link (the next time they refresh, after a minute or two).
 # A copy of every version is kept in versions\<number>\, and versions.html lists them all so people can still play old ones.
 $ErrorActionPreference = 'Stop'
@@ -20,14 +21,22 @@ if (-not (git status --porcelain)) {
   exit
 }
 
-# the version number: today's date and the time right now (24-hour clock), YY.MM.DD.HHMM
-# e.g. 4:08 pm on 14 November 2026 = 26.11.14.1608 (9:05 am = 26.11.14.905)
+# the version: the name you give it (like Alpha 0.0.1.1), or, if you just press Enter, today's date and the time
+# right now (24-hour clock), YY.MM.DD.HHMM, e.g. 4:08 pm on 14 November 2026 = 26.11.14.1608 (9:05 am = 26.11.14.905)
 $listFile = "$PSScriptRoot\versions.json"
 $list = @()
 if (Test-Path $listFile) { foreach ($v in (ConvertFrom-Json ([IO.File]::ReadAllText($listFile)))) { $list += $v } }
-$now = Get-Date
-$ver = $now.ToString('yy.MM.dd') + '.' + [int]$now.ToString('HHmm')
-if ($list | Where-Object { $_.version -eq $ver }) { throw "Version $ver was already published this minute. Wait a minute and run this again." }
+$ver = if ($env:CUBELAND_VERSION) { $env:CUBELAND_VERSION } else {   # (CUBELAND_VERSION is set when Claude publishes for you)
+  Write-Host ''
+  Write-Host "Last version: $(if ($list.Count) { $list[0].version } else { 'none' })"
+  Read-Host 'Version for this update (e.g. Alpha 0.0.1.1), or press Enter to use the date and time'
+}
+$ver = "$ver".Trim()
+if (-not $ver) { $now = Get-Date; $ver = $now.ToString('yy.MM.dd') + '.' + [int]$now.ToString('HHmm') }
+if ($ver -match "[^A-Za-z0-9 ._-]") { throw "A version can only have letters, numbers, spaces, dots, dashes and underscores." }
+if ($list | Where-Object { $_.version -eq $ver }) { throw "Version $ver was already published. Pick another version and run this again." }
+# its folder in versions\ (and its tag): lower case with dashes for spaces, so "Alpha 0.0.1.0" is alpha-0.0.1.0
+$folder = ($ver.ToLower() -replace '\s+', '-')
 
 # the change log for this version: the list in next-changes.txt (Claude adds a line there for each change we make),
 # or one you type in now. Players see it in the game's "What's new" and on the All versions page.
@@ -57,14 +66,14 @@ $m = [regex]::Match($html, "const GAME_VERSION = '[^']*';")
 if (-not $m.Success) { throw 'Could not find GAME_VERSION in index.html' }
 $html = $html.Remove($m.Index, $m.Length).Insert($m.Index, "const GAME_VERSION = '$ver';")
 # tag textures.js with the version too, so browsers load the new letters/textures instead of an old saved copy
-$html = [regex]::Replace($html, 'src="textures\.js(\?v=[^"]*)?"', "src=`"textures.js?v=$ver`"")
+$html = [regex]::Replace($html, 'src="textures\.js(\?v=[^"]*)?"', "src=`"textures.js?v=$folder`"")
 [IO.File]::WriteAllText("$PSScriptRoot\index.html", $html, $utf8)
-$dir = "$PSScriptRoot\versions\$ver"
+$dir = "$PSScriptRoot\versions\$folder"
 New-Item -ItemType Directory -Force $dir | Out-Null
 Copy-Item "$PSScriptRoot\index.html", "$PSScriptRoot\textures.js" $dir -Force
 
 # add it to the top of the list of versions
-$entry = [pscustomobject]@{ version = $ver; date = (Get-Date -Format 'yyyy-MM-dd'); notes = $notes; changes = [object[]]$changes }
+$entry = [pscustomobject]@{ version = $ver; folder = $folder; date = (Get-Date -Format 'yyyy-MM-dd'); notes = $notes; changes = [object[]]$changes }
 $list = @($entry) + @($list | Where-Object { $_.version -ne $ver })
 $json = ConvertTo-Json -InputObject $list -Depth 4
 [IO.File]::WriteAllText($listFile, $json, $utf8)
@@ -80,7 +89,7 @@ $trailer = if ($env:CUBELAND_COMMIT_TRAILER) { "`n$env:CUBELAND_COMMIT_TRAILER`n
 git add -A
 git commit -q -F $msgFile
 if ($LASTEXITCODE) { throw 'Saving the update failed (git commit). Nothing was uploaded.' }
-git tag "v$ver"
+git tag "v$folder"
 Write-Host 'Uploading...'
 git push -q
 if ($LASTEXITCODE) { throw 'Uploading failed (git push). Check your internet connection and run this again.' }

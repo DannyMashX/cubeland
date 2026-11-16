@@ -48,7 +48,7 @@ new Promise((res, rej) => {
     const date = document.createElement('div'); date.className = 'date'; date.textContent = v.date || '';
     info.append(name, notes, date);
     const a = document.createElement('a'); a.className = 'play'; a.textContent = 'Play';
-    a.href = i === 0 ? 'index.html' : `versions/${v.version}/index.html`;
+    a.href = i === 0 ? 'index.html' : `versions/${v.folder || v.version}/index.html`;   // (folder: named versions like Alpha 0.0.1.0 live in alpha-0.0.1.0)
     row.append(info, a);
     el.append(row);
   });

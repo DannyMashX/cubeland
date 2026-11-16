@@ -1,5 +1,20 @@
 [
     {
+        "version":  "Alpha 0.0.1.0",
+        "folder":  "alpha-0.0.1.0",
+        "date":  "2026-11-15",
+        "notes":  "New: Survival mode (pick Creative or Survival when you make a new world)",
+        "changes":  [
+                        "New: Survival mode (pick Creative or Survival when you make a new world)",
+                        "Survival: no flying, you start with nothing, and breaking a block drops it for you to pick up; placing uses it up",
+                        "Survival: 10 hearts of health; falls and Grr Angry hurt you, and dying drops everything you carry",
+                        "Survival: health doesn\u0027t come back on its own; right-click with chocolate to eat it (2 hearts)",
+                        "Hearts flash red for health you lose and green for health you get back",
+                        "Survival: the Crafting Bench uses up one block from your hotbar for 8 pieces; right-click a hotbar slot in the inventory to throw it out",
+                        "Versions now have names, starting with this one: Alpha 0.0.1.0"
+                    ]
+    },
+    {
         "version":  "26.11.15.1936",
         "date":  "2026-11-15",
         "notes":  "Save world button on the pause screen",
