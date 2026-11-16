@@ -1,5 +1,14 @@
 [
     {
+        "version":  "26.11.15.1930",
+        "date":  "2026-11-15",
+        "notes":  "New items: a stick and wooden and stone tools (axe, pickaxe, shovel, sword and hoe), in the inventory",
+        "changes":  [
+                        "New items: a stick and wooden and stone tools (axe, pickaxe, shovel, sword and hoe), in the inventory",
+                        "Swords hit mobs harder (wooden 2, stone 3), and so do axes a little; tools don\u0027t stack"
+                    ]
+    },
+    {
         "version":  "26.11.15.1653",
         "date":  "2026-11-15",
         "notes":  "Volume sliders in Settings: master, blocks, player, mobs and music",

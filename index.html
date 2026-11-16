@@ -259,14 +259,14 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=26.11.15.1653"></script>
+<script src="textures.js?v=26.11.15.1930"></script>
 <script>
 // ===================== Version =====================
 // The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.15.1653';
+const GAME_VERSION = '26.11.15.1930';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -337,6 +337,21 @@ const wallIndex = (dx, dz) => TORCH_WALLS.findIndex(w => w && w[0] === dx && w[1
 const CHOCOLATE = 200;
 BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true };
 const isItem = id => !!(BLOCKS[id] && BLOCKS[id].item);
+// Stick and tools (ids 201-211), from your pictures in textures/items. Tools don't stack.
+// damage = how much a hit takes off a mob (a hand or any other item does 1)
+const STICK = 201;
+BLOCKS[STICK] = { name: 'Stick', t: [32, 32, 32], item: true };
+const TOOLS = [];
+[['wood', 'Wooden', 33, 2], ['stone', 'Stone', 38, 3]].forEach(([key, label, tile, swordDamage]) => {
+  ['Axe', 'Pickaxe', 'Shovel', 'Sword', 'Hoe'].forEach((kind, k) => {
+    const id = 202 + TOOLS.length;
+    BLOCKS[id] = { name: `${label} ${kind}`, t: [tile + k, tile + k, tile + k], item: true, tool: kind.toLowerCase(), material: key,
+      damage: kind === 'Sword' ? swordDamage : kind === 'Axe' ? swordDamage - 1 : 1 };
+    TOOLS.push(id);
+  });
+});
+const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
+const stackMax = id => isTool(id) ? 1 : STACK_MAX;
 const BRICK_VARIANTS = [12, 13, 14, 15];
 // ---- Pieces: every cube block can be split into 8 pieces (an eighth of a block each: half as wide, tall and deep)
 // at the Crafting Bench. Pieces are placed one at a time, and one block space can hold pieces of different blocks.
@@ -376,7 +391,7 @@ const placeId = id => BRICK_VARIANTS.includes(id) ? BRICK_VARIANTS[Math.floor(Ma
 let selected = 0;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 32;
+const TILE = 16, NT = 48;   // the texture atlas holds 48 pictures side by side (32+ are the stick and tools)
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -453,6 +468,8 @@ const TEXTURE_SLOTS = {
   torch_side: 23, torch_top: 24, torch_bottom: 25, tortch_side: 23, tortch_top: 24, tortch_bottom: 25,
   chocolate: 26, water: 27,
   crafting_bench_side: 28, crafting_bench_top: 29, stripped_log_side: 30, stripped_log_top: 31,
+  stick: 32, wood_axe: 33, wood_pickaxe: 34, wood_shovel: 35, wood_sword: 36, wood_hoe: 37,
+  stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
 };
 function loadCustomTextures(onDone) {
   const entries = Object.entries(window.TEXTURES || {}).filter(([name]) => name in TEXTURE_SLOTS);
@@ -2994,7 +3011,9 @@ function hitMob(m, from = player) {
   if (Net.client) { Net.hitMob(m); m.hurt = 0.3; return; }   // joined game: tell the host's game, which does the rest
   const d = Math.hypot(m.x - from.x, m.z - from.z) || 1;
   m.vx = (m.x - from.x) / d * 6; m.vz = (m.z - from.z) / d * 6; m.vy = 5;
-  m.hurt = 0.3; m.health--;
+  // a sword (or axe) hits harder; friends' hits in a hosted game count as 1
+  const held = from === player ? BLOCKS[HOTBAR[selected]] : null;
+  m.hurt = 0.3; m.health -= (held && held.damage) || 1;
   if (!MOB_TYPES[m.type].hostile) m.flee = 4;   // peaceful mobs run off; hostile ones don't back down
   if (MOB_TYPES[m.type].growl) { mobGrowl(m); m.growlIn = 4 + Math.random() * 6; }   // growls when hit
   if (m.health <= 0) {
@@ -3181,7 +3200,7 @@ HOTBAR.forEach((id, i) => {
     if (d.startsWith('slot:')) {
       const j = +d.slice(5);
       if (i !== j && HOTBAR[i] === HOTBAR[j] && isItem(HOTBAR[i])) {      // same item: stack them together
-        const moved = Math.min(HOTBAR_COUNT[j], STACK_MAX - HOTBAR_COUNT[i]);
+        const moved = Math.min(HOTBAR_COUNT[j], stackMax(HOTBAR[i]) - HOTBAR_COUNT[i]);
         HOTBAR_COUNT[i] += moved; HOTBAR_COUNT[j] -= moved;
         if (!HOTBAR_COUNT[j]) HOTBAR[j] = 0;
       } else {
@@ -3207,7 +3226,7 @@ function setSlot(i, id, n = 1) { HOTBAR[i] = id; HOTBAR_COUNT[i] = isItem(id) ? 
 function giveItem(id) {
   // creative mode: a piece already in the hotbar never runs out, so there's nothing to add
   if (infinitePiece(id) && HOTBAR.includes(id)) return true;
-  let i = HOTBAR.findIndex((h, k) => h === id && HOTBAR_COUNT[k] < STACK_MAX);
+  let i = HOTBAR.findIndex((h, k) => h === id && HOTBAR_COUNT[k] < stackMax(id));
   if (i >= 0) { HOTBAR_COUNT[i]++; saveHotbar(); drawHotbarIcons(); return true; }
   i = HOTBAR.indexOf(0);
   // no empty slot: take over the right-most block slot (blocks can always be picked again from the inventory)
@@ -3221,7 +3240,7 @@ function giveItem(id) {
 const invEl = document.getElementById('inventory'), invGrid = document.getElementById('inv-grid'), invName = document.getElementById('inv-name');
 const invIcons = [];
 // creative mode: every block's pieces can be picked here too (after the blocks)
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : SPLITTABLE.map(b => PIECE_ITEM + b));
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ...TOOLS, ...SPLITTABLE.map(b => PIECE_ITEM + b)]);
 INV_LIST.forEach(id => {
   const slot = document.createElement('div');
   slot.className = 'slot';
