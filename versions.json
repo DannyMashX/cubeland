@@ -1,5 +1,14 @@
 [
     {
+        "version":  "Alpha 0.0.4.3",
+        "folder":  "alpha-0.0.4.3",
+        "date":  "2026-11-16",
+        "notes":  "Creative inventory now has tabs: Building Blocks, Natural Blocks and Items",
+        "changes":  [
+                        "Creative inventory now has tabs: Building Blocks, Natural Blocks and Items"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.4.2",
         "folder":  "alpha-0.0.4.2",
         "date":  "2026-11-16",

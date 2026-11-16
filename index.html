@@ -191,6 +191,7 @@
 <div id="inventory">
   <div class="panel">
     <h2>Inventory</h2>
+    <div id="inv-tabs" class="bench-modes"></div>
     <div id="inv-grid"></div>
     <div id="inv-variants" style="display:none"></div>
     <div id="inv-name"></div>
@@ -330,7 +331,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.4.2"></script>
+<script src="textures.js?v=alpha-0.0.4.3"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -338,7 +339,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.4.2';
+const GAME_VERSION = 'Alpha 0.0.4.3';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -3725,6 +3726,7 @@ function invSlot(id, parent) {
 }
 function showVariants(b, plus) {
   if (openPlus) openPlus.textContent = '+';
+  if (!b) { openVariants = 0; openPlus = null; invVariants.textContent = ''; invVariants.style.display = 'none'; return; }
   invVariants.textContent = '';
   if (openVariants === b || !b) { openVariants = 0; openPlus = null; invVariants.style.display = 'none'; return; }
   openVariants = b; openPlus = plus; plus.textContent = '−';
@@ -3733,17 +3735,41 @@ function showVariants(b, plus) {
   for (const id of [b, ...variantsOf(b)]) invSlot(id, invVariants);
   invVariants.style.display = '';
 }
+// the tabs along the top of the creative inventory (anything not listed goes in Building Blocks)
+const INV_TABS = [
+  ['Building Blocks', [7, 61, 8, 9, 12, 64, 65, 66, 67, 68, 69, 10, 22, CRAFTING_BENCH, FURNACE]],
+  ['Natural Blocks', [1, 2, 3, 4, 5, 6, 11, 63, WATER]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, CRUDE_AXE, ...TOOLS]],
+];
+const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
+let invTab = 0;
+const invTabsEl = document.getElementById('inv-tabs');
+INV_TABS.forEach(([name], k) => {
+  const b = document.createElement('button'); b.textContent = name;
+  b.addEventListener('click', () => showInvTab(k));
+  invTabsEl.append(b);
+});
+function showInvTab(k) {
+  invTab = k;
+  [...invTabsEl.children].forEach((b, j) => b.classList.toggle('on', j === k));
+  for (const s of invGrid.children) s.style.display = +s.dataset.tab === k ? '' : 'none';
+  showVariants(0);   // (close any open row of forms)
+}
+// each tab lists its blocks in the order above
+INV_LIST.sort((a, b) => tabOf(a) - tabOf(b) || INV_TABS[tabOf(a)][1].indexOf(a) - INV_TABS[tabOf(b)][1].indexOf(b));
 INV_LIST.forEach(id => {
   const slot = invSlot(id, invGrid);
+  slot.dataset.tab = tabOf(id);
   if (!variantsOf(id).length) return;
   const plus = document.createElement('button'); plus.className = 'plus'; plus.textContent = '+'; plus.title = 'Show the other forms';
   plus.addEventListener('click', e => { e.stopPropagation(); showVariants(id, plus); });
   plus.addEventListener('mousedown', e => e.stopPropagation());
   slot.append(plus);
 });
+showInvTab(0);
 // survival: no picking blocks from a list; you only have what's in your hotbar
 if (SURVIVAL) {
-  invGrid.style.display = 'none';
+  invGrid.style.display = invTabsEl.style.display = 'none';
   document.getElementById('inv-hint').textContent = 'Survival: break blocks to collect them · click a recipe to craft it (tools need a Crafting Bench) · drag hotbar slots to move or stack them · right-click a hotbar slot to throw it out · E to close';
 }
 // ===================== Crafting Bench (right-click one) =====================
