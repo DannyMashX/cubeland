@@ -1,5 +1,15 @@
 [
     {
+        "version":  "Alpha 0.0.4.2",
+        "folder":  "alpha-0.0.4.2",
+        "date":  "2026-11-16",
+        "notes":  "New: Vertical Stairs (a block with one standing corner missing, which faces you when you place it) and Vertical Quarters (2 pieces standing up) for every block. Cut them at the Crafting Bench, or find them under the + in creative",
+        "changes":  [
+                        "New: Vertical Stairs (a block with one standing corner missing, which faces you when you place it) and Vertical Quarters (2 pieces standing up) for every block. Cut them at the Crafting Bench, or find them under the + in creative",
+                        "A Vertical Quarter fills the gap in Vertical Stairs; Quarters now always lie down"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.4.1",
         "folder":  "alpha-0.0.4.1",
         "date":  "2026-11-16",

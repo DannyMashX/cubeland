@@ -330,7 +330,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.4.1"></script>
+<script src="textures.js?v=alpha-0.0.4.2"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -338,7 +338,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.4.1';
+const GAME_VERSION = 'Alpha 0.0.4.2';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -506,13 +506,17 @@ const SHAPE_MASKS = {
   vslab:  [0x55, 0xAA, 0x0F, 0xF0],           // x low, x high, z low, z high
   stairs: [0x33 | 0x44, 0x33 | 0x88, 0x33 | 0x0C, 0x33 | 0xC0,   // step on the x low / x high / z low / z high side
            0xCC | 0x11, 0xCC | 0x22, 0xCC | 0x03, 0xCC | 0x30],  // upside down
-  // a quarter: 2 pieces side by side (a quarter of a block), e.g. the gap that makes stairs a whole block
-  quarter: [0x03, 0x0C, 0x30, 0xC0, 0x05, 0x0A, 0x50, 0xA0, 0x11, 0x22, 0x44, 0x88],   // along x, along y, along z
+  // vertical stairs: a whole block with one standing quarter (a corner column) missing
+  vstairs: [0xFF ^ 0x05, 0xFF ^ 0x0A, 0xFF ^ 0x50, 0xFF ^ 0xA0],   // missing the column at x low z low, x high z low, x low z high, x high z high
+  // a quarter: 2 pieces side by side, lying down (a quarter of a block), e.g. the gap that makes stairs a whole block
+  quarter: [0x03, 0x0C, 0x30, 0xC0, 0x11, 0x22, 0x44, 0x88],   // along x, along z
+  // a vertical quarter: 2 pieces standing one on the other, e.g. the gap in vertical stairs
+  vquarter: [0x05, 0x0A, 0x50, 0xA0],
 };
 const shapeOfMask = m => Object.keys(SHAPE_MASKS).find(k => SHAPE_MASKS[k].includes(m)) || null;
 // the items: id = SHAPE_ITEM[shape] + block (Stone Slab = 1003)
-const SHAPE_ITEM = { slab: 1000, vslab: 1100, stairs: 1200, quarter: 1300 };
-const SHAPE_NAME = { slab: 'Slab', vslab: 'Vertical Slab', stairs: 'Stairs', quarter: 'Quarter' };
+const SHAPE_ITEM = { slab: 1000, vslab: 1100, stairs: 1200, quarter: 1300, vstairs: 1400, vquarter: 1500 };
+const SHAPE_NAME = { slab: 'Slab', vslab: 'Vertical Slab', stairs: 'Stairs', quarter: 'Quarter', vstairs: 'Vertical Stairs', vquarter: 'Vertical Quarter' };
 for (const b of SPLITTABLE) for (const k in SHAPE_ITEM)
   BLOCKS[SHAPE_ITEM[k] + b] = { name: `${BLOCKS[b].name} ${SHAPE_NAME[k]}`, t: BLOCKS[b].t, item: true, form: k, of: b };
 const formOf = id => BLOCKS[id] && BLOCKS[id].form;
@@ -3527,13 +3531,14 @@ function placeShape(hit) {
   const upper = frac(p[1]) >= 0.5;
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), alongX = Math.abs(fx) > Math.abs(fz);   // the way you face
   let mask;
-  if (form === 'quarter') {
-    // the half-block spot in front of where you aim (like a piece), plus the one next to it: lying across your view
-    // if there's room, otherwise the other way, otherwise standing up (so it can fill the gap in stairs)
+  if (form === 'quarter' || form === 'vquarter') {
+    // the half-block spot in front of where you aim (like a piece), plus the one next to it: a quarter lies across
+    // your view if there's room, otherwise the other way (so it can fill the gap in stairs); a vertical quarter
+    // stands up, with the spot above or below
     const hp = [0, 1, 2].map(k => Math.floor((hit.pt[k] + hit.n[k] * 0.25) * 2));
     const qx = Math.floor(hp[0] / 2), qy = Math.floor(hp[1] / 2), qz = Math.floor(hp[2] / 2);
     const s = (hp[0] - 2 * qx) + (hp[1] - 2 * qy) * 2 + (hp[2] - 2 * qz) * 4;
-    for (const bit of alongX ? [4, 1, 2] : [1, 4, 2]) {
+    for (const bit of form === 'vquarter' ? [2] : alongX ? [4, 1] : [1, 4]) {
       const m = (1 << s) | (1 << (s ^ bit));
       if (!shapeFits(qx, qy, qz, m)) continue;
       if (!setSpots(qx, qy, qz, m, of)) continue;
@@ -3547,6 +3552,9 @@ function placeShape(hit) {
     const onX = hit.n[1] === 0 ? hit.n[0] !== 0 : alongX;
     const high = frac(onX ? p[0] : p[2]) >= 0.5;
     mask = onX ? (high ? 0xAA : 0x55) : (high ? 0xF0 : 0x0F);
+  } else if (form === 'vstairs') {   // vertical stairs: the missing corner faces you
+    const lowX = player.x < x + 0.5, lowZ = player.z < z + 0.5;
+    mask = SHAPE_MASKS.vstairs[(lowX ? 0 : 1) + (lowZ ? 0 : 2)];
   } else {   // stairs: the step goes on the far side from you
     const side = alongX ? (fx > 0 ? 1 : 0) : (fz > 0 ? 3 : 2);   // x low, x high, z low, z high
     mask = SHAPE_MASKS.stairs[side + (upper ? 4 : 0)];
@@ -3611,6 +3619,8 @@ function drawIcon(canvas, id) {
     const sx = BLOCKS[id].t[0] * TILE, h = TILE / 2, form = formOf(id);
     if (form === 'vslab') ctx.drawImage(atlas, sx, 0, h, TILE, 0, 0, h, TILE);
     else if (form === 'quarter') ctx.drawImage(atlas, sx, h, TILE, h / 2 + 2, 0, h - 2, TILE, h / 2 + 2);   // a thin bar
+    else if (form === 'vquarter') ctx.drawImage(atlas, sx + h - 3, 0, h / 2 + 2, TILE, h - 3, 0, h / 2 + 2, TILE);   // a standing bar
+    else if (form === 'vstairs') { ctx.drawImage(atlas, sx, 0, h, TILE, 0, 0, h, TILE); ctx.drawImage(atlas, sx + h, h, h, h, h, h, h, h); }   // tall half + a corner
     else ctx.drawImage(atlas, sx, h, TILE, h, 0, h, TILE, h);                   // the bottom half...
     if (form === 'stairs') ctx.drawImage(atlas, sx + h, 0, h, h, h, 0, h, h);  // ...plus the step
   }
@@ -3694,7 +3704,8 @@ const invIcons = [];
 // click the + to see them all in a row underneath.
 const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, ...TOOLS]);
 const variantsOf = b => SPLITTABLE.includes(b)
-  ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.vslab + b, SHAPE_ITEM.quarter + b] : [];
+  ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.quarter + b,
+     SHAPE_ITEM.vslab + b, SHAPE_ITEM.vstairs + b, SHAPE_ITEM.vquarter + b] : [];
 const invVariants = document.getElementById('inv-variants');
 let openVariants = 0, openPlus = null;
 function invSlot(id, parent) {
@@ -3762,6 +3773,8 @@ const BENCH_MODES = {
   vslab: ['2 Vertical Slabs', SHAPE_ITEM.vslab, 1, 2],
   stairs: ['4 Stairs (from 3 blocks)', SHAPE_ITEM.stairs, 3, 4],
   quarter: ['4 Quarters', SHAPE_ITEM.quarter, 1, 4],
+  vstairs: ['4 Vertical Stairs (from 3 blocks)', SHAPE_ITEM.vstairs, 3, 4],
+  vquarter: ['4 Vertical Quarters', SHAPE_ITEM.vquarter, 1, 4],
 };
 let benchMode = 'pieces';
 for (const k in BENCH_MODES) {
