@@ -56,6 +56,10 @@
   #bench .arrow { font-size: var(--f3); opacity: .8; }
   #bench-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
   #bench .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
+  .bench-modes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+  .bench-modes button { font: inherit; font-size: var(--f1); color: #fff; padding: 4px 10px; background: rgba(255,255,255,.1);
+    border: 2px solid rgba(255,255,255,.3); border-radius: 4px; cursor: pointer; }
+  .bench-modes button.on { background: rgba(255,255,255,.3); border-color: #fff; }
   /* the furnace screen looks like the bench's */
   #furnace { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
   #furnace .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(100vw - 32px); box-sizing: border-box; }
@@ -195,9 +199,10 @@
         <div class="slot" id="bench-out"><span class="count" id="bench-count"></span></div>
       </div>
     </div>
+    <div class="bench-modes" id="bench-modes"></div>
     <div id="bench-name"></div>
     <div class="crafting" id="bench-crafting" style="display:none"><h3>Crafting</h3><div class="recipes" id="bench-recipes"></div></div>
-    <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces (in creative they never run out; in survival it uses up one of that block from your hotbar) &middot; E to close</div>
+    <div class="hint">Click a block to put it on the bench &middot; pick what to cut it into &middot; click the result to take it &middot; pieces put back together in the shape of a slab, stairs or a whole block become one &middot; each block splits into 8 pieces (in creative they never run out; in survival it uses up one of that block from your hotbar) &middot; E to close</div>
   </div>
 </div>
 <div id="furnace">
@@ -315,7 +320,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.3.2"></script>
+<script src="textures.js?v=alpha-0.0.4.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -323,7 +328,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.3.2';
+const GAME_VERSION = 'Alpha 0.0.4.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -480,6 +485,52 @@ const PIECE_ITEM = 100;
 const SPLITTABLE = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69];   // cube blocks (not torches or water)
 for (const b of SPLITTABLE) BLOCKS[PIECE_ITEM + b] = { name: BLOCKS[b].name + ' Piece', t: BLOCKS[b].t, item: true, piece: b };
 const isPiece = id => !!(BLOCKS[id] && BLOCKS[id].piece);
+// ---- Slabs, stairs and vertical slabs: made of pieces ----
+// A slab is 4 pieces of one block filling the bottom or top half of a space, a vertical slab 4 filling one side,
+// and stairs 6 (a slab plus a step). Whenever the pieces of one block in a space make one of these shapes, that's
+// what they are: they break as one and give you the slab/stairs back. 8 pieces of the same block become that block.
+// The shapes are bit masks of the 8 spots (spot number = x + y*2 + z*4).
+const SHAPE_MASKS = {
+  slab:   [0x33, 0xCC],                       // bottom, top
+  vslab:  [0x55, 0xAA, 0x0F, 0xF0],           // x low, x high, z low, z high
+  stairs: [0x33 | 0x44, 0x33 | 0x88, 0x33 | 0x0C, 0x33 | 0xC0,   // step on the x low / x high / z low / z high side
+           0xCC | 0x11, 0xCC | 0x22, 0xCC | 0x03, 0xCC | 0x30],  // upside down
+  // a quarter: 2 pieces side by side (a quarter of a block), e.g. the gap that makes stairs a whole block
+  quarter: [0x03, 0x0C, 0x30, 0xC0, 0x05, 0x0A, 0x50, 0xA0, 0x11, 0x22, 0x44, 0x88],   // along x, along y, along z
+};
+const shapeOfMask = m => Object.keys(SHAPE_MASKS).find(k => SHAPE_MASKS[k].includes(m)) || null;
+// the items: id = SHAPE_ITEM[shape] + block (Stone Slab = 1003)
+const SHAPE_ITEM = { slab: 1000, vslab: 1100, stairs: 1200, quarter: 1300 };
+const SHAPE_NAME = { slab: 'Slab', vslab: 'Vertical Slab', stairs: 'Stairs', quarter: 'Quarter' };
+for (const b of SPLITTABLE) for (const k in SHAPE_ITEM)
+  BLOCKS[SHAPE_ITEM[k] + b] = { name: `${BLOCKS[b].name} ${SHAPE_NAME[k]}`, t: BLOCKS[b].t, item: true, form: k, of: b };
+const formOf = id => BLOCKS[id] && BLOCKS[id].form;
+// the shape the piece in spot s belongs to (its block's pieces in this space), or null if it's a loose piece
+function shapeAt(a, s) {
+  const b = a[s];
+  if (!b) return null;
+  let mask = 0;
+  for (let k = 0; k < 8; k++) if (a[k] === b) mask |= 1 << k;
+  const shape = shapeOfMask(mask);
+  return shape ? { shape, mask, block: b } : null;
+}
+// fill (id) or empty (0) the spots in `mask` of block space (x, y, z) all at once. Filling only works if they're all free.
+// 8 pieces of the same block turn into that whole block.
+function setSpots(x, y, z, mask, id) {
+  if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false;
+  const i = idx(x, y, z), cur = world[i];
+  let a = cur === PIECES ? pieceMap.get(i) : null;
+  if (!a) {
+    if (!id || (cur && !isWater(cur))) return false;
+    a = new Uint8Array(8);
+  }
+  a = a.slice();
+  for (let s = 0; s < 8; s++) if (mask & (1 << s)) { if (id && a[s]) return false; a[s] = id; }
+  if (a[0] && a.every(v => v === a[0])) setBlock(x, y, z, a[0]);
+  else if (a.some(v => v)) { pieceMap.set(i, a); setBlock(x, y, z, PIECES); }
+  else setBlock(x, y, z, 0);
+  return true;
+}
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
 const ITEMS = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, FURNACE, 22, WATER];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
@@ -1850,7 +1901,8 @@ function setPiece(x, y, z, s, id) {
   }
   if (id && a[s]) return false;
   a = a.slice(); a[s] = id;
-  if (a.some(v => v)) { pieceMap.set(i, a); setBlock(x, y, z, PIECES); }
+  if (a[0] && a.every(v => v === a[0])) setBlock(x, y, z, a[0]);   // all 8 pieces of one block: it's that block again
+  else if (a.some(v => v)) { pieceMap.set(i, a); setBlock(x, y, z, PIECES); }
   else setBlock(x, y, z, 0);
   return true;
 }
@@ -3356,11 +3408,18 @@ addEventListener('mousedown', e => {
   const hit = raycast();
   if (!hit) return;
   const hb = getBlock(hit.x, hit.y, hit.z);
-  // pieces: break just the one you're looking at
+  // pieces: break just the one you're looking at (or the whole slab / stairs it's part of)
   if (e.button === 0 && hit.slot !== undefined) {
     const a = pieceMap.get(idx(hit.x, hit.y, hit.z));
     if (a && needAxe(a[hit.slot])) return;
     Sound.break(a ? a[hit.slot] : 3);
+    const g = a && shapeAt(a, hit.slot);
+    if (g) {
+      collect(SHAPE_ITEM[g.shape] + (g.block === 3 ? 8 : g.block), hit.x, hit.y, hit.z);   // (stone gives cobblestone, like the block)
+      setSpots(hit.x, hit.y, hit.z, g.mask, 0);
+      mobNoise(hit.x, hit.y, hit.z);
+      return;
+    }
     if (a) collect(PIECE_ITEM + (a[hit.slot] === 3 ? 8 : a[hit.slot]), hit.x, hit.y, hit.z);   // (a stone piece gives a cobblestone piece)
     setPiece(hit.x, hit.y, hit.z, hit.slot, 0);
     mobNoise(hit.x, hit.y, hit.z);
@@ -3371,6 +3430,8 @@ addEventListener('mousedown', e => {
   // right-click a lit (burning) furnace holding a Stick: the stick catches fire and becomes a Torch
   if (e.button === 2 && isFurnace(hb) && BLOCKS[hb].lit && HOTBAR[selected] === STICK) { lightStick(); return; }
   if (e.button === 2 && isFurnace(hb) && !(keys.ShiftLeft || keys.ShiftRight)) { openFurnace(idx(hit.x, hit.y, hit.z)); return; }
+  // placing a slab, vertical slab or stairs
+  if (e.button === 2 && formOf(HOTBAR[selected])) { placeShape(hit); return; }
   // placing a piece: it goes in the half-block spot just in front of whatever you're looking at
   if (e.button === 2 && isPiece(HOTBAR[selected])) {
     const p = [0, 1, 2].map(k => Math.floor((hit.pt[k] + hit.n[k] * 0.25) * 2));   // on the half-block grid
@@ -3441,6 +3502,56 @@ addEventListener('mousedown', e => {
     if (!overlapsPlayer) { setBlock(bx, by, bz, pid); Sound.place(HOTBAR[selected]); mobNoise(bx, by, bz); useOne(); }
   }
 });
+// Put down the slab / vertical slab / stairs in your hand, in the space just in front of where you're looking
+// (or into the empty half of a space you're looking at, like a second slab on top of a slab).
+//  slab: bottom half, or the top half if you aim at the upper half of a side or at the underside of something
+//  vertical slab: against the side you aim at (on a top or bottom face: the half you aim at, across where you face)
+//  stairs: the step rises away from you; upside down the same way as a top slab
+function placeShape(hit) {
+  const id = HOTBAR[selected], { form, of } = BLOCKS[id];
+  const p = [0, 1, 2].map(k => hit.pt[k] + hit.n[k] * 0.25);
+  const [x, y, z] = p.map(Math.floor);
+  const frac = v => v - Math.floor(v);
+  // (on a top face this is the bottom half, unless it's the top of a bottom slab: then it's that space's top half)
+  const upper = frac(p[1]) >= 0.5;
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), alongX = Math.abs(fx) > Math.abs(fz);   // the way you face
+  let mask;
+  if (form === 'quarter') {
+    // the half-block spot in front of where you aim (like a piece), plus the one next to it: lying across your view
+    // if there's room, otherwise the other way, otherwise standing up (so it can fill the gap in stairs)
+    const hp = [0, 1, 2].map(k => Math.floor((hit.pt[k] + hit.n[k] * 0.25) * 2));
+    const qx = Math.floor(hp[0] / 2), qy = Math.floor(hp[1] / 2), qz = Math.floor(hp[2] / 2);
+    const s = (hp[0] - 2 * qx) + (hp[1] - 2 * qy) * 2 + (hp[2] - 2 * qz) * 4;
+    for (const bit of alongX ? [4, 1, 2] : [1, 4, 2]) {
+      const m = (1 << s) | (1 << (s ^ bit));
+      if (!shapeFits(qx, qy, qz, m)) continue;
+      if (!setSpots(qx, qy, qz, m, of)) continue;
+      Sound.place(of); mobNoise(qx, qy, qz); useOne();
+      return;
+    }
+    return;
+  }
+  if (form === 'slab') mask = upper ? 0xCC : 0x33;
+  else if (form === 'vslab') {
+    const onX = hit.n[1] === 0 ? hit.n[0] !== 0 : alongX;
+    const high = frac(onX ? p[0] : p[2]) >= 0.5;
+    mask = onX ? (high ? 0xAA : 0x55) : (high ? 0xF0 : 0x0F);
+  } else {   // stairs: the step goes on the far side from you
+    const side = alongX ? (fx > 0 ? 1 : 0) : (fz > 0 ? 3 : 2);   // x low, x high, z low, z high
+    mask = SHAPE_MASKS.stairs[side + (upper ? 4 : 0)];
+  }
+  if (!shapeFits(x, y, z, mask) || !setSpots(x, y, z, mask, of)) return;
+  Sound.place(of); mobNoise(x, y, z); useOne();
+}
+// false if the spots in `mask` of space (x, y, z) would be inside you
+function shapeFits(x, y, z, mask) {
+  for (let s = 0; s < 8; s++) if (mask & (1 << s)) {
+    const bx = x + (s & 1) * 0.5, by = y + ((s >> 1) & 1) * 0.5, bz = z + (s >> 2) * 0.5;
+    if (bx < player.x + P_HALF && bx + 0.5 > player.x - P_HALF && bz < player.z + P_HALF && bz + 0.5 > player.z - P_HALF &&
+        by < player.y + P_H && by + 0.5 > player.y) return false;
+  }
+  return true;
+}
 // survival: placing something uses one up from the selected slot
 function useOne() {
   if (!SURVIVAL) return;
@@ -3484,6 +3595,14 @@ function drawIcon(canvas, id) {
   ctx.clearRect(0, 0, TILE, TILE);
   // a piece: a half-size square (one quarter of the block's side texture)
   if (isPiece(id)) ctx.drawImage(atlas, BLOCKS[id].t[0] * TILE, TILE / 2, TILE / 2, TILE / 2, TILE / 4, TILE / 4, TILE / 2, TILE / 2);
+  // slabs and stairs: the part of the block's side picture that they fill
+  else if (formOf(id)) {
+    const sx = BLOCKS[id].t[0] * TILE, h = TILE / 2, form = formOf(id);
+    if (form === 'vslab') ctx.drawImage(atlas, sx, 0, h, TILE, 0, 0, h, TILE);
+    else if (form === 'quarter') ctx.drawImage(atlas, sx, h, TILE, h / 2 + 2, 0, h - 2, TILE, h / 2 + 2);   // a thin bar
+    else ctx.drawImage(atlas, sx, h, TILE, h, 0, h, TILE, h);                   // the bottom half...
+    if (form === 'stairs') ctx.drawImage(atlas, sx + h, 0, h, h, h, 0, h, h);  // ...plus the step
+  }
   else if (id) ctx.drawImage(atlas, (BLOCKS[id].icon ?? BLOCKS[id].t[0]) * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
 }
 HOTBAR.forEach((id, i) => {
@@ -3561,7 +3680,8 @@ function giveItem(id) {
 const invEl = document.getElementById('inventory'), invGrid = document.getElementById('inv-grid'), invName = document.getElementById('inv-name');
 const invIcons = [];
 // creative mode: every block's pieces can be picked here too (after the blocks)
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, ...TOOLS, ...SPLITTABLE.map(b => PIECE_ITEM + b)]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, ...TOOLS, ...SPLITTABLE.map(b => PIECE_ITEM + b),
+  ...SPLITTABLE.map(b => SHAPE_ITEM.slab + b), ...SPLITTABLE.map(b => SHAPE_ITEM.stairs + b), ...SPLITTABLE.map(b => SHAPE_ITEM.vslab + b), ...SPLITTABLE.map(b => SHAPE_ITEM.quarter + b)]);
 INV_LIST.forEach(id => {
   const slot = document.createElement('div');
   slot.className = 'slot';
@@ -3600,14 +3720,45 @@ SPLITTABLE.forEach(id => {
   slot.addEventListener('mouseleave', () => { benchName.textContent = ''; });
   document.getElementById('bench-grid').append(slot);
 });
+// what the bench cuts the block into: [name, item id offset, blocks used, how many you get]
+const BENCH_MODES = {
+  pieces: ['8 Pieces', PIECE_ITEM, 1, 8],
+  slab: ['2 Slabs', SHAPE_ITEM.slab, 1, 2],
+  vslab: ['2 Vertical Slabs', SHAPE_ITEM.vslab, 1, 2],
+  stairs: ['4 Stairs (from 3 blocks)', SHAPE_ITEM.stairs, 3, 4],
+  quarter: ['4 Quarters', SHAPE_ITEM.quarter, 1, 4],
+};
+let benchMode = 'pieces';
+for (const k in BENCH_MODES) {
+  const b = document.createElement('button'); b.textContent = BENCH_MODES[k][0]; b.dataset.mode = k;
+  b.addEventListener('click', () => { benchMode = k; drawBench(); });
+  document.getElementById('bench-modes').append(b);
+}
 function drawBench() {
   benchIcons.forEach(([c, id]) => drawIcon(c, id));
   drawIcon(benchIn, benchBlock);
-  drawIcon(benchOut, benchBlock ? PIECE_ITEM + benchBlock : 0);
-  document.getElementById('bench-count').textContent = benchBlock && !infinitePiece(PIECE_ITEM + benchBlock) ? '8' : '';
+  const [, base, , n] = BENCH_MODES[benchMode];
+  drawIcon(benchOut, benchBlock ? base + benchBlock : 0);
+  document.getElementById('bench-count').textContent = benchBlock && !(benchMode === 'pieces' && infinitePiece(PIECE_ITEM + benchBlock)) ? n : '';
+  for (const b of document.getElementById('bench-modes').children) b.classList.toggle('on', b.dataset.mode === benchMode);
 }
 document.getElementById('bench-out').addEventListener('click', () => {
   if (!benchBlock) return;
+  if (benchMode !== 'pieces') {   // slabs, vertical slabs or stairs
+    const [, base, use, n] = BENCH_MODES[benchMode], out = base + benchBlock, name = BLOCKS[out].name;
+    if (SURVIVAL) {
+      if (countOf(benchBlock) < use) { benchName.textContent = `You need ${use} ${BLOCKS[benchBlock].name} block${use > 1 ? 's' : ''} in your hotbar`; return; }
+      const was = [HOTBAR.slice(), HOTBAR_COUNT.slice()];
+      takeFromHotbar(benchBlock, use);
+      for (let k = 0; k < n; k++) if (!giveItem(out)) {   // no room for all of them: put everything back
+        HOTBAR.splice(0, 10, ...was[0]); HOTBAR_COUNT.splice(0, 10, ...was[1]); drawHotbarIcons(); selectSlot(selected);
+        benchName.textContent = 'No room in your hotbar'; return;
+      }
+    } else for (let k = 0; k < n; k++) giveItem(out);
+    benchName.textContent = `Made ${n} ${name}`;
+    Sound.place(benchBlock);
+    return;
+  }
   const piece = PIECE_ITEM + benchBlock;
   let n = 0;
   if (SURVIVAL) {
@@ -3624,7 +3775,7 @@ document.getElementById('bench-out').addEventListener('click', () => {
   benchName.textContent = !n ? 'No room in your hotbar' : infinitePiece(piece) ? `${BLOCKS[benchBlock].name} Pieces are in your hotbar` : `Took ${n} ${BLOCKS[benchBlock].name} Pieces`;
   Sound.place(benchBlock);
 });
-document.getElementById('bench-out').addEventListener('mouseenter', () => { if (benchBlock) benchName.textContent = infinitePiece(PIECE_ITEM + benchBlock) ? `${BLOCKS[benchBlock].name} Piece (click to take)` : `${BLOCKS[benchBlock].name} Piece x8 (click to take)`; });
+document.getElementById('bench-out').addEventListener('mouseenter', () => { if (benchBlock && benchMode !== 'pieces') benchName.textContent = `${BLOCKS[BENCH_MODES[benchMode][1] + benchBlock].name} x${BENCH_MODES[benchMode][3]} (click to take)`; else if (benchBlock) benchName.textContent = infinitePiece(PIECE_ITEM + benchBlock) ? `${BLOCKS[benchBlock].name} Piece (click to take)` : `${BLOCKS[benchBlock].name} Piece x8 (click to take)`; });
 function openBench() { drawBench(); setInventory(true, benchEl); }
 
 // ===================== Furnace (right-click one) =====================
@@ -4588,10 +4739,15 @@ function frame(now) {
   outline.visible = !!hit;
   if (hit) {
     const hb = getBlock(hit.x, hit.y, hit.z);
-    if (hit.slot !== undefined) {  // outline just the piece you're looking at
-      const s = hit.slot;
-      outline.scale.set(0.5, 0.5, 0.5);
-      outline.position.set(hit.x + (s & 1) * 0.5 + 0.25, hit.y + ((s >> 1) & 1) * 0.5 + 0.25, hit.z + (s >> 2) * 0.5 + 0.25);
+    if (hit.slot !== undefined) {  // outline just the piece you're looking at (or the slab / stairs it's part of)
+      const g = shapeAt(pieceMap.get(idx(hit.x, hit.y, hit.z)) || [], hit.slot);
+      const lo = [1, 1, 1], hi = [0, 0, 0];
+      for (let s = 0; s < 8; s++) if (g ? g.mask & (1 << s) : s === hit.slot) {
+        const o = [(s & 1) * 0.5, ((s >> 1) & 1) * 0.5, (s >> 2) * 0.5];
+        for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], o[k]); hi[k] = Math.max(hi[k], o[k] + 0.5); }
+      }
+      outline.scale.set(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+      outline.position.set(hit.x + (lo[0] + hi[0]) / 2, hit.y + (lo[1] + hi[1]) / 2, hit.z + (lo[2] + hi[2]) / 2);
     } else if (hitBox(hb)) {       // outline just the torch sticks (or the rock)
       const bx = hitBox(hb);
       outline.scale.set(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2]);

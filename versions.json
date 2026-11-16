@@ -1,5 +1,17 @@
 [
     {
+        "version":  "Alpha 0.0.4.0",
+        "title":  "Cut to Shape",
+        "folder":  "alpha-0.0.4.0",
+        "date":  "2026-11-16",
+        "notes":  "New: Slabs, Stairs, Vertical Slabs and Quarters for every block. Cut them at the Crafting Bench (pick the block, then what to cut it into)",
+        "changes":  [
+                        "New: Slabs, Stairs, Vertical Slabs and Quarters for every block. Cut them at the Crafting Bench (pick the block, then what to cut it into)",
+                        "Pieces put together in the shape of a slab, stairs, vertical slab or quarter become one, and 8 pieces of one block become the block",
+                        "Slabs, stairs and quarters of different blocks can share a space, like a slab on top of a slab, or a quarter filling the gap in stairs"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.3.2",
         "folder":  "alpha-0.0.3.2",
         "date":  "2026-11-16",
