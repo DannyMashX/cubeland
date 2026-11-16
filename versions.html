@@ -12,6 +12,8 @@
   .row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.12); }
   .row > div { flex: 1; min-width: 0; }
   .ver { font-weight: 700; font-size: 17px; }
+  .title { font-weight: 600; font-style: italic; color: #ffd27a; margin-left: 8px; }
+  .title::before { content: '\2014  '; color: #fff; opacity: .5; font-style: normal; }
   .tag { font-size: 11px; font-weight: 700; background: #3d8b3d; border-radius: 4px; padding: 2px 6px; margin-left: 6px; vertical-align: 2px; }
   .notes { font-size: 14px; opacity: .85; margin: 4px 0 0; padding-left: 20px; line-height: 1.5; }
   .date { font-size: 12px; opacity: .5; margin-top: 2px; }
@@ -42,6 +44,7 @@ new Promise((res, rej) => {
     const row = document.createElement('div'); row.className = 'row';
     const info = document.createElement('div');
     const name = document.createElement('div'); name.className = 'ver'; name.textContent = 'Version ' + v.version;
+    if (v.title) { const t = document.createElement('span'); t.className = 'title'; t.textContent = v.title; name.append(t); }   // big updates have a name
     if (i === 0) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = 'NEWEST'; name.append(t); }
     const notes = document.createElement('ul'); notes.className = 'notes';
     for (const c of (v.changes && v.changes.length ? v.changes : [v.notes || 'Updates'])) { const li = document.createElement('li'); li.textContent = c; notes.append(li); }

@@ -37,6 +37,11 @@ if ($ver -match "[^A-Za-z0-9 ._-]") { throw "A version can only have letters, nu
 if ($list | Where-Object { $_.version -eq $ver }) { throw "Version $ver was already published. Pick another version and run this again." }
 # its folder in versions\ (and its tag): lower case with dashes for spaces, so "Alpha 0.0.1.0" is alpha-0.0.1.0
 $folder = ($ver.ToLower() -replace '\s+', '-')
+# a name for big updates, about what they add (like "Fired Up" for clay and the furnace); small ones have none
+$title = if ($env:CUBELAND_VERSION) { "$env:CUBELAND_TITLE" } else {   # (CUBELAND_TITLE is set when Claude publishes for you)
+  Read-Host 'Name for this update (for big updates, e.g. Fired Up), or press Enter for none'
+}
+$title = "$title".Trim()
 
 # the change log for this version: the list in next-changes.txt (Claude adds a line there for each change we make),
 # or one you type in now. Players see it in the game's "What's new" and on the All versions page.
@@ -73,7 +78,10 @@ New-Item -ItemType Directory -Force $dir | Out-Null
 Copy-Item "$PSScriptRoot\index.html", "$PSScriptRoot\textures.js" $dir -Force
 
 # add it to the top of the list of versions
-$entry = [pscustomobject]@{ version = $ver; folder = $folder; date = (Get-Date -Format 'yyyy-MM-dd'); notes = $notes; changes = [object[]]$changes }
+$entry = [ordered]@{ version = $ver }
+if ($title) { $entry.title = $title }
+$entry.folder = $folder; $entry.date = (Get-Date -Format 'yyyy-MM-dd'); $entry.notes = $notes; $entry.changes = [object[]]$changes
+$entry = [pscustomobject]$entry
 $list = @($entry) + @($list | Where-Object { $_.version -ne $ver })
 $json = ConvertTo-Json -InputObject $list -Depth 4
 [IO.File]::WriteAllText($listFile, $json, $utf8)
@@ -85,7 +93,7 @@ $json = ConvertTo-Json -InputObject $list -Depth 4
 # (the commit message goes through a file, so quote marks in the change log can't confuse git)
 $msgFile = Join-Path $env:TEMP 'cubeland-commit-message.txt'
 $trailer = if ($env:CUBELAND_COMMIT_TRAILER) { "`n$env:CUBELAND_COMMIT_TRAILER`n" } else { '' }   # (used when Claude publishes for you)
-[IO.File]::WriteAllText($msgFile, "Version ${ver}: $notes`n`n" + (($changes | ForEach-Object { "- $_" }) -join "`n") + "`n" + $trailer, $utf8)
+[IO.File]::WriteAllText($msgFile, "Version ${ver}$(if ($title) { " ($title)" }): $notes`n`n" + (($changes | ForEach-Object { "- $_" }) -join "`n") + "`n" + $trailer, $utf8)
 git add -A
 git commit -q -F $msgFile
 if ($LASTEXITCODE) { throw 'Saving the update failed (git commit). Nothing was uploaded.' }

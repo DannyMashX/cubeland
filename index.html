@@ -4453,10 +4453,11 @@ document.getElementById('game-version').textContent = GAME_VERSION;
     loadVersions().then(all => {
       const pick = all.filter(v => compareVersions(v.version, GAME_VERSION) <= 0 && (since ? compareVersions(v.version, since) > 0 : v.version === GAME_VERSION));
       if (!pick.length) return;
-      document.getElementById('whatsnew-title').textContent = since ? `What's new since version ${since}` : `What's new in version ${GAME_VERSION}`;
+      const mine = all.find(v => v.version === GAME_VERSION), named = mine && mine.title ? ` — ${mine.title}` : '';   // (this version's name, if it has one)
+      document.getElementById('whatsnew-title').textContent = since ? `What's new since version ${since}` : `What's new in version ${GAME_VERSION}${named}`;
       listEl.textContent = '';
       for (const v of pick.slice(0, 20)) {
-        const h = document.createElement('h3'); h.textContent = 'Version ' + v.version;
+        const h = document.createElement('h3'); h.textContent = 'Version ' + v.version + (v.title ? ` — ${v.title}` : '');   // (big updates have a name)
         const d = document.createElement('span'); d.textContent = v.date || ''; h.append(d);
         const ul = document.createElement('ul');
         for (const c of (v.changes && v.changes.length ? v.changes : [v.notes || 'Updates'])) { const li = document.createElement('li'); li.textContent = c; ul.append(li); }

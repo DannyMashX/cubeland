@@ -12,6 +12,7 @@ window.VERSIONS = [
     },
     {
         "version":  "Alpha 0.0.3.0",
+        "title":  "Fired Up",
         "folder":  "alpha-0.0.3.0",
         "date":  "2026-11-16",
         "notes":  "Survival: make a Crafting Bench from 4 Planks and a Log in the inventory",
@@ -29,6 +30,7 @@ window.VERSIONS = [
     },
     {
         "version":  "Alpha 0.0.2.0",
+        "title":  "Sticks and Stones",
         "folder":  "alpha-0.0.2.0",
         "date":  "2026-11-15",
         "notes":  "New: Crafting (survival). Press E to turn a Log or Stripped Log into 4 Planks",
@@ -48,6 +50,7 @@ window.VERSIONS = [
     },
     {
         "version":  "Alpha 0.0.1.0",
+        "title":  "First Hearts",
         "folder":  "alpha-0.0.1.0",
         "date":  "2026-11-15",
         "notes":  "New: Survival mode (pick Creative or Survival when you make a new world)",
