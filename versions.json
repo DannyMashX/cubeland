@@ -1,5 +1,15 @@
 [
     {
+        "version":  "26.11.15.1936",
+        "date":  "2026-11-15",
+        "notes":  "Save world button on the pause screen",
+        "changes":  [
+                        "Save world button on the pause screen",
+                        "Auto save can be turned off in Settings; then only Save world saves, and leaving a world asks if you want to save first",
+                        "Quit without saving on the pause screen: throws away everything since your last save"
+                    ]
+    },
+    {
         "version":  "26.11.15.1930",
         "date":  "2026-11-15",
         "notes":  "New items: a stick and wooden and stone tools (axe, pickaxe, shovel, sword and hoe), in the inventory",

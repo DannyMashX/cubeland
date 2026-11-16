@@ -182,10 +182,12 @@
     <h2 id="pause-title">Paused</h2>
     <div class="world-line">World: <b id="world-name"></b></div>
     <button id="pause-resume">Back to game</button>
+    <button id="pause-save">Save world</button>
     <button id="pause-settings">Settings</button>
     <button id="multi-btn">Multiplayer</button>
     <button id="pause-quit">Save &amp; quit to main menu</button>
-    <p class="saved-note">Your world saves automatically.</p>
+    <button id="pause-discard">Quit without saving</button>
+    <p class="saved-note" id="saved-note">Your world saves automatically.</p>
     <p class="newer-note" id="newer-note"></p>
   </div>
 </div>
@@ -197,6 +199,7 @@
     <div class="set-row"><span>Look (P)</span><button id="set-look"></button></div>
     <div class="set-row"><span>Sound (M)</span><button id="set-sound"></button></div>
     <div class="set-row"><span>FPS and position</span><button id="set-info"></button></div>
+    <div class="set-row"><span>Auto save</span><button id="set-autosave"></button></div>
     <h3>Volume</h3>
     <div class="set-row"><span>Master</span><input type="range" class="set-vol" data-vol="master" min="0" max="100" step="5"><b></b></div>
     <div class="set-row"><span>Blocks</span><input type="range" class="set-vol" data-vol="block" min="0" max="100" step="5"><b></b></div>
@@ -259,14 +262,14 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=26.11.15.1930"></script>
+<script src="textures.js?v=26.11.15.1936"></script>
 <script>
 // ===================== Version =====================
 // The date and time it was published (24-hour clock): YY.MM.DD.HHMM.
 // 26.11.14.1608 = published at 4:08 pm on 14 November 2026. (The first versions used 26.11.14_1, _2, _3.)
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable at versions/<number>/ (see versions.html).
-const GAME_VERSION = '26.11.15.1930';
+const GAME_VERSION = '26.11.15.1936';
 // compare two version numbers: negative if a is older than b, 0 if the same, positive if a is newer
 function compareVersions(a, b) {
   const pa = String(a || '0').split(/[._]/).map(Number), pb = String(b || '0').split(/[._]/).map(Number);
@@ -2472,7 +2475,7 @@ document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
   if (locked) overlay.style.display = 'none'; else showPause();
   if (!locked) for (const k in keys) keys[k] = false;
-  if (!locked && !invOpen) saveWorld();          // paused: save
+  if (!locked && !invOpen) autoSave();           // paused: save (if auto save is on)
 });
 document.addEventListener('pointerlockerror', showPause);
 function lockPointer() {
@@ -2490,10 +2493,34 @@ function lockPointer() {
   }
 }
 document.getElementById('pause-resume').addEventListener('click', play);
-document.getElementById('pause-quit').addEventListener('click', () => { saveWorld(); showMainMenu(true); });
+document.getElementById('pause-quit').addEventListener('click', () => { autoSave(); showMainMenu(true); });
+// Save button: saves right now, whether or not auto save is on
+document.getElementById('pause-save').addEventListener('click', async () => {
+  const note = document.getElementById('saved-note');
+  note.textContent = 'Saving...';
+  await saveWorld(true);
+  note.textContent = unsaved ? 'Could not save the world.' : 'Saved!';
+  setTimeout(updateSaveText, 2500);
+});
+// Quit without saving: throws away everything since the last save. The page reloads (back to the main menu)
+// and nothing saves on the way out.
+document.getElementById('pause-discard').addEventListener('click', () => {
+  if (!confirm('Quit without saving?\n\nEverything you did since the last save will be lost.')) return;
+  discarding = true;
+  history.replaceState(null, '', location.pathname + location.search + location.hash.replace(/(^#|&)play\b/, '$1').replace(/^#&/, '#'));
+  location.reload();
+});
+function updateSaveText() {
+  const friends = Worlds.current.temp;   // a friend's world you joined: their game saves it
+  document.getElementById('pause-save').style.display = friends ? 'none' : '';
+  document.getElementById('pause-discard').style.display = friends ? 'none' : '';
+  document.getElementById('pause-quit').textContent = settings.autosave ? 'Save & quit to main menu' : 'Quit to main menu';
+  document.getElementById('saved-note').textContent = friends ? 'Their game saves this world.' :
+    settings.autosave ? 'Your world saves automatically.' : 'Auto save is off: press Save world to keep your changes.';
+}
 
 // ---- Settings (saved in this browser) ----
-const settings = { sens: 100, fov: 75, info: true, vol: { master: 100, block: 100, player: 100, mob: 100, music: 100 } };
+const settings = { sens: 100, fov: 75, info: true, autosave: true, vol: { master: 100, block: 100, player: 100, mob: 100, music: 100 } };
 try {
   const saved = JSON.parse(localStorage.getItem('cubeland-settings')) || {};
   Object.assign(settings, saved, { vol: Object.assign(settings.vol, saved.vol) });
@@ -2509,6 +2536,8 @@ function applySettings() {
   document.getElementById('set-look').textContent = ps2 ? 'PS2 look' : 'Crisp look';
   document.getElementById('set-sound').textContent = Sound.muted ? 'Off' : 'On';
   document.getElementById('set-info').textContent = settings.info ? 'Shown' : 'Hidden';
+  document.getElementById('set-autosave').textContent = settings.autosave ? 'On (every 30 seconds)' : 'Off';
+  updateSaveText();
   for (const r of volSliders) { r.value = settings.vol[r.dataset.vol]; r.nextElementSibling.textContent = r.value + '%'; }
   Sound.setVolumes(settings.vol);
   try { localStorage.setItem('cubeland-settings', JSON.stringify(settings)); } catch (e) {}
@@ -2518,6 +2547,7 @@ document.getElementById('set-fov').addEventListener('input', e => { settings.fov
 document.getElementById('set-look').addEventListener('click', () => { ps2 = !ps2; applyRenderMode(); applySettings(); });
 document.getElementById('set-sound').addEventListener('click', () => { Sound.toggleMute(); applySettings(); });
 document.getElementById('set-info').addEventListener('click', () => { settings.info = !settings.info; applySettings(); });
+document.getElementById('set-autosave').addEventListener('click', () => { settings.autosave = !settings.autosave; applySettings(); });
 const showSettings = open => { if (open) applySettings(); settingsEl.style.display = open ? 'flex' : 'none'; };
 document.getElementById('mm-settings').addEventListener('click', () => showSettings(true));
 document.getElementById('pause-settings').addEventListener('click', () => showSettings(true));
@@ -3334,12 +3364,23 @@ function gatherSave() {
 }
 async function saveWorld() {
   // (not if it was just deleted, or if it's a friend's world you joined: their game saves it)
-  if (!worldLoaded || saving || !Worlds.list().some(w => w.id === Worlds.current.id)) return;
+  if (!worldLoaded || saving || discarding || !Worlds.list().some(w => w.id === Worlds.current.id)) return;
   saving = true; lastSave = performance.now();
-  try { await Worlds.save(Worlds.current.id, gatherSave()); Worlds.touch(); }
+  try { await Worlds.save(Worlds.current.id, gatherSave()); Worlds.touch(); unsaved = false; }
   catch (e) { console.warn('Could not save the world', e); }
   saving = false;
 }
+// unsaved = you've played since the last save. Auto save (Settings) saves every 30 seconds, when you pause and
+// when you leave; with it off, only the Save world button saves, and leaving asks first.
+let unsaved = false, discarding = false;   // discarding = "Quit without saving" was pressed
+function autoSave() { if (settings.autosave) saveWorld(); }
+async function saveBeforeLeaving() {             // switching worlds or joining a friend
+  if (settings.autosave) return saveWorld();
+  if (unsaved && confirm('Auto save is off. Save this world before leaving?\n\nOK saves it. Cancel leaves without saving.')) await saveWorld();
+}
+addEventListener('beforeunload', e => {          // closing the tab with auto save off: the browser asks first
+  if (!settings.autosave && unsaved && !discarding && worldLoaded && !Worlds.current.temp) { e.preventDefault(); e.returnValue = ''; }
+});
 // every space holding pieces: [index, 8 block ids, index, 8 block ids, ...]
 function gatherPieces() {
   const out = [];
@@ -3412,8 +3453,8 @@ function applyPlayerSave(s) {
   worldLoaded = true;
 })();
 // save when you pause, switch tabs or close the game
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveWorld(); });
-addEventListener('pagehide', () => saveWorld());
+document.addEventListener('visibilitychange', () => { if (document.hidden) autoSave(); });
+addEventListener('pagehide', () => autoSave());
 
 // ===================== Multiplayer =====================
 // One player hosts the world they're in and gets a short code; friends type the code to join.
@@ -3636,7 +3677,7 @@ addEventListener('pagehide', () => saveWorld());
         status('Joining...');
         try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, host: d.host })); } catch (e) {}
         p.destroy();
-        await saveWorld();
+        await saveBeforeLeaving();
         location.hash = 'join=' + code;
         location.reload();
       });
@@ -3873,7 +3914,7 @@ function showWorlds(open) {
       if (w.id === Worlds.current.id && !Net.client) { showWorlds(false); play(); return; }   // already open: just go in
       if (compareVersions(w.ver, GAME_VERSION) > 0 &&
           !confirm(`"${w.name}" was last played in version ${w.ver}, which is newer than this one (${GAME_VERSION}). It might not load right here, and playing it could mess it up. Open it anyway?`)) return;
-      await saveWorld(); Worlds.open(w.id);
+      await saveBeforeLeaving(); Worlds.open(w.id);
     };
     const del = document.createElement('button'); del.textContent = 'Delete'; del.className = 'danger';
     del.disabled = w.id === Worlds.current.id;
@@ -3887,7 +3928,7 @@ document.getElementById('mm-multi').addEventListener('click', () => document.get
 document.getElementById('worlds-close').addEventListener('click', () => showWorlds(false));
 document.getElementById('new-create').addEventListener('click', async () => {
   const w = Worlds.create(document.getElementById('new-name').value, document.getElementById('new-seed').value, +document.getElementById('new-gen').value);
-  await saveWorld();
+  await saveBeforeLeaving();
   Worlds.open(w.id);
 });
 
@@ -3905,7 +3946,8 @@ function frame(now) {
   last = now;
   if (worldLoaded) pumpChunkBuilds(buildDone === 0 ? 60 : 14);   // wait for the save so chunks are built with your changes
   else { player.vx = player.vy = player.vz = 0; }
-  if (worldLoaded && performance.now() - lastSave > 30000) saveWorld();   // autosave every 30 seconds
+  if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
+  if (worldLoaded && settings.autosave && performance.now() - lastSave > 30000) saveWorld();   // auto save every 30 seconds
   pumpRebuildSoon();
 
   // movement intent
