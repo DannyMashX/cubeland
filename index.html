@@ -130,6 +130,7 @@
   .world-row .wname { font-weight: 600; }
   .world-row .wsub { font-size: var(--f1); opacity: .6; }
   .new-world { display: flex; flex-wrap: wrap; gap: 6px; }
+  .new-world .dropdown { flex: 1 1 140px; }
   .new-world input, .new-world select { flex: 1 1 140px; font: inherit; font-size: var(--f1); padding: 5px 8px; border-radius: 5px; border: 2px solid rgba(255,255,255,.3); background: rgba(0,0,0,.35); color: #fff; }
   .new-world button { margin-left: 0 !important; }
   .new-world select option { color: #000; }
@@ -170,6 +171,23 @@
   }
   .skinned :is(#hotbar, #inv-grid, #inv-variants, #bench, #furnace) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
   .skinned :is(#hotbar, #inv-grid, #inv-variants, #bench, #furnace) .slot canvas { margin: 0; }
+  /* drop-down menus (like Creative / Survival): the browser's own look is turned off so the button picture shows,
+     with a small arrow drawn on the right (on the .dropdown box around it, since the picture covers the menu's own
+     background). The list that opens is the browser's, so it just gets dark colours. */
+  .skinned select:not([multiple]):not([size]), .skinned :is(#overlay, #mainmenu, #settings, #worlds, #multi, #whatsnew, .new-world) select:not([multiple]):not([size]) {
+    -webkit-appearance: none; appearance: none; padding-right: 24px; cursor: pointer;
+  }
+  .dropdown { position: relative; display: inline-flex; }
+  .dropdown > select { flex: 1 1 auto; min-width: 0; }
+  .skinned .dropdown::after { content: ''; position: absolute; right: 10px; top: 50%; margin-top: -3px; pointer-events: none;
+    border: 5px solid transparent; border-top: 6px solid #fff; border-bottom: 0; }
+  select option { background: #2a2a30; color: #fff; }
+  /* the + on a block (for its other forms), and the picked tab / bench choice, use the same button pictures */
+  .skinned #inv-grid .plus {
+    width: 20px; height: 20px; background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
+    border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
+  }
+  .skinned #inv-grid .plus:hover, .skinned .bench-modes button.on { background: none; border-color: transparent; border-image-source: var(--btn-hover); }
   #multi input:disabled { opacity: .5; }
   #multi .bottom { margin-top: 14px; text-align: right; }
 </style>
@@ -295,14 +313,14 @@
     <div class="new-world">
       <input id="new-name" maxlength="32" placeholder="Name">
       <input id="new-seed" maxlength="24" placeholder="Seed (leave blank for random)">
-      <select id="new-gen" title="Terrain style">
+      <span class="dropdown"><select id="new-gen" title="Terrain style">
         <option value="2">Rolling hills</option>
         <option value="1">Plateaus</option>
-      </select>
-      <select id="new-mode" title="Game mode">
+      </select></span>
+      <span class="dropdown"><select id="new-mode" title="Game mode">
         <option value="creative">Creative</option>
         <option value="survival">Survival</option>
-      </select>
+      </select></span>
       <button id="new-create">Create &amp; play</button>
     </div>
     <div class="bottom"><button id="worlds-close">Back</button></div>
@@ -331,7 +349,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.4.3"></script>
+<script src="textures.js?v=alpha-0.0.4.4"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -339,7 +357,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.4.3';
+const GAME_VERSION = 'Alpha 0.0.4.4';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
