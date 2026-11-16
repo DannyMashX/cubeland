@@ -1,5 +1,22 @@
 [
     {
+        "version":  "Alpha 0.0.3.0",
+        "folder":  "alpha-0.0.3.0",
+        "date":  "2026-11-16",
+        "notes":  "Survival: make a Crafting Bench from 4 Planks and a Log in the inventory",
+        "changes":  [
+                        "Survival: make a Crafting Bench from 4 Planks and a Log in the inventory",
+                        "New pictures for the Rock and the Stone Axe",
+                        "Survival: make Cobblestone from 4 Rocks in the inventory",
+                        "Removed the Crude Pickaxe",
+                        "New block: Clay, part of the soil family with Dirt, Gravel and Sand (dig it by hand for 1-8 pieces); found in patches on shallow sea floors",
+                        "Clay Balls: 4 from a Clay block (or 1 from 2 Clay Pieces). Put one on the ground and it dries into a Brick in 5 minutes",
+                        "New blocks: Bricks (4 Bricks at the bench), Terracotta, Red Terracotta, Chiseled Terracotta, Chiseled Red Terracotta and Chiseled Stone (carve 1 block at the bench with a pickaxe)",
+                        "The old Bricks are now called Red Bricks, with a new picture",
+                        "New: Furnace (8 Bricks at the bench). Put in Logs, Planks or Sticks as fuel, pick what to smelt, and 5 seconds later it pops out the front: Clay Ball to Brick, Clay to Terracotta, Cobblestone to Stone"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.2.0",
         "folder":  "alpha-0.0.2.0",
         "date":  "2026-11-15",

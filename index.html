@@ -56,6 +56,17 @@
   #bench .arrow { font-size: var(--f3); opacity: .8; }
   #bench-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
   #bench .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
+  /* the furnace screen looks like the bench's */
+  #furnace { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
+  #furnace .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(100vw - 32px); box-sizing: border-box; }
+  #furnace h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
+  #furnace .bench-craft { display: flex; align-items: center; gap: 12px; }
+  #furnace .bench-craft .slot { width: 56px; height: 56px; cursor: pointer; }
+  #furnace .bench-craft .slot canvas { width: 40px; height: 40px; margin: 6px; }
+  #furnace-fuel:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
+  #furnace-status { font-size: var(--f1); }
+  #furnace-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
+  #furnace .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; max-width: 600px; }
   #inventory .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
   /* crafting (survival): a list of things you can make; ones you don't have the ingredients for are faded */
   .crafting h3 { margin: 12px 0 6px; font-size: var(--f2); font-weight: 600; }
@@ -129,7 +140,7 @@
   .skinned :is(#overlay, #mainmenu, #settings, #worlds, #multi, #whatsnew, .new-world) :is(button:not(:disabled), input:not(:disabled):not([type=range]), select):is(:hover, :focus-visible) {
     background: none; border-image-source: var(--btn-hover); outline: none;
   }
-  .skinned :is(#inventory, #bench, #whatsnew, #worlds, #multi, #settings) .panel {
+  .skinned :is(#inventory, #bench, #furnace, #whatsnew, #worlds, #multi, #settings) .panel {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
   }
@@ -139,13 +150,13 @@
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
   }
-  .skinned :is(#hotbar, #inv-grid, #bench) .slot {
+  .skinned :is(#hotbar, #inv-grid, #bench, #furnace) .slot {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
     display: flex; align-items: center; justify-content: center;
   }
-  .skinned :is(#hotbar, #inv-grid, #bench) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
-  .skinned :is(#hotbar, #inv-grid, #bench) .slot canvas { margin: 0; }
+  .skinned :is(#hotbar, #inv-grid, #bench, #furnace) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
+  .skinned :is(#hotbar, #inv-grid, #bench, #furnace) .slot canvas { margin: 0; }
   #multi input:disabled { opacity: .5; }
   #multi .bottom { margin-top: 14px; text-align: right; }
 </style>
@@ -187,6 +198,20 @@
     <div id="bench-name"></div>
     <div class="crafting" id="bench-crafting" style="display:none"><h3>Crafting</h3><div class="recipes" id="bench-recipes"></div></div>
     <div class="hint">Click a block to put it on the bench &middot; click the pieces to take them &middot; each block splits into 8 pieces (in creative they never run out; in survival it uses up one of that block from your hotbar) &middot; E to close</div>
+  </div>
+</div>
+<div id="furnace">
+  <div class="panel">
+    <h2>Furnace</h2>
+    <div class="bench-row">
+      <div class="bench-craft">
+        <div class="slot" id="furnace-fuel" title="Fuel"><span class="count" id="furnace-fuel-count"></span></div>
+        <div id="furnace-status"></div>
+      </div>
+    </div>
+    <div id="furnace-name"></div>
+    <div class="crafting"><h3>Smelt</h3><div class="recipes" id="furnace-recipes"></div></div>
+    <div class="hint">Click the fuel slot to put in Logs, Planks or Sticks from your hotbar (right-click it to take them out) &middot; click something to smelt it (click again to line up more) &middot; it pops out of the front of the furnace &middot; E to close</div>
   </div>
 </div>
 <!-- main menu: the first thing you see -->
@@ -291,7 +316,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.2.0"></script>
+<script src="textures.js?v=alpha-0.0.3.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -299,7 +324,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.2.0';
+const GAME_VERSION = 'Alpha 0.0.3.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -334,11 +359,11 @@ const BLOCKS = {
   9:  { name: 'Stone Bricks', t: [10, 10, 10] },
   10: { name: 'Glass',       t: [11, 11, 11], transparent: true },
   11: { name: 'Gravel',      t: [12, 12, 12] },
-  // Bricks: one block in the hotbar, but each placed brick is a random one of these 4 looks
-  12: { name: 'Bricks',      t: [13, 13, 13] },
-  13: { name: 'Bricks',      t: [14, 14, 14] },
-  14: { name: 'Bricks',      t: [15, 15, 15] },
-  15: { name: 'Bricks',      t: [16, 16, 16] },
+  // Red Bricks: one block in the hotbar, but each placed brick is a random one of these 4 looks
+  12: { name: 'Red Bricks',  t: [13, 13, 13] },
+  13: { name: 'Red Bricks',  t: [14, 14, 14] },
+  14: { name: 'Red Bricks',  t: [15, 15, 15] },
+  15: { name: 'Red Bricks',  t: [16, 16, 16] },
   // (16-21 were ores, now removed from the game; those numbers are left unused)
   // (22-41 are torches and 50-57 water, see below)
   60: { name: 'Crafting Bench', t: [28, 29, 8] },   // bottom is planks
@@ -346,7 +371,30 @@ const BLOCKS = {
   // a rock lying flat on the ground (your rock picture, turned a random way); breaking it gives you a Rock to carry
   // box: the part you can aim at and hit (inside the block space)
   62: { name: 'Rock', t: [33, 33, 33], transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
+  // clay and what it's made into
+  63: { name: 'Clay',                    t: [17, 17, 17] },   // soil family (with Dirt, Gravel and Sand)
+  64: { name: 'Bricks',                  t: [18, 18, 18] },   // made from Brick items
+  65: { name: 'Terracotta',              t: [19, 19, 19] },
+  66: { name: 'Red Terracotta',          t: [20, 20, 20] },
+  67: { name: 'Chiseled Terracotta',     t: [21, 21, 21] },
+  68: { name: 'Chiseled Red Terracotta', t: [22, 22, 22] },
+  69: { name: 'Chiseled Stone',          t: [35, 35, 35] },
+  // (70 is pieces, see below)
+  // a Clay Ball lying on the ground, drying; after DRY_TIME it turns into a Brick lying there
+  71: { name: 'Clay Ball', t: [45, 45, 45], transparent: true, noCollide: true, shape: 'flat', box: [0.15, 0, 0.15, 0.85, 0.12, 0.85] },
+  72: { name: 'Brick',     t: [46, 46, 46], transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
 };
+// Furnace: 73-76 unlit, 77-80 lit (burning). Each faces one way: its front picture is on the side that faced you
+// when you put it down. t = [side, top (the Bricks picture), bottom, front]
+const FURNACE = 73, FURNACE_FRONTS = [[0, 1], [1, 0], [0, -1], [-1, 0]];   // [x, z] direction the front faces
+FURNACE_FRONTS.forEach((front, k) => {
+  BLOCKS[FURNACE + k] = { name: 'Furnace', t: [43, 18, 44, 36], front, facing: k, drop: FURNACE };
+  BLOCKS[FURNACE + 4 + k] = { name: 'Furnace', t: [43, 18, 44, 37], front, facing: k, lit: true, drop: FURNACE };
+});
+BLOCKS[FURNACE].icon = 36;   // its hotbar picture: the front
+const isFurnace = id => id >= FURNACE && id < FURNACE + 8;
+const drying = new Map();     // world index of a Clay Ball on the ground -> seconds until it's a Brick
+const furnaces = new Map();   // world index of a furnace -> what's in it (see Furnace below)
 // Torches: thin sticks (not full cubes) you can walk through, that light up the dark.
 // One block space holds 1-4 torches, either standing, or leaning 22.5 degrees off one of the 4 walls.
 // Each (placement, count) combo is its own block id: standing x1 = 22, wall x1 = 23-26, the rest from 27 up.
@@ -395,21 +443,28 @@ const TOOLS = [];
   });
 });
 // Rock (212): picked up from the ground near beaches; can be put back down (places: the block it puts down).
-// Crude Axe (213) and Crude Pickaxe (214): each 2 Rocks + a Stick, made in the inventory.
-const ROCK = 212, ROCK_BLOCK = 62, CRUDE_AXE = 213, CRUDE_PICKAXE = 214;
+// Crude Axe (213): 2 Rocks + a Stick, made in the inventory. (214 was the Crude Pickaxe, now removed; the number stays unused.)
+const ROCK = 212, ROCK_BLOCK = 62, CRUDE_AXE = 213;
 BLOCKS[ROCK] = { name: 'Rock', t: [33, 33, 33], item: true, places: ROCK_BLOCK };
 BLOCKS[ROCK_BLOCK].drop = ROCK;
 BLOCKS[3].drop = 8;   // mining Stone gives Cobblestone
 BLOCKS[1].drop = 2;   // digging up Grass gives Dirt
 BLOCKS[CRUDE_AXE] = { name: 'Crude Axe', t: [34, 34, 34], item: true, tool: 'axe', material: 'crude', damage: 1 };
-BLOCKS[CRUDE_PICKAXE] = { name: 'Crude Pickaxe', t: [35, 35, 35], item: true, tool: 'pickaxe', material: 'crude', damage: 1 };
+// Clay Ball (215): put it down on the ground and it dries into a Brick (216) in DRY_TIME seconds, which you pick up.
+const CLAY_BALL = 215, BRICK = 216, CLAY_BALL_BLOCK = 71, BRICK_BLOCK = 72, DRY_TIME = 300;
+BLOCKS[CLAY_BALL] = { name: 'Clay Ball', t: [45, 45, 45], item: true, places: CLAY_BALL_BLOCK };
+BLOCKS[BRICK] = { name: 'Brick', t: [46, 46, 46], item: true };
+BLOCKS[CLAY_BALL_BLOCK].drop = CLAY_BALL;
+BLOCKS[BRICK_BLOCK].drop = BRICK;
 const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // Survival digging rules:
 // Logs and planks can only be cut with an axe, and an axe is needed to craft them into planks and sticks.
 // Stone-type blocks (Stone, Cobblestone, Stone Bricks, Bricks) can only be mined with a pickaxe. Stone gives Cobblestone.
-// Dirt, Grass, Sand and Gravel can be dug by hand, but then give 1-8 pieces instead of the whole block
-// (a shovel gets you the whole block). Grass gives Dirt.
-const NEEDS_AXE = [4, 7, 61], NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15], DIGGABLE = [1, 2, 6, 11];
+// The soil family (Dirt, Grass, Sand, Gravel and Clay) can be dug by hand, but then gives 1-8 pieces instead of
+// the whole block (a shovel gets you the whole block). Grass gives Dirt.
+// Bricks, Terracotta, the chiseled blocks and the Furnace count as stone-type too.
+const NEEDS_AXE = [4, 7, 61], DIGGABLE = [1, 2, 6, 11, 63];
+const NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, FURNACE, FURNACE + 1, FURNACE + 2, FURNACE + 3, FURNACE + 4, FURNACE + 5, FURNACE + 6, FURNACE + 7];
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
 const holding = kind => !!(BLOCKS[HOTBAR[selected]] && BLOCKS[HOTBAR[selected]].tool === kind);
 const stackMax = id => isTool(id) ? 1 : STACK_MAX;
@@ -423,11 +478,11 @@ BLOCKS[PIECES] = { name: 'Pieces', t: [3, 3, 3], transparent: true, shape: 'piec
 const pieceMap = new Map();     // world index -> Uint8Array(8) of block ids (0 = empty spot)
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
 const PIECE_ITEM = 100;
-const SPLITTABLE = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11];   // cube blocks (not torches or water)
+const SPLITTABLE = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69];   // cube blocks (not torches or water)
 for (const b of SPLITTABLE) BLOCKS[PIECE_ITEM + b] = { name: BLOCKS[b].name + ' Piece', t: BLOCKS[b].t, item: true, piece: b };
 const isPiece = id => !!(BLOCKS[id] && BLOCKS[id].piece);
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
-const ITEMS = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 22, WATER];
+const ITEMS = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, FURNACE, 22, WATER];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 const HOTBAR_DEFAULT = [1, 2, 3, 8, 7, 4, 10, 12, 22, 6];
 const HOTBAR = (() => {
@@ -525,13 +580,16 @@ for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) px(27, x, y, [40, 
 // slots with no file keep the generated placeholder above.
 const TEXTURE_SLOTS = {
   grass: 0, grass_top: 0, grass_side: 1, dirt: 2, stone: 3, log_side: 4, log_top: 5,
-  leaves: 6, sand: 7, planks: 8, cobblestone: 9, stone_bricks: 10, bricks: 10, brick: 10, glass: 11, gravel: 12,
+  leaves: 6, sand: 7, planks: 8, cobblestone: 9, stone_bricks: 10, glass: 11, gravel: 12,
+  clay: 17, bricks: 18, terracotta: 19, red_terracotta: 20,
+  chiseled_terracotta: 21, chisled_terracota: 21, chiseled_red_terracotta: 22, red_chiseled_terracotta: 22, chiseled_stone: 35,
+  furnace_front: 36, furnace_front_on: 37, furnace_side: 43, furnace_bottom: 44, clay_ball: 45, brick: 46,
   // red bricks: one picture fills all 4 brick looks; bricks_a.._d would give each look its own picture
   red_bricks: [13, 14, 15, 16], bricks_a: 13, bricks_b: 14, bricks_c: 15, bricks_d: 16,
   torch_side: 23, torch_top: 24, torch_bottom: 25, tortch_side: 23, tortch_top: 24, tortch_bottom: 25,
   chocolate: 26, water: 27,
   crafting_bench_side: 28, crafting_bench_top: 29, stripped_log_side: 30, stripped_log_top: 31,
-  stick: 32, rock: 33, crude_axe: 34, crude_pickaxe: 35,   // (36-37 are free)
+  stick: 32, rock: 33, crude_axe: 34,   // (47 is free)
   stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
 };
 function loadCustomTextures(onDone) {
@@ -1043,6 +1101,7 @@ if (GEN === 1) for (let cz = 0; cz < WZ; cz += CELL) for (let cx = 0; cx < WX; c
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   let depth = -1, surf = 1;
   const beach = GEN === 1 ? 0 : fbm(x / 40, z / 40, 2, 950), gravelly = GEN === 1 ? 0 : fbm(x / 30 + 70, z / 30 + 70, 2, 960);
+  const clayey = GEN === 1 ? 0 : fbm(x / 14 + 140, z / 14 + 140, 2, 975);
   for (let y = WY - 1; y >= 0; y--) {
     const i = idx(x, y, z);
     if (!world[i]) { depth = -1; continue; }
@@ -1055,6 +1114,7 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
     }
     if (depth === 0) {
       if (y > SEA_LEVEL + 1) surf = 1;                                         // dry land: grass
+      else if (y < SEA_LEVEL && y >= SEA_LEVEL - 8 && clayey > 0.62) surf = 63;  // clay patch on a shallow sea floor
       else if (gravelly > 0.6) surf = 11;                                      // gravel beach / sea floor
       else if (y >= SEA_LEVEL - 4) surf = beach > 0.4 ? 6 : y >= SEA_LEVEL ? 1 : 2;   // shore: sand, or grass down to the water
       else surf = 6;                                                           // sea floor: sand
@@ -1648,7 +1708,8 @@ function buildChunk(cx, cz) {
     for (const f of FACES) {
       const n = getBlock(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
       if (n && (n === id || !BLOCKS[n].transparent)) continue;
-      const tile = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.t[0];
+      // (front: a side with its own picture, t[3], like the furnace's front)
+      const tile = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.front && f.dir[0] === b.front[0] && f.dir[2] === b.front[1] ? b.t[3] : b.t[0];
       const base = pos.length / 3;
       const na = f.dir[0] ? 0 : f.dir[1] ? 1 : 2;
       const ta = na === 0 ? 1 : 0, tb = na === 2 ? 1 : 2;
@@ -1801,6 +1862,8 @@ function setBlock(x, y, z, id) {
   if (id !== PIECES) pieceMap.delete(i);
   if (isTorch(old)) torches.delete(i);
   if (isTorch(id)) torches.add(i);
+  if (id === CLAY_BALL_BLOCK) { if (old !== id) drying.set(i, DRY_TIME); } else drying.delete(i);
+  if (isFurnace(old) && !isFurnace(id)) emptyFurnace(i);   // broken: what was in it falls out
   // keep the sky map up to date, and relight nearby chunks if what can see the sky changed
   const col = z * WX + x, wasOpaque = old && !BLOCKS[old].transparent, isOpaque = id && !BLOCKS[id].transparent;
   if (wasOpaque !== isOpaque) {
@@ -1998,7 +2061,8 @@ const Sound = (() => {
   // which sound recipe each block uses (block id: recipe). Recipe names describe the sound, not the block:
   // stone-type blocks use 'rock' (deep bm / crk), dirt uses the crumbly 'dirt' crunch, gravel uses the sharp 'stone' chk.
   const MATERIAL = { 1: 'grass', 2: 'dirt', 3: 'rock', 4: 'wood', 5: 'grass', 6: 'sand', 7: 'wood', 8: 'cobble', 9: 'rock', 10: 'glass', 11: 'stone', 12: 'brick', 13: 'brick', 14: 'brick', 15: 'brick',
-    60: 'wood', 61: 'wood' };   // torches use 'wood' (see mat below)
+    60: 'wood', 61: 'wood', 63: 'dirt', 64: 'brick', 65: 'brick', 66: 'brick', 67: 'brick', 68: 'brick', 69: 'rock' };
+  for (let k = 0; k < 8; k++) MATERIAL[FURNACE + k] = 'brick';   // torches use 'wood' (see mat below)
   // materials whose placing sound is their footstep sound instead of their dig sound
   // materials with their own placing sound (others reuse the breaking sound, softer)
   const PLACE_RECIPES = {
@@ -2825,7 +2889,7 @@ function die() {
     drawHotbarIcons(); selectSlot(selected);
   }
   document.getElementById('death-note').textContent = Net.client ? 'You kept your things.' : 'Your things are where you fell.';
-  if (invOpen) { invOpen = false; invEl.style.display = benchEl.style.display = 'none'; hotbarEl.classList.remove('open'); }
+  if (invOpen) { invOpen = false; invEl.style.display = benchEl.style.display = furnaceEl.style.display = 'none'; furnaceAt = -1; hotbarEl.classList.remove('open'); }
   overlay.style.display = 'none';
   document.getElementById('death').style.display = 'flex';
   if (locked) document.exitPointerLock();
@@ -3349,6 +3413,7 @@ addEventListener('mousedown', e => {
   }
   // right-click a Crafting Bench to use it (hold Shift to build against it instead)
   if (e.button === 2 && hb === CRAFTING_BENCH && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(); return; }
+  if (e.button === 2 && isFurnace(hb) && !(keys.ShiftLeft || keys.ShiftRight)) { openFurnace(idx(hit.x, hit.y, hit.z)); return; }
   // placing a piece: it goes in the half-block spot just in front of whatever you're looking at
   if (e.button === 2 && isPiece(HOTBAR[selected])) {
     const p = [0, 1, 2].map(k => Math.floor((hit.pt[k] + hit.n[k] * 0.25) * 2));   // on the half-block grid
@@ -3410,7 +3475,13 @@ addEventListener('mousedown', e => {
       bx < player.x + P_HALF && bx + 1 > player.x - P_HALF &&
       bz < player.z + P_HALF && bz + 1 > player.z - P_HALF &&
       by < player.y + P_H && by + 1 > player.y;
-    if (!overlapsPlayer) { setBlock(bx, by, bz, placeId(HOTBAR[selected])); Sound.place(HOTBAR[selected]); mobNoise(bx, by, bz); useOne(); }
+    // (a furnace turns its front towards you)
+    let pid = placeId(HOTBAR[selected]);
+    if (pid === FURNACE) {
+      const dx = player.x - (bx + 0.5), dz = player.z - (bz + 0.5);
+      pid = FURNACE + FURNACE_FRONTS.findIndex(([fx, fz]) => Math.abs(dx) > Math.abs(dz) ? fx === Math.sign(dx) : fz === (Math.sign(dz) || 1));
+    }
+    if (!overlapsPlayer) { setBlock(bx, by, bz, pid); Sound.place(HOTBAR[selected]); mobNoise(bx, by, bz); useOne(); }
   }
 });
 // survival: placing something uses one up from the selected slot
@@ -3456,7 +3527,7 @@ function drawIcon(canvas, id) {
   ctx.clearRect(0, 0, TILE, TILE);
   // a piece: a half-size square (one quarter of the block's side texture)
   if (isPiece(id)) ctx.drawImage(atlas, BLOCKS[id].t[0] * TILE, TILE / 2, TILE / 2, TILE / 2, TILE / 4, TILE / 4, TILE / 2, TILE / 2);
-  else if (id) ctx.drawImage(atlas, BLOCKS[id].t[0] * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
+  else if (id) ctx.drawImage(atlas, (BLOCKS[id].icon ?? BLOCKS[id].t[0]) * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
 }
 HOTBAR.forEach((id, i) => {
   const slot = document.createElement('div');
@@ -3533,7 +3604,7 @@ function giveItem(id) {
 const invEl = document.getElementById('inventory'), invGrid = document.getElementById('inv-grid'), invName = document.getElementById('inv-name');
 const invIcons = [];
 // creative mode: every block's pieces can be picked here too (after the blocks)
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CRUDE_PICKAXE, ...TOOLS, ...SPLITTABLE.map(b => PIECE_ITEM + b)]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, ...TOOLS, ...SPLITTABLE.map(b => PIECE_ITEM + b)]);
 INV_LIST.forEach(id => {
   const slot = document.createElement('div');
   slot.className = 'slot';
@@ -3599,16 +3670,154 @@ document.getElementById('bench-out').addEventListener('click', () => {
 document.getElementById('bench-out').addEventListener('mouseenter', () => { if (benchBlock) benchName.textContent = infinitePiece(PIECE_ITEM + benchBlock) ? `${BLOCKS[benchBlock].name} Piece (click to take)` : `${BLOCKS[benchBlock].name} Piece x8 (click to take)`; });
 function openBench() { drawBench(); setInventory(true, benchEl); }
 
+// ===================== Furnace (right-click one) =====================
+// Put fuel in its fuel slot, then pick what to smelt: each one takes SMELT_TIME seconds, and pops out of the
+// furnace's front when it's done. Clicking a recipe more than once lines them up. The front glows while it burns.
+// In creative it needs no fuel or ingredients.
+const SMELT_TIME = 5;
+const SMELTS = [
+  { out: BRICK, from: CLAY_BALL },   // Clay Ball -> Brick (quicker than leaving it on the ground to dry)
+  { out: 65, from: 63 },             // Clay -> Terracotta
+  { out: 3, from: 8 },               // Cobblestone -> Stone
+];
+const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1 };   // how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1
+const furnaceEl = document.getElementById('furnace'), furnaceName = document.getElementById('furnace-name');
+const furnaceFuel = document.createElement('canvas'); furnaceFuel.width = furnaceFuel.height = TILE;
+document.getElementById('furnace-fuel').append(furnaceFuel);
+let furnaceAt = -1;   // the open furnace (world index)
+const furnaceOf = i => { if (!furnaces.has(i)) furnaces.set(i, { fuel: 0, fuelN: 0, heat: 0, queue: [], t: 0, burning: false }); return furnaces.get(i); };
+const fromIdx = i => [i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ];
+function openFurnace(i) { furnaceAt = i; drawFurnace(); setInventory(true, furnaceEl); }
+// take k of an item out of the hotbar (right-most first); false if there aren't enough
+function takeFromHotbar(id, k) {
+  if (countOf(id) < k) return false;
+  for (let s = HOTBAR.length - 1; s >= 0 && k; s--) if (HOTBAR[s] === id) {
+    const t = Math.min(k, HOTBAR_COUNT[s]); HOTBAR_COUNT[s] -= t; k -= t;
+    if (!HOTBAR_COUNT[s]) HOTBAR[s] = 0;
+  }
+  drawHotbarIcons(); selectSlot(selected);
+  return true;
+}
+function drawFurnace() {
+  if (furnaceAt < 0) return;
+  const f = furnaceOf(furnaceAt);
+  drawIcon(furnaceFuel, SURVIVAL ? f.fuel : 0);
+  document.getElementById('furnace-fuel-count').textContent = SURVIVAL && f.fuelN > 1 ? f.fuelN : '';
+  drawFurnaceStatus();
+  const list = document.getElementById('furnace-recipes');
+  list.textContent = '';
+  for (const r of SMELTS) {
+    const b = document.createElement('button'); b.className = 'recipe'; b.disabled = SURVIVAL && countOf(r.from) < 1;
+    const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, r.out);
+    const txt = document.createElement('div');
+    const nm = document.createElement('div'); nm.textContent = BLOCKS[r.out].name;
+    const nd = document.createElement('div'); nd.className = 'needs'; nd.textContent = `1 ${BLOCKS[r.from].name} · ${SMELT_TIME} seconds`;
+    txt.append(nm, nd); b.append(c, txt);
+    b.addEventListener('click', () => {
+      const g = furnaceOf(furnaceAt);
+      if (g.queue.length >= 64) { furnaceName.textContent = 'The furnace is full up'; return; }
+      if (SURVIVAL && !takeFromHotbar(r.from, 1)) return;
+      g.queue.push(r.out);
+      furnaceName.textContent = `Smelting ${BLOCKS[r.out].name}`;
+      drawFurnace();
+    });
+    list.append(b);
+  }
+}
+function drawFurnaceStatus() {
+  const f = furnaces.get(furnaceAt), el = document.getElementById('furnace-status');
+  if (!f || !f.queue.length) { el.textContent = 'Pick something to smelt'; return; }
+  const more = f.queue.length > 1 ? ` (${f.queue.length - 1} more waiting)` : '';
+  el.textContent = f.burning ? `Making ${BLOCKS[f.queue[0]].name}: ${Math.max(1, Math.ceil(SMELT_TIME - f.t))} s${more}` : `Needs fuel${more}`;
+}
+// fuel slot: click to put in fuel from your hotbar (the selected slot if it's fuel, otherwise the first fuel), right-click to take it out
+document.getElementById('furnace-fuel').addEventListener('click', () => {
+  if (!SURVIVAL) { furnaceName.textContent = 'Creative: no fuel needed'; return; }
+  const f = furnaceOf(furnaceAt);
+  let s = FUEL[HOTBAR[selected]] && (!f.fuel || f.fuel === HOTBAR[selected]) ? selected : HOTBAR.findIndex(id => FUEL[id] && (!f.fuel || f.fuel === id));
+  if (s < 0) { furnaceName.textContent = f.fuel ? `Add more ${BLOCKS[f.fuel].name}, or right-click to take it out` : 'Fuel: Logs, Planks or Sticks from your hotbar'; return; }
+  const n = Math.min(HOTBAR_COUNT[s], STACK_MAX - f.fuelN);
+  if (n <= 0) { furnaceName.textContent = 'The fuel slot is full'; return; }
+  f.fuel = HOTBAR[s]; f.fuelN += n;
+  HOTBAR_COUNT[s] -= n; if (!HOTBAR_COUNT[s]) HOTBAR[s] = 0;
+  drawHotbarIcons(); selectSlot(selected);
+  furnaceName.textContent = `Put in ${n} ${BLOCKS[f.fuel].name}`;
+  drawFurnace();
+});
+document.getElementById('furnace-fuel').addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const f = furnaces.get(furnaceAt);
+  if (!f || !f.fuelN) return;
+  while (f.fuelN && giveItem(f.fuel)) f.fuelN--;
+  if (!f.fuelN) f.fuel = 0;
+  furnaceName.textContent = f.fuelN ? 'No room in your hotbar' : 'Took the fuel out';
+  drawFurnace();
+});
+// a furnace that's broken: its fuel and anything waiting to be smelted fall out
+function emptyFurnace(i) {
+  const f = furnaces.get(i);
+  furnaces.delete(i);
+  if (furnaceAt === i && invOpen && furnaceEl.style.display !== 'none') setInventory(false);
+  if (!f) return;
+  const [x, y, z] = fromIdx(i);
+  for (let n = f.fuelN; n > 0; n--) collect(f.fuel, x, y, z);
+  for (const out of f.queue) collect(SMELTS.find(r => r.out === out).from, x, y, z);
+}
+let furnaceRedraw = 0;
+function tickFurnaces(dt) {
+  for (const [i, f] of furnaces) {
+    if (!isFurnace(world[i])) { furnaces.delete(i); continue; }
+    if (f.queue.length && !f.burning) {   // start the next one: it needs fuel (one Log lasts for 4)
+      if (!SURVIVAL) f.burning = true;
+      else {
+        if (f.heat <= 0 && f.fuelN > 0) { f.heat += FUEL[f.fuel] || 1; if (!--f.fuelN) f.fuel = 0; if (furnaceAt === i) drawFurnace(); }
+        if (f.heat > 0) { f.heat--; f.burning = true; }
+      }
+      f.t = 0;
+    }
+    if (f.burning && (f.t += dt) >= SMELT_TIME) {   // done: it pops out of the front (or the top, if something's in front)
+      const out = f.queue.shift(), [x, y, z] = fromIdx(i), [fx, fz] = BLOCKS[world[i]].front;
+      if (solid(x + fx, y, z + fz)) collect(out, x, y + 1, z); else collect(out, x + fx, y, z + fz);
+      if (!SURVIVAL) giveItem(out);   // (creative: no items on the ground, so it goes into your hotbar)
+      f.burning = false; f.t = 0;
+      if (furnaceAt === i) drawFurnace();
+    }
+    // the front glows while it's burning
+    const want = FURNACE + BLOCKS[world[i]].facing + (f.burning ? 4 : 0);
+    if (world[i] !== want) { const [x, y, z] = fromIdx(i); setBlock(x, y, z, want); }
+  }
+  if (furnaceAt >= 0 && invOpen && (furnaceRedraw -= dt) <= 0) { furnaceRedraw = 0.25; drawFurnaceStatus(); }
+}
+// Clay Balls on the ground dry into Bricks
+function tickDrying(dt) {
+  if (Net.client) return;   // (in a friend's world their game does it)
+  for (const [i, left] of drying) {
+    if (left - dt > 0) { drying.set(i, left - dt); continue; }
+    drying.delete(i);
+    const [x, y, z] = fromIdx(i);
+    if (world[i] === CLAY_BALL_BLOCK) setBlock(x, y, z, BRICK_BLOCK);
+  }
+}
+
 // ===================== Crafting (survival) =====================
 // A list of things you can make. Click one: it uses up the ingredients from your hotbar and gives you what it makes.
 // at: 'hand' = can be made anywhere (in the inventory, E), 'bench' = only at a Crafting Bench (which can make everything).
 // needs: [[block or item id, how many], ...]. axe: you also need an axe somewhere in your hotbar (it isn't used up).
 const RECIPES = [
   { out: CRUDE_AXE, n: 1, needs: [[ROCK, 2], [STICK, 1]], at: 'hand' },       // 2 Rocks + a Stick -> Crude Axe
-  { out: CRUDE_PICKAXE, n: 1, needs: [[ROCK, 2], [STICK, 1]], at: 'hand' },   // 2 Rocks + a Stick -> Crude Pickaxe
+  { out: 8, n: 1, needs: [[ROCK, 4]], at: 'hand' },                         // 4 Rocks -> Cobblestone
   { out: 7, n: 4, needs: [[4, 1]], at: 'hand', axe: true },      // Log -> 4 Planks
   { out: 7, n: 4, needs: [[61, 1]], at: 'hand', axe: true },     // Stripped Log -> 4 Planks
   { out: STICK, n: 4, needs: [[7, 2]], at: 'bench', axe: true }, // 2 Planks -> 4 Sticks (sticks also sometimes drop from leaves)
+  { out: CRAFTING_BENCH, n: 1, needs: [[7, 4], [4, 1]], at: 'hand' },   // 4 Planks + a Log -> Crafting Bench
+  { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
+  { out: CLAY_BALL, n: 1, needs: [[PIECE_ITEM + 63, 2]], at: 'hand' },   // 2 Clay Pieces -> a Clay Ball
+  { out: 64, n: 1, needs: [[BRICK, 4]], at: 'bench' },                   // 4 Bricks -> Bricks (block)
+  { out: FURNACE, n: 1, needs: [[BRICK, 8]], at: 'bench' },              // 8 Bricks -> Furnace
+  // chiseled blocks: 1 block, carved with a pickaxe (not used up)
+  { out: 67, n: 1, needs: [[65, 1]], at: 'bench', tool: 'pickaxe' },     // Terracotta -> Chiseled Terracotta
+  { out: 68, n: 1, needs: [[66, 1]], at: 'bench', tool: 'pickaxe' },     // Red Terracotta -> Chiseled Red Terracotta
+  { out: 69, n: 1, needs: [[3, 1]], at: 'bench', tool: 'pickaxe' },      // Stone -> Chiseled Stone
 ];
 // tools: made of Cobblestone (stone tools), with sticks for the handle
 const TOOL_RECIPE = { Pickaxe: [3, 2], Axe: [3, 2], Shovel: [1, 2], Sword: [2, 1], Hoe: [2, 2] };   // [material, sticks]
@@ -3617,7 +3826,8 @@ for (const id of TOOLS) {
   RECIPES.push({ out: id, n: 1, needs: [[8, m], [STICK, s]], at: 'bench' });
 }
 const countOf = id => HOTBAR.reduce((a, h, i) => a + (h === id ? HOTBAR_COUNT[i] : 0), 0);
-const canCraft = r => r.needs.every(([id, k]) => countOf(id) >= k) && (!r.axe || HOTBAR.some(isAxe));
+const canCraft = r => r.needs.every(([id, k]) => countOf(id) >= k) && (!r.axe || HOTBAR.some(isAxe)) &&
+  (!r.tool || HOTBAR.some(id => BLOCKS[id] && BLOCKS[id].tool === r.tool));
 function craft(r) {
   if (!canCraft(r)) return false;
   const was = [HOTBAR.slice(), HOTBAR_COUNT.slice()];
@@ -3647,7 +3857,7 @@ function drawRecipes(listEl, atBench, nameEl) {
     const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, r.out);
     const txt = document.createElement('div');
     const nm = document.createElement('div'); nm.textContent = (r.n > 1 ? r.n + ' ' : '') + BLOCKS[r.out].name;
-    const nd = document.createElement('div'); nd.className = 'needs'; nd.textContent = r.needs.map(([id, k]) => `${k} ${BLOCKS[id].name}`).join(' + ') + (r.axe ? ', with an axe' : '');
+    const nd = document.createElement('div'); nd.className = 'needs'; nd.textContent = r.needs.map(([id, k]) => `${k} ${BLOCKS[id].name}`).join(' + ') + (r.axe ? ', with an axe' : '') + (r.tool ? `, with a ${r.tool}` : '');
     txt.append(nm, nd); b.append(c, txt);
     b.addEventListener('click', () => {
       const ok = craft(r);
@@ -3663,6 +3873,7 @@ function refreshRecipes() {
   if (!SURVIVAL || !invOpen) return;
   if (invEl.style.display !== 'none') drawRecipes(invRecipes, false, invName);
   if (benchEl.style.display !== 'none') drawRecipes(benchRecipes, true, benchName);
+  if (furnaceEl.style.display !== 'none') drawFurnace();
 }
 if (SURVIVAL) document.getElementById('inv-crafting').style.display = document.getElementById('bench-crafting').style.display = '';
 
@@ -3672,6 +3883,8 @@ function setInventory(open, panel = invEl) {
   invOpen = open;
   invEl.style.display = open && panel === invEl ? 'flex' : 'none';
   benchEl.style.display = open && panel === benchEl ? 'flex' : 'none';
+  furnaceEl.style.display = open && panel === furnaceEl ? 'flex' : 'none';
+  if (!open || panel !== furnaceEl) { furnaceAt = -1; furnaceName.textContent = ''; }
   hotbarEl.classList.toggle('open', open);
   invName.textContent = '';
   refreshRecipes();
@@ -3705,6 +3918,8 @@ function gatherSave() {
     hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), selected,
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health })),
     drops: drops.map(d => ({ id: d.id, x: d.x, y: d.y, z: d.z, age: d.age })),
+    drying: [...drying],                                   // [[index, seconds left], ...]
+    furnaces: [...furnaces].map(([i, f]) => [i, f]),       // [[index, {fuel, fuelN, heat, queue, t}], ...]
   };
 }
 async function saveWorld() {
@@ -3742,6 +3957,8 @@ function applyPieces(list) {
 function applySave(s) {
   applyPieces(s.pieces);
   applyEdits(new Uint32Array(s.idxs), new Uint8Array(s.ids));
+  for (const [i, left] of s.drying || []) if (drying.has(i)) drying.set(i, Math.max(0, +left || 0));
+  for (const [i, f] of s.furnaces || []) if (isFurnace(world[i]) && f) furnaces.set(i, f);
   applyPlayerSave(s);
 }
 // blocks you changed, put back on top of the freshly grown terrain (also used when joining a friend's game)
@@ -3755,6 +3972,7 @@ function applyEdits(idxs, ids) {
     world[i] = id; edits.set(i, id);
     const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
     if (isTorch(id)) torches.add(i);
+    if (id === CLAY_BALL_BLOCK) drying.set(i, DRY_TIME); else drying.delete(i);   // (applySave then puts back how long each has left)
     wakeWater(x, y, z);                 // water that was still flowing when you saved carries on
     cols.add(z * WX + x);
     if (id) { const c = Math.floor(z / CS) * NCX + Math.floor(x / CS); chunkTop[c] = Math.max(chunkTop[c], y + 1); }
@@ -4296,6 +4514,7 @@ function frame(now) {
   else { player.vx = player.vy = player.vz = 0; }
   if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
   if (worldLoaded && settings.autosave && performance.now() - lastSave > 30000) saveWorld();   // auto save every 30 seconds
+  if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); }   // (not while paused)
   pumpRebuildSoon();
 
   // movement intent
