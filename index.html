@@ -164,7 +164,7 @@
 <body>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
-<canvas id="hearts" width="99" height="9"></canvas>
+<canvas id="hearts" width="49" height="9"></canvas>
 <!-- survival: shows when your hearts run out -->
 <div id="death" class="screen">
   <div class="menu">
@@ -316,7 +316,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.3.0"></script>
+<script src="textures.js?v=alpha-0.0.3.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -324,7 +324,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.3.0';
+const GAME_VERSION = 'Alpha 0.0.3.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -425,7 +425,7 @@ const wallIndex = (dx, dz) => TORCH_WALLS.findIndex(w => w && w[0] === dx && w[1
 // Items: things you carry but can't place (ids 200+). They share the block list so icons and names work the same way.
 // They aren't in the inventory: you get them from drops, and they stack in the hotbar.
 const CHOCOLATE = 200;
-BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true, food: 8 };   // food: eating it heals 2 hearts (survival)
+BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true, food: 4 };   // food: eating it heals 1 heart (survival; in quarter hearts)
 const isItem = id => !!(BLOCKS[id] && BLOCKS[id].item);
 // Stick and tools, from your pictures in textures/items. Tools don't stack.
 // damage = how much a hit takes off a mob (a hand or any other item does 1)
@@ -2862,12 +2862,12 @@ function nearestTorchGoal(m, range) {
   return best;
 }
 // ---- Health (survival only; see gameMode) ----
-// 10 hearts, and each heart is split in quarters, so health goes from 0 to 40.
+// 5 hearts, and each heart is split in quarters, so health goes from 0 to 20.
 // The hearts are your pictures in textures/gui/heart_atlas.png: the white ones are normal health.
-const MAX_HEALTH = 40;
+const HEARTS = 5, MAX_HEALTH = HEARTS * 4;
 player.health = MAX_HEALTH;
 let hurtFlash = 0;
-// amount is in half hearts (a mob's damage: 3 = one and a half hearts). from = what hit you (knocks you away from it)
+// amount is in quarter hearts (a mob's damage: 3 = three quarters of a heart). from = what hit you (knocks you away from it)
 function hurtPlayer(amount, from) {
   if (!SURVIVAL || player.dead) return;
   if (!locked && !invOpen) return;   // nothing hurts you while the game is paused or in a menu
@@ -2876,7 +2876,7 @@ function hurtPlayer(amount, from) {
     player.vx += (player.x - from.x) / d * 7; player.vz += (player.z - from.z) / d * 7; player.vy = Math.max(player.vy, 5);
   }
   showChange(player.health, 'red');
-  player.health = Math.max(0, player.health - Math.round(amount * 2));
+  player.health = Math.max(0, player.health - Math.max(1, Math.round(amount)));
   hurtFlash = 0.35;
   drawHearts();
   if (player.health <= 0) die();
@@ -2905,7 +2905,7 @@ document.getElementById('respawn').addEventListener('click', () => {
   play();
 });
 // Health never comes back on its own: you eat food (right-click while holding it) to heal.
-// food = how much it heals, in quarter hearts (8 = 2 hearts)
+// food = how much it heals, in quarter hearts (4 = 1 heart)
 function eat() {
   const id = HOTBAR[selected], food = BLOCKS[id] && BLOCKS[id].food;
   if (!SURVIVAL || !food || player.dead || player.health >= MAX_HEALTH) return false;
@@ -2951,13 +2951,13 @@ function drawHearts() {
   heartsEl.style.display = SURVIVAL ? 'block' : 'none';
   if (!SURVIVAL || !whiteFillOnly) return;
   const g = heartsEl.getContext('2d');
-  g.clearRect(0, 0, 99, 9);
+  g.clearRect(0, 0, heartsEl.width, 9);
   const cell = (kind, q, i) => { const [cx, cy] = HEART_CELL[kind](q); g.drawImage(heartImg, cx * 10, cy * 10, 9, 9, i * 10, 0, 9, 9); };
   // white up to `low`, then red or green up to `high` (just the normal hearts when nothing changed lately)
   const changing = heartChange.time > 0;
   const low = changing ? Math.min(player.health, heartChange.from) : player.health;
   const high = changing ? Math.max(player.health, heartChange.from) : player.health;
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < HEARTS; i++) {
     const w = Math.max(0, Math.min(4, low - i * 4)), all = Math.max(0, Math.min(4, high - i * 4));
     if (!all) cell('empty', 0, i);
     else if (all === w) cell('white', w, i);
@@ -2971,9 +2971,10 @@ function drawHearts() {
 // just above the hotbar's left end, at a whole-number size so the pixels stay sharp; the block name moves up above them
 function layoutHearts() {
   if (!SURVIVAL) return;
+  // (sized as if there were 10 hearts, so each heart stays the same size as before)
   const r = hotbarEl.getBoundingClientRect(), s = Math.max(1, Math.floor(r.width / 2 / 99));
   const bottom = innerHeight - r.top + 4;
-  Object.assign(heartsEl.style, { width: 99 * s + 'px', height: 9 * s + 'px', left: r.left + 'px', bottom: bottom + 'px' });
+  Object.assign(heartsEl.style, { width: heartsEl.width * s + 'px', height: 9 * s + 'px', left: r.left + 'px', bottom: bottom + 'px' });
   nameEl.style.bottom = bottom + 9 * s + 8 + 'px';
 }
 addEventListener('resize', () => setTimeout(layoutHearts));
@@ -3413,6 +3414,8 @@ addEventListener('mousedown', e => {
   }
   // right-click a Crafting Bench to use it (hold Shift to build against it instead)
   if (e.button === 2 && hb === CRAFTING_BENCH && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(); return; }
+  // right-click a lit (burning) furnace holding a Stick: the stick catches fire and becomes a Torch
+  if (e.button === 2 && isFurnace(hb) && BLOCKS[hb].lit && HOTBAR[selected] === STICK) { lightStick(); return; }
   if (e.button === 2 && isFurnace(hb) && !(keys.ShiftLeft || keys.ShiftRight)) { openFurnace(idx(hit.x, hit.y, hit.z)); return; }
   // placing a piece: it goes in the half-block spot just in front of whatever you're looking at
   if (e.button === 2 && isPiece(HOTBAR[selected])) {
@@ -3753,6 +3756,15 @@ document.getElementById('furnace-fuel').addEventListener('contextmenu', e => {
   furnaceName.textContent = f.fuelN ? 'No room in your hotbar' : 'Took the fuel out';
   drawFurnace();
 });
+// one Stick from the selected slot becomes a Torch (when you right-click a lit furnace)
+function lightStick() {
+  if (SURVIVAL) {
+    useOne();
+    if (!giveItem(TORCH)) { setSlot(selected, STICK, (HOTBAR[selected] === STICK ? HOTBAR_COUNT[selected] : 0) + 1); nameEl.textContent = 'No room in your hotbar for a torch'; nameEl.style.opacity = 1; nameTimer = 2; return; }
+  } else giveItem(TORCH);
+  Sound.place(TORCH);
+  nameEl.textContent = 'Lit a Torch'; nameEl.style.opacity = 1; nameTimer = 1.5;
+}
 // a furnace that's broken: its fuel and anything waiting to be smelted fall out
 function emptyFurnace(i) {
   const f = furnaces.get(i);
@@ -3810,6 +3822,7 @@ const RECIPES = [
   { out: 7, n: 4, needs: [[61, 1]], at: 'hand', axe: true },     // Stripped Log -> 4 Planks
   { out: STICK, n: 4, needs: [[7, 2]], at: 'bench', axe: true }, // 2 Planks -> 4 Sticks (sticks also sometimes drop from leaves)
   { out: CRAFTING_BENCH, n: 1, needs: [[7, 4], [4, 1]], at: 'hand' },   // 4 Planks + a Log -> Crafting Bench
+  { out: TORCH, n: 2, needs: [[STICK, 1], [TORCH, 1]], at: 'hand' },     // a Stick + a Torch -> 2 Torches (light the first one at a lit furnace)
   { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
   { out: CLAY_BALL, n: 1, needs: [[PIECE_ITEM + 63, 2]], at: 'hand' },   // 2 Clay Pieces -> a Clay Ball
   { out: 64, n: 1, needs: [[BRICK, 4]], at: 'bench' },                   // 4 Bricks -> Bricks (block)
