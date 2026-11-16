@@ -43,6 +43,15 @@
   #inv-grid .slot, #hotbar.open .slot { cursor: pointer; }
   #inv-grid .slot:hover, #hotbar.open .slot:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   #inv-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
+  /* a block's other forms (pieces, slabs, stairs...) open in a row under the grid when you click its + */
+  #inv-grid .slot { position: relative; }
+  #inv-grid .plus { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; padding: 0; border-radius: 4px;
+    border: 1px solid rgba(255,255,255,.7); background: #2a2a30; color: #fff; font: 700 14px/14px system-ui, sans-serif; cursor: pointer; z-index: 1; }
+  #inv-grid .plus:hover { background: #4a4a55; }
+  #inv-variants { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 8px; padding: 6px; border-radius: 6px; background: rgba(255,255,255,.08); }
+  #inv-variants .slot { cursor: pointer; }
+  #inv-variants .slot:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
+  #inv-variants .var-label { font-size: var(--f1); margin-right: 6px; opacity: .8; }
   #bench { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
   #bench .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(100vw - 32px); box-sizing: border-box; }
   #bench h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
@@ -154,13 +163,13 @@
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
   }
-  .skinned :is(#hotbar, #inv-grid, #bench, #furnace) .slot {
+  .skinned :is(#hotbar, #inv-grid, #inv-variants, #bench, #furnace) .slot {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
     display: flex; align-items: center; justify-content: center;
   }
-  .skinned :is(#hotbar, #inv-grid, #bench, #furnace) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
-  .skinned :is(#hotbar, #inv-grid, #bench, #furnace) .slot canvas { margin: 0; }
+  .skinned :is(#hotbar, #inv-grid, #inv-variants, #bench, #furnace) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
+  .skinned :is(#hotbar, #inv-grid, #inv-variants, #bench, #furnace) .slot canvas { margin: 0; }
   #multi input:disabled { opacity: .5; }
   #multi .bottom { margin-top: 14px; text-align: right; }
 </style>
@@ -183,6 +192,7 @@
   <div class="panel">
     <h2>Inventory</h2>
     <div id="inv-grid"></div>
+    <div id="inv-variants" style="display:none"></div>
     <div id="inv-name"></div>
     <div class="crafting" id="inv-crafting" style="display:none"><h3>Crafting</h3><div class="recipes" id="inv-recipes"></div></div>
     <div class="hint" id="inv-hint">Click a block to put it in the selected slot &middot; drag it onto any slot &middot; right-click a hotbar slot to empty it &middot; E to close</div>
@@ -320,7 +330,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.4.0"></script>
+<script src="textures.js?v=alpha-0.0.4.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -328,7 +338,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.4.0';
+const GAME_VERSION = 'Alpha 0.0.4.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -482,7 +492,8 @@ BLOCKS[PIECES] = { name: 'Pieces', t: [3, 3, 3], transparent: true, shape: 'piec
 const pieceMap = new Map();     // world index -> Uint8Array(8) of block ids (0 = empty spot)
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
 const PIECE_ITEM = 100;
-const SPLITTABLE = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69];   // cube blocks (not torches or water)
+// cube blocks that can be cut into pieces, slabs and stairs (not torches, water, the Crafting Bench or the Furnace)
+const SPLITTABLE = [1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69];
 for (const b of SPLITTABLE) BLOCKS[PIECE_ITEM + b] = { name: BLOCKS[b].name + ' Piece', t: BLOCKS[b].t, item: true, piece: b };
 const isPiece = id => !!(BLOCKS[id] && BLOCKS[id].piece);
 // ---- Slabs, stairs and vertical slabs: made of pieces ----
@@ -3658,8 +3669,8 @@ function throwSlot(i) {
   for (let n = HOTBAR_COUNT[i]; n > 0; n--) Object.assign(dropItem(HOTBAR[i], fx, player.y + 1.2, fz), { age: -1 });   // (can't be picked straight back up)
   setSlot(i, 0);
 }
-// in creative mode pieces are unlimited, like whole blocks (no count, never used up)
-const infinitePiece = id => isPiece(id) && gameMode !== 'survival';
+// in creative mode pieces, slabs, stairs and quarters are unlimited, like whole blocks (no count, never used up)
+const infinitePiece = id => (isPiece(id) || !!formOf(id)) && gameMode !== 'survival';
 function setSlot(i, id, n = 1) { HOTBAR[i] = id; HOTBAR_COUNT[i] = counted(id) ? n : 0; saveHotbar(); drawHotbarIcons(); if (i === selected) selectSlot(i); }
 // picking up an item: top up a stack of it, otherwise the first empty slot. Returns false if there's no room.
 function giveItem(id) {
@@ -3679,21 +3690,45 @@ function giveItem(id) {
 // ===================== Inventory (E) =====================
 const invEl = document.getElementById('inventory'), invGrid = document.getElementById('inv-grid'), invName = document.getElementById('inv-name');
 const invIcons = [];
-// creative mode: every block's pieces can be picked here too (after the blocks)
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, ...TOOLS, ...SPLITTABLE.map(b => PIECE_ITEM + b),
-  ...SPLITTABLE.map(b => SHAPE_ITEM.slab + b), ...SPLITTABLE.map(b => SHAPE_ITEM.stairs + b), ...SPLITTABLE.map(b => SHAPE_ITEM.vslab + b), ...SPLITTABLE.map(b => SHAPE_ITEM.quarter + b)]);
-INV_LIST.forEach(id => {
+// Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
+// click the + to see them all in a row underneath.
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, ...TOOLS]);
+const variantsOf = b => SPLITTABLE.includes(b)
+  ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.vslab + b, SHAPE_ITEM.quarter + b] : [];
+const invVariants = document.getElementById('inv-variants');
+let openVariants = 0, openPlus = null;
+function invSlot(id, parent) {
   const slot = document.createElement('div');
   slot.className = 'slot';
   const c = document.createElement('canvas'); c.width = c.height = TILE;
   invIcons.push([c, id]);
+  drawIcon(c, id);
   slot.append(c);
   slot.draggable = true;
   slot.addEventListener('click', () => setSlot(selected, id));          // into the selected hotbar slot
   slot.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', 'item:' + id));
   slot.addEventListener('mouseenter', () => { invName.textContent = BLOCKS[id].name; });
   slot.addEventListener('mouseleave', () => { invName.textContent = ''; });
-  invGrid.append(slot);
+  parent.append(slot);
+  return slot;
+}
+function showVariants(b, plus) {
+  if (openPlus) openPlus.textContent = '+';
+  invVariants.textContent = '';
+  if (openVariants === b || !b) { openVariants = 0; openPlus = null; invVariants.style.display = 'none'; return; }
+  openVariants = b; openPlus = plus; plus.textContent = '−';
+  const label = document.createElement('div'); label.className = 'var-label'; label.textContent = BLOCKS[b].name;
+  invVariants.append(label);
+  for (const id of [b, ...variantsOf(b)]) invSlot(id, invVariants);
+  invVariants.style.display = '';
+}
+INV_LIST.forEach(id => {
+  const slot = invSlot(id, invGrid);
+  if (!variantsOf(id).length) return;
+  const plus = document.createElement('button'); plus.className = 'plus'; plus.textContent = '+'; plus.title = 'Show the other forms';
+  plus.addEventListener('click', e => { e.stopPropagation(); showVariants(id, plus); });
+  plus.addEventListener('mousedown', e => e.stopPropagation());
+  slot.append(plus);
 });
 // survival: no picking blocks from a list; you only have what's in your hotbar
 if (SURVIVAL) {
