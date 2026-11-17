@@ -1,5 +1,20 @@
 [
     {
+        "version": "Alpha 0.0.6.0",
+        "title": "Brick & Bloom",
+        "folder": "alpha-0.0.6.0",
+        "date": "2026-11-17",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.6.0/CubeLand-Alpha-0.0.6.0-windows.zip",
+        "size": 74745965,
+        "exe": "CubeLand-Alpha-0.0.6.0-windows/CubeLand.exe",
+        "changes": [
+            "Terracotta, Chiseled Terracotta and Bricks in 12 colours",
+            "Flowers grow in small patches on grass; pick them and plant them again",
+            "12 Dyes from flowers, Burnt Torches and Rocks, plus mixing for more colours",
+            "Plays multiplayer with web version Alpha 0.0.6.0"
+        ]
+    },
+    {
         "version": "Alpha 0.0.5.1",
         "folder": "alpha-0.0.5.1",
         "date": "2026-11-16",
