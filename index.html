@@ -353,7 +353,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.5.0"></script>
+<script src="textures.js?v=alpha-0.0.5.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -361,7 +361,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.5.0';
+const GAME_VERSION = 'Alpha 0.0.5.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -435,19 +435,47 @@ const furnaces = new Map();   // world index of a furnace -> what's in it (see F
 // Torches: thin sticks (not full cubes) you can walk through, that light up the dark.
 // One block space holds 1-4 torches, either standing, or leaning 22.5 degrees off one of the 4 walls.
 // Each (placement, count) combo is its own block id: standing x1 = 22, wall x1 = 23-26, the rest from 27 up.
+// Torches burn down: lit -> smoldering (half the light) -> burnt (no light), after a random time at each stage.
+// burn: 0 = lit, 1 = smoldering, 2 = burnt, 3 = Ever Torch. Lit = 22-41 (above), smoldering = 81-92, burnt = 170-181, ever = 182-193 (only the
+// counts that fit: 1-4 standing, 1-2 on a wall). Right-click a smoldering torch with a lit one to light it again.
+// Breaking any torch (or water washing it off) gives you a Burnt Torch.
 const TORCH = 22;
 const TORCH_WALLS = [null, [-1, 0], [1, 0], [0, -1], [0, 1]];   // null = standing; otherwise the direction of the wall
 const TORCH_IDS = {};
+const TORCH_STATES = [
+  { name: 'Torch', t: [23, 24, 25] },
+  { name: 'Smoldering Torch', t: [48, 49, 25] },
+  { name: 'Burnt Torch', t: [50, 51, 25] },
+  { name: 'Ever Torch', t: [23, 24, 25] },   // burn 3: a Torch + Fire Essence; stays lit forever, with fire essence sparks rising off it
+];
 {
   let next = 27;
   TORCH_WALLS.forEach((wall, wi) => {
     for (let n = 1; n <= 4; n++) {
       const id = n === 1 ? 22 + wi : next++;
-      BLOCKS[id] = { name: 'Torch', t: [23, 24, 25], transparent: true, shape: 'torch', noCollide: true, wall, wi, count: n };
-      TORCH_IDS[wi + ':' + n] = id;
+      BLOCKS[id] = { name: 'Torch', t: [23, 24, 25], transparent: true, shape: 'torch', noCollide: true, wall, wi, count: n, burn: 0 };
+      TORCH_IDS['0:' + wi + ':' + n] = id;
     }
   });
+  [81, 170, 182].forEach((first, k) => {
+    const burn = k + 1, s = TORCH_STATES[burn];
+    let id = first;
+    TORCH_WALLS.forEach((wall, wi) => {
+      for (let n = 1; n <= (wi ? 2 : 4); n++) {
+        BLOCKS[id] = { name: s.name, t: s.t, transparent: true, shape: 'torch', noCollide: true, wall, wi, count: n, burn };
+        TORCH_IDS[burn + ':' + wi + ':' + n] = id++;
+      }
+    });
+  });
 }
+const SMOLDERING_TORCH = 81, BURNT_TORCH = 170, EVER_TORCH = 182;   // (standing x1: also what you carry; Ever Torches are 182-193)
+// what a torch gives you when it's broken, falls off or is washed away: it goes out (an Ever Torch stays an Ever Torch)
+const torchDrop = id => BLOCKS[id].burn === 3 ? EVER_TORCH : BURNT_TORCH;
+// how long a torch stays at each stage, in seconds: lit 15-25 minutes, then smoldering 5-10 minutes
+const BURN_TIMES = [[900, 1500], [300, 600]];
+const burnTime = burn => { const [lo, hi] = BURN_TIMES[burn]; return lo + Math.random() * (hi - lo); };
+const torchBurn = new Map();   // world index of a lit or smoldering torch spot -> seconds until it burns down a stage
+const burnsDown = id => isTorch(id) && BLOCKS[id].burn < 2;   // lit or smoldering (burnt is done; Ever Torches never burn down)
 const isTorch = id => !!(BLOCKS[id] && BLOCKS[id].shape === 'torch');
 // Water: see-through, you swim in it, and it flows. 50 = still water (lakes and seas, or water you place);
 // 51-57 = flowing water, one step weaker for each block it runs from the still water (it stops after 7).
@@ -456,7 +484,7 @@ for (let l = 0; l <= 7; l++) BLOCKS[WATER + l] = { name: 'Water', t: [27, 27, 27
 const isWater = id => id >= WATER && id <= WATER + 7;
 // how high the water's surface sits in its block (water with more water on top fills the whole block)
 const waterHeight = (id, above) => isWater(above) ? 1 : id === WATER ? 0.875 : Math.max(0.15, 0.875 * (8 - (id - WATER)) / 8);
-const torchVariant = (wi, n) => TORCH_IDS[wi + ':' + n];
+const torchVariant = (wi, n, burn = 0) => TORCH_IDS[burn + ':' + wi + ':' + n];
 const torchMax = wi => wi ? 2 : 4;   // a wall holds up to 2 torches, a standing spot up to 4
 const wallIndex = (dx, dz) => TORCH_WALLS.findIndex(w => w && w[0] === dx && w[1] === dz);
 // Items: things you carry but can't place (ids 200+). They share the block list so icons and names work the same way.
@@ -491,6 +519,9 @@ BLOCKS[CRUDE_AXE] = { name: 'Crude Axe', t: [34, 34, 34], item: true, tool: 'axe
 const CLAY_BALL = 215, BRICK = 216, CLAY_BALL_BLOCK = 71, BRICK_BLOCK = 72, DRY_TIME = 300;
 BLOCKS[CLAY_BALL] = { name: 'Clay Ball', t: [45, 45, 45], item: true, places: CLAY_BALL_BLOCK };
 BLOCKS[BRICK] = { name: 'Brick', t: [46, 46, 46], item: true };
+// Fire Essence: 1 in 20 Grrs drop one. Right-click while holding it to lift all your gloom at once (see Gloom)
+const FIRE_ESSENCE = 217;
+BLOCKS[FIRE_ESSENCE] = { name: 'Fire Essence', t: [47, 47, 47], item: true };
 BLOCKS[CLAY_BALL_BLOCK].drop = CLAY_BALL;
 BLOCKS[BRICK_BLOCK].drop = BRICK;
 const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
@@ -597,7 +628,7 @@ const placeId = id => BLOCKS[id] && BLOCKS[id].places ? BLOCKS[id].places : BRIC
 let selected = 0;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 48;   // the texture atlas holds 48 pictures side by side (32+ are the stick and tools)
+const TILE = 16, NT = 52;   // the texture atlas holds 52 pictures side by side (32+ are the stick and tools)
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -675,9 +706,10 @@ const TEXTURE_SLOTS = {
   // red bricks: one picture fills all 4 brick looks; bricks_a.._d would give each look its own picture
   red_bricks: [13, 14, 15, 16], bricks_a: 13, bricks_b: 14, bricks_c: 15, bricks_d: 16,
   torch_side: 23, torch_top: 24, torch_bottom: 25, tortch_side: 23, tortch_top: 24, tortch_bottom: 25,
+  smoldering_torch_side: 48, smoldering_torch_top: 49, burnt_torch_side: 50, burnt_torch_top: 51,
   chocolate: 26, water: 27,
   crafting_bench_side: 28, crafting_bench_top: 29, stripped_log_side: 30, stripped_log_top: 31,
-  stick: 32, rock: 33, crude_axe: 34,   // (47 is free)
+  stick: 32, rock: 33, crude_axe: 34, fire_essence: 47,
   stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
 };
 function loadCustomTextures(onDone) {
@@ -1598,7 +1630,10 @@ function nearTorch(x, y, z) {
 function relight(dirty) {      // recompute all torch light, mark chunks whose lighting changed
   const old = lightMap, nm = new Map();
   for (const ti of torches) {
-    const q = [[ti % WX, Math.floor(ti / (WX * WZ)), Math.floor(ti / WX) % WZ, TORCH_LIGHT + TORCH_EXTRA * (BLOCKS[world[ti]].count - 1)]];
+    const tb = BLOCKS[world[ti]];
+    if (tb.burn === 2) continue;   // burnt: no light
+    const full = TORCH_LIGHT + TORCH_EXTRA * (tb.count - 1);
+    const q = [[ti % WX, Math.floor(ti / (WX * WZ)), Math.floor(ti / WX) % WZ, tb.burn === 1 ? Math.round(full / 2) : full]];   // smoldering: half
     for (let h = 0; h < q.length; h++) {
       const [x, y, z, l] = q[h], i = idx(x, y, z);
       if ((nm.get(i) || 0) >= l) continue;
@@ -1703,8 +1738,11 @@ function torchGeo(id) {           // corner positions of every stick (inside the
   })));
   return (torchGeoCache[id] = { sticks, box });
 }
-function addTorch(x, y, z, id, pos, uv, col, lt, sk, ind) {
+function addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
   const b = BLOCKS[id], lo = 6 / 16, hi = 10 / 16;
+  // a lit torch is always fully lit; a smoldering one glows dimly; a burnt one is lit like anything else around it
+  const own = b.burn === 2 ? (anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0) : b.burn === 1 ? 0.6 : 1;
+  const skyHere = b.burn === 2 ? skyExposure(x, y, z, skyCache) : 1;
   for (const stick of torchGeo(id).sticks) FACES.forEach((f, fi) => {
     const tile = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.t[0];
     const base = pos.length / 3;
@@ -1716,7 +1754,7 @@ function addTorch(x, y, z, id, pos, uv, col, lt, sk, ind) {
       uv.push((tile * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
       const s = 0.8 + 0.2 * f.shade;
       col.push(s, s, s);
-      lt.push(1); sk.push(1);                          // the torch itself is always fully lit
+      lt.push(own); sk.push(skyHere);
     });
     ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
   });
@@ -1748,7 +1786,7 @@ function buildChunk(cx, cz) {
     const id = world[idx(x, y, z)];
     if (!id) continue;
     const b = BLOCKS[id];
-    if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind); continue; }
+    if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'flat') { addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
     if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
@@ -1909,6 +1947,9 @@ function setBlock(x, y, z, id) {
   if (id !== PIECES) pieceMap.delete(i);
   if (isTorch(old)) torches.delete(i);
   if (isTorch(id)) torches.add(i);
+  // a torch spot that's newly lit or smoldering starts its burn-down timer (adding one to a spot keeps its timer)
+  if (!burnsDown(id)) torchBurn.delete(i);
+  else if (!burnsDown(old) || BLOCKS[old].burn !== BLOCKS[id].burn) torchBurn.set(i, burnTime(BLOCKS[id].burn));
   if (id === CLAY_BALL_BLOCK) { if (old !== id) drying.set(i, DRY_TIME); } else drying.delete(i);
   if (isFurnace(old) && !isFurnace(id)) emptyFurnace(i);   // broken: what was in it falls out
   // keep the sky map up to date, and relight nearby chunks if what can see the sky changed
@@ -1991,7 +2032,10 @@ function updateWater(dt) {
   const dirty = new Set();
   for (const [x, y, z, id] of changes) {
     const i = idx(x, y, z);
-    if (isTorch(world[i])) { setBlock(x, y, z, id); continue; }    // washing a torch away also changes the light
+    if (isTorch(world[i])) {   // water puts a torch out and washes it away (it drops as Burnt Torches); that also changes the light
+      for (let k = BLOCKS[world[i]].count; k > 0; k--) collect(torchDrop(world[i]), x, y, z);
+      setBlock(x, y, z, id); continue;
+    }
     world[i] = id; edits.set(i, id);
     const c = Math.floor(z / CS) * NCX + Math.floor(x / CS);
     if (id) chunkTop[c] = Math.max(chunkTop[c], y + 1);
@@ -2003,8 +2047,8 @@ function updateWater(dt) {
 }
 // when a block is removed, torches standing on it or stuck to its sides fall off
 function dropTorchesAround(x, y, z) {
-  // (in survival they drop as torches you can pick up)
-  const fall = (tx, ty, tz, t) => { for (let n = BLOCKS[t].count; n > 0; n--) collect(TORCH, tx, ty, tz); setBlock(tx, ty, tz, 0); };
+  // (in survival they drop as Burnt Torches you can pick up: a torch that falls goes out)
+  const fall = (tx, ty, tz, t) => { for (let n = BLOCKS[t].count; n > 0; n--) collect(torchDrop(t), tx, ty, tz); setBlock(tx, ty, tz, 0); };
   const above = getBlock(x, y + 1, z);
   if (isTorch(above) && !BLOCKS[above].wall) fall(x, y + 1, z, above);
   if (BLOCKS[above] && BLOCKS[above].shape === 'flat') { collect(dropFor(above), x, y + 1, z); setBlock(x, y + 1, z, 0); }   // a rock lying on it
@@ -2871,14 +2915,14 @@ function raycast(max = 6) {
 // Models come from Blockbench .json files in the model folder (packed into textures.js as window.MODELS),
 // skins from textures/entity/mobs/<name>/. Sizes are in model pixels: 16 = one block.
 const MOB_TYPES = {
-  // drops: [item, fewest, most] dropped when killed
+  // drops: [item, fewest, most, chance] dropped when killed (chance: how likely, 1/20 = 1 in 20; left out = always)
   // hostile: chases and attacks the player, but only in survival mode. night: only spawns after dark.
   // growl: the mob's voice, heard every so often (and when hit) up to ~28 blocks away. 'growl' = Grr's low grumble, 'hrr' = Dan's cat-like trill
   // curious: drawn to block-breaking/placing sounds (within hearing) and torches (within lightRange)
   danthechocolateman: { name: 'Dan The Chocolate Man', health: 5, speed: 1.3, max: 6, drops: [[CHOCOLATE, 1, 2]], growl: 'hrr' },
   // scale: how much bigger than the model to draw it (Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks, as tall as the player)
   grrangry: { name: 'Grr Angry', health: 8, speed: 1.5, max: 5, hostile: true, night: true, damage: 3, sight: 16, reach: 1.8, glow: true,
-    curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 1.6 },
+    curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 1.6, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
 };
 // play a mob's growl from where it stands: fades out by ~28 blocks, and comes from the left or right speaker
 function mobGrowl(m) {
@@ -2900,6 +2944,7 @@ function mobNoise(x, y, z) {
 function nearestTorchGoal(m, range) {
   let best = null, bd = range;
   for (const i of torches) {
+    if (BLOCKS[world[i]].burn === 2) continue;   // (a burnt torch gives no light)
     const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
     const d = Math.hypot(x + 0.5 - m.x, y - m.y, z + 0.5 - m.z);
     if (d < bd) { bd = d; best = { kind: 'light', x: x + 0.5, y, z: z + 0.5, time: 8 + Math.random() * 6 }; }
@@ -2998,6 +3043,15 @@ function updateGloom(dt) {
   }
 }
 let gloomDeath = false;   // (the death screen says the gloom got you)
+// Fire Essence (a rare Grr drop): using one clears all your gloom at once, and the health under it comes back
+function useFireEssence() {
+  if (!SURVIVAL || player.dead || HOTBAR[selected] !== FIRE_ESSENCE || !player.gloom) return false;
+  player.gloom = 0; player.lightTime = 0;
+  if (--HOTBAR_COUNT[selected] <= 0) { HOTBAR[selected] = 0; HOTBAR_COUNT[selected] = 0; selectSlot(selected); }
+  drawHotbarIcons(); drawHearts();
+  nameEl.textContent = 'The gloom lifts'; nameEl.style.opacity = 1; nameTimer = 1.5;
+  return true;
+}
 // For a moment after your health changes, the part that changed is a different colour:
 // red = what you just lost, green = what just came back. from = the health before the change.
 const heartChange = { from: 0, color: 'red', time: 0 };
@@ -3020,13 +3074,49 @@ const HEART_CELL = { white: q => [8 - q, 1], red: q => [4 - q, 0], green: q => [
 const GLOOM_MIX = { 1: { 3: [8, 1], 2: [8, 2], 1: [9, 1] }, 2: { 2: [9, 0], 1: [9, 2] }, 3: { 1: [8, 0] } };
 let HP = 10, HS = 9;   // the atlas's spacing between hearts and a heart's size, in its pixels (set from the picture's size)
 let whiteFillOnly = null, gloomFillOnly = null;   // the white / dark grey hearts with their dark outline and empty part cut out, to lay over another
+// Where heart [column, row] really is in the atlas: a heart drawn a pixel or two off the grid is found where it is,
+// by following its pixels out from the middle of its cell (hearts are separated by see-through gaps).
+let heartAlpha = null;
+const heartSpots = new Map();
+function heartAt(cx, cy) {
+  const key = cx + ',' + cy;
+  if (heartSpots.has(key)) return heartSpots.get(key);
+  let spot = [cx * HP, cy * HP];
+  const W = heartImg.width, H = heartImg.height, op = (x, y) => x >= 0 && y >= 0 && x < W && y < H && heartAlpha[(y * W + x) * 4 + 3] > 0;
+  if (heartAlpha) {
+    let sx = -1, sy = -1, best = 1e9;   // the see-through-free pixel nearest the cell's middle
+    const mx = cx * HP + HS / 2, my = cy * HP + HS / 2;
+    for (let y = cy * HP - 2; y < cy * HP + HS + 2; y++) for (let x = cx * HP - 2; x < cx * HP + HS + 2; x++) {
+      const d = (x - mx) ** 2 + (y - my) ** 2;
+      if (d < best && op(x, y)) { best = d; sx = x; sy = y; }
+    }
+    if (sx >= 0) {
+      let x0 = sx, y0 = sy, x1 = sx, y1 = sy;
+      const seen = new Set([sy * W + sx]), todo = [[sx, sy]];
+      while (todo.length) {
+        const [x, y] = todo.pop();
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+        for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]])
+          if (!seen.has(ny * W + nx) && op(nx, ny)) { seen.add(ny * W + nx); todo.push([nx, ny]); }
+      }
+      if (x1 - x0 < HS + 2 && y1 - y0 < HS + 2) spot = [x0, y0];   // (if it ran into a neighbour, stick to the grid)
+    }
+  }
+  heartSpots.set(key, spot);
+  return spot;
+}
+// draw atlas heart [column, row] at (x, 0) on g
+const drawHeart = (g, [cx, cy], x) => { const [sx, sy] = heartAt(cx, cy); g.drawImage(heartImg, sx, sy, HS, HS, x, 0, HS, HS); };
 heartImg.onload = () => {
   HP = heartImg.width / 9.9; HS = Math.round(HP * 0.9); HP = Math.round(HP);
   heartsEl.width = HEARTS * HP - (HP - HS); heartsEl.height = HS;
+  const a = document.createElement('canvas'); a.width = heartImg.width; a.height = heartImg.height;
+  const ag = a.getContext('2d'); ag.drawImage(heartImg, 0, 0);
+  heartAlpha = ag.getImageData(0, 0, a.width, a.height).data; heartSpots.clear();
   const fillOnly = kind => {
     const c = document.createElement('canvas'); c.width = 4 * HP; c.height = HS;
     const g = c.getContext('2d');
-    for (let q = 1; q <= 4; q++) { const [cx, cy] = HEART_CELL[kind](q); g.drawImage(heartImg, cx * HP, cy * HP, HS, HS, (q - 1) * HP, 0, HS, HS); }
+    for (let q = 1; q <= 4; q++) drawHeart(g, HEART_CELL[kind](q), (q - 1) * HP);
     const d = g.getImageData(0, 0, c.width, HS), p = d.data;
     for (let k = 0; k < p.length; k += 4) if (p[k] < 20 && p[k + 1] < 20 && p[k + 2] < 20) p[k + 3] = 0;
     g.putImageData(d, 0, 0);
@@ -3041,7 +3131,7 @@ function drawHearts() {
   if (!SURVIVAL || !whiteFillOnly) return;
   const g = heartsEl.getContext('2d');
   g.clearRect(0, 0, heartsEl.width, heartsEl.height);
-  const cell = (kind, q, i) => { const [cx, cy] = HEART_CELL[kind](q); g.drawImage(heartImg, cx * HP, cy * HP, HS, HS, i * HP, 0, HS, HS); };
+  const cell = (kind, q, i) => drawHeart(g, HEART_CELL[kind](q), i * HP);
   // white up to `low`, then red or green up to `high` (just the normal hearts when nothing changed lately)
   const changing = heartChange.time > 0;
   const low = changing ? Math.min(player.health, heartChange.from) : player.health;
@@ -3054,7 +3144,7 @@ function drawHearts() {
     if (!all) cell('empty', 0, i);
     else if (all === w && !gq) cell('white', w, i);
     else if (all === w && gq === w) cell('gloom', gq, i);
-    else if (all === w && GLOOM_MIX[gq] && GLOOM_MIX[gq][w - gq]) { const [cx, cy] = GLOOM_MIX[gq][w - gq]; g.drawImage(heartImg, cx * HP, cy * HP, HS, HS, i * HP, 0, HS, HS); }
+    else if (all === w && GLOOM_MIX[gq] && GLOOM_MIX[gq][w - gq]) drawHeart(g, GLOOM_MIX[gq][w - gq], i * HP);
     else {
       cell(all === w ? 'white' : heartChange.color, all, i);   // the whole filled part in red/green...
       if (w && all !== w) fill(whiteFillOnly, w, i);   // ...with the part you still have in white on top
@@ -3419,8 +3509,8 @@ function hitMob(m, from = player) {
   if (MOB_TYPES[m.type].growl) { mobGrowl(m); m.growlIn = 4 + Math.random() * 6; }   // growls when hit
   if (m.health <= 0) {
     m.dead = 0.001;
-    for (const [id, lo, hi] of MOB_TYPES[m.type].drops || [])
-      for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) dropItem(id, m.x, m.y + 0.5, m.z);
+    for (const [id, lo, hi, chance = 1] of MOB_TYPES[m.type].drops || [])
+      if (Math.random() < chance) for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) dropItem(id, m.x, m.y + 0.5, m.z);
   }
 }
 
@@ -3496,6 +3586,7 @@ addEventListener('mousedown', e => {
   if (!locked) return;
   if (e.button === 0) { const m = mobInSights(); if (m) { hitMob(m); return; } }
   if (e.button === 2 && eat()) return;   // holding food (survival): right-click eats it
+  if (e.button === 2 && useFireEssence()) return;   // holding Fire Essence while gloomed: right-click lifts the gloom
   const hit = raycast();
   if (!hit) return;
   const hb = getBlock(hit.x, hit.y, hit.z);
@@ -3544,16 +3635,20 @@ addEventListener('mousedown', e => {
     Sound.break(hb);
     collectBlock(hb, hit.x, hit.y, hit.z);
     if (hb === 5 && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);   // leaves: 1 in 5 chance of a stick too
-    if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1)); // take one torch off
+    if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn)); // take one torch off
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
     mobNoise(hit.x, hit.y, hit.z);
   }
   // empty slot or an item: nothing to place (except items that go down on the ground, like a Rock)
   if (e.button === 2 && (!HOTBAR[selected] || isItem(HOTBAR[selected]) && !BLOCKS[HOTBAR[selected]].places)) return;
-  if (e.button === 2 && HOTBAR[selected] === TORCH) {
-    // clicking a torch adds another one to that spot (up to 4 standing, 2 on a wall)
+  if (e.button === 2 && isTorch(HOTBAR[selected])) {
+    const burn = BLOCKS[HOTBAR[selected]].burn;   // what you're holding: a Torch (lit), or a Smoldering / Burnt one
     if (isTorch(hb)) {
-      if (BLOCKS[hb].count < torchMax(BLOCKS[hb].wi)) { setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count + 1)); Sound.place(TORCH); mobNoise(hit.x, hit.y, hit.z); useOne(); }
+      const tb = BLOCKS[hb];
+      // a lit torch lights a smoldering one up again (it isn't used up)
+      if ((burn === 0 || burn === 3) && tb.burn === 1) { setBlock(hit.x, hit.y, hit.z, torchVariant(tb.wi, tb.count, 0)); Sound.place(TORCH); nameEl.textContent = 'Lit the torch again'; nameEl.style.opacity = 1; nameTimer = 1.5; return; }
+      // clicking a torch adds another one of the same kind to that spot (up to 4 standing, 2 on a wall)
+      if (tb.burn === burn && tb.count < torchMax(tb.wi)) { setBlock(hit.x, hit.y, hit.z, torchVariant(tb.wi, tb.count + 1, burn)); Sound.place(TORCH); mobNoise(hit.x, hit.y, hit.z); useOne(); }
       return;
     }
     // otherwise: on top of a block (standing) or on its side (leaning off the wall), never underneath
@@ -3562,8 +3657,8 @@ addEventListener('mousedown', e => {
     if (ny < 0 || (!nx && !ny && !nz)) return;
     const wi = ny > 0 ? 0 : wallIndex(-nx, -nz);
     const there = getBlock(bx, by, bz);
-    if (!there) setBlock(bx, by, bz, torchVariant(wi, 1));
-    else if (isTorch(there) && BLOCKS[there].wi === wi && BLOCKS[there].count < torchMax(wi)) setBlock(bx, by, bz, torchVariant(wi, BLOCKS[there].count + 1));
+    if (!there) setBlock(bx, by, bz, torchVariant(wi, 1, burn));
+    else if (isTorch(there) && BLOCKS[there].wi === wi && BLOCKS[there].burn === burn && BLOCKS[there].count < torchMax(wi)) setBlock(bx, by, bz, torchVariant(wi, BLOCKS[there].count + 1, burn));
     else return;
     Sound.place(TORCH);
     mobNoise(bx, by, bz);
@@ -3655,7 +3750,7 @@ function useOne() {
 }
 // survival: what breaking a block gives you. Any of the 4 brick looks gives Bricks, a torch spot gives one torch,
 // water gives nothing.
-const dropFor = b => BLOCKS[b] && BLOCKS[b].drop ? BLOCKS[b].drop : isTorch(b) ? TORCH : BRICK_VARIANTS.includes(b) ? BRICK_VARIANTS[0] : ITEMS.includes(b) && !isWater(b) ? b : 0;
+const dropFor = b => BLOCKS[b] && BLOCKS[b].drop ? BLOCKS[b].drop : isTorch(b) ? torchDrop(b) : BRICK_VARIANTS.includes(b) ? BRICK_VARIANTS[0] : ITEMS.includes(b) && !isWater(b) ? b : 0;
 // survival: logs and planks only break when you're holding an axe, stone-type blocks only with a pickaxe
 // (returns true, with a note, when you can't break it)
 function needAxe(b) {
@@ -3778,10 +3873,11 @@ const invEl = document.getElementById('inventory'), invGrid = document.getElemen
 const invIcons = [];
 // Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
 // click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, ...TOOLS]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, ...TOOLS]);
 const variantsOf = b => SPLITTABLE.includes(b)
   ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.quarter + b,
-     SHAPE_ITEM.vslab + b, SHAPE_ITEM.vstairs + b, SHAPE_ITEM.vquarter + b] : [];
+     SHAPE_ITEM.vslab + b, SHAPE_ITEM.vstairs + b, SHAPE_ITEM.vquarter + b]
+  : b === TORCH ? [SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH] : [];   // (the Torch's + shows its other kinds)
 const invVariants = document.getElementById('inv-variants');
 let openVariants = 0, openPlus = null;
 function invSlot(id, parent) {
@@ -3814,7 +3910,7 @@ function showVariants(b, plus) {
 const INV_TABS = [
   ['Building Blocks', [7, 61, 8, 9, 12, 64, 65, 66, 67, 68, 69, 10, 22, CRAFTING_BENCH, FURNACE]],
   ['Natural Blocks', [1, 2, 3, 4, 5, 6, 11, 63, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, CRUDE_AXE, ...TOOLS]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, CRUDE_AXE, ...TOOLS]],
 ];
 const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
 let invTab = 0;
@@ -4086,6 +4182,63 @@ function tickDrying(dt) {
     if (world[i] === CLAY_BALL_BLOCK) setBlock(x, y, z, BRICK_BLOCK);
   }
 }
+// Torches burn down a stage when their time runs out (lit -> smoldering -> burnt)
+function tickTorches(dt) {
+  if (Net.client) return;   // (in a friend's world their game does it)
+  const done = [];
+  for (const [i, left] of torchBurn) { if (left - dt > 0) torchBurn.set(i, left - dt); else done.push(i); }
+  for (const i of done) {
+    const b = BLOCKS[world[i]];
+    if (!burnsDown(world[i])) { torchBurn.delete(i); continue; }
+    const [x, y, z] = fromIdx(i);
+    setBlock(x, y, z, torchVariant(b.wi, b.count, b.burn + 1));   // (starts the next stage's timer, or ends it once burnt)
+  }
+}
+// Ever Torches give off little fire essence sparks (your fire_essence picture) that drift up and fade:
+// that's how you tell them from ordinary torches. Only ones near you make sparks.
+const EVER_SPARK = { life: 1.6, every: 0.35, size: 0.14, range: 40, max: 300 };
+const everSparks = [];
+let everSparkTex = null, everSparkMat = null, everNear = [], everScan = 0;
+function tickEverSparks(dt) {
+  // every so often, find the Ever Torches near you
+  if ((everScan -= dt) <= 0) {
+    everScan = 1;
+    everNear = [];
+    for (const i of torches) {
+      if (BLOCKS[world[i]].burn !== 3) continue;
+      const [x, y, z] = fromIdx(i);
+      if (Math.abs(x - player.x) < EVER_SPARK.range && Math.abs(z - player.z) < EVER_SPARK.range && Math.abs(y - player.y) < EVER_SPARK.range) everNear.push({ i, x, y, z, t: Math.random() * EVER_SPARK.every });
+    }
+  }
+  if (everNear.length && !everSparkMat) {
+    const c = document.createElement('canvas'); c.width = c.height = TILE;
+    drawIcon(c, FIRE_ESSENCE);
+    everSparkTex = new THREE.CanvasTexture(c);
+    everSparkTex.magFilter = everSparkTex.minFilter = THREE.NearestFilter; everSparkTex.generateMipmaps = false;
+    everSparkMat = new THREE.SpriteMaterial({ map: everSparkTex, transparent: true, depthWrite: false });
+  }
+  for (const e of everNear) {
+    if (world[e.i] < 1 || BLOCKS[world[e.i]].burn !== 3) continue;   // (broken since the last look)
+    if ((e.t -= dt) > 0 || everSparks.length >= EVER_SPARK.max) continue;
+    e.t += EVER_SPARK.every * (0.6 + Math.random() * 0.8);
+    const box = torchGeo(world[e.i]).box;   // spark from the top of the torch(es)
+    const s = new THREE.Sprite(everSparkMat.clone());
+    s.position.set(e.x + (box[0] + box[3]) / 2 + (Math.random() - 0.5) * 0.2, e.y + box[4], e.z + (box[2] + box[5]) / 2 + (Math.random() - 0.5) * 0.2);
+    s.scale.setScalar(EVER_SPARK.size);
+    s.renderOrder = 2;
+    scene.add(s);
+    everSparks.push({ s, age: 0, vx: (Math.random() - 0.5) * 0.2, vy: 0.5 + Math.random() * 0.3, vz: (Math.random() - 0.5) * 0.2 });
+  }
+  for (let k = everSparks.length - 1; k >= 0; k--) {
+    const p = everSparks[k];
+    p.age += dt;
+    if (p.age >= EVER_SPARK.life) { scene.remove(p.s); p.s.material.dispose(); everSparks.splice(k, 1); continue; }
+    p.s.position.x += p.vx * dt; p.s.position.y += p.vy * dt; p.s.position.z += p.vz * dt;
+    const f = p.age / EVER_SPARK.life;
+    p.s.material.opacity = 1 - f;
+    p.s.scale.setScalar(EVER_SPARK.size * (1 - 0.5 * f));
+  }
+}
 
 // ===================== Crafting (survival) =====================
 // A list of things you can make. Click one: it uses up the ingredients from your hotbar and gives you what it makes.
@@ -4099,6 +4252,7 @@ const RECIPES = [
   { out: STICK, n: 4, needs: [[7, 2]], at: 'bench', axe: true }, // 2 Planks -> 4 Sticks (sticks also sometimes drop from leaves)
   { out: CRAFTING_BENCH, n: 1, needs: [[7, 4], [4, 1]], at: 'hand' },   // 4 Planks + a Log -> Crafting Bench
   { out: TORCH, n: 2, needs: [[STICK, 1], [TORCH, 1]], at: 'hand' },     // a Stick + a Torch -> 2 Torches (light the first one at a lit furnace)
+  { out: EVER_TORCH, n: 1, needs: [[TORCH, 1], [FIRE_ESSENCE, 1]], at: 'hand' },   // a Torch + Fire Essence -> an Ever Torch (never burns out)
   { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
   { out: CLAY_BALL, n: 1, needs: [[PIECE_ITEM + 63, 2]], at: 'hand' },   // 2 Clay Pieces -> a Clay Ball
   { out: 64, n: 1, needs: [[BRICK, 4]], at: 'bench' },                   // 4 Bricks -> Bricks (block)
@@ -4209,6 +4363,7 @@ function gatherSave() {
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health })),
     drops: drops.map(d => ({ id: d.id, x: d.x, y: d.y, z: d.z, age: d.age })),
     drying: [...drying],                                   // [[index, seconds left], ...]
+    torchBurn: [...torchBurn].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds until it burns down a stage], ...]
     furnaces: [...furnaces].map(([i, f]) => [i, f]),       // [[index, {fuel, fuelN, heat, queue, t}], ...]
   };
 }
@@ -4248,6 +4403,7 @@ function applySave(s) {
   applyPieces(s.pieces);
   applyEdits(new Uint32Array(s.idxs), new Uint8Array(s.ids));
   for (const [i, left] of s.drying || []) if (drying.has(i)) drying.set(i, Math.max(0, +left || 0));
+  for (const [i, left] of s.torchBurn || []) if (torchBurn.has(i)) torchBurn.set(i, Math.max(0, +left || 0));
   for (const [i, f] of s.furnaces || []) if (isFurnace(world[i]) && f) furnaces.set(i, f);
   applyPlayerSave(s);
 }
@@ -4262,6 +4418,7 @@ function applyEdits(idxs, ids) {
     world[i] = id; edits.set(i, id);
     const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
     if (isTorch(id)) torches.add(i);
+    if (burnsDown(id)) torchBurn.set(i, burnTime(BLOCKS[id].burn)); else torchBurn.delete(i);   // (applySave then puts back how long each has left)
     if (id === CLAY_BALL_BLOCK) drying.set(i, DRY_TIME); else drying.delete(i);   // (applySave then puts back how long each has left)
     wakeWater(x, y, z);                 // water that was still flowing when you saved carries on
     cols.add(z * WX + x);
@@ -4810,7 +4967,8 @@ function frame(now) {
   else { player.vx = player.vy = player.vz = 0; }
   if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
   if (worldLoaded && settings.autosave && performance.now() - lastSave > 30000) saveWorld();   // auto save every 30 seconds
-  if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); }   // (not while paused)
+  if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); tickTorches(dt); }   // (not while paused)
+  if (worldLoaded) tickEverSparks(dt);
   pumpRebuildSoon();
 
   // movement intent
