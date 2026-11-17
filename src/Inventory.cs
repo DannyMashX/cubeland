@@ -79,7 +79,8 @@ public class Inventory
 	// ===================== Crafting (survival) =====================
 	// at: "hand" = can be made anywhere (in the inventory, E), "bench" = only at a Crafting Bench (which can make everything).
 	// Needs: [id, how many]. Axe: you also need an axe somewhere in your hotbar (it isn't used up). Tool: the same for another tool.
-	public class Recipe { public int Out, N; public (int id, int n)[] Needs; public string At = "hand"; public bool Axe; public string Tool; }
+	// Colour: only listed while you carry at least one of its ingredients (there are a lot of them)
+	public class Recipe { public int Out, N; public (int id, int n)[] Needs; public string At = "hand"; public bool Axe; public string Tool; public bool Colour; }
 	public static readonly List<Recipe> Recipes = new()
 	{
 		new() { Out = Blocks.CrudeAxe, N = 1, Needs = new[] { (Blocks.Rock, 2), (Blocks.Stick, 1) } },
@@ -100,6 +101,18 @@ public class Inventory
 	};
 	static Inventory()
 	{
+		// dyes and colours
+		foreach (int f in Blocks.Flowers) Recipes.Add(new() { Out = Blocks.B[f].Dye, N = 1, Needs = new[] { (f, 1) }, Colour = true });   // a Flower -> its Dye
+		Recipes.Add(new() { Out = Blocks.DyeOf("black"), N = 1, Needs = new[] { (Blocks.BurntTorch, 1) }, Colour = true });   // a Burnt Torch (ash) -> Black Dye
+		Recipes.Add(new() { Out = Blocks.DyeOf("white"), N = 1, Needs = new[] { (Blocks.Rock, 1) }, Colour = true });         // a Rock (chalk) -> White Dye
+		foreach (var (o, a, b) in new[] { ("orange", "red", "yellow"), ("green", "yellow", "aqua"), ("blue", "aqua", "indigo"), ("purple", "indigo", "magenta"), ("pink", "red", "white") })
+			Recipes.Add(new() { Out = Blocks.DyeOf(o), N = 2, Needs = new[] { (Blocks.DyeOf(a), 1), (Blocks.DyeOf(b), 1) }, Colour = true });   // two dyes mixed
+		for (int k = 0; k < Blocks.Colours.Length; k++)
+		{
+			Recipes.Add(new() { Out = Blocks.ColourTerracotta[k], N = 8, Needs = new[] { (Blocks.Terracotta, 8), (Blocks.Dye[k], 1) }, At = "bench", Colour = true });
+			if (k > 0) Recipes.Add(new() { Out = Blocks.ColourChiseled[k], N = 1, Needs = new[] { (Blocks.ColourTerracotta[k], 1) }, At = "bench", Tool = "pickaxe", Colour = true });
+			Recipes.Add(new() { Out = Blocks.ColourBricks[k], N = 1, Needs = new[] { (Blocks.ColourTerracotta[k], 1) }, At = "bench", Tool = "pickaxe", Colour = true });
+		}
 		// tools: made of Cobblestone, with sticks for the handle. [material, sticks]
 		var toolRecipe = new Dictionary<string, (int m, int s)> { ["Pickaxe"] = (3, 2), ["Axe"] = (3, 2), ["Shovel"] = (1, 2), ["Sword"] = (2, 1), ["Hoe"] = (2, 2) };
 		foreach (int id in Blocks.Tools)

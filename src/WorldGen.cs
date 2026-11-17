@@ -91,6 +91,7 @@ public class WorldGen
 		Progress?.Invoke(0.75f);
 		Trees();
 		Rocks();
+		Flowers();
 		Progress?.Invoke(0.9f);
 	}
 
@@ -350,6 +351,24 @@ public class WorldGen
 			bool wet = false;
 			for (int dz = -5; dz <= 5 && !wet; dz++) for (int dx = -5; dx <= 5; dx++) if (Blocks.IsWater(world[Idx(x + dx, SeaLevel, z + dz)])) { wet = true; break; }
 			if (wet) { world[Idx(x, h + 1, z)] = Blocks.RockBlock; W.Heights[z * WX + x] = h + 1; }
+		}
+	}
+	// --- Flowers: small patches of one colour on grass (exactly as the web version, so both grow the same world) ---
+	void Flowers()
+	{
+		const double PATCH_CHANCE = 0.0012;   // out of every grass spot, how many are the middle of a patch
+		for (int z = 8; z < WZ - 8; z++) for (int x = 8; x < WX - 8; x++)
+		{
+			if (Hash(x, z, 5150) > PATCH_CHANCE) continue;
+			int flower = Blocks.Flowers[(int)Math.Floor(Hash(x, z, 5151) * Blocks.Flowers.Length)];
+			int n = 5 + (int)Math.Floor(Hash(x, z, 5152) * 8);   // 5-12 tries at a flower, within 3 blocks of the middle
+			for (int k = 0; k < n; k++)
+			{
+				int fx = x + (int)Math.Floor((Hash(x + k, z, 5153) - 0.5) * 6 + 0.5), fz = z + (int)Math.Floor((Hash(x, z + k, 5154) - 0.5) * 6 + 0.5);
+				int h = W.Heights[fz * WX + fx];
+				if (world[Idx(fx, h, fz)] != Blocks.Grass || world[Idx(fx, h + 1, fz)] != 0) continue;   // on grass, with nothing there yet
+				world[Idx(fx, h + 1, fz)] = (byte)flower; W.Heights[fz * WX + fx] = h + 1;
+			}
 		}
 	}
 }

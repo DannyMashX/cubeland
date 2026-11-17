@@ -259,13 +259,16 @@ public partial class Main : Node3D
 				GD.Print("worlds: " + string.Join(", ", Worlds.List().Select(w => w.Name + " " + w.Seed)));
 			}
 		}
+		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Input.MouseMode = Input.MouseModeEnum.Captured; }   // menus closed, as if playing
 		if (args.Contains("--mobs") && !mobsShown)
-		{   // a Dan and a Grr standing just in front of you, facing you
+		{   // a Dan and the night mob (Grr Angry until the Zombie is switched on) just in front of you, facing you
 			mobsShown = true;
+			if (menuOpen) ShowMainMenu(false);
+			Input.MouseMode = Input.MouseModeEnum.Captured;   // playing, so the pause screen stays away
 			var ya = args.FirstOrDefault(a => a.StartsWith("--yaw="));
 			if (ya != null) player.Yaw = float.Parse(ya[6..], System.Globalization.CultureInfo.InvariantCulture);
 			var fwd = new Vector3(-MathF.Sin(player.Yaw), 0, -MathF.Cos(player.Yaw)); var side = new Vector3(fwd.Z, 0, -fwd.X);
-			foreach (var (type, off) in new[] { ("danthechocolateman", -1.2f), ("grrangry", 1.4f) })
+			foreach (var (type, off) in new[] { ("danthechocolateman", -1.2f), (ZombieReady ? "zombie" : "grrangry", 1.4f) })
 			{
 				var at = player.Pos + fwd * 4.5f + side * off; int x = (int)MathF.Floor(at.X), z = (int)MathF.Floor(at.Z), y = world.Heights[z * World.WX + x] + 1;
 				var m = SpawnMob(type, at.X, y, at.Z); m.Yaw = player.Yaw + MathF.PI + off * 0.3f; m.Timer = 99; m.GoalCheck = 99;
@@ -305,6 +308,7 @@ public partial class Main : Node3D
 		if (shotTimer < (stay != null ? float.Parse(stay[7..]) : sceneBuilt ? 4f : 1.5f)) return;
 		GetViewport().GetTexture().GetImage().SavePng(arg[7..]);
 		GD.Print($"shot saved, {chunkNodes.Count} chunks");
+		foreach (var m in mobList) GD.Print($"mob {m.Type}: health {m.Health}{(m.Burning ? ", burning" : "")} at y {m.Y:0.0}");
 		GetTree().Quit();
 	}
 
@@ -343,10 +347,15 @@ public partial class Main : Node3D
 		world.SetBlock(x, y, z, 0);
 		// drops: in survival, a dropped item falls and you pick it up
 		var dp = new Drops(); AddChild(dp); dp.Init(world, player, s);
+		{   // stand on the ground first (the world may have been saved with you flying high up)
+			int gx = (int)MathF.Floor(player.Pos.X), gz = (int)MathF.Floor(player.Pos.Z);
+			player.Pos = new Vector3(player.Pos.X, world.Heights[gz * World.WX + gx] + 1, player.Pos.Z); player.Flying = false;
+		}
 		int before = s.CountOf(Blocks.Stick);
 		var d = dp.Add(Blocks.Stick, player.Pos.X, player.Pos.Y + 0.5f, player.Pos.Z); d.V = Vector3.Zero;
 		for (int t = 0; t < 60; t++) dp.Update(1 / 60f);
 		Check("walking into a dropped item picks it up", s.CountOf(Blocks.Stick) == before + 1 && dp.All.Count == 0);
+		if (dp.All.Count > 0) GD.Print($"  (stick count {before} -> {s.CountOf(Blocks.Stick)}, drop at {dp.All[0].P}, you at {player.Pos}, slots: {string.Join(",", s.Id)})");
 		dp.QueueFree();
 		GD.Print("selftest done");
 		GetTree().Quit();
@@ -368,6 +377,12 @@ public partial class Main : Node3D
 		world.SetBlock(cx + 1, cy + 1, cz, Blocks.TorchVariant(0, 1, 2));                        // burnt
 		world.SetBlock(cx + 2, cy + 1, cz, Blocks.TorchVariant(0, 2, 3));                        // 2 ever
 		world.SetBlock(cx + 4, cy + 1, cz, Blocks.Furnace);                                      // kiln
+		for (int k = 0; k < 12; k++)
+		{   // along the back: every colour's bricks, terracotta and chiseled terracotta, bottom to top
+			world.SetBlock(cx - 6 + k, cy + 1, cz - 3, Blocks.ColourBricks[k]); world.SetBlock(cx - 6 + k, cy + 2, cz - 3, Blocks.ColourTerracotta[k]);
+			world.SetBlock(cx - 6 + k, cy + 3, cz - 3, Blocks.ColourChiseled[k]);
+		}
+		for (int k = 0; k < 5; k++) { world.SetBlock(cx - 2 + k, cy, cz + 2, Blocks.Grass); world.SetBlock(cx - 2 + k, cy + 1, cz + 2, Blocks.Flowers[k]); }   // the flowers, on grass
 		player.Pos = new Vector3(cx + 0.5f, cy + 1.5f, cz + 7.5f); player.Flying = true; player.Yaw = 0; player.Pitch = -0.35f;
 		GD.Print($"burn timers: {world.TorchBurn.Count}  (expect 2: lit + smoldering)");
 	}

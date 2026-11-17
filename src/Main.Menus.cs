@@ -402,6 +402,7 @@ public partial class Main
 			}
 			SelectSlot(Math.Clamp(s.Selected, 0, Inventory.Slots - 1));
 		}
+		foreach (var m in s.Mobs) if (ZombieReady && m.Type == "grrangry") m.Type = "zombie";   // worlds saved before the Zombie replaced Grr Angry
 		foreach (var m in s.Mobs) if (MobTypes.ContainsKey(m.Type) && models.ContainsKey(m.Type)) { var mob = SpawnMob(m.Type, m.X, m.Y, m.Z); mob.Yaw = m.Yaw; mob.Health = m.Health > 0 ? m.Health : mob.T.Health; }
 		foreach (var d in s.Drops) if (Blocks.Get(d.Id) != null) { var dr = drops.Add(d.Id, d.X, d.Y, d.Z); dr.V = Vector3.Zero; dr.Age = d.Age; }
 		DrawHearts();

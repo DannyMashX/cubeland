@@ -10,7 +10,7 @@ public class BlockDef
 	public string Name;
 	public int[] T;
 	public bool Transparent, NoCollide, Liquid, Item, Lit;
-	public string Shape;            // null (a cube), "torch", "flat", "pieces"
+	public string Shape;            // null (a cube), "torch", "flat", "plant", "pieces"
 	public float[] Box;             // the part you can aim at, inside the block space: [x0, y0, z0, x1, y1, z1]
 	public int Drop;                // what breaking it gives you (0 = itself)
 	public int Places;              // an item that puts down a block (a Rock puts down a rock lying on the ground)
@@ -26,12 +26,13 @@ public class BlockDef
 	public int Piece;               // a piece item: the block it's a piece of
 	public string Form;             // a shape item: "slab", "stairs"...
 	public int Of;                  // a shape item: the block it's made of
+	public int Dye;                 // a flower: the dye it makes
 }
 
 // Every block and item in the game (the same numbers as the web version, so saved worlds line up).
 public static class Blocks
 {
-	public const int MaxId = 1600;
+	public const int MaxId = 1800;
 	public static readonly BlockDef[] B = new BlockDef[MaxId];
 	public static BlockDef Get(int id) => id > 0 && id < MaxId ? B[id] : null;
 
@@ -46,11 +47,28 @@ public static class Blocks
 	public static readonly int[][] TorchWalls = { null, new[] { -1, 0 }, new[] { 1, 0 }, new[] { 0, -1 }, new[] { 0, 1 } };
 	static readonly Dictionary<string, int> torchIds = new();
 	public static readonly List<int> Tools = new();
-	public static readonly int[] Splittable = { 1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 };
+	// ---- Colours (Brick & Bloom): 12 colours, each with a Terracotta, a Chiseled Terracotta, Bricks and a Dye ----
+	// Red's blocks came first (Red Terracotta 66, Chiseled Red Terracotta 68, Red Bricks 12); the other 11 colours use 218-250.
+	// (Placed blocks must be numbered under 256, and a block's slab/stairs items are 1000/1100/.../1500 + its number, so new
+	// blocks that can be cut into pieces sit at 218-250, where those item numbers can't clash with any other block's.)
+	// Dyes are items 600-611. Flowers are 194-198. The same numbers as the web version.
+	public static readonly string[] Colours = { "red", "orange", "yellow", "green", "aqua", "blue", "indigo", "purple", "magenta", "pink", "white", "black" };
+	public static readonly int[] ColourTerracotta = Enumerable.Range(0, 12).Select(k => k > 0 ? 217 + k : 66).ToArray();
+	public static readonly int[] ColourChiseled = Enumerable.Range(0, 12).Select(k => k > 0 ? 228 + k : 68).ToArray();
+	public static readonly int[] ColourBricks = Enumerable.Range(0, 12).Select(k => k > 0 ? 239 + k : 12).ToArray();
+	public static readonly int[] Dye = Enumerable.Range(0, 12).Select(k => 600 + k).ToArray();
+	public static int DyeOf(string c) => Dye[Array.IndexOf(Colours, c)];
+	public static readonly int[] NewColourBlocks = ColourTerracotta.Skip(1).Concat(ColourChiseled.Skip(1)).Concat(ColourBricks.Skip(1)).ToArray();
+	// Flowers: grow in small patches on grass; you walk through them, pick them by hand, and can plant them again on grass or dirt
+	public static readonly string[] FlowerColours = { "red", "yellow", "aqua", "indigo", "magenta" };
+	public static readonly int[] Flowers = { 194, 195, 196, 197, 198 };
+	public static bool IsFlower(int id) => id >= 194 && id <= 198;
+	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).ToArray();
 	public static readonly int[] NeedsAxe = { 4, 7, 61 }, Diggable = { 1, 2, 6, 11, 63 };
-	public static readonly int[] NeedsPickaxe = { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 };
+	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).ToArray();
 	// Every block you can pick from the creative inventory
-	public static readonly int[] Items = { 1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, Furnace, 22, Water };
+	public static readonly int[] Items = new[] { 1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(Flowers)
+		.Concat(new[] { Furnace, 22, Water }).ToArray();
 	public const int StackMax = 64;
 
 	// shapes made of pieces: bit masks of the 8 spots (spot number = x + y*2 + z*4)
@@ -151,6 +169,23 @@ public static class Blocks
 		B[FireEssence] = new BlockDef { Name = "Fire Essence", T = new[] { 47, 47, 47 }, Item = true };
 		B[ClayBallBlock].Drop = ClayBall;
 		B[BrickBlock].Drop = Brick;
+		// the colours (red's blocks are above). Pictures: terracotta 52-62, chiseled 63-73, bricks 74-84, flowers 85-89, dyes 90-101
+		for (int k = 0; k < Colours.Length; k++)
+		{
+			string C = char.ToUpper(Colours[k][0]) + Colours[k][1..];
+			B[Dye[k]] = new BlockDef { Name = $"{C} Dye", T = new[] { 90 + k, 90 + k, 90 + k }, Item = true };
+			if (k == 0) continue;
+			Def(ColourTerracotta[k], $"{C} Terracotta", 51 + k, 51 + k, 51 + k);
+			Def(ColourChiseled[k], $"Chiseled {C} Terracotta", 62 + k, 62 + k, 62 + k);
+			Def(ColourBricks[k], $"{C} Bricks", 73 + k, 73 + k, 73 + k);
+		}
+		// flowers: shape "plant" = the picture twice, standing up and crossed like an X
+		for (int k = 0; k < Flowers.Length; k++)
+		{
+			string c = FlowerColours[k];
+			var f = Def(Flowers[k], char.ToUpper(c[0]) + c[1..] + " Flower", 85 + k, 85 + k, 85 + k);
+			f.Transparent = true; f.NoCollide = true; f.Shape = "plant"; f.Box = new[] { 0.25f, 0, 0.25f, 0.75f, 0.7f, 0.75f }; f.Dye = DyeOf(c);
+		}
 		// Pieces: a space holding pieces is block 70; which block fills each of its 8 spots is kept separately
 		B[Pieces] = new BlockDef { Name = "Pieces", T = new[] { 3, 3, 3 }, Transparent = true, Shape = "pieces" };
 		foreach (int b in Splittable) B[PieceItem + b] = new BlockDef { Name = B[b].Name + " Piece", T = B[b].T, Item = true, Piece = b };

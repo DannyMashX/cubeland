@@ -75,7 +75,7 @@ public partial class Main
 		p.Name = name; p.Hue = hue; p.Tx = x; p.Ty = y; p.Tz = z; p.Tyaw = yaw;
 		if (p.Av == null && ready)
 		{
-			p.Av = new Mob { Type = "grrangry", T = MobTypes["grrangry"], Hue = hue };
+			p.Av = new Mob { Type = "grrangry", T = new MobType { Scale = 1.6f }, Hue = hue };   // Grr's model is 18 pixels tall; 1.6x = your height
 			BuildMob(p.Av);
 			p.Tag = new Label3D { Text = name, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, Font = Skin.Font, FontSize = 48, OutlineSize = 0, PixelSize = 0.006f, NoDepthTest = false, Position = new Vector3(0, p.Av.Height + 0.35f, 0), Modulate = Colors.White, OutlineModulate = new Color(0, 0, 0, 0.6f) };
 			p.Av.Root.AddChild(p.Tag);

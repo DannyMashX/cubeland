@@ -1,0 +1,133 @@
+{
+	"format_version": "26.3",
+	"credit": "Made with Blockbench",
+	"texture_size": [64, 64],
+	"textures": {
+		"0": "Game:entity/mobs/Player/player",
+		"particle": "Game:entity/mobs/Player/player"
+	},
+	"elements": [
+		{
+			"name": "body",
+			"from": [4, 12, 6],
+			"to": [12, 24, 10],
+			"rotation": {"angle": 0, "axis": "y", "origin": [4, 12, 6]},
+			"faces": {
+				"north": {"uv": [9, 1, 11, 4], "texture": "#0"},
+				"east": {"uv": [8, 1, 9, 4], "texture": "#0"},
+				"south": {"uv": [12, 1, 14, 4], "texture": "#0"},
+				"west": {"uv": [11, 1, 12, 4], "texture": "#0"},
+				"up": {"uv": [9, 0, 11, 1], "texture": "#0"},
+				"down": {"uv": [11, 0, 13, 1], "texture": "#0"}
+			}
+		},
+		{
+			"name": "head",
+			"from": [4, 24, 5],
+			"to": [12, 32, 11],
+			"rotation": {"angle": 0, "axis": "y", "origin": [4, 24, 5]},
+			"faces": {
+				"north": {"uv": [1.5, 1.5, 3.5, 3.5], "texture": "#missing"},
+				"east": {"uv": [0, 1.5, 1.5, 3.5], "texture": "#missing"},
+				"south": {"uv": [5, 1.5, 7, 3.5], "texture": "#missing"},
+				"west": {"uv": [3.5, 1.5, 5, 3.5], "texture": "#missing"},
+				"up": {"uv": [1.5, 0, 3.5, 1.5], "texture": "#missing"},
+				"down": {"uv": [3.5, 0, 5.5, 1.5], "texture": "#missing"}
+			}
+		},
+		{
+			"name": "arm_left",
+			"from": [2, 12, 7],
+			"to": [4, 24, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [3, 24, 8]},
+			"faces": {
+				"north": {"uv": [0.5, 4.5, 1, 7.5], "texture": "#missing"},
+				"east": {"uv": [0, 4.5, 0.5, 7.5], "texture": "#missing"},
+				"south": {"uv": [1.5, 4.5, 2, 7.5], "texture": "#missing"},
+				"west": {"uv": [1, 4.5, 1.5, 7.5], "texture": "#missing"},
+				"up": {"uv": [0.5, 4, 1, 4.5], "texture": "#missing"},
+				"down": {"uv": [1, 4, 1.5, 4.5], "texture": "#missing"}
+			}
+		},
+		{
+			"name": "arm_right",
+			"from": [12, 12, 7],
+			"to": [14, 24, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [13, 24, 8]},
+			"faces": {
+				"north": {"uv": [0.5, 4.5, 1, 7.5], "texture": "#missing"},
+				"east": {"uv": [0, 4.5, 0.5, 7.5], "texture": "#missing"},
+				"south": {"uv": [1.5, 4.5, 2, 7.5], "texture": "#missing"},
+				"west": {"uv": [1, 4.5, 1.5, 7.5], "texture": "#missing"},
+				"up": {"uv": [0.5, 4, 1, 4.5], "texture": "#missing"},
+				"down": {"uv": [1, 4, 1.5, 4.5], "texture": "#missing"}
+			}
+		},
+		{
+			"name": "leg_left",
+			"from": [5, 0, 7],
+			"to": [7, 12, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [6, 12, 8]},
+			"faces": {
+				"north": {"uv": [2.5, 4.5, 3, 7.5], "texture": "#missing"},
+				"east": {"uv": [2, 4.5, 2.5, 7.5], "texture": "#missing"},
+				"south": {"uv": [3.5, 4.5, 4, 7.5], "texture": "#missing"},
+				"west": {"uv": [3, 4.5, 3.5, 7.5], "texture": "#missing"},
+				"up": {"uv": [2.5, 4, 3, 4.5], "texture": "#missing"},
+				"down": {"uv": [3, 4, 3.5, 4.5], "texture": "#missing"}
+			}
+		},
+		{
+			"name": "leg_right",
+			"from": [9, 0, 7],
+			"to": [11, 12, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [10, 12, 8]},
+			"faces": {
+				"north": {"uv": [2.5, 4.5, 3, 7.5], "texture": "#missing"},
+				"east": {"uv": [2, 4.5, 2.5, 7.5], "texture": "#missing"},
+				"south": {"uv": [3.5, 4.5, 4, 7.5], "texture": "#missing"},
+				"west": {"uv": [3, 4.5, 3.5, 7.5], "texture": "#missing"},
+				"up": {"uv": [2.5, 4, 3, 4.5], "texture": "#missing"},
+				"down": {"uv": [3, 4, 3.5, 4.5], "texture": "#missing"}
+			}
+		}
+	],
+	"groups": [
+		{
+			"name": "Player",
+			"origin": [8, 0, 8],
+			"scope": 0,
+			"color": 0,
+			"children": [
+				{
+					"name": "body",
+					"origin": [8, 12, 10],
+					"scope": 0,
+					"color": 0,
+					"children": [0]
+				},
+				{
+					"name": "head",
+					"origin": [8, 24, 10],
+					"scope": 0,
+					"color": 0,
+					"children": [1]
+				},
+				{
+					"name": "arms",
+					"origin": [8, 24, 10],
+					"scope": 0,
+					"color": 0,
+					"children": [2, 3]
+				},
+				{
+					"name": "legs",
+					"origin": [8, 12, 10],
+					"scope": 0,
+					"color": 0,
+					"children": [4, 5]
+				}
+			]
+		}
+	]
+}

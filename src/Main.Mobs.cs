@@ -13,24 +13,36 @@ public partial class Main
 	public class MobType
 	{
 		public string Name; public int Health; public float Speed; public int Max;
-		public bool Hostile, Night, Glow, Curious; public int Damage; public float Sight, Reach, Hearing, LightRange, Scale = 1;
+		public bool Hostile, Night, Dark, Burns, Glow, Curious; public int Damage; public float Sight, Reach, Hearing, LightRange, Scale = 1;
 		public string Growl; public (int id, int lo, int hi, float chance)[] Drops = Array.Empty<(int, int, int, float)>();
 	}
-	// drops: (item, fewest, most, chance) dropped when killed. hostile: chases and attacks you, survival only. night: only spawns after dark.
+	// drops: (item, fewest, most, chance) dropped when killed. hostile: chases and attacks you, survival only. dark: spawns anywhere dark (caves any time, open ground at night).
+	// burns: catches fire in daylight when nothing is over its head (water puts it out), losing 1 health a second.
 	// growl: its voice, heard every so often (and when hit) up to ~28 blocks away. curious: drawn to block sounds and torches.
-	public static readonly Dictionary<string, MobType> MobTypes = new()
+	// The Zombie arrives in Pack & Pasture (Alpha 0.0.8.0); until then Grr Angry stays the night mob. Set true to switch it on
+	// (it must match ZOMBIE_READY in the web game's index.html, or web and desktop players see different mobs).
+	public static readonly bool ZombieReady = false;
+	public static readonly Dictionary<string, MobType> MobTypes = MakeMobTypes();
+	static Dictionary<string, MobType> MakeMobTypes()
 	{
-		["danthechocolateman"] = new() { Name = "Dan The Chocolate Man", Health = 5, Speed = 1.3f, Max = 6, Drops = new[] { (Blocks.Chocolate, 1, 2, 1f) }, Growl = "hrr" },
-		// scale: Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks, as tall as you
-		["grrangry"] = new() { Name = "Grr Angry", Health = 8, Speed = 1.5f, Max = 5, Hostile = true, Night = true, Damage = 3, Sight = 16, Reach = 1.8f, Glow = true,
-			Curious = true, Hearing = 24, LightRange = 16, Growl = "growl", Scale = 1.6f, Drops = new[] { (Blocks.FireEssence, 1, 1, 1 / 20f) } },
-	};
+		var d = new Dictionary<string, MobType>
+		{
+			["danthechocolateman"] = new() { Name = "Dan The Chocolate Man", Health = 5, Speed = 1.3f, Max = 6, Drops = new[] { (Blocks.Chocolate, 1, 2, 1f) }, Growl = "hrr" },
+		};
+		if (ZombieReady)   // scale: the Zombie's model is 32 pixels tall; 0.9x makes it 1.8 blocks, as tall as you
+			d["zombie"] = new() { Name = "Zombie", Health = 8, Speed = 1.5f, Max = 5, Hostile = true, Dark = true, Burns = true, Damage = 3, Sight = 16, Reach = 1.8f, Glow = true,
+				Curious = true, Hearing = 24, LightRange = 16, Growl = "growl", Scale = 0.9f, Drops = new[] { (Blocks.FireEssence, 1, 1, 1 / 20f) } };
+		else   // night: only spawns on open ground after dark. Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks
+			d["grrangry"] = new() { Name = "Grr Angry", Health = 8, Speed = 1.5f, Max = 5, Hostile = true, Night = true, Damage = 3, Sight = 16, Reach = 1.8f, Glow = true,
+				Curious = true, Hearing = 24, LightRange = 16, Growl = "growl", Scale = 1.6f, Drops = new[] { (Blocks.FireEssence, 1, 1, 1 / 20f) } };
+		return d;
+	}
 
 	public class Mob
 	{
 		public string Type; public MobType T;
-		public float X, Y, Z, Vx, Vy, Vz, Yaw, Walk, Stride, Timer, Hurt, Flee, Dead, AttackCool, Swing, LightTimer, GoalCheck, GrowlIn = -1, Sky = 1, Torch;
-		public float? TurnTo; public int Health; public bool Walking, OnGround, Bumped;
+		public float X, Y, Z, Vx, Vy, Vz, Yaw, Walk, Stride, Timer, Hurt, Flee, Dead, AttackCool, Swing, LightTimer, GoalCheck, GrowlIn = -1, Sky = 1, Torch, BurnIn = 1;
+		public float? TurnTo; public int Health; public bool Walking, OnGround, Bumped, Burning;
 		public int K, Hue = -1; public float Tx, Ty, Tz, Tyaw; public bool NetHurt;   // K: its own number (multiplayer); T: where the host's game says it is; Hue: recoloured skin (players)
 		public (string kind, float x, float y, float z, float time)? Goal;
 		public Node3D Root; public List<(Node3D pivot, float phase)> Legs = new(); public List<Node3D> Arms = new(); public List<ShaderMaterial> Mats = new();
@@ -126,23 +138,6 @@ public partial class Main
 		var model = md.json; float S = m.T.Scale;
 		var body = new Node3D { Scale = Vector3.One * S }; root.AddChild(body);
 		var els = model.GetProperty("elements").EnumerateArray().ToList();
-		float mnx = 1e9f, mxx = -1e9f, mnz = 1e9f, mxz = -1e9f, top = 0;
-		foreach (var e in els) { var f = Vec(e.GetProperty("from")); var t = Vec(e.GetProperty("to")); mnx = Math.Min(mnx, f[0]); mxx = Math.Max(mxx, t[0]); mnz = Math.Min(mnz, f[2]); mxz = Math.Max(mxz, t[2]); top = Math.Max(top, t[1]); }
-		float cx = (mnx + mxx) / 2, cz = (mnz + mxz) / 2, foot = 0;
-		var texNames = model.TryGetProperty("textures", out var tx) ? tx : default;
-		ShaderMaterial MatFor(string reff)
-		{
-			string id = reff.Replace("#", "");
-			string name = texNames.ValueKind == JsonValueKind.Object && texNames.TryGetProperty(id, out var n) ? n.GetString() : "missing";
-			// a plain name ("body") lives in the mob's own folder; a path ("Textures/entity/mobs/GrrAngry/grr_angry") is used as-is
-			string key = name.Contains('/') ? System.Text.RegularExpressions.Regex.Replace(name, "^textures/", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase) : $"entity/mobs/{md.folder}/{name}";
-			var tex = MobTexture(key, m.Hue);
-			var have = m.Mats.FirstOrDefault(x => (Texture2D)x.GetShaderParameter("tex") == tex);
-			if (have != null) return have;
-			itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
-			var mat = new ShaderMaterial { Shader = itemShader }; mat.SetShaderParameter("tex", tex); m.Mats.Add(mat);
-			return mat;
-		}
 		// Blockbench groups (outliner folders) named like "arms" / "legs" mark which parts are arms and legs
 		var groupOf = new Dictionary<int, string>();
 		void Walk(JsonElement list, string tag)
@@ -156,6 +151,35 @@ public partial class Main
 			}
 		}
 		if (model.TryGetProperty("groups", out var groups)) Walk(groups, null);
+		string PartOf(JsonElement e, int ei)
+		{
+			string en = e.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "";
+			return en.Contains("arm", StringComparison.OrdinalIgnoreCase) ? "arm" : en.Contains("leg", StringComparison.OrdinalIgnoreCase) ? "leg" : groupOf.GetValueOrDefault(ei);
+		}
+		// centre the model on its footprint so it turns around its middle (arms reaching out, like a zombie's, don't count)
+		float mnx = 1e9f, mxx = -1e9f, mnz = 1e9f, mxz = -1e9f, top = 0;
+		for (int ei = 0; ei < els.Count; ei++)
+		{
+			var f = Vec(els[ei].GetProperty("from")); var t = Vec(els[ei].GetProperty("to")); top = Math.Max(top, t[1]);
+			if (PartOf(els[ei], ei) == "arm") continue;
+			mnx = Math.Min(mnx, f[0]); mxx = Math.Max(mxx, t[0]); mnz = Math.Min(mnz, f[2]); mxz = Math.Max(mxz, t[2]);
+		}
+		float cx = (mnx + mxx) / 2, cz = (mnz + mxz) / 2, foot = 0;
+		var texNames = model.TryGetProperty("textures", out var tx) ? tx : default;
+		ShaderMaterial MatFor(string reff)
+		{
+			string id = reff.Replace("#", "");
+			string name = texNames.ValueKind == JsonValueKind.Object && texNames.TryGetProperty(id, out var n) ? n.GetString() : "missing";
+			// a plain name ("body") lives in the mob's own folder; a path ("Textures/entity/mobs/GrrAngry/grr_angry") is used as-is
+			// Blockbench may save a project prefix ("Game:entity/mobs/Cow/cow"); the part before the colon is dropped
+			string key = name.Contains('/') ? System.Text.RegularExpressions.Regex.Replace(System.Text.RegularExpressions.Regex.Replace(name, @"^[\w.-]+:", ""), "^textures/", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase) : $"entity/mobs/{md.folder}/{name}";
+			var tex = MobTexture(key, m.Hue);
+			var have = m.Mats.FirstOrDefault(x => (Texture2D)x.GetShaderParameter("tex") == tex);
+			if (have != null) return have;
+			itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
+			var mat = new ShaderMaterial { Shader = itemShader }; mat.SetShaderParameter("tex", tex); m.Mats.Add(mat);
+			return mat;
+		}
 		for (int ei = 0; ei < els.Count; ei++)
 		{
 			var e = els[ei]; var from = Vec(e.GetProperty("from")); var to = Vec(e.GetProperty("to"));
@@ -195,8 +219,7 @@ public partial class Main
 			}
 			var mi = new MeshInstance3D { Mesh = mesh, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
 			var mid = new Vector3(((from[0] + to[0]) / 2 - cx) / 16, (from[1] + to[1]) / 2 / 16, ((from[2] + to[2]) / 2 - cz) / 16);
-			string en = e.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "";
-			string part = en.Contains("arm", StringComparison.OrdinalIgnoreCase) ? "arm" : en.Contains("leg", StringComparison.OrdinalIgnoreCase) ? "leg" : groupOf.GetValueOrDefault(ei);
+			string part = PartOf(e, ei);
 			if (part != "arm")   // arms sticking out don't count
 				foot = new[] { foot, Math.Abs(from[0] - cx) * 2, Math.Abs(to[0] - cx) * 2, Math.Abs(from[2] - cz) * 2, Math.Abs(to[2] - cz) * 2 }.Max();
 			e.TryGetProperty("rotation", out var rot);
@@ -251,6 +274,41 @@ public partial class Main
 		}
 		return null;
 	}
+	// how bright a spot is right now: sky light x time of day, or torch light, whichever is brighter
+	float SpotLight(int x, int y, int z) => Math.Max(world.SkyExposure(x, y, z, null) * sky.SkyDay, World.LightCurve(world.LightAt(x, y, z)));
+	// a dark spot with room to stand (a cave at any time, or open ground at night), not too far above or below you
+	Vector3? FindDarkSpot(float minR, float maxR)
+	{
+		for (int tries = 0; tries < 16; tries++)
+		{
+			double a = rnd.NextDouble() * Math.PI * 2, r = minR + rnd.NextDouble() * (maxR - minR);
+			int x = (int)Math.Floor(player.Pos.X + Math.Cos(a) * r), z = (int)Math.Floor(player.Pos.Z + Math.Sin(a) * r);
+			if (x < 2 || z < 2 || x >= World.WX - 2 || z >= World.WZ - 2) continue;
+			// start somewhere between 20 blocks below you and the top of the column, then drop down to a floor
+			int top = World.WY - 1;
+			while (top > 0 && world.GetBlock(x, top, z) == 0) top--;
+			int lo = Math.Max(1, (int)MathF.Floor(player.Pos.Y) - 20);
+			if (top < lo) continue;
+			int y = lo + rnd.Next(top - lo + 1);
+			while (y >= lo && !(world.Solid(x, y, z) && !Blocks.IsWater(world.GetBlock(x, y, z)) && world.GetBlock(x, y + 1, z) == 0 && world.GetBlock(x, y + 2, z) == 0)) y--;
+			if (y < lo || Math.Abs(y + 1 - player.Pos.Y) > 20) continue;
+			if (SpotLight(x, y + 1, z) < 0.25f) return new Vector3(x + 0.5f, y + 1, z + 0.5f);
+		}
+		return null;
+	}
+	// damage a mob without knocking it back (burning in daylight); it still drops its loot when it dies
+	void HurtMob(Mob m, int n)
+	{
+		if (m.Dead > 0) return;
+		m.Hurt = 0.3f; m.Health -= n;
+		if (m.Health <= 0) MobDies(m);
+	}
+	void MobDies(Mob m)
+	{
+		m.Dead = 0.001f;
+		foreach (var (id, lo, hi, chance) in m.T.Drops)
+			if (rnd.NextDouble() < chance) for (int n = lo + rnd.Next(hi - lo + 1); n > 0; n--) drops.Add(id, m.X, m.Y + 0.5f, m.Z);
+	}
 	bool MobBlocked(Mob m, float x, float y, float z)
 	{
 		int x0 = (int)MathF.Floor(x - m.Half), x1 = (int)MathF.Floor(x + m.Half - 1e-6f), z0 = (int)MathF.Floor(z - m.Half), z1 = (int)MathF.Floor(z + m.Half - 1e-6f);
@@ -301,7 +359,7 @@ public partial class Main
 				if (mobList.Count(m => m.Type == type) < t.Max)
 				{
 					bool first = mobList.Count == 0;
-					if (FindMobSpot(first ? 8 : 24, first ? 30 : 56) is { } s) SpawnMob(type, s.X, s.Y, s.Z);
+					if ((t.Dark ? FindDarkSpot(first ? 12 : 24, first ? 30 : 56) : FindMobSpot(first ? 8 : 24, first ? 30 : 56)) is { } s) SpawnMob(type, s.X, s.Y, s.Z);
 				}
 			}
 		}
@@ -413,6 +471,16 @@ public partial class Main
 			var light = new Vector3(Math.Max(dtint.X * m.Sky, tc.X), Math.Max(dtint.Y * m.Sky, tc.Y), Math.Max(dtint.Z * m.Sky, tc.Z));
 			// glow: lights himself up, so he shows at full brightness in the dark (fades in as night falls)
 			if (t.Glow) { float gl = 1 - sky.SkyDay; light = new Vector3(Math.Max(light.X, gl), Math.Max(light.Y, gl), Math.Max(light.Z, gl)); }
+			// burning: in daylight with open sky straight above its head (and not in water). The host's game does the damage.
+			int hx = (int)MathF.Floor(m.X), hz = (int)MathF.Floor(m.Z);
+			m.Burning = t.Burns && m.Dead == 0 && sky.SkyDay > 0.6f && hx >= 0 && hz >= 0 && hx < World.WX && hz < World.WZ &&
+				(int)MathF.Floor(m.Y + m.Height) > world.SkyTop[hz * World.WX + hx] && !player.WaterAt(m.X, m.Y + 0.5f, m.Z);
+			if (m.Burning)
+			{
+				if (!netClient && (m.BurnIn -= dt) <= 0) { m.BurnIn = 1; HurtMob(m, 1); }
+				light = light.Lerp(new Vector3(1, 0.55f, 0.15f), 0.35f + 0.2f * MathF.Sin(Time.GetTicksMsec() / 60f));   // orange flicker
+			}
+			else m.BurnIn = 1;
 			if (m.Hurt > 0) { m.Hurt -= dt; light = light.Lerp(new Vector3(1, 0.15f, 0.1f), 0.6f); }
 			foreach (var mat in m.Mats) mat.SetShaderParameter("light", light);
 		}
@@ -453,11 +521,6 @@ public partial class Main
 		m.Hurt = 0.3f; m.Health -= dmg > 0 ? dmg : 1;
 		if (!m.T.Hostile) m.Flee = 4;   // peaceful mobs run off; hostile ones don't back down
 		if (m.T.Growl != null) { MobGrowl(m); m.GrowlIn = 4 + (float)rnd.NextDouble() * 6; }
-		if (m.Health <= 0)
-		{
-			m.Dead = 0.001f;
-			foreach (var (id, lo, hi, chance) in m.T.Drops)
-				if (rnd.NextDouble() < chance) for (int n = lo + rnd.Next(hi - lo + 1); n > 0; n--) drops.Add(id, m.X, m.Y + 0.5f, m.Z);
-		}
+		if (m.Health <= 0) MobDies(m);
 	}
 }

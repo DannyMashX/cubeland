@@ -141,6 +141,12 @@ public partial class Main
 				if (by != h.Y + 1 || !world.Solid(bx, by - 1, bz) || Blocks.IsWater(there)) return;
 				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
 			}
+			if (Blocks.B[pid].Shape == "plant")
+			{   // a flower: planted on top of grass or dirt
+				int under = world.GetBlock(bx, by - 1, bz);
+				if (by != h.Y + 1 || (under != Blocks.Grass && under != Blocks.Dirt) || there != 0) return;
+				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
+			}
 			if (pid == Blocks.Furnace)
 			{   // a kiln turns its front towards you
 				float dx = player.Pos.X - (bx + 0.5f), dz = player.Pos.Z - (bz + 0.5f);

@@ -339,7 +339,7 @@ public class World
 		void Fall(int tx, int ty, int tz, int t) { for (int n = Cubeland.Blocks.B[t].Count; n > 0; n--) Drop?.Invoke(Cubeland.Blocks.TorchDrop(t), tx, ty, tz); SetBlock(tx, ty, tz, 0); }
 		int above = GetBlock(x, y + 1, z);
 		if (Cubeland.Blocks.IsTorch(above) && Cubeland.Blocks.B[above].Wall == null) Fall(x, y + 1, z, above);
-		if (Cubeland.Blocks.Get(above)?.Shape == "flat") { Drop?.Invoke(dropFor(above), x, y + 1, z); SetBlock(x, y + 1, z, 0); }
+		if (Cubeland.Blocks.Get(above)?.Shape is "flat" or "plant") { Drop?.Invoke(dropFor(above), x, y + 1, z); SetBlock(x, y + 1, z, 0); }   // (a rock lying on it, or a flower growing in it)
 		foreach (var s in Sides)
 		{
 			int n = GetBlock(x + s[0], y, z + s[1]);

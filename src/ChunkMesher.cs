@@ -69,6 +69,7 @@ public class ChunkMesher
 			var b = Blocks.B[id];
 			if (b.Shape == "torch") { AddTorch(x, y, z, id, P, anyLight, sky); continue; }
 			if (b.Shape == "flat") { AddFlat(x, y, z, b, P, anyLight, sky); continue; }
+			if (b.Shape == "plant") { AddPlant(x, y, z, b, P, anyLight, sky); continue; }
 			if (b.Liquid) { AddWater(x, y, z, id, Wt, anyLight, sky); continue; }
 			if (id == Blocks.Pieces) { AddPieces(x, y, z, P, anyLight, sky); continue; }
 			float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);   // a little darker deep down
@@ -194,6 +195,24 @@ public class ChunkMesher
 			P.V(x + 0.5f + (dx * ca - dz * sa) * 2, y + 0.02f, z + 0.5f + (dx * sa + dz * ca) * 2, Atlas.UV(tile, u, v), 1, light, s);
 		}
 		P.Quad(bas); P.Ind.Add(bas); P.Ind.Add(bas + 1); P.Ind.Add(bas + 2); P.Ind.Add(bas + 2); P.Ind.Add(bas + 1); P.Ind.Add(bas + 3);   // both sides
+	}
+	// a plant (a flower): its picture twice, standing up and crossed like an X, seen from both sides.
+	// Nudged a little off-centre at random (always the same for the same spot) so a patch doesn't look like a grid.
+	void AddPlant(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky)
+	{
+		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, s = W.SkyExposure(x, y, z, sky);
+		float ox = (float)(W.Gen.Hash(x, z, y + 777) - 0.5) * 0.3f, oz = (float)(W.Gen.Hash(x, z, y + 999) - 0.5) * 0.3f, r = 0.45f;
+		int tile = b.T[0];
+		foreach (var (ax, az) in new[] { (1, 1), (1, -1) })
+		{
+			int bas = P.Pos.Count;
+			foreach (var (u, v) in new[] { (0, 0), (1, 0), (0, 1), (1, 1) })
+			{
+				float d = (u - 0.5f) * 2 * r * MathF.Sqrt(0.5f) * 1.4f;
+				P.V(x + 0.5f + ox + d * ax, y + v, z + 0.5f + oz + d * az, Atlas.UV(tile, u, v), 0.9f, light, s);
+			}
+			P.Quad(bas); P.Ind.Add(bas); P.Ind.Add(bas + 1); P.Ind.Add(bas + 2); P.Ind.Add(bas + 2); P.Ind.Add(bas + 1); P.Ind.Add(bas + 3);   // both sides
+		}
 	}
 	// pieces: half-size cubes, each showing its own quarter of the block's picture
 	static readonly (int axis, bool flip)[][] FaceUv = BuildFaceUv();

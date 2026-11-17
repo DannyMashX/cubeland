@@ -24,7 +24,12 @@ public partial class Sound : Node
 		[12] = "brick", [13] = "brick", [14] = "brick", [15] = "brick", [60] = "wood", [61] = "wood", [63] = "dirt", [64] = "brick", [65] = "brick", [66] = "brick",
 		[67] = "brick", [68] = "brick", [69] = "rock",
 	};
-	static Sound() { for (int k = 0; k < 8; k++) Material[Blocks.Furnace + k] = "brick"; }
+	static Sound()
+	{
+		for (int k = 0; k < 8; k++) Material[Blocks.Furnace + k] = "brick";
+		foreach (int b in Blocks.NewColourBlocks) Material[b] = "brick";
+		foreach (int b in Blocks.Flowers) Material[b] = "grass";
+	}
 	static string Mat(int id) => Blocks.IsTorch(id) ? "wood" : Material.TryGetValue(id, out var m) ? m : "stone";
 
 	// ---- tiny sound-building toolkit (works on raw sample arrays) ----

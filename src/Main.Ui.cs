@@ -96,9 +96,10 @@ public partial class Main
 	readonly List<Button> invTabButtons = new();
 	static readonly (string name, int[] ids)[] InvTabs =
 	{
-		("Building Blocks", new[] { 7, 61, 8, 9, 12, 64, 65, 66, 67, 68, 69, 10, 22, Blocks.CraftingBench, Blocks.Furnace }),
-		("Natural Blocks", new[] { 1, 2, 3, 4, 5, 6, 11, 63, Blocks.Water }),
-		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.CrudeAxe }.Concat(Blocks.Tools).ToArray()),
+		("Building Blocks", new[] { 7, 61, 8, 9, 64 }.Concat(Blocks.ColourBricks).Append(65).Concat(Blocks.ColourTerracotta).Append(67).Concat(Blocks.ColourChiseled)
+			.Concat(new[] { 69, 10, 22, Blocks.CraftingBench, Blocks.Furnace }).ToArray()),
+		("Natural Blocks", new[] { 1, 2, 3, 4, 5, 6, 11, 63 }.Concat(Blocks.Flowers).Append(Blocks.Water).ToArray()),
+		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence }.Concat(Blocks.Dye).Append(Blocks.CrudeAxe).Concat(Blocks.Tools).ToArray()),
 	};
 	static int TabOf(int id) => Math.Max(0, Array.FindIndex(InvTabs, t => t.ids.Contains(id)));
 	static int[] VariantsOf(int b) => Array.IndexOf(Blocks.Splittable, b) >= 0
@@ -113,7 +114,7 @@ public partial class Main
 			for (int k = 0; k < InvTabs.Length; k++) { int kk = k; var b = new Button { Text = InvTabs[k].name, ToggleMode = true }; b.Pressed += () => ShowInvTab(kk); tabs.AddChild(b); invTabButtons.Add(b); }
 			invGrid = new GridContainer { Columns = 9 }; invGrid.AddThemeConstantOverride("h_separation", 4); invGrid.AddThemeConstantOverride("v_separation", 4);
 			body.AddChild(invGrid);
-			var list = Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence }).Concat(Blocks.Tools)
+			var list = Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence }).Concat(Blocks.Dye).Concat(Blocks.Tools)
 				.OrderBy(TabOf).ThenBy(id => Array.IndexOf(InvTabs[TabOf(id)].ids, id)).ToList();
 			foreach (int id in list)
 			{
@@ -170,7 +171,7 @@ public partial class Main
 	void DrawRecipes(VBoxContainer list, bool atBench, Label name)
 	{
 		foreach (var c in list.GetChildren()) c.QueueFree();
-		foreach (var r in Inventory.Recipes.Where(r => atBench || r.At == "hand").OrderBy(r => inv.CanCraft(r) ? 0 : 1))
+		foreach (var r in Inventory.Recipes.Where(r => (atBench || r.At == "hand") && (!r.Colour || r.Needs.Any(n => inv.CountOf(n.id) > 0))).OrderBy(r => inv.CanCraft(r) ? 0 : 1))
 		{
 			string title = (r.N > 1 ? r.N + " " : "") + Blocks.B[r.Out].Name;
 			var b = new Button { Text = $"{title}\n{Inventory.NeedsText(r)}", Icon = Atlas.IconTexture(r.Out), Alignment = HorizontalAlignment.Left,

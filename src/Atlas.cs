@@ -7,7 +7,7 @@ namespace Cubeland;
 // Your pictures in textures/blocks and textures/items fill the slots below (by file name).
 public static class Atlas
 {
-	public const int TILE = 16, NT = 52;   // 52 pictures side by side
+	public const int TILE = 16, NT = 102;   // 102 pictures side by side (52+ are the colours)
 	public const int PW = TILE + 2;        // the GPU copy pads each picture with a 1px copy of its edge (no colour bleeding)
 
 	// Which atlas slot each texture file fills (a file can fill more than one)
@@ -30,6 +30,20 @@ public static class Atlas
 		["stick"] = new[] { 32 }, ["rock"] = new[] { 33 }, ["crude_axe"] = new[] { 34 }, ["fire_essence"] = new[] { 47 },
 		["stone_axe"] = new[] { 38 }, ["stone_pickaxe"] = new[] { 39 }, ["stone_shovel"] = new[] { 40 }, ["stone_sword"] = new[] { 41 }, ["stone_hoe"] = new[] { 42 },
 	};
+
+	// the colours: <colour>_terracotta 52-62, <colour>_chiseled_terracotta 63-73, <colour>_bricks 74-84 (orange..black),
+	// <colour>_flower 85-89, <colour>_dye 90-101 (red..black)
+	static Atlas()
+	{
+		for (int k = 0; k < Blocks.Colours.Length; k++)
+		{
+			string c = Blocks.Colours[k];
+			Slots[c + "_dye"] = new[] { 90 + k };
+			if (k == 0) continue;
+			Slots[c + "_terracotta"] = new[] { 51 + k }; Slots[c + "_chiseled_terracotta"] = new[] { 62 + k }; Slots[c + "_bricks"] = new[] { 73 + k };
+		}
+		for (int k = 0; k < Blocks.FlowerColours.Length; k++) Slots[Blocks.FlowerColours[k] + "_flower"] = new[] { 85 + k };
+	}
 
 	public static Image Image;          // TILE*NT x TILE, the plain strip (used to draw icons)
 	public static ImageTexture Texture; // the padded GPU copy, used by the world's blocks

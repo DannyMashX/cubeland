@@ -353,7 +353,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.5.1"></script>
+<script src="textures.js?v=alpha-0.0.6.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -361,7 +361,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.5.1';
+const GAME_VERSION = 'Alpha 0.0.6.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -524,6 +524,37 @@ const FIRE_ESSENCE = 217;
 BLOCKS[FIRE_ESSENCE] = { name: 'Fire Essence', t: [47, 47, 47], item: true };
 BLOCKS[CLAY_BALL_BLOCK].drop = CLAY_BALL;
 BLOCKS[BRICK_BLOCK].drop = BRICK;
+// ---- Colours (Brick & Bloom): 12 colours, each with a Terracotta, a Chiseled Terracotta, Bricks and a Dye ----
+// Red's blocks came first (Red Terracotta 66, Chiseled Red Terracotta 68, Red Bricks 12); the other 11 colours use 218-250.
+// (Placed blocks must be numbered under 256, and a block's slab/stairs items are 1000/1100/.../1500 + its number, so new
+// blocks that can be cut into pieces sit at 218-250, where those item numbers can't clash with any other block's.)
+// Dyes are items 600-611. Flowers are 194-198.
+const COLOURS = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'indigo', 'purple', 'magenta', 'pink', 'white', 'black'];
+const colourName = c => c[0].toUpperCase() + c.slice(1);
+const COLOUR_TERRACOTTA = COLOURS.map((c, k) => k ? 217 + k : 66);
+const COLOUR_CHISELED = COLOURS.map((c, k) => k ? 228 + k : 68);
+const COLOUR_BRICKS = COLOURS.map((c, k) => k ? 239 + k : 12);
+const DYE = COLOURS.map((c, k) => 600 + k);
+const dyeOf = c => DYE[COLOURS.indexOf(c)];
+// atlas pictures: terracotta 52-62, chiseled 63-73, bricks 74-84 (orange..black), flowers 85-89, dyes 90-101 (red..black)
+COLOURS.forEach((c, k) => {
+  const C = colourName(c);
+  BLOCKS[DYE[k]] = { name: `${C} Dye`, t: [90 + k, 90 + k, 90 + k], item: true };
+  if (!k) return;   // (red's blocks are above)
+  BLOCKS[COLOUR_TERRACOTTA[k]] = { name: `${C} Terracotta`, t: [51 + k, 51 + k, 51 + k] };
+  BLOCKS[COLOUR_CHISELED[k]] = { name: `Chiseled ${C} Terracotta`, t: [62 + k, 62 + k, 62 + k] };
+  BLOCKS[COLOUR_BRICKS[k]] = { name: `${C} Bricks`, t: [73 + k, 73 + k, 73 + k] };
+});
+const NEW_COLOUR_BLOCKS = [...COLOUR_TERRACOTTA.slice(1), ...COLOUR_CHISELED.slice(1), ...COLOUR_BRICKS.slice(1)];
+// Flowers: grow in small patches on grass. You walk through them, pick them by hand, and can plant them again on grass or dirt.
+// shape 'plant': the picture twice, standing up and crossed like an X
+const FLOWER_COLOURS = ['red', 'yellow', 'aqua', 'indigo', 'magenta'];
+const FLOWERS = FLOWER_COLOURS.map((c, k) => 194 + k);
+FLOWER_COLOURS.forEach((c, k) => {
+  BLOCKS[FLOWERS[k]] = { name: `${colourName(c)} Flower`, t: [85 + k, 85 + k, 85 + k], transparent: true, noCollide: true, shape: 'plant',
+    box: [0.25, 0, 0.25, 0.75, 0.7, 0.75], dye: dyeOf(c) };
+});
+const isFlower = id => FLOWERS.includes(id);
 const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // Survival digging rules:
 // Logs and planks can only be cut with an axe, and an axe is needed to craft them into planks and sticks.
@@ -532,7 +563,7 @@ const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // the whole block (a shovel gets you the whole block). Grass gives Dirt.
 // Bricks, Terracotta, the chiseled blocks and the Furnace count as stone-type too.
 const NEEDS_AXE = [4, 7, 61], DIGGABLE = [1, 2, 6, 11, 63];
-const NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, FURNACE, FURNACE + 1, FURNACE + 2, FURNACE + 3, FURNACE + 4, FURNACE + 5, FURNACE + 6, FURNACE + 7];
+const NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, FURNACE, FURNACE + 1, FURNACE + 2, FURNACE + 3, FURNACE + 4, FURNACE + 5, FURNACE + 6, FURNACE + 7, ...NEW_COLOUR_BLOCKS];
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
 const holding = kind => !!(BLOCKS[HOTBAR[selected]] && BLOCKS[HOTBAR[selected]].tool === kind);
 const stackMax = id => isTool(id) ? 1 : STACK_MAX;
@@ -547,7 +578,7 @@ const pieceMap = new Map();     // world index -> Uint8Array(8) of block ids (0 
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
 const PIECE_ITEM = 100;
 // cube blocks that can be cut into pieces, slabs and stairs (not torches, water, the Crafting Bench or the Furnace)
-const SPLITTABLE = [1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69];
+const SPLITTABLE = [1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...NEW_COLOUR_BLOCKS];
 for (const b of SPLITTABLE) BLOCKS[PIECE_ITEM + b] = { name: BLOCKS[b].name + ' Piece', t: BLOCKS[b].t, item: true, piece: b };
 const isPiece = id => !!(BLOCKS[id] && BLOCKS[id].piece);
 // ---- Slabs, stairs and vertical slabs: made of pieces ----
@@ -601,7 +632,7 @@ function setSpots(x, y, z, mask, id) {
   return true;
 }
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
-const ITEMS = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, FURNACE, 22, WATER];
+const ITEMS = [1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 const HOTBAR_DEFAULT = [1, 2, 3, 8, 7, 4, 10, 12, 22, 6];
 const HOTBAR = (() => {
@@ -628,7 +659,7 @@ const placeId = id => BLOCKS[id] && BLOCKS[id].places ? BLOCKS[id].places : BRIC
 let selected = 0;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 52;   // the texture atlas holds 52 pictures side by side (32+ are the stick and tools)
+const TILE = 16, NT = 102;   // the texture atlas holds 102 pictures side by side (32+ are the stick and tools, 52+ the colours)
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -712,6 +743,12 @@ const TEXTURE_SLOTS = {
   stick: 32, rock: 33, crude_axe: 34, fire_essence: 47,
   stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
 };
+// the colours: <colour>_terracotta, <colour>_chiseled_terracotta, <colour>_bricks, <colour>_dye, <colour>_flower
+COLOURS.forEach((c, k) => {
+  TEXTURE_SLOTS[c + '_dye'] = 90 + k;
+  if (k) Object.assign(TEXTURE_SLOTS, { [c + '_terracotta']: 51 + k, [c + '_chiseled_terracotta']: 62 + k, [c + '_bricks']: 73 + k });
+});
+FLOWER_COLOURS.forEach((c, k) => { TEXTURE_SLOTS[c + '_flower'] = 85 + k; });
 function loadCustomTextures(onDone) {
   const entries = Object.entries(window.TEXTURES || {}).filter(([name]) => name in TEXTURE_SLOTS);
   let pending = entries.length;
@@ -1349,6 +1386,20 @@ for (let z = 6; z < WZ - 6; z++) for (let x = 6; x < WX - 6; x++) {
   if (wet) { world[idx(x, h + 1, z)] = ROCK_BLOCK; heights[z * WX + x] = h + 1; }
 }
 
+// --- 8. Flowers: small patches of one colour on grass ---
+const FLOWER_PATCH_CHANCE = 0.0012;   // out of every grass spot, how many are the middle of a patch (more = more patches)
+for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
+  if (hash(x, z, 5150) > FLOWER_PATCH_CHANCE) continue;
+  const flower = FLOWERS[Math.floor(hash(x, z, 5151) * FLOWERS.length)];
+  const n = 5 + Math.floor(hash(x, z, 5152) * 8);   // 5-12 tries at a flower, within 3 blocks of the middle
+  for (let k = 0; k < n; k++) {
+    const fx = x + Math.floor((hash(x + k, z, 5153) - 0.5) * 6 + 0.5), fz = z + Math.floor((hash(x, z + k, 5154) - 0.5) * 6 + 0.5);
+    const h = heights[fz * WX + fx];
+    if (world[idx(fx, h, fz)] !== 1 || world[idx(fx, h + 1, fz)]) continue;   // on grass, with nothing there yet
+    world[idx(fx, h + 1, fz)] = flower; heights[fz * WX + fx] = h + 1;
+  }
+}
+
 function getBlock(x, y, z) {
   if (y < 0) return 3;
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y >= WY) return 0;
@@ -1775,6 +1826,22 @@ function addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
   // both sides, so it shows whichever way round the corners ended up
   ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
 }
+// a plant (a flower): its picture twice, standing up and crossed like an X, seen from both sides.
+// Nudged a little off-centre at random (always the same for the same spot) so a patch doesn't look like a grid.
+function addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
+  const light = anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, sky = skyExposure(x, y, z, skyCache);
+  const tile = b.t[0], ox = (hash(x, z, y + 777) - 0.5) * 0.3, oz = (hash(x, z, y + 999) - 0.5) * 0.3, r = 0.45;
+  for (const [ax, az] of [[1, 1], [1, -1]]) {
+    const base = pos.length / 3;
+    for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const s = (u - 0.5) * 2 * r;
+      pos.push(x + 0.5 + ox + s * ax * Math.SQRT1_2 * 1.4, y + v, z + 0.5 + oz + s * az * Math.SQRT1_2 * 1.4);
+      uv.push((tile * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+      col.push(0.9, 0.9, 0.9); lt.push(light); sk.push(sky);
+    }
+    ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
+  }
+}
 function buildChunk(cx, cz) {
   const pos = [], uv = [], col = [], ind = [], lt = [], sk = [];
   const wpos = [], wuv = [], wcol = [], wind = [], wlt = [], wsk = [];   // water goes in its own see-through mesh
@@ -1788,6 +1855,7 @@ function buildChunk(cx, cz) {
     const b = BLOCKS[id];
     if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'flat') { addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
+    if (b.shape === 'plant') { addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
     if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     for (const f of FACES) {
@@ -2051,7 +2119,7 @@ function dropTorchesAround(x, y, z) {
   const fall = (tx, ty, tz, t) => { for (let n = BLOCKS[t].count; n > 0; n--) collect(torchDrop(t), tx, ty, tz); setBlock(tx, ty, tz, 0); };
   const above = getBlock(x, y + 1, z);
   if (isTorch(above) && !BLOCKS[above].wall) fall(x, y + 1, z, above);
-  if (BLOCKS[above] && BLOCKS[above].shape === 'flat') { collect(dropFor(above), x, y + 1, z); setBlock(x, y + 1, z, 0); }   // a rock lying on it
+  if (BLOCKS[above] && (BLOCKS[above].shape === 'flat' || BLOCKS[above].shape === 'plant')) { collect(dropFor(above), x, y + 1, z); setBlock(x, y + 1, z, 0); }   // a rock lying on it, or a flower growing in it
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const n = getBlock(x + dx, y, z + dz);
     if (isTorch(n) && BLOCKS[n].wall && BLOCKS[n].wall[0] === -dx && BLOCKS[n].wall[1] === -dz) fall(x + dx, y, z + dz, n);
@@ -2155,6 +2223,8 @@ const Sound = (() => {
   const MATERIAL = { 1: 'grass', 2: 'dirt', 3: 'rock', 4: 'wood', 5: 'grass', 6: 'sand', 7: 'wood', 8: 'cobble', 9: 'rock', 10: 'glass', 11: 'stone', 12: 'brick', 13: 'brick', 14: 'brick', 15: 'brick',
     60: 'wood', 61: 'wood', 63: 'dirt', 64: 'brick', 65: 'brick', 66: 'brick', 67: 'brick', 68: 'brick', 69: 'rock' };
   for (let k = 0; k < 8; k++) MATERIAL[FURNACE + k] = 'brick';   // torches use 'wood' (see mat below)
+  for (const b of NEW_COLOUR_BLOCKS) MATERIAL[b] = 'brick';
+  for (const b of FLOWERS) MATERIAL[b] = 'grass';
   // materials whose placing sound is their footstep sound instead of their dig sound
   // materials with their own placing sound (others reuse the breaking sound, softer)
   const PLACE_RECIPES = {
@@ -2914,15 +2984,24 @@ function raycast(max = 6) {
 // ===================== Mobs =====================
 // Models come from Blockbench .json files in the model folder (packed into textures.js as window.MODELS),
 // skins from textures/entity/mobs/<name>/. Sizes are in model pixels: 16 = one block.
+// The Zombie arrives in Pack & Pasture (Alpha 0.0.8.0); until then Grr Angry stays the night mob. Set true to switch it on.
+const ZOMBIE_READY = false;
 const MOB_TYPES = {
   // drops: [item, fewest, most, chance] dropped when killed (chance: how likely, 1/20 = 1 in 20; left out = always)
-  // hostile: chases and attacks the player, but only in survival mode. night: only spawns after dark.
-  // growl: the mob's voice, heard every so often (and when hit) up to ~28 blocks away. 'growl' = Grr's low grumble, 'hrr' = Dan's cat-like trill
+  // hostile: chases and attacks the player, but only in survival mode. dark: spawns anywhere dark (caves any time, open ground at night).
+  // burns: catches fire in daylight when nothing is over its head (water puts it out), losing 1 health a second
+  // growl: the mob's voice, heard every so often (and when hit) up to ~28 blocks away. 'growl' = the Zombie's low grumble, 'hrr' = Dan's cat-like trill
   // curious: drawn to block-breaking/placing sounds (within hearing) and torches (within lightRange)
   danthechocolateman: { name: 'Dan The Chocolate Man', health: 5, speed: 1.3, max: 6, drops: [[CHOCOLATE, 1, 2]], growl: 'hrr' },
-  // scale: how much bigger than the model to draw it (Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks, as tall as the player)
-  grrangry: { name: 'Grr Angry', health: 8, speed: 1.5, max: 5, hostile: true, night: true, damage: 3, sight: 16, reach: 1.8, glow: true,
-    curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 1.6, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
+  // scale: how much bigger than the model to draw it (the Zombie's model is 32 pixels tall; 0.9x makes it 1.8 blocks, as tall as the player)
+  ...(ZOMBIE_READY ? {
+    zombie: { name: 'Zombie', health: 8, speed: 1.5, max: 5, hostile: true, dark: true, burns: true, damage: 3, sight: 16, reach: 1.8, glow: true,
+      curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 0.9, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
+  } : {
+    // night: only spawns on open ground after dark (Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks)
+    grrangry: { name: 'Grr Angry', health: 8, speed: 1.5, max: 5, hostile: true, night: true, damage: 3, sight: 16, reach: 1.8, glow: true,
+      curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 1.6, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
+  }),
 };
 // play a mob's growl from where it stands: fades out by ~28 blocks, and comes from the left or right speaker
 function mobGrowl(m) {
@@ -3218,21 +3297,6 @@ function buildMobMesh(type, opts = {}) {
   body.scale.setScalar(S);
   root.add(body);
   const els = model.elements;
-  // centre the model on its footprint so it turns around its middle
-  let mnx = Infinity, mxx = -Infinity, mnz = Infinity, mxz = -Infinity, top = 0;
-  for (const e of els) { mnx = Math.min(mnx, e.from[0]); mxx = Math.max(mxx, e.to[0]); mnz = Math.min(mnz, e.from[2]); mxz = Math.max(mxz, e.to[2]); top = Math.max(top, e.to[1]); }
-  const cx = (mnx + mxx) / 2, cz = (mnz + mxz) / 2;
-  let foot = 0;   // width of the body and legs (not the arms), worked out below
-  const matFor = ref => {
-    const name = model.textures[String(ref).replace('#', '')] || 'missing';
-    // a plain name ("body") lives in the mob's own folder; a path ("Textures/entity/mobs/GrrAngry/grr_angry") is used as-is
-    const key = (name.includes('/') ? name.replace(/^textures\//i, '') : `entity/mobs/${type}/${name}`).toLowerCase();
-    const ck = opts.hue === undefined ? key : key + '#hue' + opts.hue;
-    if (!mobTexCache[ck]) mobTexCache[ck] = mobTexture(key, opts.hue);
-    let m = mats.find(m => m.map === mobTexCache[ck]);
-    if (!m) { m = withHaze(new THREE.MeshBasicMaterial({ map: mobTexCache[ck], alphaTest: 0.5 })); /* cut-out, not see-through, so water draws over the parts underwater */ mats.push(m); }
-    return m;
-  };
   // Blockbench groups (outliner folders) named like "arms" / "legs" mark which parts are arms and legs
   const groupOf = {};
   (function walk(list, tag) {
@@ -3241,6 +3305,27 @@ function buildMobMesh(type, opts = {}) {
       walk(c.children, /arm/i.test(c.name) ? 'arm' : /leg/i.test(c.name) ? 'leg' : tag);
     }
   })(model.groups);
+  const partOf = (e, ei) => /arm/i.test(e.name || '') ? 'arm' : /leg/i.test(e.name || '') ? 'leg' : groupOf[ei];
+  // centre the model on its footprint so it turns around its middle (arms reaching out, like a zombie's, don't count)
+  let mnx = Infinity, mxx = -Infinity, mnz = Infinity, mxz = -Infinity, top = 0;
+  for (const [ei, e] of els.entries()) {
+    top = Math.max(top, e.to[1]);
+    if (partOf(e, ei) === 'arm') continue;
+    mnx = Math.min(mnx, e.from[0]); mxx = Math.max(mxx, e.to[0]); mnz = Math.min(mnz, e.from[2]); mxz = Math.max(mxz, e.to[2]);
+  }
+  const cx = (mnx + mxx) / 2, cz = (mnz + mxz) / 2;
+  let foot = 0;   // width of the body and legs (not the arms), worked out below
+  const matFor = ref => {
+    const name = model.textures[String(ref).replace('#', '')] || 'missing';
+    // a plain name ("body") lives in the mob's own folder; a path ("Textures/entity/mobs/GrrAngry/grr_angry") is used as-is
+    // Blockbench may save a project prefix ("Game:entity/mobs/Cow/cow"); the part before the colon is dropped
+    const key = (name.includes('/') ? name.replace(/^[\w.-]+:/, '').replace(/^textures\//i, '') : `entity/mobs/${type}/${name}`).toLowerCase();
+    const ck = opts.hue === undefined ? key : key + '#hue' + opts.hue;
+    if (!mobTexCache[ck]) mobTexCache[ck] = mobTexture(key, opts.hue);
+    let m = mats.find(m => m.map === mobTexCache[ck]);
+    if (!m) { m = withHaze(new THREE.MeshBasicMaterial({ map: mobTexCache[ck], alphaTest: 0.5 })); /* cut-out, not see-through, so water draws over the parts underwater */ mats.push(m); }
+    return m;
+  };
   for (const [ei, e] of els.entries()) {
     const [x0, y0, z0] = e.from, [x1, y1, z1] = e.to;
     const w = (x1 - x0) / 16, h = (y1 - y0) / 16, d = (z1 - z0) / 16;
@@ -3259,7 +3344,7 @@ function buildMobMesh(type, opts = {}) {
     });
     const mesh = new THREE.Mesh(g, faceMats);
     const mx = ((x0 + x1) / 2 - cx) / 16, my = (y0 + y1) / 2 / 16, mz = ((z0 + z1) / 2 - cz) / 16;
-    const part = /arm/i.test(e.name || '') ? 'arm' : /leg/i.test(e.name || '') ? 'leg' : groupOf[ei];
+    const part = partOf(e, ei);
     if (part !== 'arm')   // arms sticking out don't count
       foot = Math.max(foot, Math.abs(x0 - cx) * 2, Math.abs(x1 - cx) * 2, Math.abs(z0 - cz) * 2, Math.abs(z1 - cz) * 2);
     if (part === 'leg' || (!part && y0 === 0 && y1 < top)) {
@@ -3336,6 +3421,37 @@ function findMobSpot(minR, maxR) {
   }
   return null;
 }
+// how bright a spot is right now: sky light (dimmed by the time of day) or torch light, whichever is brighter
+const spotLight = (x, y, z) => Math.max(skyExposure(x, y, z, new Map()) * skyDay, LIGHT_CURVE(lightAt(x, y, z)));
+// find a dark spot with room to stand (a cave at any time, or open ground at night), not too far above or below the player
+function findDarkSpot(minR, maxR) {
+  for (let tries = 0; tries < 16; tries++) {
+    const a = Math.random() * Math.PI * 2, r = minR + Math.random() * (maxR - minR);
+    const x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
+    if (x < 2 || z < 2 || x >= WX - 2 || z >= WZ - 2) continue;
+    // start somewhere between 20 blocks below you and the top of the column, then drop down to a floor
+    let top = WY - 1;
+    while (top > 0 && !getBlock(x, top, z)) top--;
+    const lo = Math.max(1, Math.floor(player.y) - 20);
+    if (top < lo) continue;
+    let y = lo + Math.floor(Math.random() * (top - lo + 1));
+    while (y >= lo && !(solid(x, y, z) && !isWater(getBlock(x, y, z)) && !getBlock(x, y + 1, z) && !getBlock(x, y + 2, z))) y--;
+    if (y < lo || Math.abs(y + 1 - player.y) > 20) continue;
+    if (spotLight(x, y + 1, z) < 0.25) return [x + 0.5, y + 1, z + 0.5];
+  }
+  return null;
+}
+// damage a mob without knocking it back (burning in daylight); it still drops its loot when it dies
+function hurtMob(m, n) {
+  if (m.dead) return;
+  m.hurt = 0.3; m.health -= n;
+  if (m.health <= 0) mobDies(m);
+}
+function mobDies(m) {
+  m.dead = 0.001;
+  for (const [id, lo, hi, chance = 1] of MOB_TYPES[m.type].drops || [])
+    if (Math.random() < chance) for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) dropItem(id, m.x, m.y + 0.5, m.z);
+}
 let mobSpawnTimer = 0;
 function updateMobs(dt) {
   // keep a few Dans around the player: spawn out of the way, forget ones that wandered far off
@@ -3345,10 +3461,10 @@ function updateMobs(dt) {
     mobSpawnTimer = 3;
     for (const type in MOB_TYPES) {
       if (!(window.MODELS || {})[type]) continue;
-      if (MOB_TYPES[type].night && skyDay > 0.3) continue;
       if (mobs.filter(m => m.type === type).length < MOB_TYPES[type].max) {
+        if (MOB_TYPES[type].night && skyDay > 0.3) continue;
         const first = !mobs.length;
-        const s = findMobSpot(first ? 8 : 24, first ? 30 : 56);
+        const s = MOB_TYPES[type].dark ? findDarkSpot(first ? 12 : 24, first ? 30 : 56) : findMobSpot(first ? 8 : 24, first ? 30 : 56);
         if (s) spawnMob(type, ...s);
       }
     }
@@ -3469,6 +3585,14 @@ function updateMobs(dt) {
     m.light.setRGB(Math.max(dtint.r * s, tl * TORCH_COLOR.r), Math.max(dtint.g * s, tl * TORCH_COLOR.g), Math.max(dtint.b * s, tl * TORCH_COLOR.b));
     // glow: lights himself up, so he shows at full brightness in the dark (fades in as night falls)
     if (t.glow) { const gl = 1 - skyDay; m.light.setRGB(Math.max(m.light.r, gl), Math.max(m.light.g, gl), Math.max(m.light.b, gl)); }
+    // burning: in daylight with open sky straight above its head (and not in water). The host's game does the damage.
+    const hx = Math.floor(m.x), hz = Math.floor(m.z);
+    m.burning = t.burns && !m.dead && skyDay > 0.6 && hx >= 0 && hz >= 0 && hx < WX && hz < WZ &&
+      Math.floor(m.y + m.height) > skyTop[hz * WX + hx] && !waterAt(m.x, m.y + 0.5, m.z);
+    if (m.burning) {
+      if (!Net.client && (m.burnIn = (m.burnIn ?? 1) - dt) <= 0) { m.burnIn = 1; hurtMob(m, 1); }
+      m.light.lerp(new THREE.Color(1, 0.55, 0.15), 0.35 + 0.2 * Math.sin(performance.now() / 60));   // orange flicker
+    } else m.burnIn = 1;
     if (m.hurt > 0) { m.hurt -= dt; m.light.lerp(new THREE.Color(1, 0.15, 0.1), 0.6); }
     for (const mat of m.mats) mat.color.copy(m.light);
   }
@@ -3507,11 +3631,7 @@ function hitMob(m, from = player) {
   m.hurt = 0.3; m.health -= (held && held.damage) || 1;
   if (!MOB_TYPES[m.type].hostile) m.flee = 4;   // peaceful mobs run off; hostile ones don't back down
   if (MOB_TYPES[m.type].growl) { mobGrowl(m); m.growlIn = 4 + Math.random() * 6; }   // growls when hit
-  if (m.health <= 0) {
-    m.dead = 0.001;
-    for (const [id, lo, hi, chance = 1] of MOB_TYPES[m.type].drops || [])
-      if (Math.random() < chance) for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) dropItem(id, m.x, m.y + 0.5, m.z);
-  }
+  if (m.health <= 0) mobDies(m);
 }
 
 // ---- Dropped items: little spinning pictures of the item that you pick up by walking into them ----
@@ -3674,6 +3794,11 @@ addEventListener('mousedown', e => {
     if (BLOCKS[placeId(id)].shape === 'flat') {   // a rock: only on top of a solid block (you can stand on it, so anywhere else is fine)
       if (by !== hit.y + 1 || !solid(bx, by - 1, bz) || isWater(there)) return;
       setBlock(bx, by, bz, placeId(id)); Sound.place(placeId(id)); mobNoise(bx, by, bz); useOne(); return;
+    }
+    if (BLOCKS[id].shape === 'plant') {   // a flower: planted on top of grass or dirt
+      const under = getBlock(bx, by - 1, bz);
+      if (by !== hit.y + 1 || (under !== 1 && under !== 2) || there) return;
+      setBlock(bx, by, bz, id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;
     }
     const overlapsPlayer =
       bx < player.x + P_HALF && bx + 1 > player.x - P_HALF &&
@@ -3873,7 +3998,7 @@ const invEl = document.getElementById('inventory'), invGrid = document.getElemen
 const invIcons = [];
 // Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
 // click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, ...TOOLS]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, ...DYE, ...TOOLS]);
 const variantsOf = b => SPLITTABLE.includes(b)
   ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.quarter + b,
      SHAPE_ITEM.vslab + b, SHAPE_ITEM.vstairs + b, SHAPE_ITEM.vquarter + b]
@@ -3908,9 +4033,9 @@ function showVariants(b, plus) {
 }
 // the tabs along the top of the creative inventory (anything not listed goes in Building Blocks)
 const INV_TABS = [
-  ['Building Blocks', [7, 61, 8, 9, 12, 64, 65, 66, 67, 68, 69, 10, 22, CRAFTING_BENCH, FURNACE]],
-  ['Natural Blocks', [1, 2, 3, 4, 5, 6, 11, 63, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, CRUDE_AXE, ...TOOLS]],
+  ['Building Blocks', [7, 61, 8, 9, 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, 10, 22, CRAFTING_BENCH, FURNACE]],
+  ['Natural Blocks', [1, 2, 3, 4, 5, 6, 11, 63, ...FLOWERS, WATER]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, ...DYE, CRUDE_AXE, ...TOOLS]],
 ];
 const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
 let invTab = 0;
@@ -4262,6 +4387,18 @@ const RECIPES = [
   { out: 68, n: 1, needs: [[66, 1]], at: 'bench', tool: 'pickaxe' },     // Red Terracotta -> Chiseled Red Terracotta
   { out: 69, n: 1, needs: [[3, 1]], at: 'bench', tool: 'pickaxe' },      // Stone -> Chiseled Stone
 ];
+// Dyes and colours. colour: only listed while you carry at least one of its ingredients (there are a lot of them)
+for (const f of FLOWERS) RECIPES.push({ out: BLOCKS[f].dye, n: 1, needs: [[f, 1]], at: 'hand', colour: true });   // a Flower -> its Dye
+RECIPES.push({ out: dyeOf('black'), n: 1, needs: [[BURNT_TORCH, 1]], at: 'hand', colour: true });   // a Burnt Torch (ash) -> Black Dye
+RECIPES.push({ out: dyeOf('white'), n: 1, needs: [[ROCK, 1]], at: 'hand', colour: true });          // a Rock (chalk) -> White Dye
+// two dyes mixed -> 2 of the colour in between
+for (const [out, a, b] of [['orange', 'red', 'yellow'], ['green', 'yellow', 'aqua'], ['blue', 'aqua', 'indigo'], ['purple', 'indigo', 'magenta'], ['pink', 'red', 'white']])
+  RECIPES.push({ out: dyeOf(out), n: 2, needs: [[dyeOf(a), 1], [dyeOf(b), 1]], at: 'hand', colour: true });
+COLOURS.forEach((c, k) => {
+  RECIPES.push({ out: COLOUR_TERRACOTTA[k], n: 8, needs: [[65, 8], [DYE[k], 1]], at: 'bench', colour: true });   // 8 Terracotta + a Dye -> 8 coloured
+  if (k) RECIPES.push({ out: COLOUR_CHISELED[k], n: 1, needs: [[COLOUR_TERRACOTTA[k], 1]], at: 'bench', tool: 'pickaxe', colour: true });   // carved
+  RECIPES.push({ out: COLOUR_BRICKS[k], n: 1, needs: [[COLOUR_TERRACOTTA[k], 1]], at: 'bench', tool: 'pickaxe', colour: true });   // cut into bricks
+});
 // tools: made of Cobblestone (stone tools), with sticks for the handle
 const TOOL_RECIPE = { Pickaxe: [3, 2], Axe: [3, 2], Shovel: [1, 2], Sword: [2, 1], Hoe: [2, 2] };   // [material, sticks]
 for (const id of TOOLS) {
@@ -4294,7 +4431,7 @@ function craft(r) {
 function drawRecipes(listEl, atBench, nameEl) {
   listEl.textContent = '';
   const can = canCraft;
-  const list = RECIPES.filter(r => atBench || r.at === 'hand').sort((a, b) => can(b) - can(a));
+  const list = RECIPES.filter(r => (atBench || r.at === 'hand') && (!r.colour || r.needs.some(([id]) => countOf(id) > 0))).sort((a, b) => can(b) - can(a));
   for (const r of list) {
     const b = document.createElement('button'); b.className = 'recipe'; b.disabled = !can(r);
     const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, r.out);
@@ -4443,6 +4580,7 @@ function applyPlayerSave(s) {
   }
   // mobs and items lying around
   for (const m of s.mobs || []) {
+    if (ZOMBIE_READY && m.type === 'grrangry') m.type = 'zombie';   // worlds saved before the Zombie replaced Grr Angry
     if (!MOB_TYPES[m.type] || !(window.MODELS || {})[m.type]) continue;
     const mob = spawnMob(m.type, m.x, m.y, m.z);
     mob.yaw = m.yaw || 0; mob.health = m.health || MOB_TYPES[m.type].health;
