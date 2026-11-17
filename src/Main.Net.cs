@@ -17,7 +17,7 @@ public partial class Main
 {
 	// Everyone has to be on the same version. This is the web version this one plays with (the web version
 	// checks it), so it changes whenever the web version's multiplayer or blocks change.
-	public const string NetVersion = "Alpha 0.0.5.1";
+	public static string NetVersion => Version;   // (the game's own version, which matches the web game's)
 	const string Prefix = "cubeland-", CodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 	static readonly int[] Hues = { 200, 265, 300, 180, 235, 320, 215, 285 };   // blues, purples, magentas, cyans
 	// Relay server (Metered): used when two players' connections can't reach each other directly.

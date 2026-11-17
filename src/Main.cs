@@ -9,8 +9,11 @@ namespace Cubeland;
 // The game: makes the world, keeps its chunks' meshes up to date, and runs you around in it.
 public partial class Main : Node3D
 {
-	public static string Version => (string)ProjectSettings.GetSetting("application/config/version", "1.0.0");
-	public static string Title => (string)ProjectSettings.GetSetting("application/config/name", "CubeLand Alpha");
+	// The same version as the web game (project.godot config/version), so the two always match, multiplayer included.
+	public static string Version => (string)ProjectSettings.GetSetting("application/config/version", "Alpha 0.0.5.1");
+	// The name shown in the window and menus ("CubeLand" + "Alpha 0.0.5.1"). project.godot's config/name stays
+	// "CubeLand Alpha", because that names the folder your worlds are saved in.
+	public const string Title = "CubeLand";
 
 	World world;
 	Player player;

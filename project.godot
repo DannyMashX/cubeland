@@ -1,4 +1,5 @@
-; CubeLand Alpha: the Godot (C#) version of the game.
+; CubeLand: the Godot (C#) version of the game. config/version is the same as the web game's version.
+; (config/name stays "CubeLand Alpha": it names the folder the worlds are saved in.)
 ; Open this folder in Godot 4.7 (.NET edition) to edit it. Scripts are in src/, your pictures stay in textures/.
 
 config_version=5
@@ -7,7 +8,7 @@ config_version=5
 
 config/name="CubeLand Alpha"
 config/description="A block-building game."
-config/version="1.0.0"
+config/version="Alpha 0.0.5.1"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 

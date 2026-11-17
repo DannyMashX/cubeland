@@ -1,13 +1,13 @@
 [
     {
-        "version": "CubeLand Alpha 1.0.0",
-        "folder": "cubeland-alpha-1.0.0",
+        "version": "Alpha 0.0.5.1",
+        "folder": "alpha-0.0.5.1",
         "date": "2026-11-16",
-        "url": "https://github.com/DannyMashX/cubeland/releases/download/cubeland-alpha-1.0.0/CubeLand-Alpha-1.0.0-windows.zip",
-        "size": 74721671,
-        "exe": "CubeLand-Alpha-1.0.0-windows/CubeLand Alpha.exe",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.5.1/CubeLand-Alpha-0.0.5.1-windows.zip",
+        "size": 74724394,
+        "exe": "CubeLand-Alpha-0.0.5.1-windows/CubeLand.exe",
         "changes": [
-            "Cubeland as a desktop program for Windows, made in Godot",
+            "Cubeland as a desktop program for Windows, made in Godot, with the same version number as the web game",
             "Plays multiplayer with the web version: host or join with the same 5-letter codes",
             "Uses your font and menu pictures, like the web version"
         ]

@@ -73,6 +73,14 @@ $html = $html.Remove($m.Index, $m.Length).Insert($m.Index, "const GAME_VERSION =
 # tag textures.js with the version too, so browsers load the new letters/textures instead of an old saved copy
 $html = [regex]::Replace($html, 'src="textures\.js(\?v=[^"]*)?"', "src=`"textures.js?v=$folder`"")
 [IO.File]::WriteAllText("$PSScriptRoot\index.html", $html, $utf8)
+# the desktop (Godot) game uses the same version number (multiplayer only connects when they match);
+# its download is built separately with build-launcher.ps1
+$godotFile = "$PSScriptRoot\project.godot"
+if (Test-Path $godotFile) {
+  $proj = [IO.File]::ReadAllText($godotFile)
+  $proj = [regex]::Replace($proj, 'config/version="[^"]*"', "config/version=`"$ver`"")
+  [IO.File]::WriteAllText($godotFile, $proj, $utf8)
+}
 $dir = "$PSScriptRoot\versions\$folder"
 New-Item -ItemType Directory -Force $dir | Out-Null
 Copy-Item "$PSScriptRoot\index.html", "$PSScriptRoot\textures.js" $dir -Force

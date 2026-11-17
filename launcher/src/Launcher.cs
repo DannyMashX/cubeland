@@ -11,7 +11,7 @@ using Godot;
 namespace Cubeland;
 
 // The launcher: lists every version of Cubeland from the website, downloads the ones you pick, and starts them.
-//  - Desktop versions (CubeLand Alpha 1.0.0 and on) come from desktop-versions.json on the site: each is a zip
+//  - Desktop versions (Alpha 0.0.5.1 and on, numbered like the web game) come from desktop-versions.json on the site: each is a zip
 //    (a GitHub release file) that's unpacked into the launcher's folder and run from there.
 //  - Web versions come from versions.json: each is two files (index.html and textures.js) that are saved here
 //    and opened in your browser.

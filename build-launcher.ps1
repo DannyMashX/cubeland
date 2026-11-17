@@ -1,6 +1,7 @@
 # Builds the CubeLand Launcher (launcher\) and the desktop game, ready to upload as GitHub release files:
 #   builds\CubeLand-Launcher-windows.zip       - what people download from the site
-#   builds\CubeLand-Alpha-<version>-windows.zip - the game, which the launcher downloads
+#   builds\CubeLand-<version>-windows.zip       - the game, which the launcher downloads
+#                                                 (version = the same as the web game's, e.g. CubeLand-Alpha-0.0.5.1-windows.zip)
 # The launcher uses your font and gui pictures: they're copied from textures\ into launcher\textures\ first.
 # Needs Godot 4.7.2 (.NET) and its export templates, at the paths below.
 $ErrorActionPreference = 'Stop'
@@ -34,4 +35,5 @@ function Export($path, $out) {
 New-Item -ItemType Directory -Force builds | Out-Null
 if (-not (Test-Path builds\.gdignore)) { [IO.File]::WriteAllText("$PWD\builds\.gdignore", '') }
 Export 'launcher' "$PWD\builds\CubeLand-Launcher-windows\CubeLand Launcher.exe"
-Export '.' "$PWD\builds\CubeLand-Alpha-$ver-windows\CubeLand Alpha.exe"
+$tag = $ver -replace '\s+', '-'   # "Alpha 0.0.5.1" -> "Alpha-0.0.5.1"
+Export '.' "$PWD\builds\CubeLand-$tag-windows\CubeLand.exe"
