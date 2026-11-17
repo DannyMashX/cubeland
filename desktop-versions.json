@@ -1,5 +1,17 @@
 [
     {
+        "version": "Alpha 0.0.6.1",
+        "folder": "alpha-0.0.6.1",
+        "date": "2026-11-17",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.6.1/CubeLand-Alpha-0.0.6.1-windows.zip",
+        "size": 74746691,
+        "exe": "CubeLand-Alpha-0.0.6.1-windows/CubeLand.exe",
+        "changes": [
+            "Holding a torch now lights up the area around you, so you can see in dark caves and at night",
+            "Plays multiplayer with web version Alpha 0.0.6.1"
+        ]
+    },
+    {
         "version": "Alpha 0.0.6.0",
         "title": "Brick & Bloom",
         "folder": "alpha-0.0.6.0",
