@@ -78,6 +78,9 @@
   #furnace .bench-craft .slot canvas { width: 40px; height: 40px; margin: 6px; }
   #furnace-fuel:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   #furnace-status { font-size: var(--f1); }
+  #furnace-out { display: flex; gap: 6px; margin-left: auto; }
+  #furnace-out:empty { display: none; }
+  #furnace-out .slot:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   #furnace-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
   #furnace .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; max-width: 600px; }
   #inventory .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
@@ -236,16 +239,17 @@
 </div>
 <div id="furnace">
   <div class="panel">
-    <h2>Furnace</h2>
+    <h2>Kiln</h2>
     <div class="bench-row">
       <div class="bench-craft">
         <div class="slot" id="furnace-fuel" title="Fuel"><span class="count" id="furnace-fuel-count"></span></div>
         <div id="furnace-status"></div>
+        <div id="furnace-out" title="Done (click to take)"></div>
       </div>
     </div>
     <div id="furnace-name"></div>
     <div class="crafting"><h3>Smelt</h3><div class="recipes" id="furnace-recipes"></div></div>
-    <div class="hint">Click the fuel slot to put in Logs, Planks or Sticks from your hotbar (right-click it to take them out) &middot; click something to smelt it (click again to line up more) &middot; it pops out of the front of the furnace &middot; E to close</div>
+    <div class="hint">Click the fuel slot to put in Logs, Planks or Sticks from your hotbar (right-click it to take them out) &middot; click something to smelt it (click again to line up more) &middot; what it makes waits inside the kiln: click it to take it &middot; E to close</div>
   </div>
 </div>
 <!-- main menu: the first thing you see -->
@@ -349,7 +353,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.4.4"></script>
+<script src="textures.js?v=alpha-0.0.5.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -357,7 +361,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.4.4';
+const GAME_VERSION = 'Alpha 0.0.5.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -417,12 +421,12 @@ const BLOCKS = {
   71: { name: 'Clay Ball', t: [45, 45, 45], transparent: true, noCollide: true, shape: 'flat', box: [0.15, 0, 0.15, 0.85, 0.12, 0.85] },
   72: { name: 'Brick',     t: [46, 46, 46], transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
 };
-// Furnace: 73-76 unlit, 77-80 lit (burning). Each faces one way: its front picture is on the side that faced you
+// Kiln (called FURNACE / furnace in the code; the player sees "Kiln"): 73-76 unlit, 77-80 lit (burning). Each faces one way: its front picture is on the side that faced you
 // when you put it down. t = [side, top (the Bricks picture), bottom, front]
 const FURNACE = 73, FURNACE_FRONTS = [[0, 1], [1, 0], [0, -1], [-1, 0]];   // [x, z] direction the front faces
 FURNACE_FRONTS.forEach((front, k) => {
-  BLOCKS[FURNACE + k] = { name: 'Furnace', t: [43, 18, 44, 36], front, facing: k, drop: FURNACE };
-  BLOCKS[FURNACE + 4 + k] = { name: 'Furnace', t: [43, 18, 44, 37], front, facing: k, lit: true, drop: FURNACE };
+  BLOCKS[FURNACE + k] = { name: 'Kiln', t: [43, 18, 44, 36], front, facing: k, drop: FURNACE };
+  BLOCKS[FURNACE + 4 + k] = { name: 'Kiln', t: [43, 18, 44, 37], front, facing: k, lit: true, drop: FURNACE };
 });
 BLOCKS[FURNACE].icon = 36;   // its hotbar picture: the front
 const isFurnace = id => id >= FURNACE && id < FURNACE + 8;
@@ -667,7 +671,7 @@ const TEXTURE_SLOTS = {
   leaves: 6, sand: 7, planks: 8, cobblestone: 9, stone_bricks: 10, glass: 11, gravel: 12,
   clay: 17, bricks: 18, terracotta: 19, red_terracotta: 20,
   chiseled_terracotta: 21, chisled_terracota: 21, chiseled_red_terracotta: 22, red_chiseled_terracotta: 22, chiseled_stone: 35,
-  furnace_front: 36, furnace_front_on: 37, furnace_side: 43, furnace_bottom: 44, clay_ball: 45, brick: 46,
+  kiln_front: 36, kiln_front_on: 37, kiln_side: 43, kiln_bottom: 44, clay_ball: 45, brick: 46,
   // red bricks: one picture fills all 4 brick looks; bricks_a.._d would give each look its own picture
   red_bricks: [13, 14, 15, 16], bricks_a: 13, bricks_b: 14, bricks_c: 15, bricks_d: 16,
   torch_side: 23, torch_top: 24, torch_bottom: 25, tortch_side: 23, tortch_top: 24, tortch_bottom: 25,
@@ -2920,7 +2924,7 @@ function hurtPlayer(amount, from) {
   player.health = Math.max(0, player.health - Math.max(1, Math.round(amount)));
   hurtFlash = 0.35;
   drawHearts();
-  if (player.health <= 0) die();
+  if (player.health <= player.gloom) die();   // (blackened quarters count as empty)
 }
 function die() {
   player.dead = true;
@@ -2929,7 +2933,8 @@ function die() {
     HOTBAR.forEach((id, i) => { for (let n = HOTBAR_COUNT[i]; n > 0; n--) dropItem(id, player.x, player.y + 1, player.z); HOTBAR[i] = 0; HOTBAR_COUNT[i] = 0; });
     drawHotbarIcons(); selectSlot(selected);
   }
-  document.getElementById('death-note').textContent = Net.client ? 'You kept your things.' : 'Your things are where you fell.';
+  document.getElementById('death-note').textContent = (gloomDeath ? 'The gloom took you. ' : '') + (Net.client ? 'You kept your things.' : 'Your things are where you fell.');
+  gloomDeath = false;
   if (invOpen) { invOpen = false; invEl.style.display = benchEl.style.display = furnaceEl.style.display = 'none'; furnaceAt = -1; hotbarEl.classList.remove('open'); }
   overlay.style.display = 'none';
   document.getElementById('death').style.display = 'flex';
@@ -2940,7 +2945,7 @@ document.getElementById('respawn').addEventListener('click', () => {
   let y = Math.ceil(SPAWN.y);
   const x = Math.floor(SPAWN.x), z = Math.floor(SPAWN.z);
   while (y < WY - 2 && (solid(x, y, z) || solid(x, y + 1, z))) y++;
-  Object.assign(player, { x: SPAWN.x, y, z: SPAWN.z, vx: 0, vy: 0, vz: 0, health: MAX_HEALTH, dead: false });
+  Object.assign(player, { x: SPAWN.x, y, z: SPAWN.z, vx: 0, vy: 0, vz: 0, health: MAX_HEALTH, dead: false, gloom: 0, darkTime: 0, lightTime: 0 });
   document.getElementById('death').style.display = 'none';
   drawHearts();
   play();
@@ -2960,7 +2965,39 @@ function updateHealth(dt) {
   if (!SURVIVAL || player.dead) return;
   if (heartChange.time > 0 && (heartChange.time -= dt) <= 0) drawHearts();   // the red/green part turns back to normal
   if (player.y < -20) hurtPlayer(99);   // fell out of the world
+  if (locked || invOpen) updateGloom(dt);   // (not while paused)
 }
+// ---- Gloom: staying in the dark too long blackens your hearts, a quarter at a time, from the left of the bar.
+// Blackened quarters (player.gloom, 0-20) count as empty: if the gloom reaches all the health you have, you die.
+// Back in the light (daylight or torch light) it fades again, a quarter at a time, and the health under it comes back.
+const GLOOM_START = 60;     // seconds in the dark before the first quarter goes black
+const GLOOM_STEP = 90;      // then one more quarter every this many seconds
+const GLOOM_FADE = 120;     // in the light, one quarter comes back every this many seconds
+const GLOOM_DARK = 0.15;    // darker than this (0 = pitch black, 1 = full daylight) counts as the dark
+player.gloom = 0; player.darkTime = 0; player.lightTime = 0;
+let gloomCheck = 0, inDark = false;
+// how bright it is where your head is: sky light x time of day, or torch light, whichever is brighter (like mobs)
+function lightHere() {
+  const x = Math.floor(player.x), y = Math.floor(player.y + 1.5), z = Math.floor(player.z);
+  return Math.max(skyDay * skyExposure(x, y, z, new Map()), LIGHT_CURVE(lightAt(x, y, z)));
+}
+function updateGloom(dt) {
+  if ((gloomCheck -= dt) <= 0) { gloomCheck = 0.5; inDark = lightHere() < GLOOM_DARK; }
+  if (inDark) {
+    player.lightTime = 0;
+    if ((player.darkTime += dt) >= GLOOM_START) {
+      player.darkTime -= GLOOM_STEP;   // (the first quarter at GLOOM_START, then one every GLOOM_STEP)
+      player.gloom = Math.min(MAX_HEALTH, player.gloom + 1);
+      drawHearts();
+      if (player.gloom >= player.health) { gloomDeath = true; die(); }
+    }
+  } else {
+    player.darkTime = 0;
+    if (!player.gloom) { player.lightTime = 0; return; }
+    if ((player.lightTime += dt) >= GLOOM_FADE) { player.lightTime -= GLOOM_FADE; player.gloom--; drawHearts(); }
+  }
+}
+let gloomDeath = false;   // (the death screen says the gloom got you)
 // For a moment after your health changes, the part that changed is a different colour:
 // red = what you just lost, green = what just came back. from = the health before the change.
 const heartChange = { from: 0, color: 'red', time: 0 };
@@ -2972,19 +3009,30 @@ function showChange(from, color) {
 }
 const heartsEl = document.getElementById('hearts');
 const heartImg = new Image();
-// The atlas is a grid of 9x9 hearts, 10 pixels apart. Each heart picture is [column, row] in it.
+// The atlas is a 10x10 grid of hearts with a gap between them (at 99x99: 9x9 hearts, 10 pixels apart; at 198x198:
+// 18x18 hearts, 20 apart; any size works). Each heart picture is [column, row] in it.
 // White (normal health): 2nd row, columns 4-7 = full, 3/4, 1/2, 1/4. Red: 1st row and green: 4th row, columns 0-3 the same way.
 // The empty heart is the bottom-right one.
-const HEART_CELL = { white: q => [8 - q, 1], red: q => [4 - q, 0], green: q => [4 - q, 3], empty: () => [9, 9] };
-let whiteFillOnly = null;   // the white hearts with their dark outline and empty part cut out, to lay over a red/green one
+// Gloom (blackened quarters) uses the dark grey hearts: 1st row, columns 4-7 = full, 3/4, 1/2, 1/4 (the rest of the heart empty).
+// A heart that's part gloom and part white is in columns 8-9 of the first 3 rows; GLOOM_MIX[gloom quarters][white quarters].
+// (A heart's quarters fill in this order: top-left, bottom-left, bottom-right, top-right; gloom takes them from the start.)
+const HEART_CELL = { white: q => [8 - q, 1], red: q => [4 - q, 0], green: q => [4 - q, 3], gloom: q => [8 - q, 0], empty: () => [9, 9] };
+const GLOOM_MIX = { 1: { 3: [8, 1], 2: [8, 2], 1: [9, 1] }, 2: { 2: [9, 0], 1: [9, 2] }, 3: { 1: [8, 0] } };
+let HP = 10, HS = 9;   // the atlas's spacing between hearts and a heart's size, in its pixels (set from the picture's size)
+let whiteFillOnly = null, gloomFillOnly = null;   // the white / dark grey hearts with their dark outline and empty part cut out, to lay over another
 heartImg.onload = () => {
-  const c = document.createElement('canvas'); c.width = 40; c.height = 9;
-  const g = c.getContext('2d');
-  for (let q = 1; q <= 4; q++) { const [cx, cy] = HEART_CELL.white(q); g.drawImage(heartImg, cx * 10, cy * 10, 9, 9, (q - 1) * 10, 0, 9, 9); }
-  const d = g.getImageData(0, 0, 40, 9), p = d.data;
-  for (let k = 0; k < p.length; k += 4) if (p[k] < 20 && p[k + 1] < 20 && p[k + 2] < 20) p[k + 3] = 0;
-  g.putImageData(d, 0, 0);
-  whiteFillOnly = c;
+  HP = heartImg.width / 9.9; HS = Math.round(HP * 0.9); HP = Math.round(HP);
+  heartsEl.width = HEARTS * HP - (HP - HS); heartsEl.height = HS;
+  const fillOnly = kind => {
+    const c = document.createElement('canvas'); c.width = 4 * HP; c.height = HS;
+    const g = c.getContext('2d');
+    for (let q = 1; q <= 4; q++) { const [cx, cy] = HEART_CELL[kind](q); g.drawImage(heartImg, cx * HP, cy * HP, HS, HS, (q - 1) * HP, 0, HS, HS); }
+    const d = g.getImageData(0, 0, c.width, HS), p = d.data;
+    for (let k = 0; k < p.length; k += 4) if (p[k] < 20 && p[k + 1] < 20 && p[k + 2] < 20) p[k + 3] = 0;
+    g.putImageData(d, 0, 0);
+    return c;
+  };
+  whiteFillOnly = fillOnly('white'); gloomFillOnly = fillOnly('gloom');
   drawHearts();
 };
 if ((window.TEXTURES || {})['gui/heart_atlas']) heartImg.src = TEXTURES['gui/heart_atlas'];
@@ -2992,19 +3040,25 @@ function drawHearts() {
   heartsEl.style.display = SURVIVAL ? 'block' : 'none';
   if (!SURVIVAL || !whiteFillOnly) return;
   const g = heartsEl.getContext('2d');
-  g.clearRect(0, 0, heartsEl.width, 9);
-  const cell = (kind, q, i) => { const [cx, cy] = HEART_CELL[kind](q); g.drawImage(heartImg, cx * 10, cy * 10, 9, 9, i * 10, 0, 9, 9); };
+  g.clearRect(0, 0, heartsEl.width, heartsEl.height);
+  const cell = (kind, q, i) => { const [cx, cy] = HEART_CELL[kind](q); g.drawImage(heartImg, cx * HP, cy * HP, HS, HS, i * HP, 0, HS, HS); };
   // white up to `low`, then red or green up to `high` (just the normal hearts when nothing changed lately)
   const changing = heartChange.time > 0;
   const low = changing ? Math.min(player.health, heartChange.from) : player.health;
   const high = changing ? Math.max(player.health, heartChange.from) : player.health;
+  // gloom: the first `player.gloom` quarters (from the left) are blackened
+  const fill = (img, q, i) => g.drawImage(img, (q - 1) * HP, 0, HS, HS, i * HP, 0, HS, HS);
   for (let i = 0; i < HEARTS; i++) {
     const w = Math.max(0, Math.min(4, low - i * 4)), all = Math.max(0, Math.min(4, high - i * 4));
+    const gq = Math.min(all, Math.max(0, Math.min(4, (player.gloom || 0) - i * 4)));
     if (!all) cell('empty', 0, i);
-    else if (all === w) cell('white', w, i);
+    else if (all === w && !gq) cell('white', w, i);
+    else if (all === w && gq === w) cell('gloom', gq, i);
+    else if (all === w && GLOOM_MIX[gq] && GLOOM_MIX[gq][w - gq]) { const [cx, cy] = GLOOM_MIX[gq][w - gq]; g.drawImage(heartImg, cx * HP, cy * HP, HS, HS, i * HP, 0, HS, HS); }
     else {
-      cell(heartChange.color, all, i);   // the whole filled part in red/green...
-      if (w) g.drawImage(whiteFillOnly, (w - 1) * 10, 0, 9, 9, i * 10, 0, 9, 9);   // ...with the part you still have in white on top
+      cell(all === w ? 'white' : heartChange.color, all, i);   // the whole filled part in red/green...
+      if (w && all !== w) fill(whiteFillOnly, w, i);   // ...with the part you still have in white on top
+      if (gq) fill(gloomFillOnly, gq, i);              // ...and the blackened part on top of that
     }
   }
   layoutHearts();
@@ -3012,11 +3066,14 @@ function drawHearts() {
 // just above the hotbar's left end, at a whole-number size so the pixels stay sharp; the block name moves up above them
 function layoutHearts() {
   if (!SURVIVAL) return;
-  // (sized as if there were 10 hearts, so each heart stays the same size as before)
-  const r = hotbarEl.getBoundingClientRect(), s = Math.max(1, Math.floor(r.width / 2 / 99));
+  // (sized as if there were 10 hearts, so each heart stays the same size whatever the atlas's resolution; a whole
+  // number of screen pixels for each of its pixels, so they stay sharp)
+  const r = hotbarEl.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  const old = Math.max(1, Math.floor(r.width / 2 / 99)) * 9;   // a heart's size on screen (css pixels), as with the first 9x9 hearts
+  const s = Math.max(1, Math.round(old / HS * dpr)) / dpr;
   const bottom = innerHeight - r.top + 4;
-  Object.assign(heartsEl.style, { width: heartsEl.width * s + 'px', height: 9 * s + 'px', left: r.left + 'px', bottom: bottom + 'px' });
-  nameEl.style.bottom = bottom + 9 * s + 8 + 'px';
+  Object.assign(heartsEl.style, { width: heartsEl.width * s + 'px', height: HS * s + 'px', left: r.left + 'px', bottom: bottom + 'px' });
+  nameEl.style.bottom = bottom + HS * s + 8 + 'px';
 }
 addEventListener('resize', () => setTimeout(layoutHearts));
 // hue (optional, 0-360): recolour the skin, turning its main colour to this hue (used for player bodies)
@@ -3871,8 +3928,8 @@ document.getElementById('bench-out').addEventListener('mouseenter', () => { if (
 function openBench() { drawBench(); setInventory(true, benchEl); }
 
 // ===================== Furnace (right-click one) =====================
-// Put fuel in its fuel slot, then pick what to smelt: each one takes SMELT_TIME seconds, and pops out of the
-// furnace's front when it's done. Clicking a recipe more than once lines them up. The front glows while it burns.
+// Put fuel in its fuel slot, then pick what to smelt: each one takes SMELT_TIME seconds, and waits inside the
+// furnace (f.done) when it's done, until you open it and take it. Clicking a recipe more than once lines them up. The front glows while it burns.
 // In creative it needs no fuel or ingredients.
 const SMELT_TIME = 5;
 const SMELTS = [
@@ -3885,7 +3942,28 @@ const furnaceEl = document.getElementById('furnace'), furnaceName = document.get
 const furnaceFuel = document.createElement('canvas'); furnaceFuel.width = furnaceFuel.height = TILE;
 document.getElementById('furnace-fuel').append(furnaceFuel);
 let furnaceAt = -1;   // the open furnace (world index)
-const furnaceOf = i => { if (!furnaces.has(i)) furnaces.set(i, { fuel: 0, fuelN: 0, heat: 0, queue: [], t: 0, burning: false }); return furnaces.get(i); };
+const furnaceOf = i => { if (!furnaces.has(i)) furnaces.set(i, { fuel: 0, fuelN: 0, heat: 0, queue: [], t: 0, burning: false, done: {} }); return furnaces.get(i); };
+// what the furnace has made waits inside it ({id: how many}, no limit) until you take it
+const furnaceOutEl = document.getElementById('furnace-out');
+function drawFurnaceOut() {
+  const f = furnaces.get(furnaceAt);
+  furnaceOutEl.textContent = '';
+  for (const [id, n] of Object.entries((f && f.done) || {})) {
+    const s = document.createElement('div'); s.className = 'slot';
+    const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, +id);
+    const k = document.createElement('span'); k.className = 'count'; k.textContent = n > 1 ? n : '';
+    s.append(c, k); s.title = `${BLOCKS[id].name} (click to take)`;
+    s.addEventListener('click', () => {
+      const g = furnaces.get(furnaceAt); if (!g || !g.done[id]) return;
+      let took = 0;
+      while (g.done[id] && giveItem(+id)) { g.done[id]--; took++; }
+      if (!g.done[id]) delete g.done[id];
+      furnaceName.textContent = took ? `Took ${took} ${BLOCKS[id].name}` : 'No room in your hotbar';
+      drawFurnace();
+    });
+    furnaceOutEl.append(s);
+  }
+}
 const fromIdx = i => [i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ];
 function openFurnace(i) { furnaceAt = i; drawFurnace(); setInventory(true, furnaceEl); }
 // take k of an item out of the hotbar (right-most first); false if there aren't enough
@@ -3903,7 +3981,7 @@ function drawFurnace() {
   const f = furnaceOf(furnaceAt);
   drawIcon(furnaceFuel, SURVIVAL ? f.fuel : 0);
   document.getElementById('furnace-fuel-count').textContent = SURVIVAL && f.fuelN > 1 ? f.fuelN : '';
-  drawFurnaceStatus();
+  drawFurnaceStatus(); drawFurnaceOut();
   const list = document.getElementById('furnace-recipes');
   list.textContent = '';
   for (const r of SMELTS) {
@@ -3915,7 +3993,7 @@ function drawFurnace() {
     txt.append(nm, nd); b.append(c, txt);
     b.addEventListener('click', () => {
       const g = furnaceOf(furnaceAt);
-      if (g.queue.length >= 64) { furnaceName.textContent = 'The furnace is full up'; return; }
+      if (g.queue.length >= 64) { furnaceName.textContent = 'The kiln is full up'; return; }
       if (SURVIVAL && !takeFromHotbar(r.from, 1)) return;
       g.queue.push(r.out);
       furnaceName.textContent = `Smelting ${BLOCKS[r.out].name}`;
@@ -3962,7 +4040,7 @@ function lightStick() {
   Sound.place(TORCH);
   nameEl.textContent = 'Lit a Torch'; nameEl.style.opacity = 1; nameTimer = 1.5;
 }
-// a furnace that's broken: its fuel and anything waiting to be smelted fall out
+// a furnace that's broken: its fuel, anything waiting to be smelted and what it made fall out
 function emptyFurnace(i) {
   const f = furnaces.get(i);
   furnaces.delete(i);
@@ -3971,6 +4049,7 @@ function emptyFurnace(i) {
   const [x, y, z] = fromIdx(i);
   for (let n = f.fuelN; n > 0; n--) collect(f.fuel, x, y, z);
   for (const out of f.queue) collect(SMELTS.find(r => r.out === out).from, x, y, z);
+  if (SURVIVAL) for (const [id, n] of Object.entries(f.done || {})) for (let k = n; k > 0; k--) collect(+id, x, y, z);
 }
 let furnaceRedraw = 0;
 function tickFurnaces(dt) {
@@ -3984,10 +4063,10 @@ function tickFurnaces(dt) {
       }
       f.t = 0;
     }
-    if (f.burning && (f.t += dt) >= SMELT_TIME) {   // done: it pops out of the front (or the top, if something's in front)
-      const out = f.queue.shift(), [x, y, z] = fromIdx(i), [fx, fz] = BLOCKS[world[i]].front;
-      if (solid(x + fx, y, z + fz)) collect(out, x, y + 1, z); else collect(out, x + fx, y, z + fz);
-      if (!SURVIVAL) giveItem(out);   // (creative: no items on the ground, so it goes into your hotbar)
+    if (f.burning && (f.t += dt) >= SMELT_TIME) {   // done: it goes into the furnace's own storage, waiting for you
+      const out = f.queue.shift();
+      if (!f.done) f.done = {};
+      f.done[out] = (f.done[out] || 0) + 1;
       f.burning = false; f.t = 0;
       if (furnaceAt === i) drawFurnace();
     }
@@ -4123,7 +4202,8 @@ function gatherSave() {
     version: 1, seed, savedAt: Date.now(),
     idxs: idxs.buffer, ids: ids.buffer,
     pieces: gatherPieces(),
-    player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health },
+    player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health,
+              gloom: player.gloom, darkTime: player.darkTime, lightTime: player.lightTime },
     time: timeOfDay,
     hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), selected,
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health })),
@@ -4194,7 +4274,10 @@ function applyPlayerSave(s) {
   // you
   const p = s.player || {};
   if (isFinite(p.x)) Object.assign(player, { x: p.x, y: p.y, z: p.z, yaw: p.yaw || 0, pitch: p.pitch || 0, fly: !!p.fly && !SURVIVAL, vx: 0, vy: 0, vz: 0 });
-  if (p.health > 0) { player.health = Math.min(MAX_HEALTH, p.health); drawHearts(); }
+  player.gloom = Math.min(MAX_HEALTH, p.gloom || 0); player.darkTime = p.darkTime || 0; player.lightTime = p.lightTime || 0;
+  if (p.health > 0) player.health = Math.min(MAX_HEALTH, p.health);
+  if (player.gloom >= player.health) player.gloom = Math.max(0, player.health - 1);   // (never load straight into a gloom death)
+  drawHearts();
   if (isFinite(s.time)) timeOfDay = s.time;
   if (Array.isArray(s.hotbar) && s.hotbar.length === 10) {
     s.hotbar.forEach((id, i) => { HOTBAR[i] = id === 0 || ITEMS.includes(id) || isItem(id) ? id : 0; HOTBAR_COUNT[i] = counted(HOTBAR[i]) ? Math.max(1, (s.counts || [])[i] | 0) : 0; });
