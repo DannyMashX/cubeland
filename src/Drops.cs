@@ -18,6 +18,7 @@ public partial class Drops : Node3D
 	readonly Random rnd = new();
 	public Func<Vector3> DayTint = () => Vector3.One;
 	public Vector3 TorchColor = new(1, 0.82f, 0.58f);
+	public Func<Vector3, float> HeldLight = _ => 0;   // the light of a torch in your hand, at a spot
 
 	public void Init(World w, Player p, Inventory i) { W = w; player = p; inv = i; }
 
@@ -75,7 +76,7 @@ public partial class Drops : Node3D
 			{
 				d.LightT = 0.3f;
 				int bx = F(d.P.X), by = F(d.P.Y), bz = F(d.P.Z);
-				float sky = W.SkyExposure(bx, by, bz, null), torch = World.LightCurve(W.LightAt(bx, by, bz));
+				float sky = W.SkyExposure(bx, by, bz, null), torch = MathF.Max(World.LightCurve(W.LightAt(bx, by, bz)), HeldLight(d.P));
 				var t = DayTint();
 				d.Mat.SetShaderParameter("light", new Vector3(MathF.Max(t.X * sky, torch * TorchColor.X), MathF.Max(t.Y * sky, torch * TorchColor.Y), MathF.Max(t.Z * sky, torch * TorchColor.Z)));
 			}

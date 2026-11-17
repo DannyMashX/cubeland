@@ -250,6 +250,18 @@ public partial class Main
 		m.Half = Math.Min(0.49f, foot / 32 * 0.85f * S); m.Height = top / 16 * S;
 	}
 
+	// A torch in your hand lights up what's around you (0 = no light, otherwise how far it reaches, like a placed torch's
+	// light level: a smoldering one half as far, a burnt one not at all). It's worked out from how far each spot is
+	// from your eye, so walls don't stop it, but it doesn't reach far.
+	float heldLight;
+	float HeldLightAt(Vector3 p) => heldLight > 0 ? World.LightCurve(Math.Max(0, heldLight - p.DistanceTo(cam.Position))) : 0;
+	void UpdateHeldLight()
+	{
+		int id = inv.Held; var hb = Blocks.Get(id);
+		heldLight = !dead && Blocks.IsTorch(id) && hb.Burn != 2 ? (hb.Burn == 1 ? MathF.Round(World.TorchLight / 2f) : World.TorchLight) : 0;
+		RenderingServer.GlobalShaderParameterSet("held_light", heldLight);
+	}
+
 	void InitMobs() { LoadModels(); mobRoot = new Node3D(); AddChild(mobRoot); }
 	Mob SpawnMob(string type, float x, float y, float z)
 	{
@@ -467,7 +479,7 @@ public partial class Main
 				int bx = (int)MathF.Floor(m.X), by = (int)MathF.Floor(m.Y + 0.4f), bz = (int)MathF.Floor(m.Z);
 				m.Sky = world.SkyExposure(bx, by, bz, null); m.Torch = World.LightCurve(world.LightAt(bx, by, bz));
 			}
-			var dtint = sky.DayTint; var tc = new Vector3(1, 0.82f, 0.58f) * m.Torch;
+			var dtint = sky.DayTint; var tc = new Vector3(1, 0.82f, 0.58f) * Math.Max(m.Torch, HeldLightAt(new Vector3(m.X, m.Y + 0.8f, m.Z)));
 			var light = new Vector3(Math.Max(dtint.X * m.Sky, tc.X), Math.Max(dtint.Y * m.Sky, tc.Y), Math.Max(dtint.Z * m.Sky, tc.Z));
 			// glow: lights himself up, so he shows at full brightness in the dark (fades in as night falls)
 			if (t.Glow) { float gl = 1 - sky.SkyDay; light = new Vector3(Math.Max(light.X, gl), Math.Max(light.Y, gl), Math.Max(light.Z, gl)); }

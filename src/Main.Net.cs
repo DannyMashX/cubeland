@@ -105,7 +105,7 @@ public partial class Main
 				int bx = (int)MathF.Floor(p.X), by = (int)MathF.Floor(p.Y + 0.4f), bz = (int)MathF.Floor(p.Z);
 				av.Sky = world.SkyExposure(bx, by, bz, null); av.Torch = World.LightCurve(world.LightAt(bx, by, bz));
 			}
-			var t = sky.DayTint; var tc = new Vector3(1, 0.82f, 0.58f) * av.Torch;
+			var t = sky.DayTint; var tc = new Vector3(1, 0.82f, 0.58f) * Math.Max(av.Torch, HeldLightAt(new Vector3(p.X, p.Y + 0.9f, p.Z)));
 			var light = new Vector3(Math.Max(t.X * av.Sky, tc.X), Math.Max(t.Y * av.Sky, tc.Y), Math.Max(t.Z * av.Sky, tc.Z));
 			foreach (var mat in av.Mats) mat.SetShaderParameter("light", light);
 		}

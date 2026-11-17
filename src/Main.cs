@@ -84,7 +84,7 @@ public partial class Main : Node3D
 		mesher = new ChunkMesher(world);
 		player = new Player(world);
 		inv = new Inventory(current.Survival);
-		drops = new Drops(); AddChild(drops); drops.Init(world, player, inv); drops.DayTint = () => sky.DayTint;
+		drops = new Drops(); AddChild(drops); drops.Init(world, player, inv); drops.DayTint = () => sky.DayTint; drops.HeldLight = HeldLightAt;
 		kilns = new Kilns(world) { Survival = inv.Survival };
 		world.Drop = Collect;
 		world.NoWater = netClient;   // (in a joined game the host's game runs the water)
@@ -153,6 +153,7 @@ public partial class Main : Node3D
 		UpdateSkyAndWater(dt);
 		UpdateHealth(dt);
 		TickLifeUi(dt);
+		UpdateHeldLight();
 		UpdateMobs(dt);
 		if ((moving || invOpen || hosting) && !netClient)
 		{   // (torches burning down, clay drying and kilns all wait while you're paused)

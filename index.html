@@ -353,7 +353,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.6.0"></script>
+<script src="textures.js?v=alpha-0.0.6.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -361,7 +361,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.6.0';
+const GAME_VERSION = 'Alpha 0.0.6.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -1461,17 +1461,31 @@ const FOG = {
 // so torches still glow when the night is pitch black.
 const DAY_TINT = { value: new THREE.Color(1, 1, 1) };
 const TORCH_COLOR = new THREE.Color(1.0, 0.82, 0.58);   // warm orange-yellow
+// A torch in your hand lights up what's around you as you walk (set each frame from what you're holding:
+// 0 = no light, otherwise how far it reaches, like a placed torch's light level). It's worked out from how far
+// each spot is from your eye, so unlike a placed torch's light it isn't stopped by walls, but it doesn't reach far.
+const HELD_LIGHT = { value: 0 };
+const heldLightAt = (x, y, z) => HELD_LIGHT.value > 0 ?
+  LIGHT_CURVE(Math.max(0, HELD_LIGHT.value - Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z))) : 0;
+function updateHeldLight() {   // (a smoldering torch reaches half as far, a burnt one not at all)
+  const id = HOTBAR[selected] | 0, b = BLOCKS[id];
+  HELD_LIGHT.value = !player.dead && isTorch(id) && b.burn !== 2 ? (b.burn === 1 ? Math.round(TORCH_LIGHT / 2) : TORCH_LIGHT) : 0;
+}
 material.onBeforeCompile = shader => {
   shader.uniforms.fogThickness = FOG.density;
   shader.uniforms.fogMax = FOG.max;
   shader.uniforms.dayTint = DAY_TINT;
   shader.uniforms.torchColor = { value: TORCH_COLOR };
+  shader.uniforms.heldLight = HELD_LIGHT;
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute float torch;\nattribute float sky;\nvarying float vTorch;\nvarying float vSky;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTorch = torch;\nvSky = sky;');
+    .replace('#include <common>', '#include <common>\nattribute float torch;\nattribute float sky;\nvarying float vTorch;\nvarying float vSky;\nvarying vec3 vEye;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTorch = torch;\nvSky = sky;')
+    .replace('#include <project_vertex>', '#include <project_vertex>\nvEye = mvPosition.xyz;');
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying float vTorch;\nvarying float vSky;\nuniform vec3 dayTint;\nuniform vec3 torchColor;')
-    .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= max(dayTint * vSky, vTorch * torchColor);')
+    .replace('#include <common>', '#include <common>\nvarying float vTorch;\nvarying float vSky;\nvarying vec3 vEye;\nuniform vec3 dayTint;\nuniform vec3 torchColor;\nuniform float heldLight;')
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      float held = heldLight > 0.0 ? min(1.2, pow(max(0.0, heldLight - length(vEye)) / ${TORCH_LIGHT.toFixed(1)}, 1.4)) : 0.0;   // (the same curve as LIGHT_CURVE)
+      diffuseColor.rgb *= max(dayTint * vSky, max(vTorch, held) * torchColor);`)
     .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nuniform float fogThickness;\nuniform float fogMax;')
     .replace('#include <fog_fragment>', `
       #ifdef USE_FOG
@@ -3581,7 +3595,7 @@ function updateMobs(dt) {
       m.sky = skyExposure(bx, by, bz, new Map());
       m.torch = LIGHT_CURVE(lightAt(bx, by, bz));
     }
-    const dtint = DAY_TINT.value, s = m.sky === undefined ? 1 : m.sky, tl = m.torch || 0;
+    const dtint = DAY_TINT.value, s = m.sky === undefined ? 1 : m.sky, tl = Math.max(m.torch || 0, heldLightAt(m.x, m.y + 0.8, m.z));
     m.light.setRGB(Math.max(dtint.r * s, tl * TORCH_COLOR.r), Math.max(dtint.g * s, tl * TORCH_COLOR.g), Math.max(dtint.b * s, tl * TORCH_COLOR.b));
     // glow: lights himself up, so he shows at full brightness in the dark (fades in as night falls)
     if (t.glow) { const gl = 1 - skyDay; m.light.setRGB(Math.max(m.light.r, gl), Math.max(m.light.g, gl), Math.max(m.light.b, gl)); }
@@ -3697,8 +3711,8 @@ function updateDrops(dt) {
       const bx = Math.floor(d.x), by = Math.floor(d.y), bz = Math.floor(d.z);
       d.sky = skyExposure(bx, by, bz, new Map()); d.torch = LIGHT_CURVE(lightAt(bx, by, bz));
     }
-    const t = DAY_TINT.value;
-    d.mesh.material.color.setRGB(Math.max(t.r * d.sky, d.torch * TORCH_COLOR.r), Math.max(t.g * d.sky, d.torch * TORCH_COLOR.g), Math.max(t.b * d.sky, d.torch * TORCH_COLOR.b));
+    const t = DAY_TINT.value, tl = Math.max(d.torch, heldLightAt(d.x, d.y + 0.25, d.z));
+    d.mesh.material.color.setRGB(Math.max(t.r * d.sky, tl * TORCH_COLOR.r), Math.max(t.g * d.sky, tl * TORCH_COLOR.g), Math.max(t.b * d.sky, tl * TORCH_COLOR.b));
   }
 }
 
@@ -4708,7 +4722,7 @@ addEventListener('pagehide', () => autoSave());
         const bx = Math.floor(p.x), by = Math.floor(p.y + 0.4), bz = Math.floor(p.z);
         av.sky = skyExposure(bx, by, bz, new Map()); av.torch = LIGHT_CURVE(lightAt(bx, by, bz));
       }
-      const t = DAY_TINT.value, s = av.sky === undefined ? 1 : av.sky, tl = av.torch || 0;
+      const t = DAY_TINT.value, s = av.sky === undefined ? 1 : av.sky, tl = Math.max(av.torch || 0, heldLightAt(p.x, p.y + 0.9, p.z));
       av.light.setRGB(Math.max(t.r * s, tl * TORCH_COLOR.r), Math.max(t.g * s, tl * TORCH_COLOR.g), Math.max(t.b * s, tl * TORCH_COLOR.b));
       for (const m of av.mats) m.color.copy(av.light);
     }
@@ -5230,6 +5244,8 @@ function frame(now) {
   }
 
   if (nameTimer > 0) { nameTimer -= dt; if (nameTimer <= 0) nameEl.style.opacity = 0; }
+
+  updateHeldLight();
 
   fpsAcc += dt; fpsFrames++;
   if (fpsAcc >= 0.5) { fps = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }

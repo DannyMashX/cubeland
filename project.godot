@@ -8,7 +8,7 @@ config_version=5
 
 config/name="CubeLand Alpha"
 config/description="A block-building game."
-config/version="Alpha 0.0.6.0"
+config/version="Alpha 0.0.6.1"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 
@@ -35,6 +35,10 @@ day_tint={
 torch_color={
 "type": "vec3",
 "value": Vector3(1, 0.82, 0.58)
+}
+held_light={
+"type": "float",
+"value": 0.0
 }
 fog_color={
 "type": "vec3",
