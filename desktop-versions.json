@@ -1,5 +1,22 @@
 [
     {
+        "version": "Alpha 0.0.7.0",
+        "title": "Shape & Shade",
+        "folder": "alpha-0.0.7.0",
+        "date": "2026-11-17",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.7.0/CubeLand-Alpha-0.0.7.0-windows.zip",
+        "size": 74766534,
+        "exe": "CubeLand-Alpha-0.0.7.0-windows/CubeLand.exe",
+        "changes": [
+            "Skin menu: paint your own player skin, with a turning 3D preview",
+            "Your hand now wears your skin",
+            "New player figure with elbows and knees",
+            "Other players look like players in their own skin, holding their items",
+            "New letters, numbers and symbols",
+            "Plays multiplayer with web version Alpha 0.0.7.0"
+        ]
+    },
+    {
         "version": "Alpha 0.0.6.1",
         "folder": "alpha-0.0.6.1",
         "date": "2026-11-17",
