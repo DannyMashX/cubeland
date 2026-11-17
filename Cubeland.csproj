@@ -1,0 +1,15 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>Cubeland</RootNamespace>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <!-- the old web version's files aren't part of the C# project -->
+  <ItemGroup>
+    <Compile Remove="versions/**" />
+    <!-- the launcher is its own Godot project in launcher/ -->
+    <Compile Remove="launcher/**" />
+  </ItemGroup>
+</Project>

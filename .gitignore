@@ -1,2 +1,9 @@
 # local test-server settings for Claude, not part of the game
 .claude/
+# Godot's own working files (rebuilt automatically when the project is opened)
+.godot/
+bin/
+obj/
+*.user
+# built game downloads (uploaded as GitHub release files, not kept in the repo)
+builds/

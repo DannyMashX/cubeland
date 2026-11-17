@@ -1,0 +1,12 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>Cubeland</RootNamespace>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <!-- your font and gui_atlas.png, drawn the same way as in the game -->
+  <ItemGroup>
+    <Compile Include="../src/Skin.cs" Link="src/Skin.cs" />
+  </ItemGroup>
+</Project>

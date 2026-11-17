@@ -20,12 +20,23 @@
   a.play { color: #fff; text-decoration: none; border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 5px 14px; white-space: nowrap; }
   a.play:hover { background: rgba(255,255,255,.15); }
   .warn { font-size: 13px; color: #ffd27a; margin-top: 24px; line-height: 1.5; }
+  .download { border: 2px solid #ffd27a; border-radius: 8px; padding: 16px; margin: 0 0 24px; }
+  .download h2 { font-size: 20px; margin: 0 0 4px; }
+  .download p { font-size: 14px; opacity: .85; margin: 6px 0 12px; line-height: 1.5; }
+  .download a.play { display: inline-block; border-color: #ffd27a; color: #ffd27a; }
 </style>
 </head>
 <body>
 <main>
   <h1>CUBELAND</h1>
   <p class="sub">Every version of the game and what changed in it. The newest is at the top.</p>
+  <!-- the launcher (made in Godot). The zip is a GitHub release file, not part of this site; the launcher reads
+       desktop-versions.json and versions.json from here to know what it can download. -->
+  <div class="download">
+    <h2>CubeLand Launcher <span class="tag">WINDOWS</span></h2>
+    <p>Get Cubeland on your computer. The launcher downloads and starts any version: the desktop game CubeLand Alpha (which plays multiplayer with this web version) and every web version below. Unzip it and open <b>CubeLand Launcher.exe</b> (Windows may ask you to confirm the first time, because it isn't signed).</p>
+    <a class="play" href="https://github.com/DannyMashX/cubeland/releases/download/launcher-1.0.0/CubeLand-Launcher-windows.zip">Download the launcher (70 MB)</a>
+  </div>
   <div id="list">Loading...</div>
   <p class="warn">All versions share the same worlds. A world played in a newer version might not load right in an older one, so the game warns you before opening it.</p>
 </main>

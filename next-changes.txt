@@ -1,2 +1,4 @@
 # Changes for the next update, one per line. publish-update.bat shows this list when you publish,
 # puts it in the change log, then empties this file. Lines starting with # are ignored.
+New: the CubeLand Launcher for Windows (on the All versions page). It downloads and starts every version of the game
+New: CubeLand Alpha 1.0.0, the game remade as a desktop program (get it from the launcher). It plays multiplayer with this web version

@@ -1,0 +1,56 @@
+; CubeLand Alpha: the Godot (C#) version of the game.
+; Open this folder in Godot 4.7 (.NET edition) to edit it. Scripts are in src/, your pictures stay in textures/.
+
+config_version=5
+
+[application]
+
+config/name="CubeLand Alpha"
+config/description="A block-building game."
+config/version="1.0.0"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/aspect="expand"
+
+[dotnet]
+
+project/assembly_name="Cubeland"
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[shader_globals]
+
+day_tint={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}
+torch_color={
+"type": "vec3",
+"value": Vector3(1, 0.82, 0.58)
+}
+fog_color={
+"type": "vec3",
+"value": Vector3(0.557, 0.788, 1)
+}
+fog_thickness={
+"type": "float",
+"value": 0.045
+}
+fog_max={
+"type": "float",
+"value": 0.82
+}
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=0
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+anti_aliasing/quality/msaa_3d=0

@@ -1,0 +1,30 @@
+; CubeLand Launcher: downloads and starts every version of Cubeland (the desktop game and the old web versions).
+; Its own little Godot (C#) project. It shares src/Skin.cs with the game, and build-launcher.ps1 (in the folder
+; above) copies your font and gui pictures into launcher/textures before building it.
+
+config_version=5
+
+[application]
+
+config/name="CubeLand Launcher"
+config/description="Downloads and starts every version of Cubeland."
+config/version="1.0.0"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
+config/use_custom_user_dir=true
+config/custom_user_dir_name="CubeLand Launcher"
+
+[display]
+
+window/size/viewport_width=960
+window/size/viewport_height=640
+
+[dotnet]
+
+project/assembly_name="Launcher"
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=0
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
