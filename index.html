@@ -192,6 +192,51 @@
   }
   .skinned #inv-grid .plus:hover, .skinned .bench-modes button.on { background: none; border-color: transparent; border-image-source: var(--btn-hover); }
   #multi input:disabled { opacity: .5; }
+  /* the skin editor */
+  #skins { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 26; color: #fff; }
+  #skins .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px;
+    max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+  #skins h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
+  #skins button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 10px; cursor: pointer; }
+  #skins button:hover { background: rgba(255,255,255,.25); }
+  #skins button.on { background: rgba(127,191,255,.45); border-color: #fff; }
+  .sk-main { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .sk-left { display: flex; flex-direction: column; align-items: center; }
+  #sk-sheet { width: min(448px, calc(100vw - 72px), calc(100vh - 220px)); aspect-ratio: 1; image-rendering: pixelated; cursor: crosshair; touch-action: none; display: block; }
+  #sk-where { height: 18px; margin-top: 6px; font-size: var(--f1); opacity: .8; }
+  .sk-right { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 240px; }
+  #sk-view { width: 240px; height: 320px; touch-action: none; background: rgba(0,0,0,.25); }
+  .sk-help { font-size: var(--f1); opacity: .6; text-align: center; }
+  .sk-tools { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+  .sk-colour-row { display: flex; align-items: center; gap: 8px; font-size: var(--f1); }
+  #skins #sk-colour { width: 56px; height: 32px; padding: 5px; display: flex; }
+  #sk-colour span { flex: 1; display: block; }
+  /* "any colour": a picker of the game's own (a blocky colour square and a hue strip), so it's drawn with your pictures and font */
+  .sk-right { position: relative; }
+  #sk-cpick { display: none; position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); padding: 10px; flex-direction: column; gap: 8px;
+    background: rgba(30,30,34,.97); border: 2px solid rgba(255,255,255,.4); box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  #sk-cpick.open { display: flex; }
+  .sk-cp-top { display: flex; gap: 8px; }
+  #sk-sv { width: 160px; height: 160px; image-rendering: pixelated; cursor: crosshair; touch-action: none; }
+  #sk-hue { width: 20px; height: 160px; image-rendering: pixelated; cursor: ns-resize; touch-action: none; }
+  .sk-cp-row { display: flex; align-items: center; gap: 6px; font-size: var(--f1); }
+  #sk-hexin { width: 7em; font: inherit; font-size: var(--f1); color: #fff; background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.4); padding: 4px 6px; text-transform: uppercase; }
+  .skinned #sk-cpick { background: none; box-shadow: none; border: calc(2 * var(--px)) solid transparent; border-image: var(--panel) 2 fill stretch; image-rendering: pixelated; }
+  .skinned #sk-hexin { background: none; border: calc(2 * var(--px)) solid transparent; border-image: var(--btn) 2 fill stretch; image-rendering: pixelated; outline: none; }
+  .skinned #sk-hexin:focus { border-image-source: var(--btn-hover); }
+  .skinned #sk-sv, .skinned #sk-hue { border: calc(2 * var(--px)) solid transparent; border-image: var(--btn) 2 fill stretch; }
+  #sk-palette { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; width: 100%; }
+  #skins .sk-swatch { padding: 3px; aspect-ratio: 1; display: flex; }
+  .sk-swatch span { flex: 1; display: block; }
+  .sk-bottom { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #sk-note { flex: 1; min-width: 120px; font-size: var(--f1); color: #ffd27a; text-align: center; }
+  /* with your gui_atlas.png: the menu box, buttons (lit under the mouse), and the picked tool / colour in the bottom-right picture */
+  .skinned #skins .panel { background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent; border-image: var(--panel) 2 fill stretch; image-rendering: pixelated; }
+  .skinned #skins button { background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent; border-image: var(--btn) 2 fill stretch; image-rendering: pixelated; }
+  .skinned #skins button:hover { background: none; border-image-source: var(--btn-hover); }
+  .skinned #skins button.on { background: none; border-image-source: var(--sel); }
+  .skinned #sk-view { background: none; border: calc(2 * var(--px)) solid transparent; border-image: var(--btn) 2 fill stretch; image-rendering: pixelated; box-sizing: content-box; }
+  .skinned #sk-sheet { border: calc(2 * var(--px)) solid transparent; border-image: var(--btn) 2 fill stretch; box-sizing: content-box; }
   #multi .bottom { margin-top: 14px; text-align: right; }
 </style>
 </head>
@@ -258,6 +303,7 @@
     <h1>CUBELAND</h1>
     <button id="mm-single">Singleplayer</button>
     <button id="mm-multi">Multiplayer</button>
+    <button id="mm-skin">Skin</button>
     <button id="mm-settings">Settings</button>
     <button id="mm-whatsnew">What's new</button>
     <p class="version-line">Version <span id="game-version"></span> &middot; <a id="versions-link" href="versions.html">All versions</a></p>
@@ -271,6 +317,7 @@
     <button id="pause-resume">Back to game</button>
     <button id="pause-save">Save world</button>
     <button id="pause-settings">Settings</button>
+    <button id="pause-skin">Skin</button>
     <button id="multi-btn">Multiplayer</button>
     <button id="pause-quit">Save &amp; quit to main menu</button>
     <button id="pause-discard">Quit without saving</button>
@@ -300,6 +347,45 @@
       <li>F or double-tap Space to fly in creative (Space up, Shift down) &middot; T skips time &middot; Esc pauses</li>
     </ul>
     <div class="bottom"><button id="settings-close">Back</button></div>
+  </div>
+</div>
+<!-- the skin editor (Skin, on the title screen and the pause screen) -->
+<div id="skins">
+  <div class="panel">
+    <h2>Your skin</h2>
+    <div class="sk-main">
+      <div class="sk-left">
+        <canvas id="sk-sheet" width="512" height="512"></canvas>
+        <div id="sk-where"></div>
+      </div>
+      <div class="sk-right">
+        <canvas id="sk-view" width="240" height="320"></canvas>
+        <div class="sk-help">Drag around it to turn it &middot; paint on it or on the picture</div>
+        <div class="sk-tools">
+          <button data-tool="pencil" title="Pencil (P)">Pencil</button>
+          <button data-tool="eraser" title="Eraser (E)">Eraser</button>
+          <button data-tool="fill" title="Fill one face (F)">Fill</button>
+          <button data-tool="pick" title="Pick a colour from the skin (I)">Pick</button>
+          <button id="sk-mirror" title="Paint both sides at once (M)">Mirror</button>
+        </div>
+        <div class="sk-colour-row"><button id="sk-colour" title="Any colour"><span></span></button><span id="sk-hex"></span></div>
+        <div id="sk-cpick">
+          <div class="sk-cp-top"><canvas id="sk-sv" width="40" height="40"></canvas><canvas id="sk-hue" width="1" height="40"></canvas></div>
+          <div class="sk-cp-row"><span>#</span><input id="sk-hexin" maxlength="7" spellcheck="false" autocomplete="off"><button id="sk-cp-ok">OK</button></div>
+        </div>
+        <div id="sk-palette"></div>
+        <div class="sk-tools"><button id="sk-undo" title="Undo (Ctrl+Z)">Undo</button><button id="sk-redo" title="Redo (Ctrl+Y)">Redo</button></div>
+      </div>
+    </div>
+    <div class="sk-bottom">
+      <button id="sk-import">Import picture</button>
+      <button id="sk-export">Save picture</button>
+      <button id="sk-reset">Default skin</button>
+      <span id="sk-note"></span>
+      <button id="sk-cancel">Cancel</button>
+      <button id="sk-done">Done</button>
+    </div>
+    <input type="file" id="sk-file" accept="image/png" hidden>
   </div>
 </div>
 <div id="whatsnew">
@@ -353,7 +439,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.6.1"></script>
+<script src="textures.js?v=alpha-0.0.7.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -361,7 +447,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.6.1';
+const GAME_VERSION = 'Alpha 0.0.7.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -975,6 +1061,7 @@ const fontReady = (() => {
     const root = document.documentElement;
     root.style.setProperty('--btn', skin(0, 0)); root.style.setProperty('--btn-hover', skin(8, 0));
     root.style.setProperty('--panel', skin(0, 8));
+    root.style.setProperty('--sel', skin(8, 8));   // bottom right: something picked (the skin editor's tool and colour)
     root.classList.add('skinned');
   };
   img.src = src;
@@ -1467,10 +1554,6 @@ const TORCH_COLOR = new THREE.Color(1.0, 0.82, 0.58);   // warm orange-yellow
 const HELD_LIGHT = { value: 0 };
 const heldLightAt = (x, y, z) => HELD_LIGHT.value > 0 ?
   LIGHT_CURVE(Math.max(0, HELD_LIGHT.value - Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z))) : 0;
-function updateHeldLight() {   // (a smoldering torch reaches half as far, a burnt one not at all)
-  const id = HOTBAR[selected] | 0, b = BLOCKS[id];
-  HELD_LIGHT.value = !player.dead && isTorch(id) && b.burn !== 2 ? (b.burn === 1 ? Math.round(TORCH_LIGHT / 2) : TORCH_LIGHT) : 0;
-}
 material.onBeforeCompile = shader => {
   shader.uniforms.fogThickness = FOG.density;
   shader.uniforms.fogMax = FOG.max;
@@ -3009,7 +3092,8 @@ const MOB_TYPES = {
   danthechocolateman: { name: 'Dan The Chocolate Man', health: 5, speed: 1.3, max: 6, drops: [[CHOCOLATE, 1, 2]], growl: 'hrr' },
   // scale: how much bigger than the model to draw it (the Zombie's model is 32 pixels tall; 0.9x makes it 1.8 blocks, as tall as the player)
   ...(ZOMBIE_READY ? {
-    zombie: { name: 'Zombie', health: 8, speed: 1.5, max: 5, hostile: true, dark: true, burns: true, damage: 3, sight: 16, reach: 1.8, glow: true,
+    // shamble: walks like a zombie (arms out in front, stiff dragging steps, head lolling)
+    zombie: { name: 'Zombie', health: 8, speed: 1.5, max: 5, hostile: true, dark: true, burns: true, shamble: true, damage: 3, sight: 16, reach: 1.8, glow: true,
       curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 0.9, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
   } : {
     // night: only spawns on open ground after dark (Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks)
@@ -3306,6 +3390,8 @@ function buildMobMesh(type, opts = {}) {
   const model = (window.MODELS || {})[type];
   const root = new THREE.Group(), legs = [], arms = [], mats = [];
   if (!model) return { root, legs, arms, mats, half: 0.3, height: 1 };
+  let head = null;   // a part named "head": nods and tilts from its neck (the Zombie's lolling head)
+  const limbOf = {}, lowers = [];   // limbs by name, and the "<limb>_lower" parts (forearms, shins) that hang off them
   const S = opts.scale || (MOB_TYPES[type] && MOB_TYPES[type].scale) || 1;
   const body = new THREE.Group();    // the model itself, scaled; root is what gets moved, turned and tipped over
   body.scale.setScalar(S);
@@ -3330,6 +3416,10 @@ function buildMobMesh(type, opts = {}) {
   const cx = (mnx + mxx) / 2, cz = (mnz + mxz) / 2;
   let foot = 0;   // width of the body and legs (not the arms), worked out below
   const matFor = ref => {
+    if (opts.tex) {   // a skin of its own (yours, a friend's, or the one in the skin editor) instead of the model's picture
+      if (!mats[0]) mats.push(withHaze(new THREE.MeshBasicMaterial({ map: opts.tex, alphaTest: 0.5 })));
+      return mats[0];
+    }
     const name = model.textures[String(ref).replace('#', '')] || 'missing';
     // a plain name ("body") lives in the mob's own folder; a path ("Textures/entity/mobs/GrrAngry/grr_angry") is used as-is
     // Blockbench may save a project prefix ("Game:entity/mobs/Cow/cow"); the part before the colon is dropped
@@ -3361,14 +3451,23 @@ function buildMobMesh(type, opts = {}) {
     const part = partOf(e, ei);
     if (part !== 'arm')   // arms sticking out don't count
       foot = Math.max(foot, Math.abs(x0 - cx) * 2, Math.abs(x1 - cx) * 2, Math.abs(z0 - cz) * 2, Math.abs(z1 - cz) * 2);
-    if (part === 'leg' || (!part && y0 === 0 && y1 < top)) {
+    if (/_lower$/i.test(e.name || '')) { lowers.push({ e, mesh, mx, my, mz }); continue; }   // (joined on below, once its limb exists)
+    if (/^head$/i.test(e.name || '') && !(e.rotation && e.rotation.angle)) {
+      // the head: turns from the middle of its bottom (the neck)
+      const pivot = new THREE.Group();
+      pivot.position.set(mx, y0 / 16, mz);
+      mesh.position.set(0, h / 2, 0);
+      pivot.add(mesh);
+      body.add(pivot);
+      head = pivot;
+    } else if (part === 'leg' || (!part && y0 === 0 && y1 < top)) {
       // a leg: swings from its top; diagonal pairs move together
       const pivot = new THREE.Group();
       pivot.position.set(mx, y1 / 16, mz);
       mesh.position.set(0, -h / 2, 0);
       pivot.add(mesh);
       body.add(pivot);
-      legs.push({ pivot, phase: Math.sign((mx || 1) * (mz || 1)) });
+      legs.push(limbOf[(e.name || '').toLowerCase()] = { pivot, phase: Math.sign((mx || 1) * (mz || 1)) });
     } else if (part === 'arm') {
       // an arm (named "...arm" in Blockbench): swings from its pivot point (the shoulder) when attacking
       const o = e.rotation ? e.rotation.origin : [(x0 + x1) / 2, y1, z1];
@@ -3377,7 +3476,7 @@ function buildMobMesh(type, opts = {}) {
       mesh.position.set(mx - pivot.position.x, my - pivot.position.y, mz - pivot.position.z);
       pivot.add(mesh);
       body.add(pivot);
-      arms.push({ pivot });
+      arms.push(limbOf[(e.name || '').toLowerCase()] = { pivot });
     } else {
       const r = e.rotation;
       if (r && r.angle) {
@@ -3393,9 +3492,564 @@ function buildMobMesh(type, opts = {}) {
       }
     }
   }
+  // elbows and knees: a part named "<limb>_lower" (arm_left_lower, leg_right_lower...) hangs off its limb and bends at its
+  // pivot point (or the middle of its top), so arms and legs can bend as well as swing
+  for (const { e, mesh, mx, my, mz } of lowers) {
+    const limb = limbOf[e.name.toLowerCase().replace(/_lower$/, '')];
+    const o = e.rotation ? e.rotation.origin : [(e.from[0] + e.to[0]) / 2, e.to[1], (e.from[2] + e.to[2]) / 2];
+    const jx = (o[0] - cx) / 16, jy = o[1] / 16, jz = (o[2] - cz) / 16;
+    const joint = new THREE.Group();
+    if (limb) { joint.position.set(jx - limb.pivot.position.x, jy - limb.pivot.position.y, jz - limb.pivot.position.z); limb.pivot.add(joint); limb.lower = joint; }
+    else { joint.position.set(jx, jy, jz); body.add(joint); }   // (no limb with that name: it just stays put)
+    mesh.position.set(mx - jx, my - jy, mz - jz);
+    joint.add(mesh);
+  }
   // half = half the width of its body for bumping into blocks; height = how tall it stands (both in blocks)
-  return { root, legs, arms, mats, half: Math.min(0.49, foot / 32 * 0.85 * S), height: top / 16 * S };
+  return { root, legs, arms, mats, head, headY: head ? head.position.y : 0, figure: body, half: Math.min(0.49, foot / 32 * 0.85 * S), height: top / 16 * S };
 }
+// moves a body's arms, legs and head for this frame. b.stride counts steps (it goes up as it moves), b.walk is 0 standing
+// still .. 1 walking, swipe is how far into an attack its arms are (0 = not attacking).
+// Rotations: + on x swings a hanging limb forward (its end towards the front), - swings it back.
+function poseBody(b, dt, swipe, shamble) {
+  b.anim = (b.anim || 0) + dt;
+  const s = b.stride, w = b.walk, t = b.anim;
+  if (shamble) {
+    // the Zombie: arms held out in front (one a little lower), hands drooping, swaying as it lurches along;
+    // short stiff steps, dragging its left leg; head hanging forward and lolled over to one side
+    for (const l of b.legs) {
+      const drag = l.phase < 0;
+      l.pivot.rotation.x = Math.sin(s) * (drag ? 0.18 : 0.38) * w * l.phase;
+      if (l.lower) l.lower.rotation.x = drag ? 0 : -Math.max(0, Math.cos(s) * l.phase) * 0.4 * w;
+    }
+    b.arms.forEach((a, k) => {
+      a.pivot.rotation.x = (k ? 1.42 : 1.26) + Math.sin(t * 1.7 + k * 1.3) * 0.06 + Math.sin(s + k * Math.PI) * 0.08 * w - swipe;
+      if (a.lower) a.lower.rotation.x = -0.28 + Math.sin(t * 2.3 + k) * 0.08 + swipe * 0.5;
+    });
+    if (b.head) { b.head.rotation.x = -0.24 + Math.sin(t * 0.9) * 0.05; b.head.rotation.z = 0.2 + Math.sin(t * 0.7) * 0.06; }
+    if (b.figure) b.figure.rotation.z = Math.sin(s) * 0.07 * w + Math.sin(t * 1.1) * 0.025;   // lurching side to side
+    return;
+  }
+  // walking: legs swing in turns and the knee bends as each leg comes forward (then straightens to step down);
+  // arms swing the other way, elbows bending a little as each arm comes forward
+  for (const l of b.legs) {
+    l.pivot.rotation.x = Math.sin(s) * 0.6 * w * l.phase;
+    if (l.lower) l.lower.rotation.x = -Math.max(0, Math.cos(s) * l.phase) * 0.9 * w;
+  }
+  // breathing while standing still (jointed bodies): about every 3 seconds the shoulders rise and the arms ease out a touch
+  const breath = b.head ? (Math.sin(t * 2.1) + 1) / 2 * (1 - w) : 0;
+  b.arms.forEach((a, k) => {
+    const swing = Math.sin(s + k * Math.PI), hold = k === 1 && b.heldMesh ? 1 : 0;   // (k 1 = the right arm, holding the item)
+    a.pivot.rotation.x = swing * (a.lower ? 0.5 : 0.12) * w * (hold ? 0.4 : 1) + hold * 0.22 - swipe;   // (jointed arms swing fully; stubby ones just sway)
+    a.pivot.rotation.z = a.lower ? (k ? 1 : -1) * breath * 0.035 : 0;
+    if (a.lower) a.lower.rotation.x = (0.12 + Math.max(0, swing) * 0.4) * w * (hold ? 0.3 : 1) + hold * 0.45 + swipe * 0.4;
+  });
+  if (b.head) { b.head.rotation.set(0, 0, 0); b.head.position.y = b.headY + breath * 0.012; }
+  if (b.figure) b.figure.rotation.z = 0;
+}
+// shows item `id` in a body's right hand (0 = empty-handed). Needs a model with a right forearm (arm_right_lower).
+function setHeld(b, id) {
+  id = id | 0;
+  if (b.heldId === id) return;
+  b.heldId = id;
+  if (b.heldMesh) {
+    b.heldMesh.parent.remove(b.heldMesh); b.heldMesh.geometry.dispose();
+    b.mats.splice(b.mats.indexOf(b.heldMesh.material), 1); b.heldMesh.material.dispose(); b.heldMesh = null;
+  }
+  const arm = b.arms[1];
+  if (!id || !BLOCKS[id] || !arm || !arm.lower) return;
+  if (!dropTexCache[id]) {   // (the same picture a dropped item uses)
+    const c = document.createElement('canvas'); c.width = c.height = TILE;
+    drawIcon(c, id);
+    const tx = new THREE.CanvasTexture(c);
+    tx.magFilter = tx.minFilter = THREE.NearestFilter; tx.generateMipmaps = false;
+    dropTexCache[id] = tx;
+  }
+  const mesh = heldModel(id);
+  if (mesh.userData.cube) {          // a block: a little cube in the fist
+    mesh.position.set(0, -8 / 16, -0.06);
+    mesh.rotation.set(0, Math.PI / 4, 0);
+  } else {                           // an item: in the fist, flat side-on like a held tool, tipped forward
+    mesh.position.set(0, -6.5 / 16, -0.1);
+    mesh.rotation.set(-Math.PI / 4, Math.PI / 2, 0, 'YXZ');
+  }
+  arm.lower.add(mesh);
+  b.mats.push(mesh.material); b.heldMesh = mesh;
+}
+// a model of item `id` to hold: a small cube for an ordinary block, otherwise its flat picture (both sides)
+function heldModel(id) {
+  const b = BLOCKS[id];
+  if (b && b.t && !isItem(id) && !b.shape && !b.liquid && !isPiece(id) && !formOf(id)) {
+    const s = 0.3, geo = new THREE.BoxGeometry(s, s, s), uv = geo.attributes.uv;
+    const cols = [];
+    for (let f = 0; f < 6; f++) {   // faces: +x, -x, top, bottom, +z (the front, if it has one), -z
+      const t = f === 2 ? b.t[1] : f === 3 ? b.t[2] : f === 4 && b.t[3] !== undefined ? b.t[3] : b.t[0];
+      const u0 = (t * PW + 1) / (PW * NT), u1 = (t * PW + 1 + TILE) / (PW * NT), v0 = 1 / PW, v1 = (1 + TILE) / PW;
+      const shade = f === 2 ? 1 : f === 3 ? 0.55 : f < 2 ? 0.8 : 0.9;   // (lit from above, like the world's blocks)
+      for (let k = 0; k < 4; k++) {
+        uv.setXY(f * 4 + k, u0 + uv.getX(f * 4 + k) * (u1 - u0), v0 + uv.getY(f * 4 + k) * (v1 - v0));
+        cols.push(shade, shade, shade);
+      }
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    const mesh = new THREE.Mesh(geo, withHaze(new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, alphaTest: 0.5 })));
+    mesh.userData.cube = true;
+    return mesh;
+  }
+  if (!dropTexCache[id]) {   // (the same picture a dropped item uses)
+    const c = document.createElement('canvas'); c.width = c.height = TILE;
+    drawIcon(c, id);
+    const tx = new THREE.CanvasTexture(c);
+    tx.magFilter = tx.minFilter = THREE.NearestFilter; tx.generateMipmaps = false;
+    dropTexCache[id] = tx;
+  }
+  return new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), withHaze(new THREE.MeshBasicMaterial({ map: dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide })));
+}
+
+// ===================== Your hand =====================
+// Your right forearm (from the Player model, in your skin) at the bottom right of the screen, holding what's selected.
+// It's drawn small and close to your eye, so it doesn't poke into walls. It bobs as you walk, swings when you click,
+// and dips out of sight and back when you change what you're holding.
+const hand = { root: new THREE.Group(), arm: new THREE.Group(), body: null, id: -1, swing: 0, dip: 0, bob: 0, held: false, lightTimer: 0, light: new THREE.Color(1, 1, 1) };
+hand.root.add(hand.arm);
+hand.arm.rotation.order = 'YXZ';
+camera.add(hand.root);
+scene.add(camera);   // (so things fixed to the camera, like the hand, get drawn)
+addEventListener('mousedown', e => { if (locked && (e.button === 0 || e.button === 2)) { hand.swing = 1; if (e.button === 0) hand.held = true; } });
+addEventListener('mouseup', e => { if (e.button === 0) hand.held = false; });
+function updateHand(dt) {
+  if (!hand.body) {   // (made once the models have loaded; made again when you change your skin)
+    if (!(window.MODELS || {}).player) return;
+    hand.arm.clear(); hand.id = -1;
+    hand.body = buildMobMesh('player', { scale: 1, tex: PlayerSkin.texture() || undefined });
+    const fore = hand.body.arms[1] && hand.body.arms[1].lower;
+    if (fore) { fore.position.set(0, 0, 0); hand.arm.add(fore); }
+  }
+  hand.root.visible = !player.dead;
+  const id = HOTBAR[selected] | 0;
+  if (id !== hand.id) {
+    if (hand.id !== -1) hand.dip = 1;
+    hand.id = id;
+    setHeld(hand.body, id);
+    const m = hand.body.heldMesh;   // facing you, instead of side-on like other players'
+    if (m && m.userData.cube) { m.position.set(0, -8.5 / 16, 0); m.rotation.set(-1.55, Math.PI / 4, 0); }   // (upright, its top tipped toward you)
+    else if (m) { m.position.set(0, -7.5 / 16, -0.04); m.rotation.set(-Math.PI / 2, 0, 0); }
+  }
+  // swinging: one swing per click, and over and over while the left button is held (breaking)
+  if (hand.swing > 0) hand.swing = Math.max(0, hand.swing - dt / 0.28);
+  else if (hand.held && locked) hand.swing = 1;
+  hand.dip = Math.max(0, hand.dip - dt * 5);
+  const speed = player.onGround && !player.fly ? Math.hypot(player.vx, player.vz) : 0;
+  hand.bob += speed * dt * 1.6;
+  const walk = Math.min(1, speed / 4);
+  const sw = hand.swing > 0 ? Math.sin(Math.PI * (1 - hand.swing)) : 0;
+  const S = 0.4;   // drawn at 0.4 size, 0.4 as far away: looks the same, but stays clear of walls
+  hand.root.scale.setScalar(S);
+  hand.root.position.set(
+    (0.5 + Math.sin(hand.bob) * 0.025 * walk - sw * 0.08) * S,
+    (-0.5 - Math.abs(Math.cos(hand.bob)) * 0.022 * walk - Math.sin(hand.dip * Math.PI / 2) * 0.35 + sw * 0.05) * S,
+    (-0.8 - sw * 0.06) * S);
+  hand.arm.rotation.set(1.9 - sw * 0.75, 0.35 + sw * 0.3, 0);
+  // lit like everything else: daylight where you stand, or torch light, whichever is brighter
+  if ((hand.lightTimer -= dt) <= 0) {
+    hand.lightTimer = 0.25;
+    const bx = Math.floor(player.x), by = Math.floor(player.y + 1), bz = Math.floor(player.z);
+    hand.sky = skyExposure(bx, by, bz, new Map()); hand.torch = LIGHT_CURVE(lightAt(bx, by, bz));
+  }
+  // a torch in your hand: lights the world around you (a smoldering one half as far, a burnt one not at all)
+  const hb = BLOCKS[id];
+  HELD_LIGHT.value = !player.dead && isTorch(id) && hb.burn !== 2 ? (hb.burn === 1 ? Math.round(TORCH_LIGHT / 2) : TORCH_LIGHT) : 0;
+  const t = DAY_TINT.value, s = hand.sky === undefined ? 1 : hand.sky, tl = Math.max(hand.torch || 0, LIGHT_CURVE(HELD_LIGHT.value));
+  hand.light.setRGB(Math.max(t.r * s, tl * TORCH_COLOR.r), Math.max(t.g * s, tl * TORCH_COLOR.g), Math.max(t.b * s, tl * TORCH_COLOR.b));
+  for (const m of hand.body.mats) m.color.copy(hand.light);
+}
+
+// ===================== Your skin =====================
+// The picture your Player model wears: 64x64, laid out like textures/entity/mobs/Player/player.png (the default).
+// Made in the skin editor (Skin, on the title screen or the pause screen) or imported from a PNG. It's kept in this
+// browser, shown on your hand, and sent to other players in multiplayer.
+const PlayerSkin = (() => {
+  const KEY = 'cubeland-skin';
+  let url = null, tex = null;
+  try { url = localStorage.getItem(KEY); } catch (e) {}
+  const listeners = [];
+  // a texture from a skin picture (a data: URL). Only a 64x64 picture is used; anything else stays blank.
+  function textureFrom(src) {
+    const c = document.createElement('canvas'); c.width = c.height = 1;
+    const t = new THREE.Texture(c);
+    t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+    const img = new Image();
+    img.onload = () => { if (img.width === 64 && img.height === 64) { t.image = img; t.needsUpdate = true; } };
+    img.src = src;
+    return t;
+  }
+  // a picture from someone else is only used if it's a small PNG
+  const valid = s => typeof s === 'string' && s.startsWith('data:image/png;base64,') && s.length < 60000;
+  return {
+    KEY, valid, textureFrom,
+    get url() { return url; },
+    texture() { if (!url) return null; if (!tex) tex = textureFrom(url); return tex; },   // null = the default skin
+    set(newUrl) {
+      url = newUrl || null; tex = null;
+      try { if (url) localStorage.setItem(KEY, url); else localStorage.removeItem(KEY); } catch (e) {}
+      hand.body = null;   // (your hand is made again with it)
+      listeners.forEach(f => f(url));
+    },
+    onChange(f) { listeners.push(f); },
+  };
+})();
+
+// ===================== The skin editor =====================
+// Left: the whole 64x64 picture, big, with each part's faces outlined (the name of the one under the mouse shows
+// below it). Right: your figure in 3D: drag around it to turn it, or paint straight onto it. Tools: pencil, eraser,
+// fill (fills one face), colour picker, and mirror (paints the other side too: left arm <-> right arm, and so on).
+const SkinEditor = (() => {
+  const el = id => document.getElementById(id);
+  const panel = el('skins'), sheet = el('sk-sheet'), view = el('sk-view'), whereEl = el('sk-where');
+  const S = 64;
+  const edit = document.createElement('canvas'); edit.width = edit.height = S;   // the picture being made
+  const eg = edit.getContext('2d', { willReadFrequently: true });
+  const editTex = new THREE.CanvasTexture(edit);
+  editTex.magFilter = editTex.minFilter = THREE.NearestFilter; editTex.generateMipmaps = false;
+  let tool = 'pencil', mirror = false, colour = '#3a6ea5', open = false, undo = [], redo = [], hover = null;
+  const PALETTE = ['#000000', '#3f3f3f', '#7f7f7f', '#bfbfbf', '#ffffff', '#5a3a22', '#8b5a2b', '#c68642', '#f1c27d', '#ffdbac',
+    '#b3261e', '#e8743b', '#f2c12e', '#4caf50', '#1f7a4a', '#3a6ea5', '#2b3fae', '#7b3fb0', '#d04f9a', '#1c1c2e'];
+  let recent = [];
+
+  // ---- where each face of each part is on the picture (from the Player model) ----
+  const PART_NAMES = { head: 'Head', body: 'Body', arm_left: 'Left upper arm', arm_left_lower: 'Left forearm', arm_right: 'Right upper arm',
+    arm_right_lower: 'Right forearm', leg_left: 'Left thigh', leg_left_lower: 'Left shin', leg_right: 'Right thigh', leg_right_lower: 'Right shin' };
+  const FACE_NAMES = { north: 'front', south: 'back', east: 'right side', west: 'left side', up: 'top', down: 'bottom' };
+  let faces = [];   // { part, face, x0, y0, x1, y1 } in picture pixels (x1, y1 not included)
+  function readFaces() {
+    const m = (window.MODELS || {}).player;
+    faces = [];
+    if (!m) return;
+    for (const e of m.elements) for (const [f, d] of Object.entries(e.faces || {})) {
+      if (!d.uv) continue;
+      const [a, b, c, dd] = d.uv.map(v => Math.round(v * S / 16));
+      faces.push({ part: e.name || '', face: f, x0: Math.min(a, c), y0: Math.min(b, dd), x1: Math.max(a, c), y1: Math.max(b, dd) });
+    }
+  }
+  const faceAt = (x, y) => faces.find(f => x >= f.x0 && x < f.x1 && y >= f.y0 && y < f.y1);
+  // the same spot on the other side of the body: the matching part and face, flipped left to right
+  function mirrorOf(x, y) {
+    const f = faceAt(x, y); if (!f) return null;
+    const part = f.part.replace(/left|right/, s => s === 'left' ? 'right' : 'left');
+    const face = f.face === 'east' ? 'west' : f.face === 'west' ? 'east' : f.face;
+    const g = faces.find(o => o.part === part && o.face === face);
+    if (!g || g.x1 - g.x0 !== f.x1 - f.x0 || g.y1 - g.y0 !== f.y1 - f.y0) return null;
+    return [g.x0 + (f.x1 - 1 - x), g.y0 + (y - f.y0)];
+  }
+
+  // ---- painting ----
+  const hex = c => '#' + [c[0], c[1], c[2]].map(v => v.toString(16).padStart(2, '0')).join('');
+  function setColour(c, remember) {
+    colour = c; el('sk-colour').firstChild.style.background = c; el('sk-hex').textContent = c.toUpperCase();
+    if (remember) { recent = [c, ...recent.filter(r => r !== c)].slice(0, 10); }
+    drawPalette();
+  }
+  function plot(x, y) {
+    if (x < 0 || y < 0 || x >= S || y >= S) return;
+    if (tool === 'eraser') eg.clearRect(x, y, 1, 1);
+    else { eg.fillStyle = colour; eg.fillRect(x, y, 1, 1); }
+  }
+  function paint(x, y) {
+    if (tool === 'pick') {
+      const p = eg.getImageData(x, y, 1, 1).data;
+      if (p[3] > 0) setColour(hex(p), true);
+      choose('pencil');
+      return;
+    }
+    if (tool === 'fill') { fill(x, y); const m = mirror && mirrorOf(x, y); if (m) fill(m[0], m[1]); }
+    else { plot(x, y); const m = mirror && mirrorOf(x, y); if (m) plot(m[0], m[1]); }
+    changed();
+  }
+  // fill: the spots joined to this one that are the same colour, without going past the edge of its face
+  function fill(x, y) {
+    const f = faceAt(x, y) || { x0: 0, y0: 0, x1: S, y1: S };
+    const img = eg.getImageData(0, 0, S, S), p = img.data, at = (x, y) => (y * S + x) * 4;
+    const was = p.slice(at(x, y), at(x, y) + 4);
+    const now = tool === 'eraser' ? [0, 0, 0, 0] : [parseInt(colour.slice(1, 3), 16), parseInt(colour.slice(3, 5), 16), parseInt(colour.slice(5, 7), 16), 255];
+    if (was.every((v, i) => v === now[i])) return;
+    const same = i => p[i] === was[0] && p[i + 1] === was[1] && p[i + 2] === was[2] && p[i + 3] === was[3];
+    const todo = [[x, y]];
+    while (todo.length) {
+      const [cx, cy] = todo.pop();
+      if (cx < f.x0 || cy < f.y0 || cx >= f.x1 || cy >= f.y1) continue;
+      const i = at(cx, cy);
+      if (!same(i)) continue;
+      p.set(now, i);
+      todo.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+    }
+    eg.putImageData(img, 0, 0);
+  }
+  function snapshot() { undo.push(eg.getImageData(0, 0, S, S)); if (undo.length > 60) undo.shift(); redo = []; }
+  function stepBack(from, to) {
+    if (!from.length) return;
+    to.push(eg.getImageData(0, 0, S, S));
+    eg.putImageData(from.pop(), 0, 0);
+    changed();
+  }
+  function changed() { editTex.needsUpdate = true; drawSheet(); }
+
+  // ---- the big picture on the left ----
+  function drawSheet() {
+    const g = sheet.getContext('2d'), k = sheet.width / S;
+    g.imageSmoothingEnabled = false;
+    // a dark checkerboard shows where the picture is see-through; spots no part uses are darker still
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const used = faceAt(x, y);
+      g.fillStyle = (x + y) & 1 ? (used ? '#4a4a52' : '#1c1c20') : (used ? '#3c3c44' : '#151518');
+      g.fillRect(x * k, y * k, k, k);
+    }
+    g.drawImage(edit, 0, 0, sheet.width, sheet.height);
+    g.lineWidth = 1;
+    for (const f of faces) {
+      const on = hover && hover.f === f;
+      g.strokeStyle = on ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.22)';
+      g.strokeRect(f.x0 * k + 0.5, f.y0 * k + 0.5, (f.x1 - f.x0) * k - 1, (f.y1 - f.y0) * k - 1);
+    }
+    if (hover) {
+      g.strokeStyle = '#fff'; g.lineWidth = 2;
+      g.strokeRect(hover.x * k + 1, hover.y * k + 1, k - 2, k - 2);
+      const m = mirror && mirrorOf(hover.x, hover.y);
+      if (m) { g.strokeStyle = 'rgba(255,255,255,.5)'; g.strokeRect(m[0] * k + 1, m[1] * k + 1, k - 2, k - 2); }
+    }
+  }
+  function showWhere(x, y) {
+    const f = x === undefined ? null : faceAt(x, y);
+    hover = x === undefined ? null : { x, y, f };
+    whereEl.textContent = f ? `${PART_NAMES[f.part] || f.part} · ${FACE_NAMES[f.face] || f.face}` : (x === undefined ? '' : 'Not used');
+    drawSheet();
+  }
+  let painting = false, last = null;
+  // (inside the frame around it)
+  const inner = (c, e) => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left - c.clientLeft) / c.clientWidth, (e.clientY - r.top - c.clientTop) / c.clientHeight]; };
+  const sheetPos = e => { const [u, v] = inner(sheet, e); return [Math.floor(u * S), Math.floor(v * S)]; };
+  sheet.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    const [x, y] = sheetPos(e);
+    sheet.setPointerCapture(e.pointerId);
+    if (tool !== 'pick') snapshot();
+    painting = tool === 'pencil' || tool === 'eraser'; last = [x, y];
+    paint(x, y);
+  });
+  sheet.addEventListener('pointermove', e => {
+    const [x, y] = sheetPos(e);
+    if (painting && last) {   // a line from the last spot, so fast strokes don't leave gaps
+      const n = Math.max(Math.abs(x - last[0]), Math.abs(y - last[1]));
+      for (let i = 1; i <= n; i++) paint(Math.round(last[0] + (x - last[0]) * i / n), Math.round(last[1] + (y - last[1]) * i / n));
+      last = [x, y];
+    }
+    showWhere(x, y);
+  });
+  sheet.addEventListener('pointerup', () => { painting = false; last = null; });
+  sheet.addEventListener('pointerleave', () => { if (!painting) showWhere(); });
+
+  // ---- your figure in 3D on the right ----
+  let r3 = null, scene3, cam3, fig = null, turn = Math.PI + 0.5, tilt = 0.12, frame = 0;   // (starts looking at your front)
+  const ray = new THREE.Raycaster();
+  function setup3d() {
+    if (r3) return;
+    r3 = new THREE.WebGLRenderer({ canvas: view, antialias: false, alpha: true });
+    r3.setPixelRatio(Math.min(2, devicePixelRatio || 1)); r3.setSize(240, 320, false);
+    scene3 = new THREE.Scene();
+    cam3 = new THREE.PerspectiveCamera(30, view.width / view.height, 0.1, 50);
+  }
+  function buildFigure() {
+    if (fig) { scene3.remove(fig.root); fig.root.traverse(o => { if (o.geometry) o.geometry.dispose(); }); fig.mats.forEach(m => m.dispose()); }
+    fig = buildMobMesh('player', { scale: 1, tex: editTex });
+    // arms a little out from the sides, so their insides can be seen and painted
+    fig.arms.forEach((a, k) => { a.pivot.rotation.z = (k ? 1 : -1) * 0.18; });
+    scene3.add(fig.root);
+  }
+  function render3d() {
+    if (!open) return;
+    frame = requestAnimationFrame(render3d);
+    const d = 4.6, cy = (fig ? fig.height : 2) / 2;
+    cam3.position.set(Math.sin(turn) * Math.cos(tilt) * d, cy + Math.sin(tilt) * d, Math.cos(turn) * Math.cos(tilt) * d);
+    cam3.lookAt(0, cy, 0);
+    r3.render(scene3, cam3);
+  }
+  // the picture's pixel under the mouse on the figure (or null)
+  function figureSpot(e) {
+    const [u, v] = inner(view, e);
+    ray.setFromCamera(new THREE.Vector2(u * 2 - 1, -v * 2 + 1), cam3);
+    const hit = ray.intersectObject(fig.root, true)[0];
+    if (!hit || !hit.uv || !hit.face) return null;
+    // stay inside the face that was hit (its edge falls exactly between two pixels)
+    const uv = hit.object.geometry.attributes.uv, ids = [hit.face.a, hit.face.b, hit.face.c];
+    const us = ids.map(i => uv.getX(i) * S), vs = ids.map(i => (1 - uv.getY(i)) * S);
+    const clamp = (v, a, b) => Math.min(Math.max(Math.floor(v), Math.round(Math.min(a, b))), Math.round(Math.max(a, b)) - 1);
+    return [clamp(hit.uv.x * S, Math.min(...us), Math.max(...us)), clamp((1 - hit.uv.y) * S, Math.min(...vs), Math.max(...vs))];
+  }
+  let drag = null;
+  view.addEventListener('pointerdown', e => {
+    view.setPointerCapture(e.pointerId);
+    const spot = e.button === 0 && figureSpot(e);
+    if (spot) { if (tool !== 'pick') snapshot(); drag = { paint: true }; paint(spot[0], spot[1]); }
+    else drag = { paint: false, x: e.clientX, y: e.clientY };   // dragging around the figure turns it
+  });
+  view.addEventListener('pointermove', e => {
+    const spot = figureSpot(e);
+    if (drag && drag.paint && spot && (tool === 'pencil' || tool === 'eraser')) paint(spot[0], spot[1]);
+    else if (drag && !drag.paint) {
+      turn -= (e.clientX - drag.x) * 0.012; tilt = Math.max(-1.2, Math.min(1.2, tilt + (e.clientY - drag.y) * 0.008));
+      drag.x = e.clientX; drag.y = e.clientY;
+    }
+    if (spot) showWhere(spot[0], spot[1]); else if (hover) showWhere();
+  });
+  view.addEventListener('pointerup', () => { drag = null; });
+  view.style.cursor = 'crosshair';
+
+  // ---- tools, colours and buttons ----
+  function choose(t) {
+    tool = t;
+    panel.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  }
+  panel.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => choose(b.dataset.tool)));
+  el('sk-mirror').addEventListener('click', () => { mirror = !mirror; el('sk-mirror').classList.toggle('on', mirror); drawSheet(); });
+  // ---- "any colour": the game's own picker. The square is how bright (up/down) and how strong (left/right) the colour is;
+  // the strip beside it picks the hue. Drawn blocky, like everything else. ----
+  const cpick = el('sk-cpick'), sv = el('sk-sv'), hueBar = el('sk-hue'), hexIn = el('sk-hexin');
+  let hsv = [0, 0, 0];
+  const toRgb = (h, s, v) => { const f = n => { const k = (n + h * 6) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); }; return [f(5), f(3), f(1)].map(x => Math.round(x * 255)); };
+  const toHsv = c => {
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16) / 255), mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+    const h = d === 0 ? 0 : mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [h / 6, mx ? d / mx : 0, mx];
+  };
+  function drawPicker() {
+    const n = sv.width, g = sv.getContext('2d'), img = g.createImageData(n, n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) img.data.set([...toRgb(hsv[0], x / (n - 1), 1 - y / (n - 1)), 255], (y * n + x) * 4);
+    g.putImageData(img, 0, 0);
+    const mx = Math.round(hsv[1] * (n - 1)), my = Math.round((1 - hsv[2]) * (n - 1));   // where the colour is: a little ring
+    g.fillStyle = hsv[2] > 0.5 ? '#000' : '#fff';
+    for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, -1], [-1, 1], [1, 1]]) g.fillRect(mx + dx, my + dy, 1, 1);
+    const hn = hueBar.height, hg = hueBar.getContext('2d'), himg = hg.createImageData(1, hn);
+    for (let y = 0; y < hn; y++) himg.data.set([...toRgb(y / hn, 1, 1), 255], y * 4);
+    hg.putImageData(himg, 0, 0);
+    const hy = Math.min(hn - 1, Math.floor(hsv[0] * hn)); hg.fillStyle = '#fff'; hg.fillRect(0, hy, 1, 1);
+  }
+  function fromHsv() { setColour(hex(toRgb(...hsv)), false); hexIn.value = colour.slice(1).toUpperCase(); drawPicker(); }
+  function openPicker(on) {
+    if (on === cpick.classList.contains('open')) return;
+    cpick.classList.toggle('open', on);
+    if (on) {
+      hsv = toHsv(colour); hexIn.value = colour.slice(1).toUpperCase(); drawPicker();
+      const row = el('sk-colour').parentElement;   // just above the colour button (over the tools), so it never runs off the bottom
+      cpick.style.top = Math.max(0, row.offsetTop - cpick.offsetHeight - 6) + 'px';
+    }
+    else setColour(colour, true);   // (remembered with your recent colours)
+  }
+  el('sk-colour').addEventListener('click', () => openPicker(!cpick.classList.contains('open')));
+  el('sk-cp-ok').addEventListener('click', () => openPicker(false));
+  const dragOn = (c, f) => {
+    const at = e => { const [u, v] = inner(c, e); f(Math.max(0, Math.min(1, u)), Math.max(0, Math.min(1, v))); };
+    let held = false;
+    c.addEventListener('pointerdown', e => { held = true; try { c.setPointerCapture(e.pointerId); } catch (err) {} at(e); });
+    c.addEventListener('pointermove', e => { if (held) at(e); });
+    c.addEventListener('pointerup', () => { held = false; });
+    c.addEventListener('lostpointercapture', () => { held = false; });
+  };
+  dragOn(sv, (u, v) => { hsv[1] = u; hsv[2] = 1 - v; if (tool === 'eraser' || tool === 'pick') choose('pencil'); fromHsv(); });
+  dragOn(hueBar, (u, v) => { hsv[0] = Math.min(0.999, v); fromHsv(); });
+  hexIn.addEventListener('input', () => {
+    const t = hexIn.value.replace(/[^0-9a-f]/gi, '');
+    const full = t.length === 3 ? t.split('').map(c => c + c).join('') : t;
+    if (full.length === 6) { setColour('#' + full.toLowerCase(), false); hsv = toHsv(colour); drawPicker(); }
+  });
+  hexIn.addEventListener('keydown', e => { if (e.code === 'Enter') openPicker(false); });
+  // clicking anywhere else closes it
+  panel.addEventListener('pointerdown', e => { if (cpick.classList.contains('open') && !cpick.contains(e.target) && !el('sk-colour').contains(e.target)) openPicker(false); });
+  function drawPalette() {
+    const box = el('sk-palette'); box.textContent = '';
+    for (const c of [...PALETTE, ...recent.filter(r => !PALETTE.includes(r))]) {
+      const b = document.createElement('button'); b.className = 'sk-swatch' + (c === colour ? ' on' : ''); b.title = c.toUpperCase();
+      const dot = document.createElement('span'); dot.style.background = c; b.append(dot);
+      b.addEventListener('click', () => { setColour(c, false); if (tool === 'eraser' || tool === 'pick') choose('pencil'); });
+      box.append(b);
+    }
+  }
+  el('sk-undo').addEventListener('click', () => stepBack(undo, redo));
+  el('sk-redo').addEventListener('click', () => stepBack(redo, undo));
+  addEventListener('keydown', e => {
+    if (!open) return;
+    if (e.code === 'Escape') { if (cpick.classList.contains('open')) openPicker(false); else close(false); e.preventDefault(); }
+    else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.shiftKey ? stepBack(redo, undo) : stepBack(undo, redo); e.preventDefault(); }
+    else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') { stepBack(redo, undo); e.preventDefault(); }
+    else if (!e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') {
+      const k = { KeyP: 'pencil', KeyB: 'pencil', KeyE: 'eraser', KeyF: 'fill', KeyG: 'fill', KeyI: 'pick' }[e.code];
+      if (k) choose(k); else if (e.code === 'KeyM') el('sk-mirror').click();
+    }
+    e.stopPropagation();
+  }, true);
+  // a picture: your current skin, the default one, or one you picked from your computer
+  const loadInto = src => new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.width !== S || img.height !== S) return rej(new Error(`That picture is ${img.width}x${img.height}. Skins are 64x64.`));
+      eg.clearRect(0, 0, S, S); eg.drawImage(img, 0, 0); changed(); res();
+    };
+    img.onerror = () => rej(new Error("That file isn't a picture the game can read."));
+    img.src = src;
+  });
+  const defaultSkin = () => (window.TEXTURES || {})['entity/mobs/player/player'];
+  const note = text => { el('sk-note').textContent = text || ''; };
+  el('sk-import').addEventListener('click', () => el('sk-file').click());
+  el('sk-file').addEventListener('change', e => {
+    const file = e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => { snapshot(); loadInto(rd.result).then(() => note(`Loaded ${file.name}.`)).catch(err => { undo.pop(); note(err.message); }); };
+    rd.readAsDataURL(file);
+  });
+  el('sk-export').addEventListener('click', () => {
+    const a = document.createElement('a'); a.href = edit.toDataURL('image/png'); a.download = 'cubeland-skin.png'; a.click();
+  });
+  el('sk-reset').addEventListener('click', () => { const d = defaultSkin(); if (d) { snapshot(); loadInto(d).then(() => note('Back to the default skin.')); } });
+  el('sk-cancel').addEventListener('click', () => close(false));
+  el('sk-done').addEventListener('click', () => close(true));
+  panel.addEventListener('click', e => e.stopPropagation());
+  panel.addEventListener('mousedown', e => e.stopPropagation());
+
+  function show() {
+    if (open) return;
+    if (!(window.MODELS || {}).player) return;
+    try { document.exitPointerLock(); } catch (e) {}
+    open = true; panel.style.display = 'flex';
+    readFaces(); readDefault(); setup3d(); buildFigure();
+    undo = []; redo = []; note('');
+    const src = PlayerSkin.url || defaultSkin();
+    eg.clearRect(0, 0, S, S);
+    if (src) loadInto(src).catch(() => {});
+    choose(tool); setColour(colour, false); drawSheet();
+    render3d();
+  }
+  function close(keep) {
+    if (!open) return;
+    if (keep) {
+      // the default picture, unchanged, isn't saved as a skin of your own (so a new default still reaches you)
+      const url = edit.toDataURL('image/png');
+      PlayerSkin.set(url === sheetDefault ? null : url);
+    }
+    cpick.classList.remove('open');
+    open = false; panel.style.display = 'none';
+    cancelAnimationFrame(frame);
+  }
+  // the default skin, drawn the same way, to tell whether yours is still the default
+  let sheetDefault = null;
+  const readDefault = () => {
+    const d = defaultSkin(); if (!d || sheetDefault) return;
+    const img = new Image();
+    img.onload = () => { const c = document.createElement('canvas'); c.width = c.height = S; c.getContext('2d').drawImage(img, 0, 0); sheetDefault = c.toDataURL('image/png'); };
+    img.src = d;
+  };
+  readDefault();
+  return { show, close, get open() { return open; } };
+})();
+document.getElementById('mm-skin').addEventListener('click', e => { e.stopPropagation(); SkinEditor.show(); });
+document.getElementById('pause-skin').addEventListener('click', e => { e.stopPropagation(); SkinEditor.show(); });
 
 const mobs = [];
 let mobCount = 0;   // every mob gets its own number (k), so players in a multiplayer game know which one is which
@@ -3576,11 +4230,10 @@ function updateMobs(dt) {
     const moved = Math.hypot(m.x - ox, m.z - oz);
     m.stride += moved * 5.5;
     m.walk += ((moved > 0.002 ? 1 : 0) - m.walk) * Math.min(1, dt * 8);
-    for (const l of m.legs) l.pivot.rotation.x = Math.sin(m.stride) * 0.6 * m.walk * l.phase;
-    // arms: a gentle sway while walking, and a downward swipe when attacking
+    // arms: sway while walking, and a downward swipe when attacking
     m.swing = Math.max(0, (m.swing || 0) - dt);
     const swipe = m.swing > 0 ? Math.sin((1 - m.swing / 0.35) * Math.PI) * 0.9 : 0;
-    m.arms.forEach((a, k) => { a.pivot.rotation.x = Math.sin(m.stride + k * Math.PI) * 0.12 * m.walk - swipe; });
+    poseBody(m, dt, swipe, t.shamble);
     m.root.position.set(m.x, m.y, m.z);
     m.root.rotation.y = m.yaw;
     if (t.growl && !m.dead) {
@@ -4636,6 +5289,14 @@ addEventListener('pagehide', () => autoSave());
   let peer = null, hostConn = null, myId = 'host', lastHeard = 0, joinTimeout = 0;
   const others = new Map();     // id -> another player: { name, hue, x, y, z, yaw, av (their body) }
   const friends = new Map();    // (host only) id -> { conn, ...player }
+  // everyone's skins (id -> a 64x64 PNG as a data: URL; none = the default skin in their colour). Sent once when
+  // someone joins and again whenever someone changes theirs, not with every update.
+  const skins = new Map();
+  const skinMsg = (id, s) => ({ t: 'skin', id, s: s || '' });
+  PlayerSkin.onChange(s => {
+    if (Net.hosting) { for (const f of friends.values()) if (f.conn.open) f.conn.send(skinMsg('host', s)); }
+    else if (hostConn && hostConn.open && worldLoaded) hostConn.send(skinMsg(null, s));
+  });
   let pending = [];             // block changes waiting to be sent: [index, id, index, id, ...]
   let myName = 'Player';
   try { myName = localStorage.getItem(NAME_KEY) || myName; } catch (e) {}
@@ -4668,7 +5329,10 @@ addEventListener('pagehide', () => autoSave());
 
   // ---- other players' bodies: a recoloured Grr as tall as you, with their name above it ----
   function makeBody(p) {
-    const b = buildMobMesh('grrangry', { scale: 1.6, hue: p.hue });
+    // their own skin, or (if they haven't made one) the default skin recoloured with their colour
+    const own = p.skin ? PlayerSkin.textureFrom(p.skin) : null;
+    const b = buildMobMesh('player', own ? { scale: 0.9, tex: own } : { scale: 0.9, hue: p.hue });   // (the Player model is 32 pixels tall; 0.9x = your height)
+    b.ownTex = own;
     const c = document.createElement('canvas'); c.width = 256; c.height = 64;
     const g = c.getContext('2d');
     g.font = '36px Cubeland, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -4690,15 +5354,18 @@ addEventListener('pagehide', () => autoSave());
     scene.remove(p.av.root);
     p.av.root.traverse(o => { if (o.geometry) o.geometry.dispose(); });
     p.av.mats.forEach(m => m.dispose());
+    if (p.av.ownTex) p.av.ownTex.dispose();
     p.av.tag.material.map.dispose(); p.av.tag.material.dispose();
     p.av = null;
   }
   function setOther(id, d) {      // d: { name, hue, x, y, z, yaw }
     let p = others.get(id);
     if (!p) { p = { ...d, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw }; others.set(id, p); }
-    if (p.av && (p.name !== d.name || p.hue !== d.hue)) removeBody(p);
-    Object.assign(p, { name: d.name, hue: d.hue, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw });
+    const skin = skins.get(id) || null;
+    if (p.av && (p.name !== d.name || p.hue !== d.hue || p.skin !== skin)) removeBody(p);
+    Object.assign(p, { name: d.name, hue: d.hue, skin, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw, held: d.h | 0 });
     if (!p.av) p.av = makeBody(p);
+    setHeld(p.av, p.held);   // what they're holding shows in their hand
     return p;
   }
   function removeOther(id) { const p = others.get(id); if (p) { removeBody(p); others.delete(id); } }
@@ -4712,8 +5379,7 @@ addEventListener('pagehide', () => autoSave());
       const moved = Math.hypot(p.x - ox, p.z - oz);
       av.stride += moved * 5.5;
       av.walk += ((moved > 0.002 ? 1 : 0) - av.walk) * Math.min(1, dt * 8);
-      for (const l of av.legs) l.pivot.rotation.x = Math.sin(av.stride) * 0.6 * av.walk * l.phase;
-      av.arms.forEach((ar, k) => { ar.pivot.rotation.x = Math.sin(av.stride + k * Math.PI) * 0.12 * av.walk; });
+      poseBody(av, dt, 0, false);
       av.root.position.set(p.x, p.y, p.z);
       av.root.rotation.y = p.yaw;
       // lit like mobs: sky light by time of day, or torch light, whichever is brighter
@@ -4771,7 +5437,7 @@ addEventListener('pagehide', () => autoSave());
   function dropFriend(id) {
     const f = friends.get(id);
     if (!f) return;
-    friends.delete(id); removeOther(id);
+    friends.delete(id); removeOther(id); skins.delete(id);
     try { f.conn.close(); } catch (e) {}
     refreshUI();
   }
@@ -4789,13 +5455,20 @@ addEventListener('pagehide', () => autoSave());
       setOther(conn.peer, { name, hue, x: player.x + 1, y: player.y, z: player.z, yaw: 0 });
       const save = gatherSave();
       conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ids: save.ids, pieces: save.pieces, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
+      // everyone's skins: yours, and the other friends' here already
+      if (PlayerSkin.url) conn.send(skinMsg('host', PlayerSkin.url));
+      for (const [id, s] of skins) if (id !== conn.peer && friends.has(id)) conn.send(skinMsg(id, s));
       refreshUI();
     } else if (!f) {
       return;
     } else if (d.t === 'me') {
-      setOther(conn.peer, { name: f.name, hue: f.hue, x: +d.x || 0, y: +d.y || 0, z: +d.z || 0, yaw: +d.yaw || 0 });
+      setOther(conn.peer, { name: f.name, hue: f.hue, x: +d.x || 0, y: +d.y || 0, z: +d.z || 0, yaw: +d.yaw || 0, h: d.h | 0 });
     } else if (d.t === 'sets' && Array.isArray(d.l)) {
       applySets(d.l, d.p);
+    } else if (d.t === 'skin') {     // a friend's skin: shown on them here, and passed on to everyone else
+      const s = PlayerSkin.valid(d.s) ? d.s : null;
+      if (s) skins.set(conn.peer, s); else skins.delete(conn.peer);
+      for (const [id, o] of friends) if (id !== conn.peer && o.conn.open) o.conn.send(skinMsg(conn.peer, s));
     } else if (d.t === 'hit') {
       const m = mobs.find(m => m.k === d.k && !m.dead), p = others.get(conn.peer);
       if (m && p) hitMob(m, p);
@@ -4805,8 +5478,9 @@ addEventListener('pagehide', () => autoSave());
     }
   }
   function hostTick() {
-    const players = [{ id: 'host', name: myName, hue: HUES[0], x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw) }];
-    for (const [id, f] of friends) { const p = others.get(id); if (p) players.push({ id, name: f.name, hue: f.hue, x: r2(p.tx), y: r2(p.ty), z: r2(p.tz), yaw: r2(p.tyaw) }); }
+    // h: the item each player is holding (0 = nothing)
+    const players = [{ id: 'host', name: myName, hue: HUES[0], x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0 }];
+    for (const [id, f] of friends) { const p = others.get(id); if (p) players.push({ id, name: f.name, hue: f.hue, x: r2(p.tx), y: r2(p.ty), z: r2(p.tz), yaw: r2(p.tyaw), h: p.held | 0 }); }
     const ms = mobs.map(m => [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0]);
     const ds = drops.map(d => [d.k, d.id, r2(d.x), r2(d.y), r2(d.z)]);
     const msg = { t: 'tick', time: timeOfDay, players, mobs: ms, drops: ds };
@@ -4890,7 +5564,10 @@ addEventListener('pagehide', () => autoSave());
       Object.assign(player, { x: d.x, y: d.y, z: d.z, yaw: d.yaw || 0, vx: 0, vy: 0, vz: 0 });
       timeOfDay = d.time;
       worldLoaded = true;
+      if (PlayerSkin.url) hostConn.send(skinMsg(null, PlayerSkin.url));   // your skin, for everyone here
       refreshUI();
+    } else if (d.t === 'skin') {
+      if (PlayerSkin.valid(d.s)) skins.set(d.id, d.s); else skins.delete(d.id);
     } else if (d.t === 'tick' && worldLoaded) {
       timeOfDay = d.time;
       const seenP = new Set();
@@ -4943,7 +5620,7 @@ addEventListener('pagehide', () => autoSave());
     flush();
     if (Net.hosting && friends.size) hostTick();
     if (Net.client && worldLoaded && hostConn && hostConn.open)
-      hostConn.send({ t: 'me', x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw) });
+      hostConn.send({ t: 'me', x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0 });
     if (Net.client && worldLoaded && performance.now() - lastHeard > 30000) hostGone();
   }, 100);
 
@@ -5245,7 +5922,7 @@ function frame(now) {
 
   if (nameTimer > 0) { nameTimer -= dt; if (nameTimer <= 0) nameEl.style.opacity = 0; }
 
-  updateHeldLight();
+  updateHand(dt);
 
   fpsAcc += dt; fpsFrames++;
   if (fpsAcc >= 0.5) { fps = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }

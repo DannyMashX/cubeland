@@ -118,6 +118,7 @@ public partial class Main
 		mm.AddChild(new Control { CustomMinimumSize = new Vector2(0, 12) });
 		mm.AddChild(Btn("Singleplayer", () => ShowWorlds(true)));
 		mm.AddChild(Btn("Multiplayer", () => { RefreshNetUi(); multiPanel.Visible = true; }));
+		mm.AddChild(Btn("Skin", OpenSkinEditor));
 		mm.AddChild(Btn("Settings", () => ShowSettings(true)));
 		mm.AddChild(Btn("What's new", () => whatsNewPanel.Visible = true));
 		mm.AddChild(Btn("Quit game", () => { SaveWorld(); GetTree().Quit(); }));
@@ -132,6 +133,7 @@ public partial class Main
 		saveBtn = Btn("Save world", () => { savedNote.Text = SaveWorld(true) ? "Saved!" : tempWorld ? "Test worlds don't save." : "Could not save the world."; GetTree().CreateTimer(2.5).Timeout += UpdateSaveText; });
 		pm.AddChild(saveBtn);
 		pm.AddChild(Btn("Settings", () => ShowSettings(true)));
+		pm.AddChild(Btn("Skin", OpenSkinEditor));
 		pauseMultiBtn = Btn("Multiplayer", () => { RefreshNetUi(); multiPanel.Visible = true; }); pm.AddChild(pauseMultiBtn);
 		quitBtn = Btn("Save & quit to main menu", () => { if (netClient) { LeaveGame(); return; } if (settings.Autosave) SaveWorld(); ShowMainMenu(true); }); pm.AddChild(quitBtn);
 		discardBtn = Btn("Quit without saving", () => Ask("Quit without saving?\n\nEverything you did since the last save will be lost.", () => { discarding = true; SwitchWorld(current.Id, false); }));
@@ -139,7 +141,8 @@ public partial class Main
 		savedNote = Centre(Text("", 13, 0.8f)); pm.AddChild(savedNote);
 		newerNote = Centre(Text("", 13)); newerNote.AddThemeColorOverride("font_color", new Color(1, 0.8f, 0.4f)); newerNote.AutowrapMode = TextServer.AutowrapMode.WordSmart; newerNote.CustomMinimumSize = new Vector2(420, 0); pm.AddChild(newerNote);
 
-		BuildSettings(); BuildWorlds(); BuildWhatsNew(); BuildMulti();
+		BuildSettings(); BuildWorlds(); BuildWhatsNew(); BuildMulti(); BuildSkinEditor();
+		PlayerSkin.Changed += SkinChanged;
 		confirm = new ConfirmationDialog { Title = "CubeLand", OkButtonText = "OK", CancelButtonText = "Cancel" };
 		menuLayer.AddChild(confirm);
 		UpdateSaveText();
@@ -286,7 +289,7 @@ public partial class Main
 	}
 
 	// ---- moving between the screens ----
-	bool AnyPanel => settingsPanel.Visible || worldsPanel.Visible || whatsNewPanel.Visible || multiPanel.Visible;
+	bool AnyPanel => settingsPanel.Visible || worldsPanel.Visible || whatsNewPanel.Visible || multiPanel.Visible || skinPanel.Visible;
 	void ShowMainMenu(bool open)
 	{
 		menuOpen = open; mainMenu.Visible = open;
@@ -413,5 +416,6 @@ public partial class Main
 		// closing the window saves first (if auto save is on)
 		if (what == NotificationWMCloseRequest && settings?.Autosave == true) SaveWorld();
 		if (what == NotificationWMCloseRequest || what == NotificationPredelete) peer?.Destroy();
+		if (what == NotificationExitTree) PlayerSkin.Changed -= SkinChanged;   // (the scene restarts when you switch worlds)
 	}
 }

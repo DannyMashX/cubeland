@@ -14,7 +14,7 @@ public static class Skin
 {
 	public const int Px = 2;   // screen pixels per pixel of the button pictures
 	public static FontFile Font { get; private set; }
-	static StyleBox btn, btnHover, panel;
+	static StyleBox btn, btnHover, panel, sel;
 	static readonly Dictionary<string, char> Names = new()
 	{
 		["asterisk"] = '*', ["dash"] = '-', ["hyphen"] = '-', ["minus"] = '-', ["period"] = '.', ["dot"] = '.', ["full_stop"] = '.', ["plus"] = '+',
@@ -98,7 +98,25 @@ public static class Skin
 	{
 		var img = LoadImage("res://textures/gui/gui_atlas.png");
 		if (img == null) return;
-		btn = Cut(img, 0, 0); btnHover = Cut(img, 8, 0); panel = Cut(img, 0, 8);
+		btn = Cut(img, 0, 0); btnHover = Cut(img, 8, 0); panel = Cut(img, 0, 8); sel = Cut(img, 8, 8);
+	}
+	// the bottom right picture: what's picked (the tool or colour you're using)
+	public static StyleBox Selected(int pad = 0)
+	{
+		var b = (StyleBox)(sel ?? btnHover)?.Duplicate();
+		if (b == null) { var f = new StyleBoxFlat { BgColor = new Color(0.55f, 0.8f, 1, 0.5f) }; b = f; }
+		b.SetContentMarginAll(pad);
+		return b;
+	}
+	// a button that shows when it's the picked one (tools, swatches): its picture becomes the "picked" one
+	public static void Pickable(Button b, bool on)
+	{
+		foreach (var s in new[] { "normal", "hover", "pressed", "hover_pressed" })
+		{
+			if (!on) { b.RemoveThemeStyleboxOverride(s); continue; }
+			var x = Selected(0); x.ContentMarginLeft = x.ContentMarginRight = 12; x.ContentMarginTop = x.ContentMarginBottom = 6;
+			b.AddThemeStyleboxOverride(s, x);
+		}
 	}
 	// the 7x7 picture at (left, top): columns/rows 0,1 = edge, 3 = middle, 5,6 = other edge (2 and 4 are gaps)
 	static StyleBox Cut(Image img, int left, int top)

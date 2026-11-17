@@ -153,8 +153,8 @@ public partial class Main : Node3D
 		UpdateSkyAndWater(dt);
 		UpdateHealth(dt);
 		TickLifeUi(dt);
-		UpdateHeldLight();
 		UpdateMobs(dt);
+		UpdateHand(dt);
 		if ((moving || invOpen || hosting) && !netClient)
 		{   // (torches burning down, clay drying and kilns all wait while you're paused)
 			world.TickTimers(dt);
@@ -225,7 +225,7 @@ public partial class Main : Node3D
 	float target = 1;
 
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
-	float shotTimer;
+	float shotTimer; bool timeArgDone, skinTested;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -261,6 +261,37 @@ public partial class Main : Node3D
 			}
 		}
 		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Input.MouseMode = Input.MouseModeEnum.Captured; }   // menus closed, as if playing
+		var timeArg = args.FirstOrDefault(a => a.StartsWith("--time="));   // (test: the time of day again, after the world loaded its own)
+		if (timeArg != null && !timeArgDone) { timeArgDone = true; sky.TimeOfDay = float.Parse(timeArg[7..], System.Globalization.CultureInfo.InvariantCulture); }
+		var slotArg = args.FirstOrDefault(a => a.StartsWith("--slot="));   // (test: hold what's in hotbar slot N, 1-10)
+		if (slotArg != null && int.TryParse(slotArg[7..], out int slotN) && inv.Selected != slotN - 1) SelectSlot(slotN - 1);
+		if (args.Contains("--skineditor") && !skinTested)
+		{   // (test: the skin editor open, with a mirrored stroke, a fill, and a spot painted through the 3D figure)
+			skinTested = true; OpenSkinEditor();			skMirror = true; Skin.Pickable(skMirrorBtn, true); SkChoose("pencil");
+			for (int y = 20; y < 24; y++) SkPaint(4, y);
+			GD.Print((skEdit.GetPixel(28, 22).ToHtml(false) == skColour.ToHtml(false) ? "PASS" : "FAIL") + " mirror paints the other arm");
+			SkChoose("fill"); SkSetColour(new Color(0xf2c12eff), true); SkPaint(40, 10);
+			GD.Print((skEdit.GetPixel(44, 15).ToHtml(false) == "f2c12e" && skEdit.GetPixel(36, 10).ToHtml(false) != "f2c12e" ? "PASS" : "FAIL") + " fill stays on its face");
+			SkChoose("pencil"); SkPlaceCamera();
+			var mid = (Vector2)skView.Size / 2; var spot = FigureSpot(mid);
+			GD.Print((spot != null && SkFaceAt(spot.Value.Item1, spot.Value.Item2) != null ? "PASS" : "FAIL") + $" the figure under the middle of the view is on the picture ({spot})");
+			if (PlayerSkin.Image == null)
+			{   // (only when you have no skin saved: Done saves this one, your hand is made in it, then it's removed again)
+				CloseSkinEditor(true); UpdateHand(0.016f);
+				bool ok = PlayerSkin.Image != null && handBody?.Mats.Any(m => (Texture2D)m.GetShaderParameter("tex") == PlayerSkin.Texture) == true;
+				GD.Print((ok ? "PASS" : "FAIL") + " Done saves the skin and your hand wears it");
+				GD.Print((PlayerSkin.ImageFrom(PlayerSkin.DataUrl) != null ? "PASS" : "FAIL") + " the skin goes over the network and back");
+				PlayerSkin.Set(null); OpenSkinEditor();
+			}
+			if (args.Contains("--skinpicker"))
+			{   // (test: the colour picker open, after dragging in its square and typing a colour)
+				GetTree().CreateTimer(0.2).Timeout += () => OpenColourPicker(skSwatch.GetParent<Control>());
+				skSat = 1; skVal = 1; SkFromHsv();
+				GD.Print((skColour.ToHtml(false) == "ffc12e" || skColour.R > 0.99f ? "PASS" : "FAIL") + $" the picker's square sets the colour ({skColour.ToHtml(false)})");
+				skHexIn.Text = "7b3fb0"; skHexIn.EmitSignal(LineEdit.SignalName.TextChanged, "7b3fb0");
+				GD.Print((skColour.ToHtml(false) == "7b3fb0" ? "PASS" : "FAIL") + " typing a colour sets it");
+			}
+		}
 		if (args.Contains("--mobs") && !mobsShown)
 		{   // a Dan and the night mob (Grr Angry until the Zombie is switched on) just in front of you, facing you
 			mobsShown = true;
@@ -269,10 +300,21 @@ public partial class Main : Node3D
 			var ya = args.FirstOrDefault(a => a.StartsWith("--yaw="));
 			if (ya != null) player.Yaw = float.Parse(ya[6..], System.Globalization.CultureInfo.InvariantCulture);
 			var fwd = new Vector3(-MathF.Sin(player.Yaw), 0, -MathF.Cos(player.Yaw)); var side = new Vector3(fwd.Z, 0, -fwd.X);
-			foreach (var (type, off) in new[] { ("danthechocolateman", -1.2f), (ZombieReady ? "zombie" : "grrangry", 1.4f) })
+			// --figures: the Player and Zombie models instead (test only: shows their jointed animations, even with the Zombie off)
+			var list = args.Contains("--figures") ? new[] { ("player", -1.0f), ("zombie", 1.0f) } : new[] { ("danthechocolateman", -1.2f), (ZombieReady ? "zombie" : "grrangry", 1.4f) };
+			foreach (var (type, off) in list)
 			{
 				var at = player.Pos + fwd * 4.5f + side * off; int x = (int)MathF.Floor(at.X), z = (int)MathF.Floor(at.Z), y = world.Heights[z * World.WX + x] + 1;
-				var m = SpawnMob(type, at.X, y, at.Z); m.Yaw = player.Yaw + MathF.PI + off * 0.3f; m.Timer = 99; m.GoalCheck = 99;
+				Mob m;
+				if (MobTypes.ContainsKey(type)) m = SpawnMob(type, at.X, y, at.Z);
+				else
+				{
+					m = new Mob { K = ++mobCount, Type = type, T = new MobType { Name = type, Health = 10, Scale = 0.9f, Shamble = type == "zombie" }, X = at.X, Y = y, Z = at.Z, Health = 10 };
+					BuildMob(m); mobList.Add(m);
+				}
+				m.Yaw = player.Yaw + MathF.PI + off * 0.3f; m.Timer = 99; m.GoalCheck = 99;
+				if (args.Contains("--figures")) m.Yaw = player.Yaw + MathF.PI / 2;   // side on, to see how the arms and legs move
+				if (type == "player") SetHeld(m, Blocks.CrudeAxe);                // and holding something
 			}
 			player.Pitch = -0.15f;
 			var pa = args.FirstOrDefault(a => a.StartsWith("--pitch="));
@@ -497,6 +539,7 @@ public partial class Main : Node3D
 	double lastSpace;
 	public override void _UnhandledInput(InputEvent e)
 	{
+		if (skinPanel?.Visible == true) { SkinKey(e); return; }   // (the skin editor has keys of its own)
 		if (!ready) return;
 		bool locked = Input.MouseMode == Input.MouseModeEnum.Captured;
 		if (e is InputEventMouseMotion mm && locked)
@@ -508,8 +551,8 @@ public partial class Main : Node3D
 		{
 			if (invOpen || menuOpen || pauseMenu.Visible || dead) return;
 			if (!locked) { Input.MouseMode = Input.MouseModeEnum.Captured; return; }
-			if (mb.ButtonIndex == MouseButton.Left) Break();
-			else if (mb.ButtonIndex == MouseButton.Right) Place();
+			if (mb.ButtonIndex == MouseButton.Left) { SwingHand(); Break(); }
+			else if (mb.ButtonIndex == MouseButton.Right) { SwingHand(); Place(); }
 			else if (mb.ButtonIndex == MouseButton.WheelDown) SelectSlot(inv.Selected + 1);
 			else if (mb.ButtonIndex == MouseButton.WheelUp) SelectSlot(inv.Selected - 1);
 		}

@@ -34,8 +34,17 @@ public partial class Main
 	bool hosting, welcomed, applying, netLeft;
 	string netCode, myId = "host";
 	float netTimer, lastHeard, joinTimer;
-	public class Other { public string Name; public int Hue; public float X, Y, Z, Yaw, Tx, Ty, Tz, Tyaw; public Mob Av; public Label3D Tag; }
+	public class Other { public string Name, Skin; public int Hue, Held; public float X, Y, Z, Yaw, Tx, Ty, Tz, Tyaw; public Mob Av; public Label3D Tag; }
 	readonly Dictionary<string, Other> others = new();
+	readonly Dictionary<string, string> skins = new();   // other players' skins (PNG data: text), by their id
+	static Dictionary<string, object> SkinMsg(string id, string s) => new() { ["t"] = "skin", ["id"] = id ?? "", ["s"] = s ?? "" };
+	// your skin changed: your hand is made again with it, and everyone else in the game gets it
+	void SkinChanged()
+	{
+		RemakeHand();
+		if (hosting) foreach (var f in friends.Values) f.conn.Send(SkinMsg("host", PlayerSkin.DataUrl));
+		else if (netClient && welcomed && hostConn?.IsOpen == true) hostConn.Send(SkinMsg(myId, PlayerSkin.DataUrl));
+	}
 	readonly Dictionary<string, (DataConnection conn, string name, int hue, float seen)> friends = new();
 	readonly List<int> pending = new();
 	readonly HashSet<int> goneMobs = new();
@@ -68,18 +77,21 @@ public partial class Main
 	static double R2(float v) => Math.Round(v * 100) / 100;
 
 	// ---------------- other players' bodies ----------------
-	Other SetOther(string id, string name, int hue, float x, float y, float z, float yaw)
+	Other SetOther(string id, string name, int hue, float x, float y, float z, float yaw, int held = 0)
 	{
 		if (!others.TryGetValue(id, out var p)) { p = new Other { X = x, Y = y, Z = z, Yaw = yaw }; others[id] = p; }
-		if (p.Av != null && (p.Name != name || p.Hue != hue)) RemoveBody(p);
-		p.Name = name; p.Hue = hue; p.Tx = x; p.Ty = y; p.Tz = z; p.Tyaw = yaw;
+		string sk = skins.GetValueOrDefault(id);
+		if (p.Av != null && (p.Name != name || p.Hue != hue || p.Skin != sk)) RemoveBody(p);
+		p.Name = name; p.Skin = sk; p.Hue = hue; p.Tx = x; p.Ty = y; p.Tz = z; p.Tyaw = yaw;
 		if (p.Av == null && ready)
 		{
-			p.Av = new Mob { Type = "grrangry", T = new MobType { Scale = 1.6f }, Hue = hue };   // Grr's model is 18 pixels tall; 1.6x = your height
+			p.Av = new Mob { Type = "player", T = new MobType { Scale = 0.9f }, Hue = hue, Skin = PlayerSkin.TextureFrom(sk) };   // the Player model is 32 pixels tall; 0.9x = your height
 			BuildMob(p.Av);
 			p.Tag = new Label3D { Text = name, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, Font = Skin.Font, FontSize = 48, OutlineSize = 0, PixelSize = 0.006f, NoDepthTest = false, Position = new Vector3(0, p.Av.Height + 0.35f, 0), Modulate = Colors.White, OutlineModulate = new Color(0, 0, 0, 0.6f) };
 			p.Av.Root.AddChild(p.Tag);
 		}
+		p.Held = held;
+		if (p.Av != null) SetHeld(p.Av, held);   // what they're holding shows in their hand
 		return p;
 	}
 	void RemoveBody(Other p) { p.Av?.Root.QueueFree(); p.Av = null; p.Tag = null; }
@@ -96,8 +108,7 @@ public partial class Main
 			float moved = MathF.Sqrt((p.X - ox) * (p.X - ox) + (p.Z - oz) * (p.Z - oz));
 			av.Stride += moved * 5.5f;
 			av.Walk += ((moved > 0.002f ? 1 : 0) - av.Walk) * Math.Min(1, dt * 8);
-			foreach (var (pivot, phase) in av.Legs) pivot.Rotation = new Vector3(MathF.Sin(av.Stride) * 0.6f * av.Walk * phase, 0, 0);
-			for (int k = 0; k < av.Arms.Count; k++) av.Arms[k].Rotation = new Vector3(MathF.Sin(av.Stride + k * MathF.PI) * 0.12f * av.Walk, 0, 0);
+			PoseBody(av, dt, 0, false);
 			av.Root.Position = new Vector3(p.X, p.Y, p.Z); av.Root.Rotation = new Vector3(0, p.Yaw, 0);
 			if ((av.LightTimer -= dt) <= 0)
 			{
@@ -187,7 +198,7 @@ public partial class Main
 	void DropFriend(string id)
 	{
 		if (!friends.Remove(id, out var f)) return;
-		RemoveOther(id);
+		RemoveOther(id); skins.Remove(id);
 		f.conn.Close();
 		RefreshNetUi();
 	}
@@ -213,11 +224,20 @@ public partial class Main
 			var pcs = new List<object>(); foreach (var (i, a) in world.PieceMap) { pcs.Add(i); foreach (var v in a) pcs.Add((int)v); }
 			conn.Send(new Dictionary<string, object> { ["t"] = "welcome", ["id"] = conn.PeerId, ["idxs"] = idxs, ["ids"] = ids, ["pieces"] = pcs, ["time"] = sky.TimeOfDay,
 				["x"] = player.Pos.X + 1, ["y"] = player.Pos.Y, ["z"] = player.Pos.Z, ["yaw"] = player.Yaw });
+			// everyone's skins: yours, and the other friends'
+			if (PlayerSkin.DataUrl != null) conn.Send(SkinMsg("host", PlayerSkin.DataUrl));
+			foreach (var (sid, s) in skins) if (sid != conn.PeerId && friends.ContainsKey(sid)) conn.Send(SkinMsg(sid, s));
 			RefreshNetUi();
 		}
 		else if (!known) return;
-		else if (t == "me") SetOther(conn.PeerId, f.name, f.hue, d.F("x"), d.F("y"), d.F("z"), d.F("yaw"));
+		else if (t == "me") SetOther(conn.PeerId, f.name, f.hue, d.F("x"), d.F("y"), d.F("z"), d.F("yaw"), d.I("h"));
 		else if (t == "sets" && d.L("l") is { } l) ApplySets(Ints(l), Ints(d.L("p")));
+		else if (t == "skin")
+		{   // a friend's skin: shown on them here, and passed on to everyone else
+			string s = PlayerSkin.Valid(d.S("s")) ? d.S("s") : null;
+			if (s != null) skins[conn.PeerId] = s; else skins.Remove(conn.PeerId);
+			foreach (var (fid, o) in friends) if (fid != conn.PeerId) o.conn.Send(SkinMsg(conn.PeerId, s));
+		}
 		else if (t == "hit")
 		{
 			var m = mobList.FirstOrDefault(m => m.K == d.I("k") && m.Dead == 0);
@@ -231,9 +251,10 @@ public partial class Main
 	}
 	void HostTick()
 	{
-		var players = new List<object> { new Dictionary<string, object> { ["id"] = "host", ["name"] = settings.Name, ["hue"] = Hues[0], ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw) } };
+		// h: the item each player is holding (0 = nothing)
+		var players = new List<object> { new Dictionary<string, object> { ["id"] = "host", ["name"] = settings.Name, ["hue"] = Hues[0], ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw), ["h"] = inv.Held } };
 		foreach (var (id, f) in friends) if (others.TryGetValue(id, out var p))
-			players.Add(new Dictionary<string, object> { ["id"] = id, ["name"] = f.name, ["hue"] = f.hue, ["x"] = R2(p.Tx), ["y"] = R2(p.Ty), ["z"] = R2(p.Tz), ["yaw"] = R2(p.Tyaw) });
+			players.Add(new Dictionary<string, object> { ["id"] = id, ["name"] = f.name, ["hue"] = f.hue, ["x"] = R2(p.Tx), ["y"] = R2(p.Ty), ["z"] = R2(p.Tz), ["yaw"] = R2(p.Tyaw), ["h"] = p.Held });
 		var ms = mobList.Select(m => (object)new List<object> { m.K, m.Type, R2(m.X), R2(m.Y), R2(m.Z), R2(m.Yaw), m.Dead > 0 ? 1 : 0, m.Hurt > 0 ? 1 : 0 }).ToList();
 		var ds = drops.All.Select(d => (object)new List<object> { d.K, d.Id, R2(d.P.X), R2(d.P.Y), R2(d.P.Z) }).ToList();
 		var msg = new Dictionary<string, object> { ["t"] = "tick", ["time"] = sky.TimeOfDay, ["players"] = players, ["mobs"] = ms, ["drops"] = ds };
@@ -324,7 +345,7 @@ public partial class Main
 			foreach (var o in d.L("players") ?? new())
 			{
 				if (o is not Dictionary<string, object> p || p.S("id") == myId) continue;
-				seenP.Add(p.S("id")); SetOther(p.S("id"), p.S("name") ?? "Player", p.I("hue"), p.F("x"), p.F("y"), p.F("z"), p.F("yaw"));
+				seenP.Add(p.S("id")); SetOther(p.S("id"), p.S("name") ?? "Player", p.I("hue"), p.F("x"), p.F("y"), p.F("z"), p.F("yaw"), p.I("h"));
 			}
 			foreach (var id in others.Keys.ToArray()) if (!seenP.Contains(id)) RemoveOther(id);
 			// mobs: make, move or remove ours to match the host's
@@ -361,6 +382,10 @@ public partial class Main
 		}
 		else if (t == "sets" && d.L("l") is { } l) ApplySets(Ints(l), Ints(d.L("p")));
 		else if (t == "give") inv.Give(d.I("id"));
+		else if (t == "skin" && d.S("id") is { } sid)
+		{
+			if (PlayerSkin.Valid(d.S("s"))) skins[sid] = d.S("s"); else skins.Remove(sid);
+		}
 	}
 	void ApplyWelcome(Dictionary<string, object> d)
 	{
@@ -376,6 +401,7 @@ public partial class Main
 		player.Pos = new Vector3(d.F("x"), d.F("y"), d.F("z")); player.Yaw = d.F("yaw"); player.Vel = Vector3.Zero;
 		sky.TimeOfDay = d.F("time");
 		welcomed = true;
+		if (PlayerSkin.DataUrl != null) hostConn?.Send(SkinMsg(myId, PlayerSkin.DataUrl));   // your skin, for everyone here
 		RefreshNetUi();
 		GD.Print($"net: welcomed into {current.Name}, {idxs.Count} changed blocks");
 	}
@@ -394,8 +420,8 @@ public partial class Main
 		Flush();
 		if (hosting && friends.Count > 0) HostTick();
 		if (netClient && welcomed && hostConn?.IsOpen == true)
-			hostConn.Send(new Dictionary<string, object> { ["t"] = "me", ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw) });
-		if (netClient && welcomed && Now - lastHeard > 30) HostGone();
+			hostConn.Send(new Dictionary<string, object> { ["t"] = "me", ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw), ["h"] = inv.Held });
+	if (netClient && welcomed && Now - lastHeard > 30) HostGone();
 	}
 	string NetInfoLine() => hosting ? $"\nHosting: code {netCode} · {friends.Count} friend{(friends.Count == 1 ? "" : "s")} here" : netClient ? $"\nIn {current.Name}" + (welcomed ? "" : "\nJoining...") : "";
 	// (host) keep a mob around if it's near any friend, even when it's far from you

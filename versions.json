@@ -1,5 +1,19 @@
 [
     {
+        "version":  "Alpha 0.0.7.0",
+        "title":  "Shape \u0026 Shade",
+        "folder":  "alpha-0.0.7.0",
+        "date":  "2026-11-17",
+        "notes":  "New Skin menu (on the main menu and the pause screen): paint your own skin on the picture or straight onto your 3D figure, with pencil, eraser, fill, colour picker and mirror, plus undo, importing and saving pictures. Your hand and other players see your skin.",
+        "changes":  [
+                        "New Skin menu (on the main menu and the pause screen): paint your own skin on the picture or straight onto your 3D figure, with pencil, eraser, fill, colour picker and mirror, plus undo, importing and saving pictures. Your hand and other players see your skin.",
+                        "You can now see your hand holding the selected block or item at the bottom right of the screen. It bobs as you walk, swings when you click, and dips when you switch items.",
+                        "A new player figure with elbows and knees: arms and legs bend as players walk, and they breathe when standing still.",
+                        "Other players now look like players (in their own skin) instead of a recoloured Grr, and you can see what they\u0027re holding.",
+                        "New letters, numbers and symbols for all the text in the game."
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.6.1",
         "folder":  "alpha-0.0.6.1",
         "date":  "2026-11-17",
