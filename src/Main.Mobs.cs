@@ -335,12 +335,52 @@ public partial class Main
 		if (id == 0 || Blocks.Get(id) == null || b.Arms.Count < 2 || b.Arms[1].Lower == null) return;
 		var (mi, mat, cube) = HeldModel(id);
 		if (cube) { mi.Position = new Vector3(0, -8f / 16, -0.06f); mi.Rotation = new Vector3(0, MathF.PI / 4, 0); }   // a block: a little cube in the fist
+		else if (IsHeldTool(id))
+		{   // a tool: gripped near the end of its handle, which points forward out of the fist
+			mi.Position = new Vector3(0, -5f / 16, 0); mi.RotationOrder = EulerOrder.Xyz; mi.Rotation = new Vector3(-(MathF.PI / 2 - 0.35f), MathF.PI / 2, 0);
+		}
 		else
-		{   // an item: in the fist at the end of the forearm, flat side-on like a held tool, tipped forward
+		{   // an item: in the fist at the end of the forearm, flat side-on, tipped forward
 			mi.Position = new Vector3(0, -6.5f / 16, -0.1f); mi.RotationOrder = EulerOrder.Yxz; mi.Rotation = new Vector3(-MathF.PI / 4, MathF.PI / 2, 0);
 		}
 		b.Arms[1].Lower.AddChild(mi);
 		b.Mats.Add(mat); b.HeldMesh = mi;
+	}
+	// tools (and sticks) are held by the handle. Their pictures all run corner to corner with the handle at the bottom left;
+	// the grip is the handle a few pixels up from its end, at pixel (4, 11) of 16.
+	static bool IsHeldTool(int id) { var b = Blocks.Get(id); return b != null && (b.Tool != null || id == Blocks.Stick); }
+	static readonly Dictionary<int, ArrayMesh> heldTools = new();
+	// a tool's picture, 0.5 wide and one of its pixels thick, with its grip moved to the middle and its handle standing
+	// straight up: the picture on the front and back, and a little wall along every edge of its solid pixels, in that
+	// pixel's colour, shaded a bit darker so the thickness shows
+	static ArrayMesh ThickTool(int id)
+	{
+		if (heldTools.TryGetValue(id, out var done)) return done;
+		var img = Atlas.Icon(id); int n = img.GetWidth();
+		float s = 0.5f / n, h = s / 2;
+		var grip = new Vector2((4f / 16 - 0.5f) * 0.5f, (0.5f - 11f / 16) * 0.5f);
+		bool Solid(int i, int j) => i >= 0 && j >= 0 && i < n && j < n && img.GetPixel(i, j).A >= 0.5f;
+		var st = new SurfaceTool(); st.Begin(Mesh.PrimitiveType.Triangles);
+		Vector3 Place(Vector3 p) { var q = (new Vector2(p.X, p.Y) - grip).Rotated(MathF.PI / 4); return new Vector3(q.X, q.Y, p.Z); }
+		void Quad(Vector3[] p, Vector2[] uv, float c)
+		{
+			foreach (int k in new[] { 0, 1, 2, 0, 2, 3 }) { st.SetColor(new Color(c, c, c)); st.SetUV(uv.Length == 1 ? uv[0] : uv[k]); st.AddVertex(Place(p[k])); }
+		}
+		Vector2[] corners = { new(0, 1), new(1, 1), new(1, 0), new(0, 0) };   // (uv: bottom-left, bottom-right, top-right, top-left)
+		foreach (float z in new[] { h, -h })
+			Quad(corners.Select(c => new Vector3((c.X - 0.5f) * 0.5f, (0.5f - c.Y) * 0.5f, z)).ToArray(), corners, 1);
+		for (int j = 0; j < n; j++)
+			for (int i = 0; i < n; i++)
+			{
+				if (!Solid(i, j)) continue;
+				float x0 = i * s - 0.25f, x1 = x0 + s, y1 = 0.25f - j * s, y0 = y1 - s;
+				var u = new[] { new Vector2((i + 0.5f) / n, (j + 0.5f) / n) };
+				if (!Solid(i, j - 1)) Quad(new Vector3[] { new(x0, y1, h), new(x1, y1, h), new(x1, y1, -h), new(x0, y1, -h) }, u, 0.85f);   // top edge
+				if (!Solid(i, j + 1)) Quad(new Vector3[] { new(x0, y0, h), new(x0, y0, -h), new(x1, y0, -h), new(x1, y0, h) }, u, 0.6f);    // bottom edge
+				if (!Solid(i - 1, j)) Quad(new Vector3[] { new(x0, y0, h), new(x0, y1, h), new(x0, y1, -h), new(x0, y0, -h) }, u, 0.72f);   // left edge
+				if (!Solid(i + 1, j)) Quad(new Vector3[] { new(x1, y0, h), new(x1, y0, -h), new(x1, y1, -h), new(x1, y1, h) }, u, 0.72f);   // right edge
+			}
+		return heldTools[id] = st.Commit();
 	}
 	// a model of item `id` to hold: a small cube for an ordinary block, otherwise its flat picture (both sides)
 	static readonly Dictionary<int, Mesh> heldCubes = new();
@@ -378,7 +418,7 @@ public partial class Main
 		else
 		{
 			mat.SetShaderParameter("tex", Atlas.IconTexture(id));   // (the same picture a dropped item uses)
-			mesh = heldQuad ??= new QuadMesh { Size = new Vector2(0.5f, 0.5f) };
+			mesh = IsHeldTool(id) ? ThickTool(id) : (heldQuad ??= new QuadMesh { Size = new Vector2(0.5f, 0.5f) });
 		}
 		return (new MeshInstance3D { Mesh = mesh, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off }, mat, cube);
 	}
@@ -387,6 +427,11 @@ public partial class Main
 	// Your right forearm (from the Player model, in your skin) at the bottom right of the screen, holding what's selected.
 	// It's drawn small and close to your eye, so it doesn't poke into walls. It bobs as you walk, swings when you click,
 	// and dips out of sight and back when you change what you're holding.
+	// how a tool sits in your own hand: by the handle, side-on (its flat side lined up with the way you face, not toward
+	// you), leaning up and away, its head pointing ahead, so the swing leads with the pick's point or the axe's blade.
+	// Same as the web's HAND_TOOL.
+	static readonly Vector3 HandTool = new(-2.07f, MathF.PI / 2, 0);
+	float testSwing = -1;
 	Node3D handRoot, handArm; Mob handBody; int handId = -1; float handSwing, handDip, handBob, handLightTimer, handSky = 1, handTorch;
 	void SwingHand() => handSwing = 1;
 	// your skin changed: your hand is made again with it
@@ -417,6 +462,7 @@ public partial class Main
 			SetHeld(handBody, id);
 			var m = handBody.HeldMesh;   // facing you, instead of side-on like other players'
 			if (m != null && heldCubes.ContainsKey(id) && m.Mesh == heldCubes[id]) { m.Position = new Vector3(0, -8.5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-1.55f, MathF.PI / 4, 0); }   // (upright, its top tipped toward you)
+			else if (m != null && IsHeldTool(id)) { m.Position = new Vector3(0, -5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = HandTool; }   // (by the handle, side-on)
 			else if (m != null) { m.Position = new Vector3(0, -7.5f / 16, -0.04f); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-MathF.PI / 2, 0, 0); }
 		}
 		// swinging: one swing per click, and over and over while the left button is held (breaking)
@@ -427,6 +473,7 @@ public partial class Main
 		float speed = player.OnGround && !player.Flying ? new Vector2(player.Vel.X, player.Vel.Z).Length() : 0;
 		handBob += speed * dt * 1.6f;
 		float walk = Math.Min(1, speed / 4), sw = handSwing > 0 ? MathF.Sin(MathF.PI * (1 - handSwing)) : 0;
+		if (testSwing >= 0) sw = testSwing;   // (test: held part way through a swing)
 		const float S = 0.4f;   // drawn at 0.4 size, 0.4 as far away: looks the same, but stays clear of walls
 		handRoot.Scale = Vector3.One * S;
 		handRoot.Position = new Vector3(

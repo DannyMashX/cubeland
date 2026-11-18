@@ -120,9 +120,15 @@ public partial class Main
 			{
 				var s = InvSlot(id); s.SetMeta("tab", TabOf(id)); invGrid.AddChild(s);
 				if (VariantsOf(id).Length == 0) continue;
-				var plus = new Button { Text = "+", Position = new Vector2(30, -5), Size = new Vector2(18, 18), TooltipText = "Show the other forms" };
-				plus.AddThemeFontSizeOverride("font_size", 12);
+				// a small + tucked inside the slot's bottom-right corner, clear of the block's picture
+				var plus = new Button { Position = new Vector2(32, 32), Size = new Vector2(10, 10), TooltipText = "Show the other forms" };
+				// the + (or - once open) is two little bars, so it's exactly in the middle
+				plus.AddChild(new ColorRect { Position = new Vector2(2, 4), Size = new Vector2(6, 2), MouseFilter = Control.MouseFilterEnum.Ignore });
+				plus.AddChild(new ColorRect { Position = new Vector2(4, 2), Size = new Vector2(2, 6), MouseFilter = Control.MouseFilterEnum.Ignore });
+				foreach (var st in new[] { "normal", "hover", "pressed" }) plus.AddThemeStyleboxOverride(st, Skin.Button(st != "normal"));
+				plus.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
 				plus.Pressed += () => ShowVariants(id, plus);
+				plus.SetDeferred(Control.PropertyName.Size, new Vector2(10, 10));   // (something widens it on its way into the slot)
 				s.AddChild(plus);
 			}
 			invVariants = new HBoxContainer { Visible = false }; invVariants.AddThemeConstantOverride("separation", 4);
@@ -152,10 +158,10 @@ public partial class Main
 	}
 	void ShowVariants(int b, Button plus)
 	{
-		if (openPlus != null) openPlus.Text = "+";
+		if (openPlus != null) openPlus.GetChild<ColorRect>(1).Visible = true;
 		foreach (var c in invVariants.GetChildren()) c.QueueFree();
 		if (b == 0 || openVariants == b) { openVariants = 0; openPlus = null; invVariants.Visible = false; return; }
-		openVariants = b; openPlus = plus; if (plus != null) plus.Text = "−";
+		openVariants = b; openPlus = plus; if (plus != null) plus.GetChild<ColorRect>(1).Visible = false;
 		invVariants.AddChild(Text(Blocks.B[b].Name, 13, 0.8f));
 		foreach (int id in new[] { b }.Concat(VariantsOf(b))) invVariants.AddChild(InvSlot(id));
 		invVariants.Visible = true;
@@ -174,8 +180,8 @@ public partial class Main
 		foreach (var r in Inventory.Recipes.Where(r => (atBench || r.At == "hand") && (!r.Colour || r.Needs.Any(n => inv.CountOf(n.id) > 0))).OrderBy(r => inv.CanCraft(r) ? 0 : 1))
 		{
 			string title = (r.N > 1 ? r.N + " " : "") + Blocks.B[r.Out].Name;
-			var b = new Button { Text = $"{title}\n{Inventory.NeedsText(r)}", Icon = Atlas.IconTexture(r.Out), Alignment = HorizontalAlignment.Left,
-				Disabled = !inv.CanCraft(r), TextureFilter = CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
+			var b = new Button { Text = $"{title}\n{Inventory.NeedsText(r)}", Icon = Atlas.SlotIcon(r.Out), Alignment = HorizontalAlignment.Left,
+				Disabled = !inv.CanCraft(r), TextureFilter = Atlas.IsCubeIcon(r.Out) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
 			b.AddThemeConstantOverride("icon_max_width", 32);
 			b.Pressed += () =>
 			{
@@ -265,8 +271,8 @@ public partial class Main
 		foreach (var c in kilnRecipes.GetChildren()) c.QueueFree();
 		foreach (var (outId, from) in Kilns.Smelts)
 		{
-			var b = new Button { Text = $"{Blocks.B[outId].Name}\n1 {Blocks.B[from].Name} · {Kilns.SmeltTime} seconds", Icon = Atlas.IconTexture(outId),
-				Alignment = HorizontalAlignment.Left, Disabled = inv.Survival && inv.CountOf(from) < 1, TextureFilter = CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
+			var b = new Button { Text = $"{Blocks.B[outId].Name}\n1 {Blocks.B[from].Name} · {Kilns.SmeltTime} seconds", Icon = Atlas.SlotIcon(outId),
+				Alignment = HorizontalAlignment.Left, Disabled = inv.Survival && inv.CountOf(from) < 1, TextureFilter = Atlas.IsCubeIcon(outId) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
 			b.AddThemeConstantOverride("icon_max_width", 32);
 			b.Pressed += () =>
 			{

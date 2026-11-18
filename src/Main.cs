@@ -34,6 +34,23 @@ public partial class Main : Node3D
 	public override void _Ready()
 	{
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
+		// menus and the hotbar follow your Windows display scaling, like the web edition does in a browser, but always
+		// by a whole number (150% and up makes them twice as big), so every pixel of the pixel art stays the same size.
+		// --uiscale=N for testing.
+		var uiArg = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--uiscale="));
+		float uiScale = uiArg != null ? float.Parse(uiArg[10..], System.Globalization.CultureInfo.InvariantCulture)
+			: MathF.Floor(DisplayServer.ScreenGetDpi() / 96f + 0.5f);
+		uiScale = Mathf.Max(1, MathF.Round(uiScale));
+		GetTree().Root.ContentScaleFactor = uiScale;
+		if (uiScale > 1 && DisplayServer.WindowGetMode() == DisplayServer.WindowMode.Windowed)
+		{
+			// the window grows to match, so there's as much room as at 100% (but never bigger than the screen)
+			var usable = DisplayServer.ScreenGetUsableRect();
+			var size = DisplayServer.WindowGetSize();
+			var want = new Vector2I(Math.Min((int)(size.X * uiScale), usable.Size.X - 16), Math.Min((int)(size.Y * uiScale), usable.Size.Y - 48));
+			DisplayServer.WindowSetSize(want);
+			DisplayServer.WindowSetPosition(usable.Position + (usable.Size - want) / 2 + new Vector2I(0, 16));
+		}
 		Atlas.Build();
 		Skin.Load();   // your font and gui_atlas.png, for every menu and label
 		blockMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://src/blocks.gdshader") };
@@ -263,6 +280,11 @@ public partial class Main : Node3D
 		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Input.MouseMode = Input.MouseModeEnum.Captured; }   // menus closed, as if playing
 		var timeArg = args.FirstOrDefault(a => a.StartsWith("--time="));   // (test: the time of day again, after the world loaded its own)
 		if (timeArg != null && !timeArgDone) { timeArgDone = true; sky.TimeOfDay = float.Parse(timeArg[7..], System.Globalization.CultureInfo.InvariantCulture); }
+		var holdArg = args.FirstOrDefault(a => a.StartsWith("--hold="));   // (test: put item ID in the first hotbar slot and hold it)
+		if (holdArg != null && int.TryParse(holdArg[7..], out int holdId) && inv.Id[0] != holdId) { inv.SetSlot(0, holdId); SelectSlot(0); }
+		if (args.Contains("--inventory") && !invOpen && !menuOpen) OpenPanel(invPanel);   // (test: the inventory open)
+		var swingArg = args.FirstOrDefault(a => a.StartsWith("--swing="));   // (test: your hand frozen part way through a swing, 0-1)
+		if (swingArg != null) testSwing = float.Parse(swingArg[8..], System.Globalization.CultureInfo.InvariantCulture);
 		var slotArg = args.FirstOrDefault(a => a.StartsWith("--slot="));   // (test: hold what's in hotbar slot N, 1-10)
 		if (slotArg != null && int.TryParse(slotArg[7..], out int slotN) && inv.Selected != slotN - 1) SelectSlot(slotN - 1);
 		if (args.Contains("--skineditor") && !skinTested)
@@ -314,7 +336,7 @@ public partial class Main : Node3D
 				}
 				m.Yaw = player.Yaw + MathF.PI + off * 0.3f; m.Timer = 99; m.GoalCheck = 99;
 				if (args.Contains("--figures")) m.Yaw = player.Yaw + MathF.PI / 2;   // side on, to see how the arms and legs move
-				if (type == "player") SetHeld(m, Blocks.CrudeAxe);                // and holding something
+				if (type == "player") SetHeld(m, holdArg != null && int.TryParse(holdArg[7..], out int hid) ? hid : Blocks.CrudeAxe);   // and holding something
 			}
 			player.Pitch = -0.15f;
 			var pa = args.FirstOrDefault(a => a.StartsWith("--pitch="));

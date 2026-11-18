@@ -29,7 +29,7 @@
   .screen h2 { font-size: var(--f3); margin: 0 0 6px; letter-spacing: 1px; }
   .screen p { margin: 4px 0; }
   .screen .menu { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-  .screen .menu > button { width: min(320px, calc(100vw - 32px)); font: inherit; font-size: var(--f2); padding: 8px 12px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; cursor: pointer; margin: 0; }
+  .screen .menu > button { width: min(320px, calc(var(--vw) - 32px)); font: inherit; font-size: var(--f2); padding: 8px 12px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; cursor: pointer; margin: 0; }
   .screen .menu > button:hover { background: rgba(255,255,255,.25); }
   #hotbar { z-index: 10; }
   /* survival: your hearts, just above the left end of the hotbar (placed and sized by layoutHearts) */
@@ -45,15 +45,20 @@
   #inv-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
   /* a block's other forms (pieces, slabs, stairs...) open in a row under the grid when you click its + */
   #inv-grid .slot { position: relative; }
-  #inv-grid .plus { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; padding: 0; border-radius: 4px;
-    border: 1px solid rgba(255,255,255,.7); background: #2a2a30; color: #fff; font: 700 14px/14px system-ui, sans-serif; cursor: pointer; z-index: 1; }
+  /* the + sits inside the slot's bottom-right corner, clear of the block's picture */
+  #inv-grid .plus { position: absolute; bottom: 0; right: 0; width: 10px; height: 10px; padding: 0; border-radius: 2px;
+    border: 1px solid rgba(255,255,255,.7); background: #2a2a30; cursor: pointer; z-index: 1; }
+  /* the + (or - once open) is drawn as two bars, so it's exactly in the middle */
+  #inv-grid .plus::before, #inv-grid .plus::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 2px; background: #fff; transform: translate(-50%, -50%); }
+  #inv-grid .plus::after { width: 2px; height: 6px; }
+  #inv-grid .plus.open::after { display: none; }
   #inv-grid .plus:hover { background: #4a4a55; }
   #inv-variants { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 8px; padding: 6px; border-radius: 6px; background: rgba(255,255,255,.08); }
   #inv-variants .slot { cursor: pointer; }
   #inv-variants .slot:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   #inv-variants .var-label { font-size: var(--f1); margin-right: 6px; opacity: .8; }
   #bench { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
-  #bench .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(100vw - 32px); box-sizing: border-box; }
+  #bench .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(var(--vw) - 32px); box-sizing: border-box; }
   #bench h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
   #bench .bench-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
   #bench-grid { display: grid; grid-template-columns: repeat(7, 44px); gap: 4px; }
@@ -71,7 +76,7 @@
   .bench-modes button.on { background: rgba(255,255,255,.3); border-color: #fff; }
   /* the furnace screen looks like the bench's */
   #furnace { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
-  #furnace .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(100vw - 32px); box-sizing: border-box; }
+  #furnace .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(var(--vw) - 32px); box-sizing: border-box; }
   #furnace h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
   #furnace .bench-craft { display: flex; align-items: center; gap: 12px; }
   #furnace .bench-craft .slot { width: 56px; height: 56px; cursor: pointer; }
@@ -86,7 +91,7 @@
   #inventory .hint { margin-top: 4px; font-size: var(--f1); opacity: .65; }
   /* crafting (survival): a list of things you can make; ones you don't have the ingredients for are faded */
   .crafting h3 { margin: 12px 0 6px; font-size: var(--f2); font-weight: 600; }
-  .recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px; max-height: 40vh; overflow-y: auto; max-width: 600px; }
+  .recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px; max-height: calc(var(--vh) * 0.4); overflow-y: auto; max-width: 600px; }
   .recipe { display: flex; align-items: center; gap: 8px; text-align: left; font: inherit; font-size: var(--f1); color: #fff; padding: 4px 8px;
     background: rgba(255,255,255,.1); border: 2px solid rgba(255,255,255,.3); border-radius: 4px; cursor: pointer; }
   .recipe canvas { width: 32px; height: 32px; image-rendering: pixelated; flex: none; }
@@ -100,7 +105,7 @@
   .screen .version-line { margin-top: 14px; font-size: var(--f1); opacity: .6; }
   .screen .version-line a { color: #fff; }
   #whatsnew { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 25; color: #fff; }
-  #whatsnew .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+  #whatsnew .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(520px, calc(var(--vw) - 32px)); max-height: calc(var(--vh) - 32px); overflow: auto; box-sizing: border-box; }
   #whatsnew h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
   #whatsnew h3 { margin: 14px 0 4px; font-size: var(--f1); }
   #whatsnew h3 span { font-weight: 400; font-size: var(--f1); opacity: .55; margin-left: 6px; }
@@ -112,7 +117,7 @@
   #worlds button, #settings button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 12px; cursor: pointer; margin-left: 6px; }
   #worlds button:hover:not(:disabled), #settings button:hover { background: rgba(255,255,255,.25); }
   #settings { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
-  #settings .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+  #settings .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(520px, calc(var(--vw) - 32px)); max-height: calc(var(--vh) - 32px); overflow: auto; box-sizing: border-box; }
   #settings h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
   #settings h3 { margin: 16px 0 6px; font-size: var(--f1); }
   #settings .set-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: var(--f1); }
@@ -125,7 +130,7 @@
   #worlds button:disabled { opacity: .35; cursor: default; }
   #worlds button.danger { border-color: rgba(255,120,110,.7); }
   #worlds { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
-  #worlds .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+  #worlds .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(560px, calc(var(--vw) - 32px)); max-height: calc(var(--vh) - 32px); overflow: auto; box-sizing: border-box; }
   #worlds h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
   #worlds h3 { margin: 16px 0 8px; font-size: var(--f1); }
   .world-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.12); }
@@ -139,7 +144,7 @@
   .new-world select option { color: #000; }
   #worlds .bottom { margin-top: 14px; text-align: right; }
   #multi { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 20; color: #fff; }
-  #multi .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+  #multi .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px; width: min(460px, calc(var(--vw) - 32px)); max-height: calc(var(--vh) - 32px); overflow: auto; box-sizing: border-box; }
   #multi h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
   #multi h3 { margin: 16px 0 6px; font-size: var(--f1); }
   #multi .mp-help { font-size: var(--f1); opacity: .7; margin: 0 0 8px; }
@@ -187,7 +192,7 @@
   select option { background: #2a2a30; color: #fff; }
   /* the + on a block (for its other forms), and the picked tab / bench choice, use the same button pictures */
   .skinned #inv-grid .plus {
-    width: 20px; height: 20px; background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
+    width: 10px; height: 10px; background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
   }
   .skinned #inv-grid .plus:hover, .skinned .bench-modes button.on { background: none; border-color: transparent; border-image-source: var(--btn-hover); }
@@ -195,14 +200,14 @@
   /* the skin editor */
   #skins { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 26; color: #fff; }
   #skins .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 16px 18px;
-    max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; }
+    max-width: calc(var(--vw) - 32px); max-height: calc(var(--vh) - 32px); overflow: auto; box-sizing: border-box; }
   #skins h2 { margin: 0 0 10px; font-size: var(--f2); letter-spacing: 1px; }
   #skins button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 10px; cursor: pointer; }
   #skins button:hover { background: rgba(255,255,255,.25); }
   #skins button.on { background: rgba(127,191,255,.45); border-color: #fff; }
   .sk-main { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
   .sk-left { display: flex; flex-direction: column; align-items: center; }
-  #sk-sheet { width: min(448px, calc(100vw - 72px), calc(100vh - 220px)); aspect-ratio: 1; image-rendering: pixelated; cursor: crosshair; touch-action: none; display: block; }
+  #sk-sheet { width: min(448px, calc(var(--vw) - 72px), calc(var(--vh) - 220px)); aspect-ratio: 1; image-rendering: pixelated; cursor: crosshair; touch-action: none; display: block; }
   #sk-where { height: 18px; margin-top: 6px; font-size: var(--f1); opacity: .8; }
   .sk-right { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 240px; }
   #sk-view { width: 240px; height: 320px; touch-action: none; background: rgba(0,0,0,.25); }
@@ -439,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.7.0"></script>
+<script src="textures.js?v=alpha-0.0.7.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -447,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.7.0';
+const GAME_VERSION = 'Alpha 0.0.7.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -1012,10 +1017,19 @@ function buildPixelFont(glyphs) {
   out.setUint32(offs.head + 8, (0xB1B0AFBA - sum(0, total)) >>> 0);
   return out.buffer;
 }
-// Text sizes: each letter pixel is made a whole number of screen pixels so your letters stay sharp
-// (screens with display scaling, like 150%, need different sizes than plain ones). Tiers: small, normal, heading, title.
+// The menus, hotbar and every other part of the screen (not the world itself) are scaled by a whole number: with
+// display scaling like 150% they're made twice as big, so each of their pixels is exactly 2x2 screen pixels and
+// nothing comes out uneven. uiScale = screen pixels per page pixel; uiZoom = how much the page is zoomed to get it.
+let uiScale = 1, uiZoom = 1;
+// Text sizes: each letter pixel is made a whole number of screen pixels so your letters stay sharp. Tiers: small,
+// normal, heading, title.
 function fitFontSizes() {
-  const dpr = window.devicePixelRatio || 1, root = document.documentElement.style;
+  const real = window.devicePixelRatio || 1, root = document.documentElement.style;
+  uiScale = Math.max(1, Math.round(real)); uiZoom = uiScale / real;
+  document.body.style.zoom = uiZoom === 1 ? '' : uiZoom;
+  root.setProperty('--unzoom', 1 / uiZoom);                      // (the world's canvas undoes it)
+  root.setProperty('--vw', innerWidth / uiZoom + 'px'); root.setProperty('--vh', innerHeight / uiZoom + 'px');   // the window, in page pixels
+  const dpr = uiScale;
   const size = target => Math.max(1, Math.round(target * dpr)) / dpr * 12;   // target = screen pixels per letter pixel (at 100%)
   root.setProperty('--f1', size(1.34) + 'px'); root.setProperty('--f2', size(2) + 'px');
   root.setProperty('--f3', size(2.67) + 'px'); root.setProperty('--f6', size(5.34) + 'px');
@@ -1506,6 +1520,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 document.body.prepend(renderer.domElement);
+renderer.domElement.style.zoom = 'var(--unzoom)';   // the world fills the window whatever the screen's zoomed by
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
 scene.fog = new THREE.Fog(SKY, 40, 110);
@@ -3335,10 +3350,11 @@ function layoutHearts() {
   if (!SURVIVAL) return;
   // (sized as if there were 10 hearts, so each heart stays the same size whatever the atlas's resolution; a whole
   // number of screen pixels for each of its pixels, so they stay sharp)
-  const r = hotbarEl.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  const b = hotbarEl.getBoundingClientRect(), dpr = uiScale, z = uiZoom;   // (the hotbar's place, in page pixels)
+  const r = { left: b.left / z, top: b.top / z, width: b.width / z };
   const old = Math.max(1, Math.floor(r.width / 2 / 99)) * 9;   // a heart's size on screen (css pixels), as with the first 9x9 hearts
   const s = Math.max(1, Math.round(old / HS * dpr)) / dpr;
-  const bottom = innerHeight - r.top + 4;
+  const bottom = innerHeight / z - r.top + 4;
   Object.assign(heartsEl.style, { width: heartsEl.width * s + 'px', height: HS * s + 'px', left: r.left + 'px', bottom: bottom + 'px' });
   nameEl.style.bottom = bottom + HS * s + 8 + 'px';
 }
@@ -3559,7 +3575,7 @@ function setHeld(b, id) {
   if (!id || !BLOCKS[id] || !arm || !arm.lower) return;
   if (!dropTexCache[id]) {   // (the same picture a dropped item uses)
     const c = document.createElement('canvas'); c.width = c.height = TILE;
-    drawIcon(c, id);
+    drawIcon(c, id, true);   // (flat: it's shown in the world)
     const tx = new THREE.CanvasTexture(c);
     tx.magFilter = tx.minFilter = THREE.NearestFilter; tx.generateMipmaps = false;
     dropTexCache[id] = tx;
@@ -3568,7 +3584,10 @@ function setHeld(b, id) {
   if (mesh.userData.cube) {          // a block: a little cube in the fist
     mesh.position.set(0, -8 / 16, -0.06);
     mesh.rotation.set(0, Math.PI / 4, 0);
-  } else {                           // an item: in the fist, flat side-on like a held tool, tipped forward
+  } else if (mesh.userData.tool) {   // a tool: gripped near the end of its handle, which points forward out of the fist
+    mesh.position.set(0, -5 / 16, 0);
+    mesh.rotation.set(-(Math.PI / 2 - 0.35), Math.PI / 2, 0, 'XYZ');
+  } else {                           // an item: in the fist, flat side-on, tipped forward
     mesh.position.set(0, -6.5 / 16, -0.1);
     mesh.rotation.set(-Math.PI / 4, Math.PI / 2, 0, 'YXZ');
   }
@@ -3597,18 +3616,58 @@ function heldModel(id) {
   }
   if (!dropTexCache[id]) {   // (the same picture a dropped item uses)
     const c = document.createElement('canvas'); c.width = c.height = TILE;
-    drawIcon(c, id);
+    drawIcon(c, id, true);   // (flat: it's shown in the world)
     const tx = new THREE.CanvasTexture(c);
     tx.magFilter = tx.minFilter = THREE.NearestFilter; tx.generateMipmaps = false;
     dropTexCache[id] = tx;
   }
-  return new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), withHaze(new THREE.MeshBasicMaterial({ map: dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide })));
+  const tool = isHeldTool(id), geo = tool ? thickPicture(dropTexCache[id].image) : new THREE.PlaneGeometry(0.5, 0.5);
+  if (tool) {   // the picture's handle runs from the bottom-left corner: move its grip to the middle and stand the handle straight up
+    geo.translate(-HELD_GRIP[0], -HELD_GRIP[1], 0); geo.rotateZ(Math.PI / 4);
+  }
+  const mesh = new THREE.Mesh(geo, withHaze(new THREE.MeshBasicMaterial({ map: dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: tool })));
+  mesh.userData.tool = tool;
+  return mesh;
+}
+// tools (and sticks) are held by the handle. Their pictures all run corner to corner with the handle at the bottom left;
+// the grip is the handle a few pixels up from its end, at pixel (4, 11) of 16, here in the 0.5-wide picture's units.
+const HELD_GRIP = [(4 / 16 - 0.5) * 0.5, (0.5 - 11 / 16) * 0.5];
+const isHeldTool = id => !!(BLOCKS[id] && (BLOCKS[id].tool || id === STICK));
+// a picture 0.5 wide and one of its pixels thick: the picture on the front and back, and a little wall along every
+// edge of its solid pixels, in that pixel's colour, shaded a bit darker so the thickness shows
+function thickPicture(canvas) {
+  const n = canvas.width, px = canvas.getContext('2d').getImageData(0, 0, n, n).data, s = 0.5 / n, h = s / 2;
+  const solid = (i, j) => i >= 0 && j >= 0 && i < n && j < n && px[(j * n + i) * 4 + 3] >= 128;
+  const pos = [], uv = [], col = [];
+  // a quad from four corners (in order around it), all with uv `u` (or the picture's own corners), in shade `c`
+  const quad = (p, u, c) => {
+    const each = Array.isArray(u[0]);
+    for (const k of [0, 1, 2, 0, 2, 3]) { pos.push(...p[k]); uv.push(...(each ? u[k] : u)); col.push(c, c, c); }
+  };
+  const corners = [[0, 0], [1, 0], [1, 1], [0, 1]];   // (uv: bottom-left, bottom-right, top-right, top-left)
+  for (const z of [h, -h]) quad(corners.map(([a, b]) => [(a - 0.5) * 0.5, (b - 0.5) * 0.5, z]), corners, 1);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    if (!solid(i, j)) continue;
+    const x0 = i * s - 0.25, x1 = x0 + s, y1 = 0.25 - j * s, y0 = y1 - s, u = [(i + 0.5) / n, 1 - (j + 0.5) / n];
+    if (!solid(i, j - 1)) quad([[x0, y1, h], [x1, y1, h], [x1, y1, -h], [x0, y1, -h]], u, 0.85);   // top edge
+    if (!solid(i, j + 1)) quad([[x0, y0, h], [x0, y0, -h], [x1, y0, -h], [x1, y0, h]], u, 0.6);    // bottom edge
+    if (!solid(i - 1, j)) quad([[x0, y0, h], [x0, y1, h], [x0, y1, -h], [x0, y0, -h]], u, 0.72);   // left edge
+    if (!solid(i + 1, j)) quad([[x1, y0, h], [x1, y0, -h], [x1, y1, -h], [x1, y1, h]], u, 0.72);   // right edge
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return geo;
 }
 
 // ===================== Your hand =====================
 // Your right forearm (from the Player model, in your skin) at the bottom right of the screen, holding what's selected.
 // It's drawn small and close to your eye, so it doesn't poke into walls. It bobs as you walk, swings when you click,
 // and dips out of sight and back when you change what you're holding.
+// how a tool sits in your own hand: by the handle, side-on (its flat side lined up with the way you face, not toward you),
+// leaning up and away, its head pointing ahead, so the swing leads with the pick's point or the axe's blade
+const HAND_TOOL = [-2.07, Math.PI / 2, 0];
 const hand = { root: new THREE.Group(), arm: new THREE.Group(), body: null, id: -1, swing: 0, dip: 0, bob: 0, held: false, lightTimer: 0, light: new THREE.Color(1, 1, 1) };
 hand.root.add(hand.arm);
 hand.arm.rotation.order = 'YXZ';
@@ -3632,6 +3691,7 @@ function updateHand(dt) {
     setHeld(hand.body, id);
     const m = hand.body.heldMesh;   // facing you, instead of side-on like other players'
     if (m && m.userData.cube) { m.position.set(0, -8.5 / 16, 0); m.rotation.set(-1.55, Math.PI / 4, 0); }   // (upright, its top tipped toward you)
+    else if (m && m.userData.tool) { m.position.set(0, -5 / 16, 0); m.rotation.set(HAND_TOOL[0], HAND_TOOL[1], HAND_TOOL[2], 'XYZ'); }   // (by the handle, side-on)
     else if (m) { m.position.set(0, -7.5 / 16, -0.04); m.rotation.set(-Math.PI / 2, 0, 0); }
   }
   // swinging: one swing per click, and over and over while the left button is held (breaking)
@@ -3824,7 +3884,8 @@ const SkinEditor = (() => {
   }
   let painting = false, last = null;
   // (inside the frame around it)
-  const inner = (c, e) => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left - c.clientLeft) / c.clientWidth, (e.clientY - r.top - c.clientTop) / c.clientHeight]; };
+  // (k: how much the page is zoomed, so the mouse and the canvas's own sizes are measured the same way)
+  const inner = (c, e) => { const r = c.getBoundingClientRect(), k = r.width / c.offsetWidth || 1; return [(e.clientX - r.left - c.clientLeft * k) / (c.clientWidth * k), (e.clientY - r.top - c.clientTop * k) / (c.clientHeight * k)]; };
   const sheetPos = e => { const [u, v] = inner(sheet, e); return [Math.floor(u * S), Math.floor(v * S)]; };
   sheet.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
@@ -4307,7 +4368,7 @@ const dropTexCache = {};
 function dropItem(id, x, y, z) {
   if (!dropTexCache[id]) {
     const c = document.createElement('canvas'); c.width = c.height = TILE;
-    drawIcon(c, id);
+    drawIcon(c, id, true);   // (flat: it's shown in the world)
     const t = new THREE.CanvasTexture(c);
     t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
     dropTexCache[id] = t;
@@ -4572,7 +4633,12 @@ const hotbarEl = document.getElementById('hotbar');
 const nameEl = document.getElementById('blockname');
 let nameTimer = 0;
 const hotbarIcons = [], hotbarCounts = [];
-function drawIcon(canvas, id) {
+// `flat`: always the flat picture (for things in the world: dropped items, what's held). Otherwise an ordinary whole
+// block is drawn as a little cube.
+function drawIcon(canvas, id, flat) {
+  if (!flat && isCubeIcon(id)) { drawCubeIcon(canvas, id); return; }
+  if (canvas.width !== TILE) canvas.width = canvas.height = TILE;
+  canvas.style.imageRendering = '';
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, TILE, TILE);
   // a piece: a half-size square (one quarter of the block's side texture)
@@ -4588,6 +4654,47 @@ function drawIcon(canvas, id) {
     if (form === 'stairs') ctx.drawImage(atlas, sx + h, 0, h, h, h, 0, h, h);  // ...plus the step
   }
   else if (id) ctx.drawImage(atlas, (BLOCKS[id].icon ?? BLOCKS[id].t[0]) * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
+}
+// ordinary whole blocks (not items, shapes, liquids, pieces, slabs or stairs, nor ones with a picture of their own)
+// (a block with a front face, like the kiln, is a cube too even though it has a picture of its own; torches are a
+// little standing stick)
+const isCubeIcon = id => { const b = BLOCKS[id]; return !!(id && b && b.t && (b.icon === undefined || b.t[3] !== undefined) && !isItem(id) && (!b.shape || isTorch(id)) && !b.liquid && !isPiece(id) && !formOf(id)); };
+// a block as a little cube, seen from above at the front-left corner: top, front (left) and side (right), in a
+// 4 x TILE square (each texture pixel is 2 icon pixels across). Each pixel takes its colour straight from the face
+// picture under it, so it stays crisp. A torch is the same drawing cut down to its stick (texture pixels 6-10).
+// (The same drawing as the desktop edition's Atlas.CubeIcon.)
+function drawCubeIcon(canvas, id) {
+  const R = TILE * 4, s = TILE * 2, b = BLOCKS[id], [a, e] = isTorch(id) ? [6, 10] : [0, TILE];
+  if (canvas.width !== R) canvas.width = canvas.height = R;
+  canvas.style.imageRendering = 'auto';   // shrunk to fit a slot it's smoothed, not missing every other row
+  const tiles = [b.t[1], b.t[3] ?? b.t[0], b.t[0]];   // top, front, side
+  const src = document.createElement('canvas'); src.width = TILE * 3; src.height = TILE;
+  const sctx = src.getContext('2d');
+  tiles.forEach((t, k) => sctx.drawImage(atlas, t * TILE, 0, TILE, TILE, k * TILE, 0, TILE, TILE));
+  const px = sctx.getImageData(0, 0, TILE * 3, TILE).data;
+  const ctx = canvas.getContext('2d'), out = ctx.createImageData(R, R);
+  for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) {
+    const hit = cubeFaceAt(x + 0.5, y + 0.5, s, a, e);
+    if (!hit) continue;
+    const [k, u, v, shade] = hit, i = (v * TILE * 3 + k * TILE + u) * 4, o = (y * R + x) * 4;
+    if (px[i + 3] < 128) continue;
+    out.data[o] = px[i] * shade; out.data[o + 1] = px[i + 1] * shade; out.data[o + 2] = px[i + 2] * shade; out.data[o + 3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+}
+// which face of the icon cube a point is on: [face (0 top, 1 front, 2 side), texture x, texture y, shade], or null.
+// The cube is `s` pixels along each edge in the picture: the top's corners are (s, 0), (2s, s/2), (s, s), (0, s/2).
+// Only texture pixels a..e across (and a..e deep, for the top) are solid: 0..TILE for a whole block.
+function cubeFaceAt(x, y, s, a = 0, e = TILE) {
+  const k = s / TILE, at = (A, B) => [s + (A - B) * k, (A + B) * k / 2];   // a point on the top, A and B pixels in
+  const T = TILE, faces = [   // origin, where one texture pixel across (U) and one down (V) moves you, shade, the solid u and v
+    [...at(0, 0), 1, 0.5, -1, 0.5, 1, a, e, a, e], [...at(0, e), 1, 0.5, 0, 1, 0.8, a, e, 0, T], [...at(e, T), 1, -0.5, 0, 1, 0.62, T - e, T - a, 0, T]];
+  for (let f = 0; f < 3; f++) {
+    const [ox, oy, ux, uy, vx, vy, shade, u0, u1, v0, v1] = faces[f], dx = (x - ox) / k, dy = (y - oy) / k, det = ux * vy - uy * vx;
+    const u = (dx * vy - dy * vx) / det, v = (ux * dy - uy * dx) / det;
+    if (u >= u0 && u < u1 && v >= v0 && v < v1) return [f, Math.floor(u), Math.floor(v), shade];
+  }
+  return null;
 }
 HOTBAR.forEach((id, i) => {
   const slot = document.createElement('div');
@@ -4688,11 +4795,11 @@ function invSlot(id, parent) {
   return slot;
 }
 function showVariants(b, plus) {
-  if (openPlus) openPlus.textContent = '+';
+  if (openPlus) openPlus.classList.remove('open');
   if (!b) { openVariants = 0; openPlus = null; invVariants.textContent = ''; invVariants.style.display = 'none'; return; }
   invVariants.textContent = '';
   if (openVariants === b || !b) { openVariants = 0; openPlus = null; invVariants.style.display = 'none'; return; }
-  openVariants = b; openPlus = plus; plus.textContent = '−';
+  openVariants = b; openPlus = plus; plus.classList.add('open');
   const label = document.createElement('div'); label.className = 'var-label'; label.textContent = BLOCKS[b].name;
   invVariants.append(label);
   for (const id of [b, ...variantsOf(b)]) invSlot(id, invVariants);
@@ -4724,7 +4831,7 @@ INV_LIST.forEach(id => {
   const slot = invSlot(id, invGrid);
   slot.dataset.tab = tabOf(id);
   if (!variantsOf(id).length) return;
-  const plus = document.createElement('button'); plus.className = 'plus'; plus.textContent = '+'; plus.title = 'Show the other forms';
+  const plus = document.createElement('button'); plus.className = 'plus'; plus.title = 'Show the other forms';
   plus.addEventListener('click', e => { e.stopPropagation(); showVariants(id, plus); });
   plus.addEventListener('mousedown', e => e.stopPropagation());
   slot.append(plus);

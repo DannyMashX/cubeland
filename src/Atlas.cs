@@ -85,6 +85,55 @@ public static class Atlas
 		if (!iconCache.TryGetValue(id, out var t)) iconCache[id] = t = ImageTexture.CreateFromImage(Icon(id));
 		return t;
 	}
+	// what inventory slots, the hotbar and recipe lists show: an ordinary whole block as a little cube, anything else
+	// its flat picture (dropped and held things keep using the flat IconTexture)
+	static readonly Dictionary<int, ImageTexture> slotCache = new();
+	public static ImageTexture SlotIcon(int id)
+	{
+		if (!IsCubeIcon(id)) return IconTexture(id);
+		if (!slotCache.TryGetValue(id, out var t)) slotCache[id] = t = ImageTexture.CreateFromImage(CubeIcon(id));
+		return t;
+	}
+	// ordinary whole blocks (not items, shapes, liquids, pieces, slabs or stairs, nor ones with a picture of their own);
+	// a block with a front face (the kiln) is a cube too, and a torch is a little standing stick
+	public static bool IsCubeIcon(int id)
+	{
+		var b = Blocks.Get(id);
+		return id != 0 && b != null && b.T != null && b.T.Length >= 3 && (b.Icon < 0 || b.T.Length > 3) && !b.Item
+			&& (b.Shape == null || b.Shape == "torch") && !b.Liquid && b.Piece <= 0 && b.Form == null;
+	}
+	// a block as a little cube, seen from above at the front-left corner: top, front (left) and side (right), in a
+	// 4 x TILE square (each texture pixel is 2 icon pixels across). Each pixel takes its colour straight from the face
+	// picture under it, so it stays crisp. A torch is the same drawing cut down to its stick (texture pixels 6-10).
+	// (The same drawing as the web edition's drawCubeIcon.)
+	public static Image CubeIcon(int id)
+	{
+		int R = TILE * 4, s = TILE * 2, T = TILE; var b = Blocks.Get(id);
+		int a = b.Shape == "torch" ? 6 : 0, e = b.Shape == "torch" ? 10 : TILE;
+		float k = (float)s / TILE;
+		int[] tiles = { b.T[1], b.T.Length > 3 ? b.T[3] : b.T[0], b.T[0] };   // top, front, side
+		var img = Image.CreateEmpty(R, R, false, Image.Format.Rgba8);
+		// per face: origin (a point on the top, A and B texture pixels in), where one texture pixel across (U) and one
+		// down (V) moves you, its shade, and the solid u and v
+		float AtX(float A, float B) => s + (A - B) * k; float AtY(float A, float B) => (A + B) * k / 2;
+		float[][] faces = {
+			new[] { AtX(0, 0), AtY(0, 0), 1, 0.5f, -1, 0.5f, 1, a, e, a, e },
+			new[] { AtX(0, e), AtY(0, e), 1, 0.5f, 0, 1, 0.8f, a, e, 0, T },
+			new[] { AtX(e, T), AtY(e, T), 1, -0.5f, 0, 1, 0.62f, T - e, T - a, 0, T } };
+		for (int y = 0; y < R; y++)
+			for (int x = 0; x < R; x++)
+				for (int fi = 0; fi < 3; fi++)
+				{
+					var f = faces[fi];
+					float dx = (x + 0.5f - f[0]) / k, dy = (y + 0.5f - f[1]) / k, det = f[2] * f[5] - f[3] * f[4];
+					float u = (dx * f[5] - dy * f[4]) / det, v = (f[2] * dy - f[3] * dx) / det;
+					if (u < f[7] || u >= f[8] || v < f[9] || v >= f[10]) continue;
+					var c = Image.GetPixel(tiles[fi] * TILE + (int)u, (int)v);
+					if (c.A >= 0.5f) img.SetPixel(x, y, new Color(c.R * f[6], c.G * f[6], c.B * f[6], 1));
+					break;
+				}
+		return img;
+	}
 	// draw a block's or item's picture into a TILE x TILE image (its hotbar icon)
 	public static Image Icon(int id)
 	{

@@ -1,5 +1,18 @@
 [
     {
+        "version":  "Alpha 0.0.7.1",
+        "folder":  "alpha-0.0.7.1",
+        "date":  "2026-11-18",
+        "notes":  "Tools are held properly: gripped near the end of the handle and turned side-on, so you swing with the head, not the flat",
+        "changes":  [
+                        "Tools are held properly: gripped near the end of the handle and turned side-on, so you swing with the head, not the flat",
+                        "Tools in your hand are 1 pixel thick, for a little depth",
+                        "Blocks in your inventory, hotbar and recipes show as little 3D cubes, including the kiln (with its opening); torches show as a small 3D stick",
+                        "The + on blocks with other forms is smaller, neatly centred and tucked into the slot\u0027s bottom-right corner",
+                        "Menus and the hotbar scale with your screen\u0027s display scaling by a whole number (150% makes them twice as big), so every pixel stays even"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.7.0",
         "title":  "Shape \u0026 Shade",
         "folder":  "alpha-0.0.7.0",
