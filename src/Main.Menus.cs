@@ -351,6 +351,7 @@ public partial class Main
 			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health }).ToList(),
 			Drops = drops.All.Select(d => new Worlds.DropSave { Id = d.Id, X = d.P.X, Y = d.P.Y, Z = d.P.Z, Age = d.Age }).ToList(),
 			Drying = new(world.Drying), TorchBurn = world.TorchBurn.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
+			Crops = world.Crops.ToDictionary(k => k.Key, k => MathF.Round(k.Value)), Fert = new(world.FertLeft),
 			Kilns = new(kilns.All),
 		};
 		try { if (!Worlds.WriteSave(current, s)) return false; unsaved = false; return true; }
@@ -374,6 +375,8 @@ public partial class Main
 			world.ApplyEdits(s.Idxs, s.Ids);
 			foreach (var (i, left) in s.Drying) if (world.Drying.ContainsKey(i)) world.Drying[i] = Math.Max(0, left);
 			foreach (var (i, left) in s.TorchBurn) if (world.TorchBurn.ContainsKey(i)) world.TorchBurn[i] = Math.Max(0, left);
+			if (s.Crops != null) foreach (var (i, left) in s.Crops) if (world.Crops.ContainsKey(i)) world.Crops[i] = Math.Max(0, left);
+			if (s.Fert != null) foreach (var (i, n) in s.Fert) if (world.FertLeft.ContainsKey(i)) world.FertLeft[i] = Math.Max(1, n);
 			pendingSave = s;
 		}
 		catch (Exception e) { GD.PrintErr("Could not load the world (it will still play, but may not save): " + e.Message); }

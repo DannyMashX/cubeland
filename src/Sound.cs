@@ -29,6 +29,8 @@ public partial class Sound : Node
 		for (int k = 0; k < 8; k++) Material[Blocks.Furnace + k] = "brick";
 		foreach (int b in Blocks.NewColourBlocks) Material[b] = "brick";
 		foreach (int b in Blocks.Flowers) Material[b] = "grass";
+		foreach (int b in Blocks.GrainStages) Material[b] = "grass";
+		foreach (int b in Blocks.Soils) Material[b] = "dirt";
 	}
 	static string Mat(int id) => Blocks.IsTorch(id) ? "wood" : Material.TryGetValue(id, out var m) ? m : "stone";
 

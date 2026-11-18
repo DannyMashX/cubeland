@@ -8,7 +8,7 @@ namespace Cubeland;
 // Your pictures in textures/blocks and textures/items fill the slots below (by file name).
 public static class Atlas
 {
-	public const int TILE = 16, NT = 105;   // 105 pictures side by side (52+ are the colours, 102+ Fear & Foes)
+	public const int TILE = 16, NT = 121;   // 121 pictures side by side (52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend)
 	public const int PW = TILE + 2;        // the GPU copy pads each picture with a 1px copy of its edge (no colour bleeding)
 
 	// Which atlas slot each texture file fills (a file can fill more than one)
@@ -31,6 +31,8 @@ public static class Atlas
 		["stick"] = new[] { 32 }, ["rock"] = new[] { 33 }, ["crude_axe"] = new[] { 34 }, ["fire_essence"] = new[] { 47 },
 		["stone_axe"] = new[] { 38 }, ["stone_pickaxe"] = new[] { 39 }, ["stone_shovel"] = new[] { 40 }, ["stone_sword"] = new[] { 41 }, ["stone_hoe"] = new[] { 42 },
 		["bone"] = new[] { 102 }, ["bone_ash"] = new[] { 103 }, ["gloom_wisp"] = new[] { 104 },
+		["grain_seeds"] = new[] { 105 }, ["grain"] = new[] { 106 }, ["flour"] = new[] { 107 }, ["bread"] = new[] { 108 },
+		["tilled_dirt"] = new[] { 109 }, ["wet_tilled_dirt"] = new[] { 110 }, ["fertilized_dirt"] = new[] { 111 }, ["wet_fertilized_dirt"] = new[] { 112 },
 	};
 
 	// the colours: <colour>_terracotta 52-62, <colour>_chiseled_terracotta 63-73, <colour>_bricks 74-84 (orange..black),
@@ -45,6 +47,7 @@ public static class Atlas
 			Slots[c + "_terracotta"] = new[] { 51 + k }; Slots[c + "_chiseled_terracotta"] = new[] { 62 + k }; Slots[c + "_bricks"] = new[] { 73 + k };
 		}
 		for (int k = 0; k < Blocks.FlowerColours.Length; k++) Slots[Blocks.FlowerColours[k] + "_flower"] = new[] { 85 + k };
+		for (int k = 0; k < 8; k++) Slots["grain_stage_" + k] = new[] { 113 + k };
 	}
 
 	public static Image Image;          // TILE*NT x TILE, the plain strip (used to draw icons)

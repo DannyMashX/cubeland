@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace Cubeland;
 
 // The world: every block, plus the light (sky and torches) worked out from them.
-public class World
+public partial class World
 {
 	public const int WX = 640, WZ = 640, WY = 192, CS = 16;
 	public const int NCX = WX / CS, NCZ = WZ / CS;
@@ -190,6 +190,7 @@ public class World
 		if (!BurnsDown(id)) TorchBurn.Remove(i);
 		else if (!BurnsDown(old) || Cubeland.Blocks.B[old].Burn != Cubeland.Blocks.B[id].Burn) TorchBurn[i] = BurnTime(Cubeland.Blocks.B[id].Burn);
 		if (id == Cubeland.Blocks.ClayBallBlock) { if (old != id) Drying[i] = DryTime; } else Drying.Remove(i);
+		FarmChanged(i, old, id, false);
 		BlockChanged?.Invoke(i, old, id, 0);
 		// keep the sky map up to date, and relight nearby chunks if what can see the sky changed
 		int col = z * WX + x;
@@ -224,6 +225,7 @@ public class World
 			if (Cubeland.Blocks.IsTorch(id)) Torches.Add(i); else Torches.Remove(i);
 			if (BurnsDown(id)) TorchBurn[i] = BurnTime(Cubeland.Blocks.B[id].Burn); else TorchBurn.Remove(i);   // (then the save puts back how long each has left)
 			if (id == Cubeland.Blocks.ClayBallBlock) Drying[i] = DryTime; else Drying.Remove(i);
+			FarmChanged(i, 0, id, true);
 			WakeWater(x, y, z);   // water that was still flowing when you saved carries on
 			cols.Add(z * WX + x);
 			if (id != 0) { int c = (z / CS) * NCX + x / CS; ChunkTop[c] = Math.Max(ChunkTop[c], y + 1); }
@@ -263,6 +265,7 @@ public class World
 			var (x, y, z) = FromIdx(i);
 			if (Blocks[i] == Cubeland.Blocks.ClayBallBlock) SetBlock(x, y, z, Cubeland.Blocks.BrickBlock);
 		}
+		TickFarm(dt);
 	}
 
 	// ---- Water flow ----

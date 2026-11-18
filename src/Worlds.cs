@@ -27,7 +27,8 @@ public static class Worlds
 		public PlayerSave Player; public float Time;
 		public int[] Hotbar, Counts; public int Selected;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();
-		public Dictionary<int, float> Drying = new(), TorchBurn = new();
+		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: growing time left in each stage)
+		public Dictionary<int, int> Fert = new();   // fertilized soil -> harvests left
 		public Dictionary<int, Kilns.Kiln> Kilns = new();
 	}
 	static readonly JsonSerializerOptions Opts = new() { IncludeFields = true };

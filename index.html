@@ -444,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.8.0"></script>
+<script src="textures.js?v=alpha-0.0.9.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.8.0';
+const GAME_VERSION = 'Alpha 0.0.9.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -566,6 +566,11 @@ const torchDrop = id => BLOCKS[id].burn === 3 ? EVER_TORCH : BURNT_TORCH;
 const BURN_TIMES = [[900, 1500], [300, 600]];
 const burnTime = burn => { const [lo, hi] = BURN_TIMES[burn]; return lo + Math.random() * (hi - lo); };
 const torchBurn = new Map();   // world index of a lit or smoldering torch spot -> seconds until it burns down a stage
+// farming (Till & Tend, see farmChanged)
+const crops = new Map();      // world index of growing (not yet ripe) Grain -> seconds of growing left until its next stage
+const soils = new Set();      // world index of every tilled / fertilized soil block
+const fertLeft = new Map();   // world index of fertilized soil -> ripe harvests it has left (FARM.fertHarvests to start)
+const soilIdle = new Map();   // world index of dry, empty tilled soil -> seconds it has been like that
 const burnsDown = id => isTorch(id) && BLOCKS[id].burn < 2;   // lit or smoldering (burnt is done; Ever Torches never burn down)
 const isTorch = id => !!(BLOCKS[id] && BLOCKS[id].shape === 'torch');
 // Water: see-through, you swim in it, and it flows. 50 = still water (lakes and seas, or water you place);
@@ -621,6 +626,33 @@ const BONE = 620, BONE_ASH = 621, GLOOM_WISP = 622;
 BLOCKS[BONE] = { name: 'Bone', t: [102, 102, 102], item: true };
 BLOCKS[BONE_ASH] = { name: 'Bone Ash', t: [103, 103, 103], item: true };
 BLOCKS[GLOOM_WISP] = { name: 'Gloom Wisp', t: [104, 104, 104], item: true };
+// ---- Till & Tend: farming Grain ----
+// Use a Hoe on Grass or Dirt (with nothing on top) to till it. Tilling Grass sometimes turns up Grain Seeds.
+// Plant Grain Seeds on tilled soil; the Grain grows through 8 stages (42-49), and the last one is ripe: break it for
+// Grain and 1-2 Seeds (an unripe one just gives its Seed back). Grain -> Flour by hand; Flour -> Bread in the Kiln.
+// Soil (93-96): tilled / wet tilled / fertilized / wet fertilized. Soil is wet when water touches it, or touches tilled
+// soil joined to it within FARM.wetReach blocks (the wet only travels through tilled soil). Wet soil grows Grain twice as
+// fast as dry. Bone Ash on soil fertilizes it (faster still) for FARM.fertHarvests ripe harvests. Dry tilled soil with
+// nothing growing turns back into Dirt after FARM.revertTime seconds.
+const GRAIN_SEEDS = 623, GRAIN = 624, FLOUR = 625, BREAD = 626;
+const TILLED = 93, WET_TILLED = 94, FERTILIZED = 95, WET_FERTILIZED = 96;
+const GRAIN_STAGES = [42, 43, 44, 45, 46, 47, 48, 49], GRAIN_RIPE = 49;
+const FARM = { stageTime: 40, dryRate: 0.5, fertRate: 1.6, wetReach: 5, fertHarvests: 2, revertTime: 180, seedChance: 1 / 6 };
+BLOCKS[GRAIN_SEEDS] = { name: 'Grain Seeds', t: [105, 105, 105], item: true };
+BLOCKS[GRAIN] = { name: 'Grain', t: [106, 106, 106], item: true };
+BLOCKS[FLOUR] = { name: 'Flour', t: [107, 107, 107], item: true };
+BLOCKS[BREAD] = { name: 'Bread', t: [108, 108, 108], item: true, food: 6 };
+[['Tilled Dirt', 109], ['Wet Tilled Dirt', 110], ['Fertilized Dirt', 111], ['Wet Fertilized Dirt', 112]].forEach(([name, top], k) => {
+  BLOCKS[TILLED + k] = { name, t: [2, top, 2], drop: 2, soil: true, wet: k % 2 === 1, fert: k >= 2 };   // (t: side, top, bottom)
+});
+GRAIN_STAGES.forEach((id, k) => {
+  BLOCKS[id] = { name: 'Grain', t: [113 + k, 113 + k, 113 + k], transparent: true, noCollide: true, shape: 'plant',
+    box: [0.15, 0, 0.15, 0.85, 0.15 + k * 0.12, 0.85], drop: k === 7 ? GRAIN : GRAIN_SEEDS, stage: k };
+});
+const isSoil = id => !!(BLOCKS[id] && BLOCKS[id].soil);
+const isCrop = id => id >= GRAIN_STAGES[0] && id <= GRAIN_RIPE;
+// the soil block with this wetness and fertilizer
+const soilId = (wet, fert) => TILLED + (wet ? 1 : 0) + (fert ? 2 : 0);
 // ---- Colours (Brick & Bloom): 12 colours, each with a Terracotta, a Chiseled Terracotta, Bricks and a Dye ----
 // Red's blocks came first (Red Terracotta 66, Chiseled Red Terracotta 68, Red Bricks 12); the other 11 colours use 218-250.
 // (Placed blocks must be numbered under 256, and a block's slab/stairs items are 1000/1100/.../1500 + its number, so new
@@ -659,7 +691,7 @@ const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // The soil family (Dirt, Grass, Sand, Gravel and Clay) can be dug by hand, but then gives 1-8 pieces instead of
 // the whole block (a shovel gets you the whole block). Grass gives Dirt.
 // Bricks, Terracotta, the chiseled blocks and the Furnace count as stone-type too.
-const NEEDS_AXE = [4, 7, 61], DIGGABLE = [1, 2, 6, 11, 63];
+const NEEDS_AXE = [4, 7, 61], DIGGABLE = [1, 2, 6, 11, 63, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED];
 const NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, FURNACE, FURNACE + 1, FURNACE + 2, FURNACE + 3, FURNACE + 4, FURNACE + 5, FURNACE + 6, FURNACE + 7, ...NEW_COLOUR_BLOCKS];
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
 const holding = kind => !!(BLOCKS[HOTBAR[selected]] && BLOCKS[HOTBAR[selected]].tool === kind);
@@ -756,7 +788,7 @@ const placeId = id => BLOCKS[id] && BLOCKS[id].places ? BLOCKS[id].places : BRIC
 let selected = 0;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 105;   // the texture atlas holds 105 pictures side by side (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes)
+const TILE = 16, NT = 121;   // the texture atlas holds 121 pictures side by side (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes, 105+ Till & Tend)
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -840,6 +872,7 @@ const TEXTURE_SLOTS = {
   stick: 32, rock: 33, crude_axe: 34, fire_essence: 47,
   stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
   bone: 102, bone_ash: 103, gloom_wisp: 104,
+  grain_seeds: 105, grain: 106, flour: 107, bread: 108, tilled_dirt: 109, wet_tilled_dirt: 110, fertilized_dirt: 111, wet_fertilized_dirt: 112,
 };
 // the colours: <colour>_terracotta, <colour>_chiseled_terracotta, <colour>_bricks, <colour>_dye, <colour>_flower
 COLOURS.forEach((c, k) => {
@@ -847,6 +880,7 @@ COLOURS.forEach((c, k) => {
   if (k) Object.assign(TEXTURE_SLOTS, { [c + '_terracotta']: 51 + k, [c + '_chiseled_terracotta']: 62 + k, [c + '_bricks']: 73 + k });
 });
 FLOWER_COLOURS.forEach((c, k) => { TEXTURE_SLOTS[c + '_flower'] = 85 + k; });
+for (let k = 0; k < 8; k++) TEXTURE_SLOTS['grain_stage_' + k] = 113 + k;
 function loadCustomTextures(onDone) {
   const entries = Object.entries(window.TEXTURES || {}).filter(([name]) => name in TEXTURE_SLOTS);
   let pending = entries.length;
@@ -2138,6 +2172,7 @@ function setBlock(x, y, z, id) {
   if (!burnsDown(id)) torchBurn.delete(i);
   else if (!burnsDown(old) || BLOCKS[old].burn !== BLOCKS[id].burn) torchBurn.set(i, burnTime(BLOCKS[id].burn));
   if (id === CLAY_BALL_BLOCK) { if (old !== id) drying.set(i, DRY_TIME); } else drying.delete(i);
+  farmChanged(i, old, id);
   if (isFurnace(old) && !isFurnace(id)) emptyFurnace(i);   // broken: what was in it falls out
   // keep the sky map up to date, and relight nearby chunks if what can see the sky changed
   const col = z * WX + x, wasOpaque = old && !BLOCKS[old].transparent, isOpaque = id && !BLOCKS[id].transparent;
@@ -2344,6 +2379,8 @@ const Sound = (() => {
   for (let k = 0; k < 8; k++) MATERIAL[FURNACE + k] = 'brick';   // torches use 'wood' (see mat below)
   for (const b of NEW_COLOUR_BLOCKS) MATERIAL[b] = 'brick';
   for (const b of FLOWERS) MATERIAL[b] = 'grass';
+  for (const b of GRAIN_STAGES) MATERIAL[b] = 'grass';
+  for (const b of [TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED]) MATERIAL[b] = 'dirt';
   // materials whose placing sound is their footstep sound instead of their dig sound
   // materials with their own placing sound (others reuse the breaking sound, softer)
   const PLACE_RECIPES = {
@@ -4627,6 +4664,7 @@ addEventListener('mousedown', e => {
   // right-click a lit (burning) furnace holding a Stick: the stick catches fire and becomes a Torch
   if (e.button === 2 && isFurnace(hb) && BLOCKS[hb].lit && HOTBAR[selected] === STICK) { lightStick(); return; }
   if (e.button === 2 && isFurnace(hb) && !(keys.ShiftLeft || keys.ShiftRight)) { openFurnace(idx(hit.x, hit.y, hit.z)); return; }
+  if (e.button === 2 && farmUse(hit, hb)) return;   // tilling, planting, fertilizing
   // placing a slab, vertical slab or stairs
   if (e.button === 2 && formOf(HOTBAR[selected])) { placeShape(hit); return; }
   // placing a piece: it goes in the half-block spot just in front of whatever you're looking at
@@ -4650,6 +4688,7 @@ addEventListener('mousedown', e => {
     Sound.break(hb);
     collectBlock(hb, hit.x, hit.y, hit.z);
     if (hb === 5 && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);   // leaves: 1 in 5 chance of a stick too
+    if (hb === GRAIN_RIPE) for (let n = 1 + (Math.random() < 0.5 ? 1 : 0); n > 0; n--) collect(GRAIN_SEEDS, hit.x, hit.y, hit.z);   // ripe Grain: 1-2 Seeds too
     if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn)); // take one torch off
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
     mobNoise(hit.x, hit.y, hit.z);
@@ -4997,7 +5036,7 @@ const invEl = document.getElementById('inventory'), invGrid = document.getElemen
 const invIcons = [];
 // Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
 // click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, ...DYE, ...TOOLS]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, ...DYE, ...TOOLS]);
 const variantsOf = b => SPLITTABLE.includes(b)
   ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.quarter + b,
      SHAPE_ITEM.vslab + b, SHAPE_ITEM.vstairs + b, SHAPE_ITEM.vquarter + b]
@@ -5033,8 +5072,8 @@ function showVariants(b, plus) {
 // the tabs along the top of the creative inventory (anything not listed goes in Building Blocks)
 const INV_TABS = [
   ['Building Blocks', [7, 61, 8, 9, 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, 10, 22, CRAFTING_BENCH, FURNACE]],
-  ['Natural Blocks', [1, 2, 3, 4, 5, 6, 11, 63, ...FLOWERS, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, ...DYE, CRUDE_AXE, ...TOOLS]],
+  ['Natural Blocks', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, 4, 5, 6, 11, 63, ...FLOWERS, WATER]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, ...DYE, CRUDE_AXE, ...TOOLS]],
 ];
 const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
 let invTab = 0;
@@ -5157,6 +5196,7 @@ const SMELTS = [
   { out: 65, from: 63 },             // Clay -> Terracotta
   { out: 3, from: 8 },               // Cobblestone -> Stone
   { out: BONE_ASH, from: BONE },     // Bone -> Bone Ash
+  { out: BREAD, from: FLOUR },       // Flour -> Bread
 ];
 const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1 };   // how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1
 const furnaceEl = document.getElementById('furnace'), furnaceName = document.getElementById('furnace-name');
@@ -5319,6 +5359,104 @@ function tickTorches(dt) {
     setBlock(x, y, z, torchVariant(b.wi, b.count, b.burn + 1));   // (starts the next stage's timer, or ends it once burnt)
   }
 }
+// ---- Farming (Till & Tend) ----
+let farmTimer = 0, wetTimer = 0;
+// keeps the lists above up to date when a block changes (loading: true while a save is being put back)
+function farmChanged(i, old, id, loading) {
+  if (isSoil(id)) soils.add(i); else { soils.delete(i); soilIdle.delete(i); }
+  if (!(BLOCKS[id] && BLOCKS[id].fert)) fertLeft.delete(i);
+  else if (!fertLeft.has(i)) fertLeft.set(i, FARM.fertHarvests);
+  if (isCrop(id) && id !== GRAIN_RIPE) { if (old !== id) crops.set(i, FARM.stageTime); } else crops.delete(i);
+  // a ripe Grain harvested (or trampled away) from fertilized soil uses up one of the fertilizer's harvests
+  if (!loading && old === GRAIN_RIPE && id !== GRAIN_RIPE && fertLeft.has(i - WX * WZ) && !Net.client) {
+    const n = fertLeft.get(i - WX * WZ) - 1;
+    if (n > 0) fertLeft.set(i - WX * WZ, n);
+    else { const [x, y, z] = fromIdx(i - WX * WZ); setBlock(x, y, z, soilId(BLOCKS[world[i - WX * WZ]].wet, false)); }
+  }
+}
+// how fast Grain grows on this soil (0 = not on soil: it doesn't grow)
+function growRate(soil) {
+  const b = BLOCKS[soil];
+  if (!b || !b.soil) return 0;
+  return (b.wet ? 1 : FARM.dryRate) * (b.fert ? FARM.fertRate : 1);
+}
+function tickFarm(dt) {
+  if (Net.client) return;   // (in a friend's world their game does it)
+  if ((wetTimer -= dt) <= 0) { wetTimer = 2; updateWetSoil(); }
+  if ((farmTimer += dt) < 1) return;
+  const step = farmTimer; farmTimer = 0;
+  // growing
+  for (const [i, left] of [...crops]) {
+    const id = world[i];
+    if (!isCrop(id) || id === GRAIN_RIPE) { crops.delete(i); continue; }
+    const t = left - step * growRate(world[i - WX * WZ]);
+    if (t > 0) { crops.set(i, t); continue; }
+    const [x, y, z] = fromIdx(i);
+    setBlock(x, y, z, id + 1);   // (the next stage starts its own timer)
+  }
+  // dry tilled soil with nothing growing on it turns back into Dirt after a while
+  for (const i of [...soils]) {
+    if (world[i] !== TILLED || world[i + WX * WZ]) { soilIdle.delete(i); continue; }
+    const t = (soilIdle.get(i) || 0) + step;
+    if (t < FARM.revertTime) { soilIdle.set(i, t); continue; }
+    soilIdle.delete(i);
+    const [x, y, z] = fromIdx(i);
+    setBlock(x, y, z, 2);
+  }
+}
+// which soil is wet: soil touching water (above or beside it), and soil joined to that through other tilled soil,
+// up to FARM.wetReach blocks away. Plain grass or dirt in between stops it.
+function updateWetSoil() {
+  if (!soils.size) return;
+  const dist = new Map(), queue = [];
+  for (const i of soils) {
+    const [x, y, z] = fromIdx(i);
+    for (const [dx, dy, dz] of [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]])
+      if (isWater(getBlock(x + dx, y + dy, z + dz))) { dist.set(i, 0); queue.push(i); break; }
+  }
+  for (let q = 0; q < queue.length; q++) {
+    const i = queue[q], d = dist.get(i);
+    if (d >= FARM.wetReach) continue;
+    const [x, y, z] = fromIdx(i);
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]]) {
+      const xx = x + dx, yy = y + dy, zz = z + dz;
+      if (xx < 0 || zz < 0 || xx >= WX || zz >= WZ || yy < 0 || yy >= WY) continue;
+      const n = idx(xx, yy, zz);
+      if (soils.has(n) && !dist.has(n)) { dist.set(n, d + 1); queue.push(n); }
+    }
+  }
+  for (const i of [...soils]) {
+    const b = BLOCKS[world[i]], want = soilId(dist.has(i), b.fert);
+    if (world[i] !== want) { const [x, y, z] = fromIdx(i); setBlock(x, y, z, want); }
+  }
+}
+// right-click farming: a Hoe tills Grass or Dirt, Grain Seeds are planted in tilled soil, Bone Ash fertilizes it.
+// Returns true if it did something (or should stop the click there).
+function farmUse(hit, hb) {
+  const held = HOTBAR[selected], above = getBlock(hit.x, hit.y + 1, hit.z);
+  const target = isCrop(hb) ? getBlock(hit.x, hit.y - 1, hit.z) : hb, ty = isCrop(hb) ? hit.y - 1 : hit.y;
+  if (holding('hoe')) {
+    if ((hb !== 1 && hb !== 2) || (above && !isWater(above) && !isFlower(above))) return false;
+    if (isFlower(above)) { collect(above, hit.x, hit.y + 1, hit.z); setBlock(hit.x, hit.y + 1, hit.z, 0); }
+    setBlock(hit.x, hit.y, hit.z, TILLED);
+    Sound.place(2); mobNoise(hit.x, hit.y, hit.z);
+    if (hb === 1 && Math.random() < FARM.seedChance) collect(GRAIN_SEEDS, hit.x, hit.y + 1, hit.z);   // turned up some seeds
+    return true;
+  }
+  if (held === GRAIN_SEEDS) {
+    if (!isSoil(hb) || above) return true;
+    setBlock(hit.x, hit.y + 1, hit.z, GRAIN_STAGES[0]); Sound.place(1); mobNoise(hit.x, hit.y + 1, hit.z); useOne();
+    return true;
+  }
+  if (held === BONE_ASH && isSoil(target)) {
+    const b = BLOCKS[target];
+    if (b.fert) { fertLeft.set(idx(hit.x, ty, hit.z), FARM.fertHarvests); Net.blockChanged(idx(hit.x, ty, hit.z), target); }   // (topped up)
+    else setBlock(hit.x, ty, hit.z, soilId(b.wet, true));
+    Sound.place(2); useOne();
+    return true;
+  }
+  return false;
+}
 // Ever Torches give off little fire essence sparks (your fire_essence picture) that drift up and fade:
 // that's how you tell them from ordinary torches. Only ones near you make sparks.
 const EVER_SPARK = { life: 1.6, every: 0.35, size: 0.14, range: 40, max: 300 };
@@ -5391,6 +5529,7 @@ const RECIPES = [
 for (const f of FLOWERS) RECIPES.push({ out: BLOCKS[f].dye, n: 1, needs: [[f, 1]], at: 'hand', colour: true });   // a Flower -> its Dye
 RECIPES.push({ out: dyeOf('black'), n: 1, needs: [[GLOOM_WISP, 1]], at: 'hand', colour: true });   // a Gloom Wisp -> Black Dye
 RECIPES.push({ out: dyeOf('white'), n: 1, needs: [[BONE_ASH, 1]], at: 'hand', colour: true });     // Bone Ash -> White Dye
+RECIPES.push({ out: FLOUR, n: 1, needs: [[GRAIN, 1]], at: 'hand' });                               // Grain, mashed by hand -> Flour
 // two dyes mixed -> 2 of the colour in between
 for (const [out, a, b] of [['orange', 'red', 'yellow'], ['green', 'yellow', 'aqua'], ['blue', 'aqua', 'indigo'], ['purple', 'indigo', 'magenta'], ['pink', 'red', 'white']])
   RECIPES.push({ out: dyeOf(out), n: 2, needs: [[dyeOf(a), 1], [dyeOf(b), 1]], at: 'hand', colour: true });
@@ -5502,6 +5641,8 @@ function gatherSave() {
     drying: [...drying],                                   // [[index, seconds left], ...]
     torchBurn: [...torchBurn].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds until it burns down a stage], ...]
     furnaces: [...furnaces].map(([i, f]) => [i, f]),       // [[index, {fuel, fuelN, heat, queue, t}], ...]
+    crops: [...crops].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds of growing until its next stage], ...]
+    fert: [...fertLeft],                                   // [[index of fertilized soil, ripe harvests it has left], ...]
   };
 }
 async function saveWorld() {
@@ -5542,6 +5683,8 @@ function applySave(s) {
   for (const [i, left] of s.drying || []) if (drying.has(i)) drying.set(i, Math.max(0, +left || 0));
   for (const [i, left] of s.torchBurn || []) if (torchBurn.has(i)) torchBurn.set(i, Math.max(0, +left || 0));
   for (const [i, f] of s.furnaces || []) if (isFurnace(world[i]) && f) furnaces.set(i, f);
+  for (const [i, left] of s.crops || []) if (crops.has(i)) crops.set(i, Math.max(0, +left || 0));
+  for (const [i, n] of s.fert || []) if (BLOCKS[world[i]] && BLOCKS[world[i]].fert) fertLeft.set(i, Math.max(1, n | 0));
   applyPlayerSave(s);
 }
 // blocks you changed, put back on top of the freshly grown terrain (also used when joining a friend's game)
@@ -5557,6 +5700,7 @@ function applyEdits(idxs, ids) {
     if (isTorch(id)) torches.add(i);
     if (burnsDown(id)) torchBurn.set(i, burnTime(BLOCKS[id].burn)); else torchBurn.delete(i);   // (applySave then puts back how long each has left)
     if (id === CLAY_BALL_BLOCK) drying.set(i, DRY_TIME); else drying.delete(i);   // (applySave then puts back how long each has left)
+    farmChanged(i, 0, id, true);
     wakeWater(x, y, z);                 // water that was still flowing when you saved carries on
     cols.add(z * WX + x);
     if (id) { const c = Math.floor(z / CS) * NCX + Math.floor(x / CS); chunkTop[c] = Math.max(chunkTop[c], y + 1); }
@@ -6147,7 +6291,7 @@ function frame(now) {
   else { player.vx = player.vy = player.vz = 0; }
   if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
   if (worldLoaded && settings.autosave && performance.now() - lastSave > 30000) saveWorld();   // auto save every 30 seconds
-  if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); tickTorches(dt); }   // (not while paused)
+  if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); tickTorches(dt); tickFarm(dt); }   // (not while paused)
   if (worldLoaded) tickEverSparks(dt);
   pumpRebuildSoon();
 

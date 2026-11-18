@@ -42,6 +42,16 @@ public static class Blocks
 	public const int Torch = 22, SmolderingTorch = 81, BurntTorch = 170, EverTorch = 182, Water = 50;
 	public const int Chocolate = 200, Stick = 201, Rock = 212, CrudeAxe = 213, ClayBall = 215, Brick = 216, FireEssence = 217;
 	public const int Bone = 620, BoneAsh = 621, GloomWisp = 622;   // Fear & Foes (items 620+; 600-611 are the dyes)
+	// Till & Tend (farming Grain; see Farm.cs): items 623-626, soil blocks 93-96, Grain growing 42-49 (49 = ripe)
+	public const int GrainSeeds = 623, Grain = 624, Flour = 625, Bread = 626;
+	public const int Tilled = 93, WetTilled = 94, Fertilized = 95, WetFertilized = 96, GrainRipe = 49;
+	public static readonly int[] GrainStages = { 42, 43, 44, 45, 46, 47, 48, 49 };
+	public static readonly int[] Soils = { Tilled, WetTilled, Fertilized, WetFertilized };
+	public static bool IsSoil(int id) => id >= Tilled && id <= WetFertilized;
+	public static bool IsCrop(int id) => id >= 42 && id <= GrainRipe;
+	public static int SoilId(bool wet, bool fert) => Tilled + (wet ? 1 : 0) + (fert ? 2 : 0);
+	public static bool SoilWet(int id) => id == WetTilled || id == WetFertilized;
+	public static bool SoilFert(int id) => id == Fertilized || id == WetFertilized;
 	public const int PieceItem = 100;
 	public static readonly int[] BrickVariants = { 12, 13, 14, 15 };
 	public static readonly int[][] FurnaceFronts = { new[] { 0, 1 }, new[] { 1, 0 }, new[] { 0, -1 }, new[] { -1, 0 } };
@@ -65,7 +75,7 @@ public static class Blocks
 	public static readonly int[] Flowers = { 194, 195, 196, 197, 198 };
 	public static bool IsFlower(int id) => id >= 194 && id <= 198;
 	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).ToArray();
-	public static readonly int[] NeedsAxe = { 4, 7, 61 }, Diggable = { 1, 2, 6, 11, 63 };
+	public static readonly int[] NeedsAxe = { 4, 7, 61 }, Diggable = { 1, 2, 6, 11, 63, 93, 94, 95, 96 };
 	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).ToArray();
 	// Every block you can pick from the creative inventory
 	public static readonly int[] Items = new[] { 1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(Flowers)
@@ -174,6 +184,19 @@ public static class Blocks
 		B[Bone] = new BlockDef { Name = "Bone", T = new[] { 102, 102, 102 }, Item = true };
 		B[BoneAsh] = new BlockDef { Name = "Bone Ash", T = new[] { 103, 103, 103 }, Item = true };
 		B[GloomWisp] = new BlockDef { Name = "Gloom Wisp", T = new[] { 104, 104, 104 }, Item = true };
+		// Till & Tend: Grain Seeds, Grain (-> Flour by hand -> Bread in the Kiln), tilled soil, and Grain growing in 8 stages
+		B[GrainSeeds] = new BlockDef { Name = "Grain Seeds", T = new[] { 105, 105, 105 }, Item = true };
+		B[Grain] = new BlockDef { Name = "Grain", T = new[] { 106, 106, 106 }, Item = true };
+		B[Flour] = new BlockDef { Name = "Flour", T = new[] { 107, 107, 107 }, Item = true };
+		B[Bread] = new BlockDef { Name = "Bread", T = new[] { 108, 108, 108 }, Item = true, Food = 6 };
+		string[] soilNames = { "Tilled Dirt", "Wet Tilled Dirt", "Fertilized Dirt", "Wet Fertilized Dirt" };
+		for (int k = 0; k < 4; k++) Def(Tilled + k, soilNames[k], 2, 109 + k, 2).Drop = Dirt;
+		for (int k = 0; k < 8; k++)
+		{
+			var g = Def(GrainStages[k], "Grain", 113 + k, 113 + k, 113 + k);
+			g.Transparent = true; g.NoCollide = true; g.Shape = "plant"; g.Box = new[] { 0.15f, 0, 0.15f, 0.85f, 0.15f + k * 0.12f, 0.85f };
+			g.Drop = k == 7 ? Grain : GrainSeeds;
+		}
 		// the colours (red's blocks are above). Pictures: terracotta 52-62, chiseled 63-73, bricks 74-84, flowers 85-89, dyes 90-101
 		for (int k = 0; k < Colours.Length; k++)
 		{

@@ -251,7 +251,7 @@ public partial class Main : Node3D
 	float target = 1;
 
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
-	float shotTimer; bool timeArgDone, skinTested, dropsTested;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -393,6 +393,43 @@ public partial class Main : Node3D
 			var pa = args.FirstOrDefault(a => a.StartsWith("--pitch="));
 			if (pa != null) player.Pitch = float.Parse(pa[8..], System.Globalization.CultureInfo.InvariantCulture);
 			if (inv.Survival) { health = 13; gloom = 3; changeTime = 0; DrawHearts(); }
+		}
+		if (args.Contains("--farm") && !farmTested && !menuOpen)
+		{   // (test: a row of soil in front of you with water at one end, tilled and planted the way you would, then 200 seconds of growing)
+			farmTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			player.Yaw = 0;   // (lined up with the blocks)
+			var fwd = new Vector3(0, 0, -1); var side = new Vector3(-1, 0, 0);
+			var c0 = player.Pos + fwd * 3.5f; int y = world.Heights[(int)c0.Z * World.WX + (int)c0.X];
+			(int x, int z) At(int k) { var p = c0 + side * (k - 4); return ((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z)); }
+			for (int k = -1; k < 10; k++)
+			{   // the row, with a stone kerb round it so the water stays put
+				var (x, z) = At(k);
+				for (int d = -1; d <= 1; d++) { world.SetBlock(x, y - 1, z + d, Blocks.Dirt); world.SetBlock(x, y, z + d, Blocks.Stone); for (int u = 1; u < 4; u++) world.SetBlock(x, y + u, z + d, 0); }
+				if (k >= 0 && k < 9) world.SetBlock(x, y, z, k == 0 ? Blocks.Water : Blocks.Grass);
+			}
+			int hoe = Blocks.Tools.First(t => Blocks.Get(t)?.Tool == "hoe");
+			for (int k = 1; k < 9; k++)
+			{
+				var (x, z) = At(k);
+				inv.SetSlot(0, hoe); SelectSlot(0); FarmUse(x, y, z, Blocks.Grass);
+				inv.SetSlot(0, Blocks.GrainSeeds); FarmUse(x, y, z, world.GetBlock(x, y, z));
+				if (k == 1) { inv.SetSlot(0, Blocks.BoneAsh); FarmUse(x, y + 1, z, world.GetBlock(x, y + 1, z)); }   // (fertilized by clicking the crop)
+			}
+			Check("hoe tills grass and seeds go in", Enumerable.Range(1, 8).All(k => { var (x, z) = At(k); return Blocks.IsSoil(world.GetBlock(x, y, z)) && world.GetBlock(x, y + 1, z) == Blocks.GrainStages[0]; }));
+			for (int s = 0; s < 3; s++) world.TickTimers(1);
+			string Soil() => string.Join(" ", Enumerable.Range(1, 8).Select(k => { var (x, z) = At(k); return world.GetBlock(x, y, z) + "/" + world.GetBlock(x, y + 1, z); }));
+			GD.Print("farm after 3s (soil/crop): " + Soil());
+			Check("soil joined to water is wet up to 5 away, the next is dry", Enumerable.Range(1, 6).All(k => { var (x, z) = At(k); return Blocks.SoilWet(world.GetBlock(x, y, z)); }) && !Blocks.SoilWet(world.GetBlock(At(7).x, y, At(7).z)));
+			for (int s = 0; s < 200; s++) world.TickTimers(1);
+			GD.Print("farm after 203s (soil/crop): " + Soil());
+			var (fx, fz) = At(1); var (wx, wz) = At(3); var (dx, dz) = At(8);
+			Check("wet + fertilized is ripe", world.GetBlock(fx, y + 1, fz) == Blocks.GrainRipe);
+			Check("wet grows faster than dry", world.GetBlock(wx, y + 1, wz) > world.GetBlock(dx, y + 1, dz));
+			world.SetBlock(fx, y + 1, fz, 0);
+			Check("a harvest uses up one of the fertilizer's 2", world.FertLeft.GetValueOrDefault(World.Idx(fx, y, fz)) == 1);
+			Check("Flour by hand, Bread in the kiln, Bread is food", Inventory.Recipes.Any(r => r.Out == Blocks.Flour) && Kilns.Smelts.Any(s => s.Out == Blocks.Bread && s.From == Blocks.Flour) && Blocks.Get(Blocks.Bread)?.Food > 0);
+			inv.SetSlot(0, Blocks.Bread); player.Pitch = -0.45f;
 		}
 		if (args.Contains("--face") && others.Count > 0)
 		{   // multiplayer test: step back from the first other player and look at them, menus closed

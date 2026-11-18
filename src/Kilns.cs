@@ -15,6 +15,7 @@ public class Kilns
 		(Blocks.Terracotta, Blocks.Clay),  // Clay -> Terracotta
 		(Blocks.Stone, Blocks.Cobblestone),// Cobblestone -> Stone
 		(Blocks.BoneAsh, Blocks.Bone),     // Bone -> Bone Ash
+		(Blocks.Bread, Blocks.Flour),      // Flour -> Bread
 	};
 	// how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1
 	public static readonly Dictionary<int, int> Fuel = new() { [Blocks.Log] = 4, [Blocks.StrippedLog] = 4, [Blocks.Planks] = 2, [Blocks.Stick] = 1 };

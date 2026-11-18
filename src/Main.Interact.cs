@@ -76,9 +76,43 @@ public partial class Main
 		CollectBlock(hb, h.X, h.Y, h.Z);
 		Sound.I?.Break(hb);
 		if (hb == Blocks.Leaves && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);   // leaves: 1 in 5 chance of a stick too
+		if (hb == Blocks.GrainRipe) for (int n = 1 + rnd.Next(2); n > 0; n--) Collect(Blocks.GrainSeeds, h.X, h.Y, h.Z);   // ripe Grain: 1-2 seeds too
 		var b = Blocks.B[hb];
 		if (Blocks.IsTorch(hb) && b.Count > 1) world.SetBlock(h.X, h.Y, h.Z, Blocks.TorchVariant(b.Wi, b.Count - 1, b.Burn));   // take one torch off
 		else { world.SetBlock(h.X, h.Y, h.Z, 0); world.DropTorchesAround(h.X, h.Y, h.Z, DropFor); }
+	}
+
+	// right-click farming: a Hoe tills Grass or Dirt, Grain Seeds are planted in tilled soil, Bone Ash fertilizes it
+	// (clicking the crop works too). Returns true if it did something, or the click should stop there.
+	bool FarmUse(int x, int y, int z, int hb)
+	{
+		int held = inv.Held, above = world.GetBlock(x, y + 1, z);
+		bool onCrop = Blocks.IsCrop(hb);
+		int ty = onCrop ? y - 1 : y, target = onCrop ? world.GetBlock(x, ty, z) : hb;
+		if (inv.Holding("hoe"))
+		{
+			if ((hb != Blocks.Grass && hb != Blocks.Dirt) || (above != 0 && !Blocks.IsWater(above) && !Blocks.IsFlower(above))) return false;
+			if (Blocks.IsFlower(above)) { Collect(above, x, y + 1, z); world.SetBlock(x, y + 1, z, 0); }
+			world.SetBlock(x, y, z, Blocks.Tilled);
+			Sound.I?.Place(Blocks.Dirt); MobNoise(x, y, z);
+			if (hb == Blocks.Grass && rnd.NextDouble() < 1.0 / 6) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
+			return true;
+		}
+		if (held == Blocks.GrainSeeds)
+		{
+			if (!Blocks.IsSoil(hb) || above != 0) return true;
+			world.SetBlock(x, y + 1, z, Blocks.GrainStages[0]);
+			Sound.I?.Place(Blocks.Grass); MobNoise(x, y + 1, z); inv.UseOne();
+			return true;
+		}
+		if (held == Blocks.BoneAsh && Blocks.IsSoil(target))
+		{
+			if (Blocks.SoilFert(target)) world.FertLeft[World.Idx(x, ty, z)] = World.FertHarvests;   // (topped up)
+			else world.SetBlock(x, ty, z, Blocks.SoilId(Blocks.SoilWet(target), true));
+			Sound.I?.Place(Blocks.Dirt); inv.UseOne();
+			return true;
+		}
+		return false;
 	}
 
 	void Place()
@@ -93,6 +127,7 @@ public partial class Main
 		// right-click a lit (burning) kiln holding a Stick: the stick catches fire and becomes a Torch
 		if (Blocks.IsFurnace(hb) && Blocks.B[hb].Lit && id == Blocks.Stick) { LightStick(); return; }
 		if (Blocks.IsFurnace(hb) && !ShiftDown) { kilnAt = World.Idx(h.X, h.Y, h.Z); OpenPanel(kilnPanel); return; }
+		if (FarmUse(h.X, h.Y, h.Z, hb)) return;
 		if (id == 0) return;
 		if (Blocks.FormOf(id) != null) { PlaceShape(h, id); return; }
 		// a piece goes in the half-block spot just in front of whatever you're looking at

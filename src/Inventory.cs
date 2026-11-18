@@ -98,6 +98,7 @@ public class Inventory
 		new() { Out = 67, N = 1, Needs = new[] { (65, 1) }, At = "bench", Tool = "pickaxe" },
 		new() { Out = 68, N = 1, Needs = new[] { (66, 1) }, At = "bench", Tool = "pickaxe" },
 		new() { Out = 69, N = 1, Needs = new[] { (3, 1) }, At = "bench", Tool = "pickaxe" },
+		new() { Out = Blocks.Flour, N = 1, Needs = new[] { (Blocks.Grain, 1) } },   // Grain, mashed by hand -> Flour
 	};
 	static Inventory()
 	{
