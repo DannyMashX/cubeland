@@ -1,79 +1,73 @@
 [
     {
-        "version":  "Alpha 0.0.7.1",
-        "folder":  "alpha-0.0.7.1",
-        "date":  "2026-11-18",
-        "url":  "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.7.1/CubeLand-Alpha-0.0.7.1-windows.zip",
-        "size":  74771652,
-        "exe":  "CubeLand-Alpha-0.0.7.1-windows/CubeLand.exe",
-        "changes":  [
-                        "Tools are held properly: gripped near the end of the handle and turned side-on, so you swing with the head, not the flat",
-                        "Tools in your hand are 1 pixel thick, for a little depth",
-                        "Blocks in your inventory, hotbar and recipes show as little 3D cubes, including the kiln (with its opening); torches show as a small 3D stick",
-                        "The + on blocks with other forms is smaller, neatly centred and tucked into the slot\u0027s bottom-right corner",
-                        "Menus and the hotbar scale with your screen\u0027s display scaling by a whole number (150% makes them twice as big), so every pixel stays even"
-                    ]
+        "version": "Alpha 0.0.7.1",
+        "folder": "alpha-0.0.7.1",
+        "date": "2026-11-18",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.7.1/CubeLand-Alpha-0.0.7.1-windows.zip",
+        "size": 74771652,
+        "exe": "CubeLand-Alpha-0.0.7.1-windows/CubeLand.exe",
+        "changes": [
+            "Tools are held properly: gripped near the end of the handle and turned side-on, so you swing with the head, not the flat",
+            "Tools in your hand are 1 pixel thick, for a little depth",
+            "Blocks in your inventory, hotbar and recipes show as little 3D cubes, including the kiln (with its opening); torches show as a small 3D stick",
+            "The + on blocks with other forms is smaller, neatly centred and tucked into the slot's bottom-right corner",
+            "Menus and the hotbar scale with your screen's display scaling by a whole number (150% makes them twice as big), so every pixel stays even"
+        ]
+    },    {
+        "version": "Alpha 0.0.7.0",
+        "title": "Shape & Shade",
+        "folder": "alpha-0.0.7.0",
+        "date": "2026-11-17",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.7.0/CubeLand-Alpha-0.0.7.0-windows.zip",
+        "size": 74766534,
+        "exe": "CubeLand-Alpha-0.0.7.0-windows/CubeLand.exe",
+        "changes": [
+            "Skin menu: paint your own player skin, with a turning 3D preview",
+            "Your hand now wears your skin",
+            "New player figure with elbows and knees",
+            "Other players look like players in their own skin, holding their items",
+            "New letters, numbers and symbols",
+            "Plays multiplayer with web version Alpha 0.0.7.0"
+        ]
     },
     {
-        "value":  [
-                      {
-                          "version":  "Alpha 0.0.7.0",
-                          "title":  "Shape \u0026 Shade",
-                          "folder":  "alpha-0.0.7.0",
-                          "date":  "2026-11-17",
-                          "url":  "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.7.0/CubeLand-Alpha-0.0.7.0-windows.zip",
-                          "size":  74766534,
-                          "exe":  "CubeLand-Alpha-0.0.7.0-windows/CubeLand.exe",
-                          "changes":  [
-                                          "Skin menu: paint your own player skin, with a turning 3D preview",
-                                          "Your hand now wears your skin",
-                                          "New player figure with elbows and knees",
-                                          "Other players look like players in their own skin, holding their items",
-                                          "New letters, numbers and symbols",
-                                          "Plays multiplayer with web version Alpha 0.0.7.0"
-                                      ]
-                      },
-                      {
-                          "version":  "Alpha 0.0.6.1",
-                          "folder":  "alpha-0.0.6.1",
-                          "date":  "2026-11-17",
-                          "url":  "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.6.1/CubeLand-Alpha-0.0.6.1-windows.zip",
-                          "size":  74746691,
-                          "exe":  "CubeLand-Alpha-0.0.6.1-windows/CubeLand.exe",
-                          "changes":  [
-                                          "Holding a torch now lights up the area around you, so you can see in dark caves and at night",
-                                          "Plays multiplayer with web version Alpha 0.0.6.1"
-                                      ]
-                      },
-                      {
-                          "version":  "Alpha 0.0.6.0",
-                          "title":  "Brick \u0026 Bloom",
-                          "folder":  "alpha-0.0.6.0",
-                          "date":  "2026-11-17",
-                          "url":  "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.6.0/CubeLand-Alpha-0.0.6.0-windows.zip",
-                          "size":  74745965,
-                          "exe":  "CubeLand-Alpha-0.0.6.0-windows/CubeLand.exe",
-                          "changes":  [
-                                          "Terracotta, Chiseled Terracotta and Bricks in 12 colours",
-                                          "Flowers grow in small patches on grass; pick them and plant them again",
-                                          "12 Dyes from flowers, Burnt Torches and Rocks, plus mixing for more colours",
-                                          "Plays multiplayer with web version Alpha 0.0.6.0"
-                                      ]
-                      },
-                      {
-                          "version":  "Alpha 0.0.5.1",
-                          "folder":  "alpha-0.0.5.1",
-                          "date":  "2026-11-16",
-                          "url":  "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.5.1/CubeLand-Alpha-0.0.5.1-windows.zip",
-                          "size":  74724394,
-                          "exe":  "CubeLand-Alpha-0.0.5.1-windows/CubeLand.exe",
-                          "changes":  [
-                                          "Cubeland as a desktop program for Windows, made in Godot, with the same version number as the web game",
-                                          "Plays multiplayer with the web version: host or join with the same 5-letter codes",
-                                          "Uses your font and menu pictures, like the web version"
-                                      ]
-                      }
-                  ],
-        "Count":  4
+        "version": "Alpha 0.0.6.1",
+        "folder": "alpha-0.0.6.1",
+        "date": "2026-11-17",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.6.1/CubeLand-Alpha-0.0.6.1-windows.zip",
+        "size": 74746691,
+        "exe": "CubeLand-Alpha-0.0.6.1-windows/CubeLand.exe",
+        "changes": [
+            "Holding a torch now lights up the area around you, so you can see in dark caves and at night",
+            "Plays multiplayer with web version Alpha 0.0.6.1"
+        ]
+    },
+    {
+        "version": "Alpha 0.0.6.0",
+        "title": "Brick & Bloom",
+        "folder": "alpha-0.0.6.0",
+        "date": "2026-11-17",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.6.0/CubeLand-Alpha-0.0.6.0-windows.zip",
+        "size": 74745965,
+        "exe": "CubeLand-Alpha-0.0.6.0-windows/CubeLand.exe",
+        "changes": [
+            "Terracotta, Chiseled Terracotta and Bricks in 12 colours",
+            "Flowers grow in small patches on grass; pick them and plant them again",
+            "12 Dyes from flowers, Burnt Torches and Rocks, plus mixing for more colours",
+            "Plays multiplayer with web version Alpha 0.0.6.0"
+        ]
+    },
+    {
+        "version": "Alpha 0.0.5.1",
+        "folder": "alpha-0.0.5.1",
+        "date": "2026-11-16",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.5.1/CubeLand-Alpha-0.0.5.1-windows.zip",
+        "size": 74724394,
+        "exe": "CubeLand-Alpha-0.0.5.1-windows/CubeLand.exe",
+        "changes": [
+            "Cubeland as a desktop program for Windows, made in Godot, with the same version number as the web game",
+            "Plays multiplayer with the web version: host or join with the same 5-letter codes",
+            "Uses your font and menu pictures, like the web version"
+        ]
     }
 ]
