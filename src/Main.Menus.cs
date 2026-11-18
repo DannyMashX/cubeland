@@ -303,7 +303,7 @@ public partial class Main
 		pauseTitle.Text = "Paused"; resumeBtn.Text = "Back to game";
 		if (!ready) { wantPlay = true; loading.Visible = true; return; }   // (still growing: goes in once it's ready)
 		pauseMenu.Visible = false;
-		Input.MouseMode = Input.MouseModeEnum.Captured;
+		Input.MouseMode = LockMode;
 	}
 	void Resume() { if (dead) return; Play(); }
 	// open another world: save this one, then start the game over with the other one
@@ -327,7 +327,7 @@ public partial class Main
 	// called every frame: the pause screen shows whenever you're not playing (and not in a menu); auto save
 	void UpdateScreens(float dt)
 	{
-		bool playing = ready && Input.MouseMode == Input.MouseModeEnum.Captured;
+		bool playing = ready && Input.MouseMode == LockMode;
 		bool paused = ready && !menuOpen && !invOpen && !dead && !playing;
 		if (paused && !pauseMenu.Visible && settings.Autosave) SaveWorld();   // paused: save (if auto save is on)
 		pauseMenu.Visible = paused && !wantPlay;

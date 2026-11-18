@@ -466,7 +466,7 @@ public partial class Main
 			else if (m != null) { m.Position = new Vector3(0, -7.5f / 16, -0.04f); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-MathF.PI / 2, 0, 0); }
 		}
 		// swinging: one swing per click, and over and over while the left button is held (breaking)
-		bool locked = Input.MouseMode == Input.MouseModeEnum.Captured;
+		bool locked = Input.MouseMode == LockMode;
 		if (handSwing > 0) handSwing = Math.Max(0, handSwing - dt / 0.28f);
 		else if (locked && !invOpen && Input.IsMouseButtonPressed(MouseButton.Left)) handSwing = 1;
 		handDip = Math.Max(0, handDip - dt * 5);

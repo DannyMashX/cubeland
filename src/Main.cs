@@ -87,9 +87,9 @@ public partial class Main : Node3D
 		loading.SetAnchorsPreset(Control.LayoutPreset.FullRect);
 		loading.AddThemeFontSizeOverride("font_size", 24);
 		ui.AddChild(loading);
-		var cross = new Control(); cross.SetAnchorsPreset(Control.LayoutPreset.Center); ui.AddChild(cross);
-		cross.AddChild(new ColorRect { Color = new Color(1, 1, 1, 0.8f), Position = new Vector2(-9, -1), Size = new Vector2(18, 2) });
-		cross.AddChild(new ColorRect { Color = new Color(1, 1, 1, 0.8f), Position = new Vector2(-1, -9), Size = new Vector2(2, 18) });
+		var cross = new Control { MouseFilter = Control.MouseFilterEnum.Ignore }; cross.SetAnchorsPreset(Control.LayoutPreset.Center); ui.AddChild(cross);
+		cross.AddChild(new ColorRect { Color = new Color(1, 1, 1, 0.8f), Position = new Vector2(-9, -1), Size = new Vector2(18, 2), MouseFilter = Control.MouseFilterEnum.Ignore });   // (the hidden pointer sits under it: clicks pass through)
+		cross.AddChild(new ColorRect { Color = new Color(1, 1, 1, 0.8f), Position = new Vector2(-1, -9), Size = new Vector2(2, 18), MouseFilter = Control.MouseFilterEnum.Ignore });
 		uiLayer = ui;
 	}
 
@@ -124,7 +124,7 @@ public partial class Main : Node3D
 		ApplyPlayerSave();
 		if (netClient) ConnectToHost();
 		// tests go straight in; otherwise the main menu (or the Ready screen) is showing
-		Input.MouseMode = (tempWorld || HasArg("--play")) && !menuOpen ? Input.MouseModeEnum.Captured : Input.MouseModeEnum.Visible;
+		Input.MouseMode = (tempWorld || HasArg("--play")) && !menuOpen ? LockMode : Input.MouseModeEnum.Visible;
 	}
 	Vector3 FindSpawn()
 	{
@@ -151,7 +151,7 @@ public partial class Main : Node3D
 			if (genTask.IsCompleted) StartPlaying();
 			else { loading.Text = $"Making the world... {(int)(genProgress * 100)}%"; loading.Visible = !menuOpen; return; }
 		}
-		bool moving = Input.MouseMode == Input.MouseModeEnum.Captured && !invOpen && !dead && (!netClient || welcomed);   // (a joined game waits for the host's blocks)
+		bool moving = Input.MouseMode == LockMode && !invOpen && !dead && (!netClient || welcomed);   // (a joined game waits for the host's blocks)
 		if (!dead && (moving || (inv.Survival && invOpen && (!netClient || welcomed))))   // (survival keeps falling while the inventory is open)
 		{
 			var ev = player.Update(dt, !moving ? default : new Player.Keys
@@ -162,6 +162,15 @@ public partial class Main : Node3D
 				Sprint = Input.IsPhysicalKeyPressed(Key.Shift),
 			});
 			PlayerSounds(ev);
+		}
+		MouseLook();
+		if (moving)
+		{   // the arrow keys look around too (for laptops, or when the mouse won't)
+			float turn = 2.4f * dt;
+			if (Input.IsPhysicalKeyPressed(Key.Left)) player.Yaw += turn;
+			if (Input.IsPhysicalKeyPressed(Key.Right)) player.Yaw -= turn;
+			if (Input.IsPhysicalKeyPressed(Key.Up)) player.Pitch = Math.Min(1.55f, player.Pitch + turn * 0.75f);
+			if (Input.IsPhysicalKeyPressed(Key.Down)) player.Pitch = Math.Max(-1.55f, player.Pitch - turn * 0.75f);
 		}
 		cam.Position = player.EyePos;
 		cam.Rotation = new Vector3(player.Pitch, player.Yaw, 0);
@@ -277,7 +286,7 @@ public partial class Main : Node3D
 				GD.Print("worlds: " + string.Join(", ", Worlds.List().Select(w => w.Name + " " + w.Seed)));
 			}
 		}
-		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Input.MouseMode = Input.MouseModeEnum.Captured; }   // menus closed, as if playing
+		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Input.MouseMode = LockMode; }   // menus closed, as if playing
 		var timeArg = args.FirstOrDefault(a => a.StartsWith("--time="));   // (test: the time of day again, after the world loaded its own)
 		if (timeArg != null && !timeArgDone) { timeArgDone = true; sky.TimeOfDay = float.Parse(timeArg[7..], System.Globalization.CultureInfo.InvariantCulture); }
 		var holdArg = args.FirstOrDefault(a => a.StartsWith("--hold="));   // (test: put item ID in the first hotbar slot and hold it)
@@ -285,6 +294,31 @@ public partial class Main : Node3D
 		if (args.Contains("--inventory") && !invOpen && !menuOpen) OpenPanel(invPanel);   // (test: the inventory open)
 		var varArg = args.FirstOrDefault(a => a.StartsWith("--variants="));   // (test: a block's other forms shown under the grid)
 		if (varArg != null && invOpen && openVariants == 0) ShowVariants(int.Parse(varArg[11..]), null);
+		var pressArg = args.FirstOrDefault(a => a.StartsWith("--press="));   // (test: hold this key down, e.g. --press=Left)
+		if (pressArg != null && !menuOpen && !Input.IsPhysicalKeyPressed(Enum.Parse<Key>(pressArg[8..])))
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Enum.Parse<Key>(pressArg[8..]), Pressed = true });
+		var clicksArg = args.FirstOrDefault(a => a.StartsWith("--clicks="));   // (test: click these buttons in turn, by their words, e.g. --clicks=Singleplayer,Play)
+		if (clicksArg != null && clickStep < clicksArg[9..].Split(',').Length && clickWait-- <= 0)
+		{   // (test: click whichever "Play" button is showing, with real-looking mouse clicks, as a person would)
+			clickWait = 30;
+			Button FindPlay(Node n) { foreach (var ch in n.GetChildren()) { if (ch is Button b && b.IsVisibleInTree() && b.Text.StartsWith(clicksArg[9..].Split(',')[clickStep], StringComparison.OrdinalIgnoreCase)) return b; var f = FindPlay(ch); if (f != null) return f; } return null; }
+			var pb = FindPlay(this);
+			if (pb != null)
+			{
+				var at = pb.GetGlobalRect().GetCenter() * GetWindow().ContentScaleFactor;   // (the window's pixels)
+				clickStep++;
+				GD.Print($"clicks: clicking \"{pb.Text}\" ({pb.GetPath()}) at {at}");
+				Input.ParseInputEvent(new InputEventMouseMotion { Position = at, GlobalPosition = at });
+				Input.ParseInputEvent(new InputEventMouseButton { Position = at, GlobalPosition = at, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left });
+				Input.ParseInputEvent(new InputEventMouseButton { Position = at, GlobalPosition = at, ButtonIndex = MouseButton.Left, Pressed = false });
+			}
+		}
+		if (args.Contains("--mousemove") && !menuOpen && Input.MouseMode == LockMode)   // (test: the mouse moving right, through the same path a real one takes)
+		{
+			DisplayServer.WarpMouse(DisplayServer.WindowGetSize() / 2 + new Vector2I(8, 0));   // (the real pointer, 8 pixels right of the middle)
+			if ((int)(shotTimer * 2) != (int)((shotTimer - (float)GetProcessDeltaTime()) * 2))
+				GD.Print($"mousemove: yaw {player.Yaw:F2}, mouse over: {GetViewport().GuiGetHoveredControl()?.GetPath()}");
+		}
 		var dropArg = args.FirstOrDefault(a => a.StartsWith("--drops="));     // (test: these items lying in a row in front of you)
 		if (dropArg != null && !dropsTested && !menuOpen && shotTimer > 0.5f)
 		{
@@ -332,7 +366,7 @@ public partial class Main : Node3D
 		{   // a Dan and the night mob (Grr Angry until the Zombie is switched on) just in front of you, facing you
 			mobsShown = true;
 			if (menuOpen) ShowMainMenu(false);
-			Input.MouseMode = Input.MouseModeEnum.Captured;   // playing, so the pause screen stays away
+			Input.MouseMode = LockMode;   // playing, so the pause screen stays away
 			var ya = args.FirstOrDefault(a => a.StartsWith("--yaw="));
 			if (ya != null) player.Yaw = float.Parse(ya[6..], System.Globalization.CultureInfo.InvariantCulture);
 			var fwd = new Vector3(-MathF.Sin(player.Yaw), 0, -MathF.Cos(player.Yaw)); var side = new Vector3(fwd.Z, 0, -fwd.X);
@@ -513,7 +547,7 @@ public partial class Main : Node3D
 	}
 	void UpdateOutline()
 	{
-		var h = Input.MouseMode == Input.MouseModeEnum.Captured ? player.Raycast() : null;
+		var h = Input.MouseMode == LockMode ? player.Raycast() : null;
 		outline.Visible = h != null;
 		if (h is not { } hit) return;
 		Vector3 pos = new(hit.X, hit.Y, hit.Z), size = Vector3.One;
@@ -573,20 +607,39 @@ public partial class Main : Node3D
 	}
 
 	double lastSpace;
+	Input.MouseModeEnum lastMouseMode = (Input.MouseModeEnum)(-1); int clickWait = 60, clickStep;
+	// Looking around with the mouse. Godot's own "captured" mouse gets its movements a special way (raw input) that
+	// doesn't reach the game on some PCs, so instead the pointer is hidden and kept inside the window, and each frame
+	// the game sees how far it moved from the middle of the window, turns you by that much, and puts it back.
+	public const Input.MouseModeEnum LockMode = Input.MouseModeEnum.ConfinedHidden;
+	bool lookPrimed;
+	void MouseLook()
+	{
+		bool locked = Input.MouseMode == LockMode && GetWindow().HasFocus();
+		var mode = Input.MouseMode;
+		if (mode != lastMouseMode) { lastMouseMode = mode; GD.Print($"mouse: {mode}"); }   // (a note in the game's log)
+		if (!locked) { lookPrimed = false; return; }
+		var middle = DisplayServer.WindowGetSize() / 2;
+		var at = DisplayServer.MouseGetPosition() - DisplayServer.WindowGetPosition();
+		if (lookPrimed)
+		{
+			var moved = at - middle;
+			player.Yaw -= moved.X * MouseSens;
+			player.Pitch = Math.Clamp(player.Pitch - moved.Y * MouseSens, -1.55f, 1.55f);
+		}
+		if (at != middle) DisplayServer.WarpMouse(middle);
+		lookPrimed = true;
+	}
 	public override void _UnhandledInput(InputEvent e)
 	{
 		if (skinPanel?.Visible == true) { SkinKey(e); return; }   // (the skin editor has keys of its own)
 		if (!ready) return;
-		bool locked = Input.MouseMode == Input.MouseModeEnum.Captured;
-		if (e is InputEventMouseMotion mm && locked)
-		{
-			player.Yaw -= mm.Relative.X * MouseSens;
-			player.Pitch = Math.Clamp(player.Pitch - mm.Relative.Y * MouseSens, -1.55f, 1.55f);
-		}
+		bool locked = Input.MouseMode == LockMode;
+		if (e is InputEventMouseMotion && locked) { }   // (looking around is done in MouseLook, every frame)
 		else if (e is InputEventMouseButton mb && mb.Pressed)
 		{
 			if (invOpen || menuOpen || pauseMenu.Visible || dead) return;
-			if (!locked) { Input.MouseMode = Input.MouseModeEnum.Captured; return; }
+			if (!locked) { Input.MouseMode = LockMode; return; }
 			if (mb.ButtonIndex == MouseButton.Left) { SwingHand(); Break(); }
 			else if (mb.ButtonIndex == MouseButton.Right) { SwingHand(); Place(); }
 			else if (mb.ButtonIndex == MouseButton.WheelDown) SelectSlot(inv.Selected + 1);

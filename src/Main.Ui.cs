@@ -347,7 +347,7 @@ public partial class Main
 	{
 		invOpen = false; kilnAt = -1;
 		dim.Visible = false;
-		Input.MouseMode = Input.MouseModeEnum.Captured;
+		Input.MouseMode = LockMode;
 	}
 	// redraw whichever screen is open (after crafting, or when your hotbar changes)
 	void RefreshPanels()

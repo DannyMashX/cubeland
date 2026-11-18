@@ -444,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.7.2"></script>
+<script src="textures.js?v=alpha-0.0.7.3"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.7.2';
+const GAME_VERSION = 'Alpha 0.0.7.3';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -3013,7 +3013,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyT') timeOfDay = (timeOfDay + 0.125) % 1;   // skip ahead 1/8 of a day
   const num = e.code.match(/^Digit(\d)$/);
   if (num) selectSlot(num[1] === '0' ? 9 : +num[1] - 1);
-  if (e.code === 'Space') e.preventDefault();
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('mousemove', e => {
@@ -5971,6 +5971,11 @@ function frame(now) {
   // movement intent
   let fx = 0, fz = 0;
   if (locked) {
+    // the arrow keys look around too (for laptops, or when the mouse won't)
+    const turn = 2.4 * dt;
+    if (keys.ArrowLeft) player.yaw += turn; if (keys.ArrowRight) player.yaw -= turn;
+    if (keys.ArrowUp) player.pitch = Math.min(Math.PI / 2 - 0.01, player.pitch + turn * 0.75);
+    if (keys.ArrowDown) player.pitch = Math.max(-Math.PI / 2 + 0.01, player.pitch - turn * 0.75);
     if (keys.KeyW) fz += 1; if (keys.KeyS) fz -= 1;
     if (keys.KeyD) fx += 1; if (keys.KeyA) fx -= 1;
   }
