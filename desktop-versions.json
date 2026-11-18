@@ -1,5 +1,17 @@
 [
     {
+        "version": "Alpha 0.0.7.2",
+        "folder": "alpha-0.0.7.2",
+        "date": "2026-11-18",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.7.2/CubeLand-Alpha-0.0.7.2-windows.zip",
+        "size": 74772993,
+        "exe": "CubeLand-Alpha-0.0.7.2-windows/CubeLand.exe",
+        "changes": [
+            "Slabs, stairs, quarters and pieces now show as little 3D models in the inventory, as sharp as full blocks",
+            "Dropped blocks, slabs, stairs, pieces and torches are now little 3D models instead of flat pictures"
+        ]
+    },
+    {
         "version": "Alpha 0.0.7.1",
         "folder": "alpha-0.0.7.1",
         "date": "2026-11-18",
@@ -13,7 +25,8 @@
             "The + on blocks with other forms is smaller, neatly centred and tucked into the slot's bottom-right corner",
             "Menus and the hotbar scale with your screen's display scaling by a whole number (150% makes them twice as big), so every pixel stays even"
         ]
-    },    {
+    },
+    {
         "version": "Alpha 0.0.7.0",
         "title": "Shape & Shade",
         "folder": "alpha-0.0.7.0",

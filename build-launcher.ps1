@@ -50,6 +50,7 @@ $launcherZip = "$PWD\builds\CubeLand-Launcher-windows.zip"
 $unchanged = (Test-Path $launcherZip) -and (Test-Path $hashFile) -and ([IO.File]::ReadAllText($hashFile).Trim() -eq $launcherHash)
 if ($unchanged -and -not ($args -contains '-Launcher')) {
   "Launcher unchanged since the last build - skipping it ($launcherZip)"
+  & { $ErrorActionPreference = 'Continue'; & $godot --headless --path launcher --import 2>&1 | Out-Null }   # (puts back Godot's .import files for the freshly copied pictures)
 } else {
   Export 'launcher' "$PWD\builds\CubeLand-Launcher-windows\CubeLand Launcher.exe"
   [IO.File]::WriteAllText($hashFile, $launcherHash)
