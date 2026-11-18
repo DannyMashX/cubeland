@@ -34,6 +34,25 @@ function Export($path, $out) {
 }
 New-Item -ItemType Directory -Force builds | Out-Null
 if (-not (Test-Path builds\.gdignore)) { [IO.File]::WriteAllText("$PWD\builds\.gdignore", '') }
-Export 'launcher' "$PWD\builds\CubeLand-Launcher-windows\CubeLand Launcher.exe"
+
+# The launcher is only rebuilt when something in launcher\ (its code, scenes or your font and gui pictures) has
+# changed since the last build, since it takes about 10 minutes. Run with -Launcher to rebuild it anyway.
+# (The fingerprint skips Godot's own working files, which change by themselves.)
+$root = (Resolve-Path 'launcher').Path
+$sha = [Security.Cryptography.SHA256]::Create()
+$parts = Get-ChildItem -Recurse -File -LiteralPath $root |
+  Where-Object { $_.FullName -notmatch '\\(\.godot|bin|obj)\\' -and $_.Extension -ne '.import' } |
+  Sort-Object FullName |
+  ForEach-Object { $_.FullName.Substring($root.Length) + ':' + [BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($_.FullName))) }
+$launcherHash = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes((@($godot) + $parts) -join "`n")))
+$hashFile = "$PWD\builds\launcher.hash"
+$launcherZip = "$PWD\builds\CubeLand-Launcher-windows.zip"
+$unchanged = (Test-Path $launcherZip) -and (Test-Path $hashFile) -and ([IO.File]::ReadAllText($hashFile).Trim() -eq $launcherHash)
+if ($unchanged -and -not ($args -contains '-Launcher')) {
+  "Launcher unchanged since the last build - skipping it ($launcherZip)"
+} else {
+  Export 'launcher' "$PWD\builds\CubeLand-Launcher-windows\CubeLand Launcher.exe"
+  [IO.File]::WriteAllText($hashFile, $launcherHash)
+}
 $tag = $ver -replace '\s+', '-'   # "Alpha 0.0.5.1" -> "Alpha-0.0.5.1"
 Export '.' "$PWD\builds\CubeLand-$tag-windows\CubeLand.exe"
