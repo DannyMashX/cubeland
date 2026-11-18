@@ -181,7 +181,7 @@ public partial class Main
 		{
 			string title = (r.N > 1 ? r.N + " " : "") + Blocks.B[r.Out].Name;
 			var b = new Button { Text = $"{title}\n{Inventory.NeedsText(r)}", Icon = Atlas.SlotIcon(r.Out), Alignment = HorizontalAlignment.Left,
-				Disabled = !inv.CanCraft(r), TextureFilter = Atlas.IsCubeIcon(r.Out) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
+				Disabled = !inv.CanCraft(r), TextureFilter = Atlas.Is3DIcon(r.Out) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
 			b.AddThemeConstantOverride("icon_max_width", 32);
 			b.Pressed += () =>
 			{
@@ -272,7 +272,7 @@ public partial class Main
 		foreach (var (outId, from) in Kilns.Smelts)
 		{
 			var b = new Button { Text = $"{Blocks.B[outId].Name}\n1 {Blocks.B[from].Name} · {Kilns.SmeltTime} seconds", Icon = Atlas.SlotIcon(outId),
-				Alignment = HorizontalAlignment.Left, Disabled = inv.Survival && inv.CountOf(from) < 1, TextureFilter = Atlas.IsCubeIcon(outId) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
+				Alignment = HorizontalAlignment.Left, Disabled = inv.Survival && inv.CountOf(from) < 1, TextureFilter = Atlas.Is3DIcon(outId) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
 			b.AddThemeConstantOverride("icon_max_width", 32);
 			b.Pressed += () =>
 			{

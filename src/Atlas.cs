@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -90,9 +91,108 @@ public static class Atlas
 	static readonly Dictionary<int, ImageTexture> slotCache = new();
 	public static ImageTexture SlotIcon(int id)
 	{
-		if (!IsCubeIcon(id)) return IconTexture(id);
-		if (!slotCache.TryGetValue(id, out var t)) slotCache[id] = t = ImageTexture.CreateFromImage(CubeIcon(id));
+		if (!Is3DIcon(id)) return IconTexture(id);
+		if (!slotCache.TryGetValue(id, out var t)) slotCache[id] = t = ImageTexture.CreateFromImage(BoxIcon(id));
 		return t;
+	}
+	// What a block, slab, stairs, piece or torch is made of, for its 3D icon and its 3D drop: boxes {x0, x1, z0, z1, y0, y1}
+	// in texture pixels (0-16 = a whole block), or null for things shown as a flat picture. Slabs and stairs are shown
+	// in one set way (made of the 8 half-size spots, spot = x + y*2 + z*4): a bottom slab, stairs with the step at the
+	// back, a quarter lying at the front... A loose piece is a small cube in the middle. (Same as the web edition's iconBoxes.)
+	static readonly Dictionary<string, int> IconMasks = new()
+		{ ["slab"] = 0x33, ["vslab"] = 0x55, ["stairs"] = 0x33 | 0x44, ["quarter"] = 0x30, ["vquarter"] = 0xA0, ["vstairs"] = 0xFF ^ 0xA0 };
+	public static int[][] IconBoxes(int id)
+	{
+		var b = Blocks.Get(id);
+		if (id == 0 || b == null || b.T == null || b.T.Length < 3) return null;
+		if (b.Piece > 0) return new[] { new[] { 4, 12, 4, 12, 4, 12 } };
+		if (b.Form != null && IconMasks.TryGetValue(b.Form, out int mask))
+		{
+			var boxes = new List<int[]>();
+			for (int s = 0; s < 8; s++) if ((mask & (1 << s)) != 0)
+			{
+				int x = (s & 1) * 8, y = (s >> 1 & 1) * 8, z = (s >> 2 & 1) * 8;
+				boxes.Add(new[] { x, x + 8, z, z + 8, y, y + 8 });
+			}
+			return boxes.ToArray();
+		}
+		if (!IsCubeIcon(id)) return null;
+		return b.Shape == "torch" ? new[] { new[] { 6, 10, 6, 10, 0, 16 } } : new[] { new[] { 0, 16, 0, 16, 0, 16 } };
+	}
+	public static bool Is3DIcon(int id) => IconBoxes(id) != null;
+	// a thing's face pictures: top, front, side, bottom (the kiln's front is its opening)
+	static int[] IconTiles(BlockDef b) => new[] { b.T[1], b.T.Length > 3 ? b.T[3] : b.T[0], b.T[0], b.T[2] };
+	// The 3D icon: seen from above at the front-left corner, in a 4 x TILE square (each texture pixel is 2 icon pixels
+	// across). Each icon pixel takes its colour straight from the nearest face under it, so it stays crisp.
+	// (The same drawing as the web edition's drawBoxIcon.)
+	public static Image BoxIcon(int id)
+	{
+		int R = TILE * 4, T = TILE; float k = 2;
+		var boxes = IconBoxes(id); var tiles = IconTiles(Blocks.Get(id));
+		float[] shades = { 1, 0.8f, 0.62f };
+		var img = Image.CreateEmpty(R, R, false, Image.Format.Rgba8);
+		for (int y = 0; y < R; y++)
+			for (int x = 0; x < R; x++)
+			{
+				// A (x across), B (z, towards you) and D (down from the top) of the point on each face under this pixel;
+				// the face nearest you (the biggest A + B - D) that isn't see-through wins
+				float X = (x + 0.5f - T * k) / k, Y = (y + 0.5f) / k, best = -1e9f; Color? col = null;
+				foreach (var bx in boxes)
+				{
+					float a0 = bx[0], a1 = bx[1], b0 = bx[2], b1 = bx[3], d0 = T - bx[5], d1 = T - bx[4];
+					void Try(int f, float A, float B, float D, int u, int v)
+					{
+						float depth = A + B - D;
+						if (depth <= best) return;
+						var c = Image.GetPixel(tiles[f] * T + u, v);
+						if (c.A < 0.5f) return;
+						best = depth; col = new Color(c.R * shades[f], c.G * shades[f], c.B * shades[f], 1);
+					}
+					{ float A = Y - d0 + X / 2, B = Y - d0 - X / 2;                    // top
+					  if (A >= a0 && A < a1 && B >= b0 && B < b1) Try(0, A, B, d0, (int)MathF.Floor(A), (int)MathF.Floor(B)); }
+					{ float A = X + b1, D = Y - (A + b1) / 2;                           // front
+					  if (A >= a0 && A < a1 && D >= d0 && D < d1) Try(1, A, b1, D, (int)MathF.Floor(A), (int)MathF.Floor(D)); }
+					{ float B = a1 - X, D = Y - (a1 + B) / 2;                           // side
+					  if (B >= b0 && B < b1 && D >= d0 && D < d1) Try(2, a1, B, D, T - 1 - (int)MathF.Floor(B), (int)MathF.Floor(D)); }
+				}
+				if (col != null) img.SetPixel(x, y, col.Value);
+			}
+		return img;
+	}
+	// the same boxes as a little 3D model, 1 unit for a whole block, centred, with each face's picture (for drops).
+	// Its texture is the 4 face pictures side by side; the faces are shaded like the icon (the item shader multiplies
+	// by the vertex colour).
+	static readonly Dictionary<int, (ArrayMesh mesh, ImageTexture tex)> boxModels = new();
+	public static (ArrayMesh mesh, ImageTexture tex) BoxModel(int id)
+	{
+		if (boxModels.TryGetValue(id, out var m)) return m;
+		int T = TILE; var tiles = IconTiles(Blocks.Get(id));
+		var strip = Image.CreateEmpty(T * 4, T, false, Image.Format.Rgba8);
+		for (int f = 0; f < 4; f++) strip.BlitRect(Image, new Rect2I(tiles[f] * T, 0, T, T), new Vector2I(f * T, 0));
+		var st = new SurfaceTool(); st.Begin(Mesh.PrimitiveType.Triangles);
+		// one face: corners p ({A, h, B}), their texture pixels q ({u, v}, v down from the picture's top), tile f, shade
+		void Face(float[][] p, float[][] q, int f, float s)
+		{
+			foreach (int i in new[] { 0, 1, 2, 0, 2, 3 })
+			{
+				st.SetColor(new Color(s, s, s));
+				st.SetUV(new Vector2((f * T + q[i][0]) / (T * 4f), q[i][1] / T));
+				st.AddVertex(new Vector3(p[i][0] / T - 0.5f, p[i][1] / T - 0.5f, p[i][2] / T - 0.5f));
+			}
+		}
+		float[] P(float a, float h, float b) => new[] { a, h, b };
+		float[] Q(float u, float v) => new[] { u, v };
+		foreach (var bx in IconBoxes(id))
+		{
+			float a0 = bx[0], a1 = bx[1], b0 = bx[2], b1 = bx[3], h0 = bx[4], h1 = bx[5], d0 = T - h1, d1 = T - h0;
+			Face(new[] { P(a0, h1, b0), P(a0, h1, b1), P(a1, h1, b1), P(a1, h1, b0) }, new[] { Q(a0, b0), Q(a0, b1), Q(a1, b1), Q(a1, b0) }, 0, 1);       // top
+			Face(new[] { P(a0, h0, b1), P(a0, h0, b0), P(a1, h0, b0), P(a1, h0, b1) }, new[] { Q(a0, b1), Q(a0, b0), Q(a1, b0), Q(a1, b1) }, 3, 0.5f);    // bottom
+			Face(new[] { P(a0, h1, b1), P(a0, h0, b1), P(a1, h0, b1), P(a1, h1, b1) }, new[] { Q(a0, d0), Q(a0, d1), Q(a1, d1), Q(a1, d0) }, 1, 0.8f);    // front
+			Face(new[] { P(a1, h1, b0), P(a1, h0, b0), P(a0, h0, b0), P(a0, h1, b0) }, new[] { Q(T - a1, d0), Q(T - a1, d1), Q(T - a0, d1), Q(T - a0, d0) }, 2, 0.8f);   // back
+			Face(new[] { P(a1, h1, b1), P(a1, h0, b1), P(a1, h0, b0), P(a1, h1, b0) }, new[] { Q(T - b1, d0), Q(T - b1, d1), Q(T - b0, d1), Q(T - b0, d0) }, 2, 0.62f);  // right side
+			Face(new[] { P(a0, h1, b0), P(a0, h0, b0), P(a0, h0, b1), P(a0, h1, b1) }, new[] { Q(b0, d0), Q(b0, d1), Q(b1, d1), Q(b1, d0) }, 2, 0.62f);   // left side
+		}
+		return boxModels[id] = (st.Commit(), ImageTexture.CreateFromImage(strip));
 	}
 	// ordinary whole blocks (not items, shapes, liquids, pieces, slabs or stairs, nor ones with a picture of their own);
 	// a block with a front face (the kiln) is a cube too, and a torch is a little standing stick
@@ -101,38 +201,6 @@ public static class Atlas
 		var b = Blocks.Get(id);
 		return id != 0 && b != null && b.T != null && b.T.Length >= 3 && (b.Icon < 0 || b.T.Length > 3) && !b.Item
 			&& (b.Shape == null || b.Shape == "torch") && !b.Liquid && b.Piece <= 0 && b.Form == null;
-	}
-	// a block as a little cube, seen from above at the front-left corner: top, front (left) and side (right), in a
-	// 4 x TILE square (each texture pixel is 2 icon pixels across). Each pixel takes its colour straight from the face
-	// picture under it, so it stays crisp. A torch is the same drawing cut down to its stick (texture pixels 6-10).
-	// (The same drawing as the web edition's drawCubeIcon.)
-	public static Image CubeIcon(int id)
-	{
-		int R = TILE * 4, s = TILE * 2, T = TILE; var b = Blocks.Get(id);
-		int a = b.Shape == "torch" ? 6 : 0, e = b.Shape == "torch" ? 10 : TILE;
-		float k = (float)s / TILE;
-		int[] tiles = { b.T[1], b.T.Length > 3 ? b.T[3] : b.T[0], b.T[0] };   // top, front, side
-		var img = Image.CreateEmpty(R, R, false, Image.Format.Rgba8);
-		// per face: origin (a point on the top, A and B texture pixels in), where one texture pixel across (U) and one
-		// down (V) moves you, its shade, and the solid u and v
-		float AtX(float A, float B) => s + (A - B) * k; float AtY(float A, float B) => (A + B) * k / 2;
-		float[][] faces = {
-			new[] { AtX(0, 0), AtY(0, 0), 1, 0.5f, -1, 0.5f, 1, a, e, a, e },
-			new[] { AtX(0, e), AtY(0, e), 1, 0.5f, 0, 1, 0.8f, a, e, 0, T },
-			new[] { AtX(e, T), AtY(e, T), 1, -0.5f, 0, 1, 0.62f, T - e, T - a, 0, T } };
-		for (int y = 0; y < R; y++)
-			for (int x = 0; x < R; x++)
-				for (int fi = 0; fi < 3; fi++)
-				{
-					var f = faces[fi];
-					float dx = (x + 0.5f - f[0]) / k, dy = (y + 0.5f - f[1]) / k, det = f[2] * f[5] - f[3] * f[4];
-					float u = (dx * f[5] - dy * f[4]) / det, v = (f[2] * dy - f[3] * dx) / det;
-					if (u < f[7] || u >= f[8] || v < f[9] || v >= f[10]) continue;
-					var c = Image.GetPixel(tiles[fi] * TILE + (int)u, (int)v);
-					if (c.A >= 0.5f) img.SetPixel(x, y, new Color(c.R * f[6], c.G * f[6], c.B * f[6], 1));
-					break;
-				}
-		return img;
 	}
 	// draw a block's or item's picture into a TILE x TILE image (its hotbar icon)
 	public static Image Icon(int id)

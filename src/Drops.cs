@@ -27,8 +27,12 @@ public partial class Drops : Node3D
 		shader ??= GD.Load<Shader>("res://src/item.gdshader");
 		quad ??= new QuadMesh { Size = new Vector2(0.4f, 0.4f) };
 		var mat = new ShaderMaterial { Shader = shader };
-		mat.SetShaderParameter("tex", Atlas.IconTexture(id));
-		var mesh = new MeshInstance3D { Mesh = quad, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+		// blocks, slabs, stairs, pieces and torches drop as a little 3D model of themselves; other things as their picture
+		bool box = Atlas.Is3DIcon(id);
+		var model = box ? Atlas.BoxModel(id) : default;
+		mat.SetShaderParameter("tex", box ? model.tex : Atlas.IconTexture(id));
+		var mesh = new MeshInstance3D { Mesh = box ? model.mesh : quad, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+		if (box) mesh.Scale = new Vector3(0.25f, 0.25f, 0.25f);
 		AddChild(mesh);
 		double a = rnd.NextDouble() * Math.PI * 2;
 		var d = new Drop { K = ++count, Id = id, P = new Vector3(x, y, z), V = new Vector3((float)Math.Cos(a) * 1.5f, 4, (float)Math.Sin(a) * 1.5f), Spin = (float)rnd.NextDouble() * 6, Mesh = mesh, Mat = mat };
@@ -70,7 +74,7 @@ public partial class Drops : Node3D
 			}
 			d.Spin += dt * 2;
 			d.Mesh.Position = new Vector3(d.P.X, d.P.Y + 0.25f + MathF.Sin(d.Age * 3) * 0.06f, d.P.Z);
-			d.Mesh.Rotation = new Vector3(0, d.Spin, 0);
+			d.Mesh.Rotation = new Vector3(0, d.Spin, 0);   // (Rotation keeps the mesh's Scale)
 			// lit like everything else
 			if ((d.LightT -= dt) <= 0)
 			{

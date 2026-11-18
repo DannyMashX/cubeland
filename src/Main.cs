@@ -242,7 +242,7 @@ public partial class Main : Node3D
 	float target = 1;
 
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
-	float shotTimer; bool timeArgDone, skinTested;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -283,6 +283,20 @@ public partial class Main : Node3D
 		var holdArg = args.FirstOrDefault(a => a.StartsWith("--hold="));   // (test: put item ID in the first hotbar slot and hold it)
 		if (holdArg != null && int.TryParse(holdArg[7..], out int holdId) && inv.Id[0] != holdId) { inv.SetSlot(0, holdId); SelectSlot(0); }
 		if (args.Contains("--inventory") && !invOpen && !menuOpen) OpenPanel(invPanel);   // (test: the inventory open)
+		var varArg = args.FirstOrDefault(a => a.StartsWith("--variants="));   // (test: a block's other forms shown under the grid)
+		if (varArg != null && invOpen && openVariants == 0) ShowVariants(int.Parse(varArg[11..]), null);
+		var dropArg = args.FirstOrDefault(a => a.StartsWith("--drops="));     // (test: these items lying in a row in front of you)
+		if (dropArg != null && !dropsTested && !menuOpen && shotTimer > 0.5f)
+		{
+			dropsTested = true;
+			var ids = dropArg[8..].Split(',').Select(int.Parse).ToArray();
+			var fwd = new Vector3(-MathF.Sin(player.Yaw), 0, -MathF.Cos(player.Yaw)); var side = new Vector3(fwd.Z, 0, -fwd.X);
+			for (int i = 0; i < ids.Length; i++)
+			{
+				var p = player.Pos + fwd * 2.2f + side * ((i - (ids.Length - 1) / 2f) * 0.45f);
+				var d = drops.Add(ids[i], p.X, player.Pos.Y, p.Z); d.V = Vector3.Zero;
+			}
+		}
 		var swingArg = args.FirstOrDefault(a => a.StartsWith("--swing="));   // (test: your hand frozen part way through a swing, 0-1)
 		if (swingArg != null) testSwing = float.Parse(swingArg[8..], System.Globalization.CultureInfo.InvariantCulture);
 		var slotArg = args.FirstOrDefault(a => a.StartsWith("--slot="));   // (test: hold what's in hotbar slot N, 1-10)

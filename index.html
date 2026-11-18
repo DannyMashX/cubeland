@@ -444,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.7.1"></script>
+<script src="textures.js?v=alpha-0.0.7.2"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.7.1';
+const GAME_VERSION = 'Alpha 0.0.7.2';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -4373,8 +4373,11 @@ function dropItem(id, x, y, z) {
     t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
     dropTexCache[id] = t;
   }
-  const mat = withHaze(new THREE.MeshBasicMaterial({ map: dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide }));
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), mat);
+  // blocks, slabs, stairs, pieces and torches drop as a little 3D model of themselves; other things as their picture
+  const box = iconBoxes(id) && boxModel(id);
+  const mat = withHaze(new THREE.MeshBasicMaterial({ map: box ? box.tex : dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: !!box }));
+  const mesh = new THREE.Mesh(box ? box.geo : new THREE.PlaneGeometry(0.4, 0.4), mat);
+  if (box) { mesh.scale.setScalar(0.25); mesh.userData.sharedGeo = true; }
   scene.add(mesh);
   const a = Math.random() * Math.PI * 2;
   const d = { k: ++dropCount, id, x, y, z, vx: Math.cos(a) * 1.5, vy: 4, vz: Math.sin(a) * 1.5, age: 0, spin: Math.random() * 6, mesh, light: 0 };
@@ -4383,7 +4386,7 @@ function dropItem(id, x, y, z) {
 }
 let dropCount = 0;   // every drop gets its own number (k), for multiplayer
 function removeDrop(d) {
-  scene.remove(d.mesh); d.mesh.geometry.dispose(); d.mesh.material.dispose();
+  scene.remove(d.mesh); if (!d.mesh.userData.sharedGeo) d.mesh.geometry.dispose(); d.mesh.material.dispose();
   drops.splice(drops.indexOf(d), 1);
 }
 function updateDrops(dt) {
@@ -4633,10 +4636,9 @@ const hotbarEl = document.getElementById('hotbar');
 const nameEl = document.getElementById('blockname');
 let nameTimer = 0;
 const hotbarIcons = [], hotbarCounts = [];
-// `flat`: always the flat picture (for things in the world: dropped items, what's held). Otherwise an ordinary whole
-// block is drawn as a little cube.
+// `flat`: always the flat picture (for what's held). Otherwise a block, slab, stairs, piece or torch is drawn in 3D.
 function drawIcon(canvas, id, flat) {
-  if (!flat && isCubeIcon(id)) { drawCubeIcon(canvas, id); return; }
+  if (!flat && iconBoxes(id)) { drawBoxIcon(canvas, id); return; }
   if (canvas.width !== TILE) canvas.width = canvas.height = TILE;
   canvas.style.imageRendering = '';
   const ctx = canvas.getContext('2d');
@@ -4659,42 +4661,101 @@ function drawIcon(canvas, id, flat) {
 // (a block with a front face, like the kiln, is a cube too even though it has a picture of its own; torches are a
 // little standing stick)
 const isCubeIcon = id => { const b = BLOCKS[id]; return !!(id && b && b.t && (b.icon === undefined || b.t[3] !== undefined) && !isItem(id) && (!b.shape || isTorch(id)) && !b.liquid && !isPiece(id) && !formOf(id)); };
-// a block as a little cube, seen from above at the front-left corner: top, front (left) and side (right), in a
-// 4 x TILE square (each texture pixel is 2 icon pixels across). Each pixel takes its colour straight from the face
-// picture under it, so it stays crisp. A torch is the same drawing cut down to its stick (texture pixels 6-10).
-// (The same drawing as the desktop edition's Atlas.CubeIcon.)
-function drawCubeIcon(canvas, id) {
-  const R = TILE * 4, s = TILE * 2, b = BLOCKS[id], [a, e] = isTorch(id) ? [6, 10] : [0, TILE];
+// What a block, slab, stairs, piece or torch is made of, for its 3D icon and its 3D drop: boxes [x0, x1, z0, z1, y0, y1]
+// in texture pixels (0-16 = a whole block), or null for things shown as a flat picture. Slabs and stairs are shown
+// in one set way (made of the 8 half-size spots, spot = x + y*2 + z*4): a bottom slab, stairs with the step at the
+// back, a quarter lying at the front... A loose piece is a small cube in the middle.
+const ICON_MASKS = { slab: 0x33, vslab: 0x55, stairs: 0x33 | 0x44, quarter: 0x30, vquarter: 0xA0, vstairs: 0xFF ^ 0xA0 };
+function iconBoxes(id) {
+  const b = BLOCKS[id];
+  if (!id || !b || !b.t) return null;
+  if (isPiece(id)) return [[4, 12, 4, 12, 4, 12]];
+  const form = formOf(id);
+  if (form) {
+    const boxes = [];
+    for (let s = 0; s < 8; s++) if (ICON_MASKS[form] & (1 << s)) {
+      const x = (s & 1) * 8, y = (s >> 1 & 1) * 8, z = (s >> 2 & 1) * 8;
+      boxes.push([x, x + 8, z, z + 8, y, y + 8]);
+    }
+    return boxes;
+  }
+  if (!isCubeIcon(id)) return null;
+  return isTorch(id) ? [[6, 10, 6, 10, 0, 16]] : [[0, 16, 0, 16, 0, 16]];
+}
+// a thing's face pictures: top, front, side, bottom (the kiln's front is its opening)
+const iconTiles = b => [b.t[1], b.t[3] ?? b.t[0], b.t[0], b.t[2] ?? b.t[0]];
+// The 3D icon: seen from above at the front-left corner, in a 4 x TILE square (each texture pixel is 2 icon pixels
+// across). Each icon pixel takes its colour straight from the nearest face under it, so it stays crisp.
+// (The same drawing as the desktop edition's Atlas.BoxIcon.)
+function drawBoxIcon(canvas, id) {
+  const R = TILE * 4, k = 2, T = TILE, b = BLOCKS[id], boxes = iconBoxes(id);
   if (canvas.width !== R) canvas.width = canvas.height = R;
   canvas.style.imageRendering = 'auto';   // shrunk to fit a slot it's smoothed, not missing every other row
-  const tiles = [b.t[1], b.t[3] ?? b.t[0], b.t[0]];   // top, front, side
-  const src = document.createElement('canvas'); src.width = TILE * 3; src.height = TILE;
+  const tiles = iconTiles(b);
+  const src = document.createElement('canvas'); src.width = T * 3; src.height = T;
   const sctx = src.getContext('2d');
-  tiles.forEach((t, k) => sctx.drawImage(atlas, t * TILE, 0, TILE, TILE, k * TILE, 0, TILE, TILE));
-  const px = sctx.getImageData(0, 0, TILE * 3, TILE).data;
+  tiles.slice(0, 3).forEach((t, f) => sctx.drawImage(atlas, t * T, 0, T, T, f * T, 0, T, T));
+  const px = sctx.getImageData(0, 0, T * 3, T).data;
   const ctx = canvas.getContext('2d'), out = ctx.createImageData(R, R);
+  const shades = [1, 0.8, 0.62];
   for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) {
-    const hit = cubeFaceAt(x + 0.5, y + 0.5, s, a, e);
-    if (!hit) continue;
-    const [k, u, v, shade] = hit, i = (v * TILE * 3 + k * TILE + u) * 4, o = (y * R + x) * 4;
-    if (px[i + 3] < 128) continue;
-    out.data[o] = px[i] * shade; out.data[o + 1] = px[i + 1] * shade; out.data[o + 2] = px[i + 2] * shade; out.data[o + 3] = 255;
+    // A (x across), B (z, towards you) and D (down from the top) of the point on each face under this pixel;
+    // the face nearest you (the biggest A + B - D) that isn't see-through wins
+    const X = (x + 0.5 - T * k) / k, Y = (y + 0.5) / k;   // (A - B, and (A + B) / 2 + D)
+    let best = -1e9, col = null;
+    for (const [a0, a1, b0, b1, h0, h1] of boxes) {
+      const d0 = T - h1, d1 = T - h0;
+      const hits = [];
+      { const A = Y - d0 + X / 2, B = Y - d0 - X / 2;                          // top
+        if (A >= a0 && A < a1 && B >= b0 && B < b1) hits.push([0, A, B, d0, Math.floor(A), Math.floor(B)]); }
+      { const A = X + b1, D = Y - (A + b1) / 2;                                 // front
+        if (A >= a0 && A < a1 && D >= d0 && D < d1) hits.push([1, A, b1, D, Math.floor(A), Math.floor(D)]); }
+      { const B = a1 - X, D = Y - (a1 + B) / 2;                                 // side
+        if (B >= b0 && B < b1 && D >= d0 && D < d1) hits.push([2, a1, B, D, T - 1 - Math.floor(B), Math.floor(D)]); }
+      for (const [f, A, B, D, u, v] of hits) {
+        const depth = A + B - D, i = (v * T * 3 + f * T + u) * 4;
+        if (depth > best && px[i + 3] >= 128) { best = depth; col = [px[i] * shades[f], px[i + 1] * shades[f], px[i + 2] * shades[f]]; }
+      }
+    }
+    if (!col) continue;
+    const o = (y * R + x) * 4;
+    out.data[o] = col[0]; out.data[o + 1] = col[1]; out.data[o + 2] = col[2]; out.data[o + 3] = 255;
   }
   ctx.putImageData(out, 0, 0);
 }
-// which face of the icon cube a point is on: [face (0 top, 1 front, 2 side), texture x, texture y, shade], or null.
-// The cube is `s` pixels along each edge in the picture: the top's corners are (s, 0), (2s, s/2), (s, s), (0, s/2).
-// Only texture pixels a..e across (and a..e deep, for the top) are solid: 0..TILE for a whole block.
-function cubeFaceAt(x, y, s, a = 0, e = TILE) {
-  const k = s / TILE, at = (A, B) => [s + (A - B) * k, (A + B) * k / 2];   // a point on the top, A and B pixels in
-  const T = TILE, faces = [   // origin, where one texture pixel across (U) and one down (V) moves you, shade, the solid u and v
-    [...at(0, 0), 1, 0.5, -1, 0.5, 1, a, e, a, e], [...at(0, e), 1, 0.5, 0, 1, 0.8, a, e, 0, T], [...at(e, T), 1, -0.5, 0, 1, 0.62, T - e, T - a, 0, T]];
-  for (let f = 0; f < 3; f++) {
-    const [ox, oy, ux, uy, vx, vy, shade, u0, u1, v0, v1] = faces[f], dx = (x - ox) / k, dy = (y - oy) / k, det = ux * vy - uy * vx;
-    const u = (dx * vy - dy * vx) / det, v = (ux * dy - uy * dx) / det;
-    if (u >= u0 && u < u1 && v >= v0 && v < v1) return [f, Math.floor(u), Math.floor(v), shade];
+// the same boxes as a little 3D model, `size` world units for a whole block, centred, with each face's picture
+// (for drops). Its texture is the 4 face pictures side by side; the faces are shaded like the icon.
+const boxModelCache = {};
+function boxModel(id) {
+  if (boxModelCache[id]) return boxModelCache[id];
+  const T = TILE, tiles = iconTiles(BLOCKS[id]);
+  const c = document.createElement('canvas'); c.width = T * 4; c.height = T;
+  const cx = c.getContext('2d');
+  tiles.forEach((t, f) => cx.drawImage(atlas, t * T, 0, T, T, f * T, 0, T, T));
+  const tex = new THREE.CanvasTexture(c);
+  tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+  const pos = [], uv = [], col = [], ind = [];
+  // one face: corners p (4 points [A, h, B]), their texture pixels q ([u, v], v down from the picture's top), tile f, shade
+  const face = (p, q, f, s) => {
+    const n = pos.length / 3;
+    p.forEach(([A, h, B], i) => { pos.push(A / T - 0.5, h / T - 0.5, B / T - 0.5); uv.push((f * T + q[i][0]) / (T * 4), 1 - q[i][1] / T); col.push(s, s, s); });
+    ind.push(n, n + 1, n + 2, n, n + 2, n + 3);
+  };
+  for (const [a0, a1, b0, b1, h0, h1] of iconBoxes(id)) {
+    const d0 = T - h1, d1 = T - h0;
+    face([[a0, h1, b0], [a0, h1, b1], [a1, h1, b1], [a1, h1, b0]], [[a0, b0], [a0, b1], [a1, b1], [a1, b0]], 0, 1);          // top
+    face([[a0, h0, b1], [a0, h0, b0], [a1, h0, b0], [a1, h0, b1]], [[a0, b1], [a0, b0], [a1, b0], [a1, b1]], 3, 0.5);        // bottom
+    face([[a0, h1, b1], [a0, h0, b1], [a1, h0, b1], [a1, h1, b1]], [[a0, d0], [a0, d1], [a1, d1], [a1, d0]], 1, 0.8);        // front
+    face([[a1, h1, b0], [a1, h0, b0], [a0, h0, b0], [a0, h1, b0]], [[T - a1, d0], [T - a1, d1], [T - a0, d1], [T - a0, d0]], 2, 0.8);   // back
+    face([[a1, h1, b1], [a1, h0, b1], [a1, h0, b0], [a1, h1, b0]], [[T - b1, d0], [T - b1, d1], [T - b0, d1], [T - b0, d0]], 2, 0.62);  // right side
+    face([[a0, h1, b0], [a0, h0, b0], [a0, h0, b1], [a0, h1, b1]], [[b0, d0], [b0, d1], [b1, d1], [b1, d0]], 2, 0.62);       // left side
   }
-  return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(ind);
+  return (boxModelCache[id] = { geo, tex });
 }
 HOTBAR.forEach((id, i) => {
   const slot = document.createElement('div');

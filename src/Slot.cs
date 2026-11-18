@@ -43,7 +43,7 @@ public partial class Slot : Panel
 	{
 		Pic.Texture = id != 0 ? Atlas.SlotIcon(id) : null;
 		// a cube icon is drawn bigger than the slot, so it's smoothed down rather than missing every other row
-		Pic.TextureFilter = Atlas.IsCubeIcon(id) ? TextureFilterEnum.Linear : TextureFilterEnum.Nearest;
+		Pic.TextureFilter = Atlas.Is3DIcon(id) ? TextureFilterEnum.Linear : TextureFilterEnum.Nearest;
 		Count.Text = count > 1 ? count.ToString() : "";
 	}
 	public bool Selected { get => sel; set { sel = value; Restyle(); } }

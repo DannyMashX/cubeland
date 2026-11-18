@@ -1,5 +1,15 @@
 [
     {
+        "version":  "Alpha 0.0.7.2",
+        "folder":  "alpha-0.0.7.2",
+        "date":  "2026-11-18",
+        "notes":  "Slabs, stairs, quarters and pieces now show as little 3D models in the inventory, as sharp as full blocks",
+        "changes":  [
+                        "Slabs, stairs, quarters and pieces now show as little 3D models in the inventory, as sharp as full blocks",
+                        "Dropped blocks, slabs, stairs, pieces and torches are now little 3D models instead of flat pictures"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.7.1",
         "folder":  "alpha-0.0.7.1",
         "date":  "2026-11-18",
