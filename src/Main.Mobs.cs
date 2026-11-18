@@ -14,14 +14,15 @@ public partial class Main
 	{
 		public string Name; public int Health; public float Speed; public int Max;
 		public bool Hostile, Night, Dark, Burns, Shamble, Glow, Curious; public int Damage; public float Sight, Reach, Hearing, LightRange, Scale = 1;
+		public bool Thrower, Deep, Snuffer; public float Near, Far, Faint;   // (see the Skeleton and Gloomling below)
 		public string Growl; public (int id, int lo, int hi, float chance)[] Drops = Array.Empty<(int, int, int, float)>();
 	}
 	// drops: (item, fewest, most, chance) dropped when killed. hostile: chases and attacks you, survival only. dark: spawns anywhere dark (caves any time, open ground at night).
 	// burns: catches fire in daylight when nothing is over its head (water puts it out), losing 1 health a second.
 	// growl: its voice, heard every so often (and when hit) up to ~28 blocks away. curious: drawn to block sounds and torches.
-	// The Zombie arrives in Pack & Pasture (Alpha 0.0.8.0); until then Grr Angry stays the night mob. Set true to switch it on
-	// (it must match ZOMBIE_READY in the web game's index.html, or web and desktop players see different mobs).
-	public static readonly bool ZombieReady = false;
+	// The Zombie arrived in Fear & Foes (Alpha 0.0.8.0), taking over from Grr Angry as the night mob (false brings Grr back;
+	// it must match ZOMBIE_READY in the web game's index.html, or web and desktop players see different mobs).
+	public static readonly bool ZombieReady = true;
 	public static readonly Dictionary<string, MobType> MobTypes = MakeMobTypes();
 	static Dictionary<string, MobType> MakeMobTypes()
 	{
@@ -35,6 +36,14 @@ public partial class Main
 		else   // night: only spawns on open ground after dark. Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks
 			d["grrangry"] = new() { Name = "Grr Angry", Health = 8, Speed = 1.5f, Max = 5, Hostile = true, Night = true, Damage = 3, Sight = 16, Reach = 1.8f, Glow = true,
 				Curious = true, Hearing = 24, LightRange = 16, Growl = "growl", Scale = 1.6f, Drops = new[] { (Blocks.FireEssence, 1, 1, 1 / 20f) } };
+		// thrower: keeps its distance (closes in past Far, backs off inside Near) and throws Rocks at you when it can see you;
+		// Damage = what a Rock that hits you takes off. Its model is 32 pixels tall, so 0.9x is 1.8 blocks.
+		d["skeleton"] = new() { Name = "Skeleton", Health = 6, Speed = 1.4f, Max = 3, Hostile = true, Dark = true, Burns = true, Thrower = true, Near = 5, Far = 10,
+			Damage = 2, Sight = 18, Reach = 0, Glow = true, Scale = 0.9f, Drops = new[] { (Blocks.Bone, 1, 2, 1f) } };
+		// deep: only spawns where it's pitch dark underground. snuffer: creeps to the nearest burning torch (not an Ever Torch) and puts
+		// it out a stage at a time (lit -> smoldering -> burnt). Light doesn't hurt it, but it fades away (dropping nothing) when someone
+		// comes near holding a lit torch. faint: it never looks darker than this, so you can just make it out in the dark.
+		d["gloomling"] = new() { Name = "Gloomling", Health = 4, Speed = 1.1f, Max = 3, Deep = true, Snuffer = true, Faint = 0.3f, Drops = new[] { (Blocks.GloomWisp, 1, 1, 1f) } };
 		return d;
 	}
 
@@ -50,6 +59,8 @@ public partial class Main
 		public int HeldId; public MeshInstance3D HeldMesh;     // the item shown in its right hand (other players)
 		public Texture2D Skin;                                 // a picture of its own instead of the model's (your skin, a friend's)
 		public float Half = 0.3f, Height = 1;
+		public float Fade, ThrowT, ThrowCool = -1, SnuffCheck, Snuffing; public bool Thrown, Backing;   // fading away (Gloomling), throwing (Skeleton)
+		public (int x, int y, int z, float time)? Snuff;                                                  // the torch a Gloomling is heading for
 	}
 	// an arm or leg: swings at Pivot (shoulder/hip); Lower (forearm/shin, if the model has one) bends at the elbow/knee
 	public class Limb { public Node3D Pivot, Lower; public float Phase; }
@@ -283,7 +294,8 @@ public partial class Main
 	// moves a body's arms, legs and head for this frame. Stride counts steps (it goes up as it moves), Walk is 0 standing
 	// still .. 1 walking, swipe is how far into an attack its arms are (0 = not attacking).
 	// Rotations: + on x swings a hanging limb forward (its end towards the front), - swings it back. (Same as the web game's poseBody.)
-	static void PoseBody(Mob b, float dt, float swipe, bool shamble)
+	// throwing (0..1..0): the right arm swings up over the shoulder and comes down forward (a Skeleton throwing a Rock)
+	static void PoseBody(Mob b, float dt, float swipe, bool shamble, float throwing = 0)
 	{
 		b.Anim += dt;
 		float s = b.Stride, w = b.Walk, t = b.Anim;
@@ -319,7 +331,7 @@ public partial class Main
 		{
 			var a = b.Arms[k]; float swing = MathF.Sin(s + k * MathF.PI), hold = k == 1 && b.HeldMesh != null ? 1 : 0;   // (k 1 = the right arm, holding the item)
 			float side = a.Lower != null ? (k > 0 ? 1 : -1) * breath * 0.035f : 0;
-			a.Pivot.Rotation = new Vector3(swing * (a.Lower != null ? 0.5f : 0.12f) * w * (hold > 0 ? 0.4f : 1) + hold * 0.22f - swipe, 0, side);   // (jointed arms swing fully; stubby ones just sway)
+			a.Pivot.Rotation = new Vector3(swing * (a.Lower != null ? 0.5f : 0.12f) * w * (hold > 0 ? 0.4f : 1) + hold * 0.22f - swipe - (k == 1 ? throwing * 2.8f : 0), 0, side);   // (jointed arms swing fully; stubby ones just sway)
 			if (a.Lower != null) a.Lower.Rotation = new Vector3((0.12f + Math.Max(0, swing) * 0.4f) * w * (hold > 0 ? 0.3f : 1) + hold * 0.45f + swipe * 0.4f, 0, 0);
 		}
 		if (b.Head != null) { b.Head.Rotation = Vector3.Zero; b.Head.Position = new Vector3(b.Head.Position.X, b.HeadY + breath * 0.012f, b.Head.Position.Z); }
@@ -524,7 +536,8 @@ public partial class Main
 	// how bright a spot is right now: sky light x time of day, or torch light, whichever is brighter
 	float SpotLight(int x, int y, int z) => Math.Max(world.SkyExposure(x, y, z, null) * sky.SkyDay, World.LightCurve(world.LightAt(x, y, z)));
 	// a dark spot with room to stand (a cave at any time, or open ground at night), not too far above or below you
-	Vector3? FindDarkSpot(float minR, float maxR)
+	// deep: only pitch-dark spots underground (no sky above and no torch light at all), for the Gloomling
+	Vector3? FindDarkSpot(float minR, float maxR, bool deep = false)
 	{
 		for (int tries = 0; tries < 16; tries++)
 		{
@@ -539,7 +552,7 @@ public partial class Main
 			int y = lo + rnd.Next(top - lo + 1);
 			while (y >= lo && !(world.Solid(x, y, z) && !Blocks.IsWater(world.GetBlock(x, y, z)) && world.GetBlock(x, y + 1, z) == 0 && world.GetBlock(x, y + 2, z) == 0)) y--;
 			if (y < lo || Math.Abs(y + 1 - player.Pos.Y) > 20) continue;
-			if (SpotLight(x, y + 1, z) < 0.25f) return new Vector3(x + 0.5f, y + 1, z + 0.5f);
+			if (deep ? world.SkyExposure(x, y + 1, z, null) == 0 && world.LightAt(x, y + 1, z) == 0 : SpotLight(x, y + 1, z) < 0.25f) return new Vector3(x + 0.5f, y + 1, z + 0.5f);
 		}
 		return null;
 	}
@@ -606,7 +619,7 @@ public partial class Main
 				if (mobList.Count(m => m.Type == type) < t.Max)
 				{
 					bool first = mobList.Count == 0;
-					if ((t.Dark ? FindDarkSpot(first ? 12 : 24, first ? 30 : 56) : FindMobSpot(first ? 8 : 24, first ? 30 : 56)) is { } s) SpawnMob(type, s.X, s.Y, s.Z);
+					if ((t.Dark || t.Deep ? FindDarkSpot(first ? 12 : 24, first ? 30 : 56, t.Deep) : FindMobSpot(first ? 8 : 24, first ? 30 : 56)) is { } s) SpawnMob(type, s.X, s.Y, s.Z);
 				}
 			}
 		}
@@ -634,7 +647,40 @@ public partial class Main
 				m.AttackCool = Math.Max(0, m.AttackCool - dt);
 				float pdist = MathF.Sqrt((m.X - P.X) * (m.X - P.X) + (m.Z - P.Z) * (m.Z - P.Z));
 				bool hunting = t.Hostile && inv.Survival && !dead && !player.Flying && pdist < t.Sight && Math.Abs(P.Y - m.Y) < 6;
-				if (hunting)
+				m.Backing = false;
+				// a Gloomling: fades away when someone holding a lit torch comes near (it drops nothing)
+				if (t.Snuffer && m.Fade == 0 && TorchBearerNear(new Vector3(m.X, m.Y + 0.5f, m.Z), GloomFadeRange)) StartFade(m);
+				var snuff = t.Snuffer && m.Fade == 0 && m.Flee <= 0 ? SnuffGoal(m, dt) : null;
+				if (m.Fade > 0) m.Walking = false;
+				else if (hunting && t.Thrower)
+				{   // a Skeleton: faces you, keeps between Near and Far blocks away, and throws a Rock whenever it can see you
+					float toward = MathF.Atan2(m.X - P.X, m.Z - P.Z);
+					m.Yaw += Turn(m.Yaw, toward) * Math.Min(1, dt * 6); m.TurnTo = m.Yaw; m.Flee = 0;
+					m.Backing = pdist < t.Near;
+					m.Walking = pdist > t.Far || m.Backing;
+					if (m.ThrowCool < 0) m.ThrowCool = 1 + (float)rnd.NextDouble();
+					m.ThrowCool -= dt;
+					if (m.ThrowCool <= 0 && m.ThrowT == 0 && SeesPlayer(m)) { m.ThrowT = 0.001f; m.ThrowCool = 2.2f + (float)rnd.NextDouble() * 1.3f; }
+				}
+				else if (snuff is { } sn)
+				{   // a Gloomling with a torch to put out: creep over to it, then reach up and snuff it out a stage at a time
+					float gd = MathF.Sqrt((sn.x + 0.5f - m.X) * (sn.x + 0.5f - m.X) + (sn.z + 0.5f - m.Z) * (sn.z + 0.5f - m.Z));
+					float toward = MathF.Atan2(m.X - sn.x - 0.5f, m.Z - sn.z - 0.5f);
+					m.Yaw += Turn(m.Yaw, toward) * Math.Min(1, dt * 4); m.TurnTo = m.Yaw;
+					if (gd < 1.2f)
+					{
+						m.Walking = false;
+						if (m.Swing <= 0) m.Swing = 0.35f;   // (reaching for it)
+						if ((m.Snuffing += dt) >= 1.5f)
+						{
+							m.Snuffing = 0;
+							var b = Blocks.B[world.GetBlock(sn.x, sn.y, sn.z)];
+							world.SetBlock(sn.x, sn.y, sn.z, Blocks.TorchVariant(b.Wi, b.Count, b.Burn + 1));
+						}
+					}
+					else { m.Walking = true; m.Snuffing = 0; }
+				}
+				else if (hunting)
 				{   // hostile, survival only: walk straight at you and hit you when in reach
 					m.Walking = true; m.Flee = 0;
 					float toward = MathF.Atan2(m.X - P.X, m.Z - P.Z);
@@ -665,7 +711,7 @@ public partial class Main
 					else { m.Walking = false; m.Timer = 1 + (float)rnd.NextDouble() * 5; }
 				}
 				if (m.Walking && m.Flee <= 0 && m.TurnTo is { } tt) m.Yaw += Turn(m.Yaw, tt) * Math.Min(1, dt * 3);
-				float sp = m.Walking ? t.Speed * (m.Flee > 0 ? 2.4f : hunting ? 1.6f : 1) * (hunting && pdist < t.Reach * 0.7f ? 0 : 1) : 0;
+				float sp = m.Walking ? t.Speed * (m.Flee > 0 ? 2.4f : hunting ? 1.6f : 1) * (hunting && pdist < t.Reach * 0.7f ? 0 : 1) * (m.Backing ? -0.6f : 1) : 0;
 				float tvx = -MathF.Sin(m.Yaw) * sp, tvz = -MathF.Cos(m.Yaw) * sp;   // the front of the model is its north side
 				float acc = Math.Min(1, dt * (m.OnGround ? 10 : 2));
 				m.Vx += (tvx - m.Vx) * acc; m.Vz += (tvz - m.Vz) * acc;
@@ -699,7 +745,17 @@ public partial class Main
 			// arms: sway while walking, and a downward swipe when attacking
 			m.Swing = Math.Max(0, m.Swing - dt);
 			float swipe = m.Swing > 0 ? MathF.Sin((1 - m.Swing / 0.35f) * MathF.PI) * 0.9f : 0;
-			PoseBody(m, dt, swipe, t.Shamble);
+			// throwing a Rock: the arm winds up over the shoulder, lets go, and follows through forward
+			float throwing = 0;
+			if (m.ThrowT > 0)
+			{
+				m.ThrowT += dt;
+				float p = m.ThrowT / 0.5f;
+				throwing = p < 0.6f ? p / 0.6f : Math.Max(-0.3f, 1 - (p - 0.6f) / 0.4f * 1.3f);
+				if (!m.Thrown && p >= 0.6f) { m.Thrown = true; if (!netClient && m.Dead == 0) ThrowRock(m); }
+				if (p >= 1) { m.ThrowT = 0; m.Thrown = false; }
+			}
+			PoseBody(m, dt, swipe, t.Shamble, throwing);
 			m.Root.Position = new Vector3(m.X, m.Y, m.Z);
 			if (m.Dead == 0) m.Root.Rotation = new Vector3(0, m.Yaw, 0);
 			if (t.Growl != null && m.Dead == 0)
@@ -718,6 +774,7 @@ public partial class Main
 			var light = new Vector3(Math.Max(dtint.X * m.Sky, tc.X), Math.Max(dtint.Y * m.Sky, tc.Y), Math.Max(dtint.Z * m.Sky, tc.Z));
 			// glow: lights himself up, so he shows at full brightness in the dark (fades in as night falls)
 			if (t.Glow) { float gl = 1 - sky.SkyDay; light = new Vector3(Math.Max(light.X, gl), Math.Max(light.Y, gl), Math.Max(light.Z, gl)); }
+			if (t.Faint > 0) light = new Vector3(Math.Max(light.X, t.Faint), Math.Max(light.Y, t.Faint), Math.Max(light.Z, t.Faint));
 			// burning: in daylight with open sky straight above its head (and not in water). The host's game does the damage.
 			int hx = (int)MathF.Floor(m.X), hz = (int)MathF.Floor(m.Z);
 			m.Burning = t.Burns && m.Dead == 0 && sky.SkyDay > 0.6f && hx >= 0 && hz >= 0 && hx < World.WX && hz < World.WZ &&
@@ -730,6 +787,118 @@ public partial class Main
 			else m.BurnIn = 1;
 			if (m.Hurt > 0) { m.Hurt -= dt; light = light.Lerp(new Vector3(1, 0.15f, 0.1f), 0.6f); }
 			foreach (var mat in m.Mats) mat.SetShaderParameter("light", light);
+			// fading away (a Gloomling near a lit torch): it drifts up and thins out, then it's gone
+			if (m.Fade > 0)
+			{
+				m.Fade += dt;
+				float f = Math.Min(1, m.Fade / GloomFadeTime);
+				foreach (var mat in m.Mats) mat.SetShaderParameter("fade", f);
+				m.Root.Position = new Vector3(m.X, m.Y + f * 0.6f, m.Z);
+				if (f >= 1 && !netClient) RemoveMob(m);
+			}
+		}
+		UpdateRocks(dt);
+	}
+	// how close (in blocks) someone holding a lit torch has to come for a Gloomling to fade away, and how long fading takes (seconds)
+	const float GloomFadeRange = 6, GloomFadeTime = 1.2f;
+	static bool IsLitTorch(int id) => Blocks.IsTorch(id) && (Blocks.B[id].Burn == 0 || Blocks.B[id].Burn == 3);
+	// a Gloomling starts fading away
+	void StartFade(Mob m) { m.Fade = 0.001f; m.Walking = false; }
+	// is anyone (you, or a friend in a game you're hosting) holding a lit torch within r blocks of p?
+	bool TorchBearerNear(Vector3 p, float r) =>
+		(!dead && IsLitTorch(inv.Held) && new Vector3(player.Pos.X - p.X, player.Pos.Y + 1 - p.Y, player.Pos.Z - p.Z).Length() < r) || FriendTorchNear(p, r);
+	// the burning torch a Gloomling is heading for, or null. It looks for the nearest one every couple of seconds, and gives up on
+	// one it can't get to in time (then wanders for a while).
+	(int x, int y, int z, float time)? SnuffGoal(Mob m, float dt)
+	{
+		if (m.Snuff is { } g)
+		{
+			var b = Blocks.Get(world.GetBlock(g.x, g.y, g.z));
+			g.time -= dt;
+			if (b != null && b.Shape == "torch" && b.Burn < 2 && g.time > 0) { m.Snuff = g; return g; }
+			m.Snuff = null;
+			if (g.time <= 0) { m.SnuffCheck = 8; return null; }   // (couldn't reach it)
+		}
+		if ((m.SnuffCheck -= dt) > 0) return null;
+		m.SnuffCheck = 2;
+		float bd = 20;
+		foreach (int i in world.Torches)
+		{
+			if (Blocks.B[world.Blocks[i]].Burn >= 2) continue;   // (lit or smoldering only: not burnt, and not an Ever Torch)
+			var (x, y, z) = World.FromIdx(i);
+			float d = new Vector3(x + 0.5f - m.X, y - m.Y, z + 0.5f - m.Z).Length();
+			if (d < bd) { bd = d; m.Snuff = (x, y, z, 25); }
+		}
+		return m.Snuff;
+	}
+	// can this mob see you? (nothing solid on the line from its eyes to yours)
+	bool SeesPlayer(Mob m)
+	{
+		var o = new Vector3(m.X, m.Y + m.Height * 0.85f, m.Z); var d = player.Pos + new Vector3(0, 1.5f, 0) - o;
+		int n = (int)MathF.Ceiling(d.Length() / 0.3f);
+		for (int k = 1; k < n; k++) { var q = o + d * k / n; if (world.Solid((int)MathF.Floor(q.X), (int)MathF.Floor(q.Y), (int)MathF.Floor(q.Z))) return false; }
+		return true;
+	}
+
+	// ---- Thrown Rocks (Skeletons): they fly in an arc at you. One that hits you hurts; one that hits a block breaks. ----
+	public class Rock { public int K; public Vector3 P, V, T; public float Age, LightTimer, Sky = 1, Torch; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
+	readonly List<Rock> rocks = new();
+	int rockCount;
+	const float RockGravity = 20;
+	static BoxMesh rockMesh;
+	Rock MakeRock(Vector3 at)
+	{
+		itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
+		var mat = new ShaderMaterial { Shader = itemShader }; mat.SetShaderParameter("tex", Atlas.IconTexture(Blocks.Rock));
+		var mi = new MeshInstance3D { Mesh = rockMesh ??= new BoxMesh { Size = Vector3.One * 0.2f }, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = at };
+		mobRoot.AddChild(mi);
+		var r = new Rock { K = ++rockCount, P = at, T = at, Mesh = mi, Mat = mat };
+		rocks.Add(r);
+		return r;
+	}
+	void RemoveRock(Rock r) { r.Mesh.QueueFree(); rocks.Remove(r); }
+	void ThrowRock(Mob m)
+	{
+		// from its right hand, aimed where you'll be when it gets there, a little off at random
+		var h = new Vector3(m.X - MathF.Cos(m.Yaw) * 0.3f, m.Y + m.Height * 0.85f, m.Z + MathF.Sin(m.Yaw) * 0.3f);
+		var P = player.Pos;
+		float dist = new Vector2(P.X - h.X, P.Z - h.Z).Length(), T = Math.Min(1.3f, Math.Max(0.35f, dist / 14));
+		float tx = P.X + player.Vel.X * T * 0.6f + ((float)rnd.NextDouble() - 0.5f) * 0.8f, tz = P.Z + player.Vel.Z * T * 0.6f + ((float)rnd.NextDouble() - 0.5f) * 0.8f, ty = P.Y + 1.1f;
+		var r = MakeRock(h);
+		r.V = new Vector3((tx - h.X) / T, (ty - h.Y) / T + 0.5f * RockGravity * T, (tz - h.Z) / T);
+	}
+	void UpdateRocks(float dt)
+	{
+		foreach (var r in rocks.ToArray())
+		{
+			r.Age += dt;
+			if (netClient) r.P += (r.T - r.P) * Math.Min(1, dt * 12);   // a joined game: the host's game moves them
+			else
+			{
+				r.V.Y -= RockGravity * dt; r.P += r.V * dt;
+				if (r.Age > 5 || r.P.Y < -10) { RemoveRock(r); continue; }
+				var P = player.Pos;
+				if (!dead && Math.Abs(r.P.X - P.X) < 0.45f && Math.Abs(r.P.Z - P.Z) < 0.45f && r.P.Y > P.Y && r.P.Y < P.Y + 1.85f)
+				{
+					HurtPlayer(MobTypes["skeleton"].Damage, r.P - r.V);
+					RemoveRock(r); continue;
+				}
+				if (world.Solid((int)MathF.Floor(r.P.X), (int)MathF.Floor(r.P.Y), (int)MathF.Floor(r.P.Z)))
+				{
+					if (r.P.DistanceTo(P) < 16) Sound.I?.Place(Blocks.RockBlock);   // (a clack, if you're close enough to hear it)
+					RemoveRock(r); continue;
+				}
+			}
+			r.Mesh.Position = r.P;
+			r.Mesh.Rotation = new Vector3(r.Age * 9, r.Age * 7, 0);
+			if ((r.LightTimer -= dt) <= 0)
+			{
+				r.LightTimer = 0.2f;
+				int bx = (int)MathF.Floor(r.P.X), by = (int)MathF.Floor(r.P.Y), bz = (int)MathF.Floor(r.P.Z);
+				r.Sky = world.SkyExposure(bx, by, bz, null); r.Torch = World.LightCurve(world.LightAt(bx, by, bz));
+			}
+			var dtint = sky.DayTint; var tc = new Vector3(1, 0.82f, 0.58f) * Math.Max(r.Torch, HeldLightAt(r.P));
+			r.Mat.SetShaderParameter("light", new Vector3(Math.Max(dtint.X * r.Sky, tc.X), Math.Max(dtint.Y * r.Sky, tc.Y), Math.Max(dtint.Z * r.Sky, tc.Z)));
 		}
 	}
 	// distance along the look ray to a mob's box, or infinity

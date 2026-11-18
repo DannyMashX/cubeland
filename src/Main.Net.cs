@@ -255,9 +255,11 @@ public partial class Main
 		var players = new List<object> { new Dictionary<string, object> { ["id"] = "host", ["name"] = settings.Name, ["hue"] = Hues[0], ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw), ["h"] = inv.Held } };
 		foreach (var (id, f) in friends) if (others.TryGetValue(id, out var p))
 			players.Add(new Dictionary<string, object> { ["id"] = id, ["name"] = f.name, ["hue"] = f.hue, ["x"] = R2(p.Tx), ["y"] = R2(p.Ty), ["z"] = R2(p.Tz), ["yaw"] = R2(p.Tyaw), ["h"] = p.Held });
-		var ms = mobList.Select(m => (object)new List<object> { m.K, m.Type, R2(m.X), R2(m.Y), R2(m.Z), R2(m.Yaw), m.Dead > 0 ? 1 : 0, m.Hurt > 0 ? 1 : 0 }).ToList();
+		// (a mob's last number is 1 while it's fading away, 2 while it's throwing)
+		var ms = mobList.Select(m => (object)new List<object> { m.K, m.Type, R2(m.X), R2(m.Y), R2(m.Z), R2(m.Yaw), m.Dead > 0 ? 1 : 0, m.Hurt > 0 ? 1 : 0, m.Fade > 0 ? 1 : m.ThrowT > 0 ? 2 : 0 }).ToList();
 		var ds = drops.All.Select(d => (object)new List<object> { d.K, d.Id, R2(d.P.X), R2(d.P.Y), R2(d.P.Z) }).ToList();
-		var msg = new Dictionary<string, object> { ["t"] = "tick", ["time"] = sky.TimeOfDay, ["players"] = players, ["mobs"] = ms, ["drops"] = ds };
+		var rs = rocks.Select(r => (object)new List<object> { r.K, R2(r.P.X), R2(r.P.Y), R2(r.P.Z) }).ToList();
+		var msg = new Dictionary<string, object> { ["t"] = "tick", ["time"] = sky.TimeOfDay, ["players"] = players, ["mobs"] = ms, ["drops"] = ds, ["rocks"] = rs };
 		foreach (var (id, f) in friends.ToArray())
 		{
 			if (Now - f.seen > 30) { DropFriend(id); continue; }   // not heard from them in a while: they've gone
@@ -365,8 +367,23 @@ public partial class Main
 				if (isDead && m.Dead == 0) { m.Dead = 0.001f; goneMobs.Add(k); }
 				if (hurt && !m.NetHurt) m.Hurt = 0.3f;
 				m.NetHurt = hurt;
+				int act = a.Count > 8 ? (int)BinaryPack.Num(a[8]) : 0;
+				if (act == 1 && m.Fade == 0) StartFade(m);
+				if (act == 2 && m.ThrowT == 0) m.ThrowT = 0.001f;
 			}
 			foreach (var m in mobList.ToArray()) if (m.Dead == 0 && !seenM.Contains(m.K)) RemoveMob(m);
+			// Rocks thrown by Skeletons
+			var byR = rocks.ToDictionary(r => r.K); var seenR = new HashSet<int>();
+			foreach (var o in d.L("rocks") ?? new())
+			{
+				if (o is not List<object> a || a.Count < 4) continue;
+				int k = (int)BinaryPack.Num(a[0]);
+				var at = new Vector3((float)BinaryPack.Num(a[1]), (float)BinaryPack.Num(a[2]), (float)BinaryPack.Num(a[3]));
+				seenR.Add(k);
+				if (!byR.TryGetValue(k, out var r)) { r = MakeRock(at); r.K = k; }
+				r.T = at;
+			}
+			foreach (var r in rocks.ToArray()) if (!seenR.Contains(r.K)) RemoveRock(r);
 			// dropped items
 			var byD = drops.All.ToDictionary(x => x.K); var seenD = new HashSet<int>();
 			foreach (var o in d.L("drops") ?? new())
@@ -425,6 +442,8 @@ public partial class Main
 	}
 	string NetInfoLine() => hosting ? $"\nHosting: code {netCode} · {friends.Count} friend{(friends.Count == 1 ? "" : "s")} here" : netClient ? $"\nIn {current.Name}" + (welcomed ? "" : "\nJoining...") : "";
 	// (host) keep a mob around if it's near any friend, even when it's far from you
+	// is another player here holding a lit torch within r blocks of p? (Gloomlings fade away from them)
+	bool FriendTorchNear(Vector3 p, float r) => others.Values.Any(o => IsLitTorch(o.Held) && new Vector3(o.X - p.X, o.Y + 1 - p.Y, o.Z - p.Z).Length() < r);
 	bool NearAFriend(Mob m) => others.Values.Any(p => MathF.Sqrt((m.X - p.X) * (m.X - p.X) + (m.Z - p.Z) * (m.Z - p.Z)) < 110);
 
 	// ---------------- the Multiplayer menu ----------------

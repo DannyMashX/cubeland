@@ -41,6 +41,7 @@ public static class Blocks
 		BricksBlock = 64, Terracotta = 65, Pieces = 70, ClayBallBlock = 71, BrickBlock = 72, Furnace = 73;
 	public const int Torch = 22, SmolderingTorch = 81, BurntTorch = 170, EverTorch = 182, Water = 50;
 	public const int Chocolate = 200, Stick = 201, Rock = 212, CrudeAxe = 213, ClayBall = 215, Brick = 216, FireEssence = 217;
+	public const int Bone = 620, BoneAsh = 621, GloomWisp = 622;   // Fear & Foes (items 620+; 600-611 are the dyes)
 	public const int PieceItem = 100;
 	public static readonly int[] BrickVariants = { 12, 13, 14, 15 };
 	public static readonly int[][] FurnaceFronts = { new[] { 0, 1 }, new[] { 1, 0 }, new[] { 0, -1 }, new[] { -1, 0 } };
@@ -169,6 +170,10 @@ public static class Blocks
 		B[FireEssence] = new BlockDef { Name = "Fire Essence", T = new[] { 47, 47, 47 }, Item = true };
 		B[ClayBallBlock].Drop = ClayBall;
 		B[BrickBlock].Drop = Brick;
+		// Fear & Foes: Skeletons drop Bones (Kiln -> Bone Ash -> White Dye); a Gloomling beaten in the dark leaves a Gloom Wisp (-> Black Dye)
+		B[Bone] = new BlockDef { Name = "Bone", T = new[] { 102, 102, 102 }, Item = true };
+		B[BoneAsh] = new BlockDef { Name = "Bone Ash", T = new[] { 103, 103, 103 }, Item = true };
+		B[GloomWisp] = new BlockDef { Name = "Gloom Wisp", T = new[] { 104, 104, 104 }, Item = true };
 		// the colours (red's blocks are above). Pictures: terracotta 52-62, chiseled 63-73, bricks 74-84, flowers 85-89, dyes 90-101
 		for (int k = 0; k < Colours.Length; k++)
 		{

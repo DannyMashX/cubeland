@@ -444,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.7.3"></script>
+<script src="textures.js?v=alpha-0.0.8.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.7.3';
+const GAME_VERSION = 'Alpha 0.0.8.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -615,6 +615,12 @@ const FIRE_ESSENCE = 217;
 BLOCKS[FIRE_ESSENCE] = { name: 'Fire Essence', t: [47, 47, 47], item: true };
 BLOCKS[CLAY_BALL_BLOCK].drop = CLAY_BALL;
 BLOCKS[BRICK_BLOCK].drop = BRICK;
+// Fear & Foes: a Skeleton drops Bones (burn one in the Kiln for Bone Ash, which makes White Dye); a Gloomling beaten in the
+// dark leaves a Gloom Wisp (which makes Black Dye). Items 620+ (600-611 are the dyes).
+const BONE = 620, BONE_ASH = 621, GLOOM_WISP = 622;
+BLOCKS[BONE] = { name: 'Bone', t: [102, 102, 102], item: true };
+BLOCKS[BONE_ASH] = { name: 'Bone Ash', t: [103, 103, 103], item: true };
+BLOCKS[GLOOM_WISP] = { name: 'Gloom Wisp', t: [104, 104, 104], item: true };
 // ---- Colours (Brick & Bloom): 12 colours, each with a Terracotta, a Chiseled Terracotta, Bricks and a Dye ----
 // Red's blocks came first (Red Terracotta 66, Chiseled Red Terracotta 68, Red Bricks 12); the other 11 colours use 218-250.
 // (Placed blocks must be numbered under 256, and a block's slab/stairs items are 1000/1100/.../1500 + its number, so new
@@ -750,7 +756,7 @@ const placeId = id => BLOCKS[id] && BLOCKS[id].places ? BLOCKS[id].places : BRIC
 let selected = 0;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 102;   // the texture atlas holds 102 pictures side by side (32+ are the stick and tools, 52+ the colours)
+const TILE = 16, NT = 105;   // the texture atlas holds 105 pictures side by side (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes)
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -833,6 +839,7 @@ const TEXTURE_SLOTS = {
   crafting_bench_side: 28, crafting_bench_top: 29, stripped_log_side: 30, stripped_log_top: 31,
   stick: 32, rock: 33, crude_axe: 34, fire_essence: 47,
   stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
+  bone: 102, bone_ash: 103, gloom_wisp: 104,
 };
 // the colours: <colour>_terracotta, <colour>_chiseled_terracotta, <colour>_bricks, <colour>_dye, <colour>_flower
 COLOURS.forEach((c, k) => {
@@ -1165,7 +1172,7 @@ const Worlds = (() => {
 // Multiplayer (filled in further down, in "Multiplayer"). These do nothing when you're playing on your own.
 // client = you joined a friend's game (their game runs the mobs, water and items; yours shows them)
 const Net = { client: !!Worlds.current.temp, hosting: false, applying: false,
-  blockChanged() {}, hitMob() {}, pickup() {}, pickedUpByFriend() { return false; }, farthestPlayer() { return 0; }, update() {}, infoLine() { return ''; } };
+  blockChanged() {}, hitMob() {}, pickup() {}, pickedUpByFriend() { return false; }, farthestPlayer() { return 0; }, torchBearerNear() { return false; }, update() {}, infoLine() { return ''; } };
 
 // ===================== Terrain generation =====================
 const seed = Worlds.current.seed;
@@ -3096,8 +3103,8 @@ function raycast(max = 6) {
 // ===================== Mobs =====================
 // Models come from Blockbench .json files in the model folder (packed into textures.js as window.MODELS),
 // skins from textures/entity/mobs/<name>/. Sizes are in model pixels: 16 = one block.
-// The Zombie arrives in Pack & Pasture (Alpha 0.0.8.0); until then Grr Angry stays the night mob. Set true to switch it on.
-const ZOMBIE_READY = false;
+// The Zombie arrived in Fear & Foes (Alpha 0.0.8.0), taking over from Grr Angry as the night mob (false brings Grr back).
+const ZOMBIE_READY = true;
 const MOB_TYPES = {
   // drops: [item, fewest, most, chance] dropped when killed (chance: how likely, 1/20 = 1 in 20; left out = always)
   // hostile: chases and attacks the player, but only in survival mode. dark: spawns anywhere dark (caves any time, open ground at night).
@@ -3115,7 +3122,18 @@ const MOB_TYPES = {
     grrangry: { name: 'Grr Angry', health: 8, speed: 1.5, max: 5, hostile: true, night: true, damage: 3, sight: 16, reach: 1.8, glow: true,
       curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 1.6, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
   }),
+  // thrower: keeps its distance (closes in past `far`, backs off inside `near`) and throws Rocks at you when it can see you;
+  // damage = what a Rock that hits you takes off. Its model is 32 pixels tall, so 0.9x is 1.8 blocks.
+  skeleton: { name: 'Skeleton', health: 6, speed: 1.4, max: 3, hostile: true, dark: true, burns: true, thrower: true, near: 5, far: 10,
+    damage: 2, sight: 18, reach: 0, glow: true, scale: 0.9, drops: [[BONE, 1, 2]] },
+  // deep: only spawns where it's pitch dark underground. snuffer: creeps to the nearest burning torch (not an Ever Torch) and puts it
+  // out a stage at a time (lit -> smoldering -> burnt). Light doesn't hurt it, but it fades away (dropping nothing) when someone
+  // comes near holding a lit torch. faint: it never looks darker than this, so you can just make it out in the dark.
+  gloomling: { name: 'Gloomling', health: 4, speed: 1.1, max: 3, deep: true, snuffer: true, faint: 0.3, scale: 1, drops: [[GLOOM_WISP, 1, 1]] },
 };
+// how close (in blocks) someone holding a lit torch has to come for a Gloomling to fade away, and how long fading takes (seconds)
+const GLOOM_FADE_RANGE = 6, GLOOM_FADE_TIME = 1.2;
+const isLitTorch = id => isTorch(id) && (BLOCKS[id].burn === 0 || BLOCKS[id].burn === 3);
 // play a mob's growl from where it stands: fades out by ~28 blocks, and comes from the left or right speaker
 function mobGrowl(m) {
   const dx = m.x - player.x, dz = m.z - player.z, d = Math.hypot(dx, dz, m.y - player.y);
@@ -3526,7 +3544,8 @@ function buildMobMesh(type, opts = {}) {
 // moves a body's arms, legs and head for this frame. b.stride counts steps (it goes up as it moves), b.walk is 0 standing
 // still .. 1 walking, swipe is how far into an attack its arms are (0 = not attacking).
 // Rotations: + on x swings a hanging limb forward (its end towards the front), - swings it back.
-function poseBody(b, dt, swipe, shamble) {
+// throwing (0..1..0): the right arm swings up over the shoulder and comes down forward (a Skeleton throwing a Rock)
+function poseBody(b, dt, swipe, shamble, throwing = 0) {
   b.anim = (b.anim || 0) + dt;
   const s = b.stride, w = b.walk, t = b.anim;
   if (shamble) {
@@ -3555,7 +3574,7 @@ function poseBody(b, dt, swipe, shamble) {
   const breath = b.head ? (Math.sin(t * 2.1) + 1) / 2 * (1 - w) : 0;
   b.arms.forEach((a, k) => {
     const swing = Math.sin(s + k * Math.PI), hold = k === 1 && b.heldMesh ? 1 : 0;   // (k 1 = the right arm, holding the item)
-    a.pivot.rotation.x = swing * (a.lower ? 0.5 : 0.12) * w * (hold ? 0.4 : 1) + hold * 0.22 - swipe;   // (jointed arms swing fully; stubby ones just sway)
+    a.pivot.rotation.x = swing * (a.lower ? 0.5 : 0.12) * w * (hold ? 0.4 : 1) + hold * 0.22 - swipe - (k === 1 ? throwing * 2.8 : 0);   // (jointed arms swing fully; stubby ones just sway)
     a.pivot.rotation.z = a.lower ? (k ? 1 : -1) * breath * 0.035 : 0;
     if (a.lower) a.lower.rotation.x = (0.12 + Math.max(0, swing) * 0.4) * w * (hold ? 0.3 : 1) + hold * 0.45 + swipe * 0.4;
   });
@@ -4153,7 +4172,8 @@ function findMobSpot(minR, maxR) {
 // how bright a spot is right now: sky light (dimmed by the time of day) or torch light, whichever is brighter
 const spotLight = (x, y, z) => Math.max(skyExposure(x, y, z, new Map()) * skyDay, LIGHT_CURVE(lightAt(x, y, z)));
 // find a dark spot with room to stand (a cave at any time, or open ground at night), not too far above or below the player
-function findDarkSpot(minR, maxR) {
+// deep: only pitch-dark spots underground (no sky above and no torch light at all), for the Gloomling
+function findDarkSpot(minR, maxR, deep) {
   for (let tries = 0; tries < 16; tries++) {
     const a = Math.random() * Math.PI * 2, r = minR + Math.random() * (maxR - minR);
     const x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
@@ -4166,7 +4186,7 @@ function findDarkSpot(minR, maxR) {
     let y = lo + Math.floor(Math.random() * (top - lo + 1));
     while (y >= lo && !(solid(x, y, z) && !isWater(getBlock(x, y, z)) && !getBlock(x, y + 1, z) && !getBlock(x, y + 2, z))) y--;
     if (y < lo || Math.abs(y + 1 - player.y) > 20) continue;
-    if (spotLight(x, y + 1, z) < 0.25) return [x + 0.5, y + 1, z + 0.5];
+    if (deep ? !skyExposure(x, y + 1, z, new Map()) && !lightAt(x, y + 1, z) : spotLight(x, y + 1, z) < 0.25) return [x + 0.5, y + 1, z + 0.5];
   }
   return null;
 }
@@ -4193,7 +4213,8 @@ function updateMobs(dt) {
       if (mobs.filter(m => m.type === type).length < MOB_TYPES[type].max) {
         if (MOB_TYPES[type].night && skyDay > 0.3) continue;
         const first = !mobs.length;
-        const s = MOB_TYPES[type].dark ? findDarkSpot(first ? 12 : 24, first ? 30 : 56) : findMobSpot(first ? 8 : 24, first ? 30 : 56);
+        const T = MOB_TYPES[type];
+        const s = T.dark || T.deep ? findDarkSpot(first ? 12 : 24, first ? 30 : 56, T.deep) : findMobSpot(first ? 8 : 24, first ? 30 : 56);
         if (s) spawnMob(type, ...s);
       }
     }
@@ -4218,7 +4239,37 @@ function updateMobs(dt) {
       m.attackCool = Math.max(0, (m.attackCool || 0) - dt);
       const pdist = Math.hypot(m.x - player.x, m.z - player.z);
       const hunting = t.hostile && gameMode === 'survival' && !player.fly && pdist < t.sight && Math.abs(player.y - m.y) < 6;
-      if (hunting) {
+      m.backing = false;
+      // a Gloomling: fades away when someone holding a lit torch comes near (it drops nothing)
+      if (t.snuffer && !m.fade && torchBearerNear(m.x, m.y + 0.5, m.z, GLOOM_FADE_RANGE)) startFade(m);
+      const snuff = t.snuffer && !m.fade && m.flee <= 0 ? snuffGoal(m, dt) : null;
+      if (m.fade) {
+        m.state = 'idle';
+      } else if (hunting && t.thrower) {
+        // a Skeleton: faces you, keeps between `near` and `far` blocks away, and throws a Rock whenever it can see you
+        const toward = Math.atan2(m.x - player.x, m.z - player.z);
+        m.yaw += Math.atan2(Math.sin(toward - m.yaw), Math.cos(toward - m.yaw)) * Math.min(1, dt * 6);
+        m.turnTo = m.yaw; m.flee = 0;
+        m.backing = pdist < t.near;
+        m.state = pdist > t.far || m.backing ? 'walk' : 'idle';
+        m.throwCool = (m.throwCool ?? 1 + Math.random()) - dt;
+        if (m.throwCool <= 0 && !m.throwT && seesPlayer(m)) { m.throwT = 0.001; m.throwCool = 2.2 + Math.random() * 1.3; }
+      } else if (snuff) {
+        // a Gloomling with a torch to put out: creep over to it, then reach up and snuff it out a stage at a time
+        const gd = Math.hypot(snuff.x + 0.5 - m.x, snuff.z + 0.5 - m.z);
+        const toward = Math.atan2(m.x - snuff.x - 0.5, m.z - snuff.z - 0.5);
+        m.yaw += Math.atan2(Math.sin(toward - m.yaw), Math.cos(toward - m.yaw)) * Math.min(1, dt * 4);
+        m.turnTo = m.yaw;
+        if (gd < 1.2) {
+          m.state = 'idle';
+          if (!m.swing) m.swing = 0.35;   // (reaching for it)
+          if ((m.snuffing = (m.snuffing || 0) + dt) >= 1.5) {
+            m.snuffing = 0;
+            const b = BLOCKS[getBlock(snuff.x, snuff.y, snuff.z)];
+            setBlock(snuff.x, snuff.y, snuff.z, torchVariant(b.wi, b.count, b.burn + 1));
+          }
+        } else { m.state = 'walk'; m.snuffing = 0; }
+      } else if (hunting) {
         // hostile, survival only: walk straight at the player and hit them when in reach
         m.state = 'walk'; m.flee = 0;
         const toward = Math.atan2(m.x - player.x, m.z - player.z);
@@ -4252,7 +4303,7 @@ function updateMobs(dt) {
       }
       if (m.state === 'walk' && m.flee <= 0 && m.turnTo !== undefined)
         m.yaw += Math.atan2(Math.sin(m.turnTo - m.yaw), Math.cos(m.turnTo - m.yaw)) * Math.min(1, dt * 3);
-      const sp = m.state === 'walk' ? t.speed * (m.flee > 0 ? 2.4 : hunting ? 1.6 : 1) * (hunting && pdist < t.reach * 0.7 ? 0 : 1) : 0;
+      const sp = m.state === 'walk' ? t.speed * (m.flee > 0 ? 2.4 : hunting ? 1.6 : 1) * (hunting && pdist < t.reach * 0.7 ? 0 : 1) * (m.backing ? -0.6 : 1) : 0;
       const tvx = -Math.sin(m.yaw) * sp, tvz = -Math.cos(m.yaw) * sp;   // front of the model is its north side
       const acc = Math.min(1, dt * (m.onGround ? 10 : 2));
       m.vx += (tvx - m.vx) * acc; m.vz += (tvz - m.vz) * acc;
@@ -4294,7 +4345,16 @@ function updateMobs(dt) {
     // arms: sway while walking, and a downward swipe when attacking
     m.swing = Math.max(0, (m.swing || 0) - dt);
     const swipe = m.swing > 0 ? Math.sin((1 - m.swing / 0.35) * Math.PI) * 0.9 : 0;
-    poseBody(m, dt, swipe, t.shamble);
+    // throwing a Rock: the arm winds up over the shoulder, lets go, and follows through forward
+    let throwing = 0;
+    if (m.throwT) {
+      m.throwT += dt;
+      const p = m.throwT / 0.5;
+      throwing = p < 0.6 ? p / 0.6 : Math.max(-0.3, 1 - (p - 0.6) / 0.4 * 1.3);
+      if (!m.thrown && p >= 0.6) { m.thrown = true; if (!Net.client && !m.dead) throwRock(m); }
+      if (p >= 1) { m.throwT = 0; m.thrown = false; }
+    }
+    poseBody(m, dt, swipe, t.shamble, throwing);
     m.root.position.set(m.x, m.y, m.z);
     m.root.rotation.y = m.yaw;
     if (t.growl && !m.dead) {
@@ -4313,6 +4373,7 @@ function updateMobs(dt) {
     m.light.setRGB(Math.max(dtint.r * s, tl * TORCH_COLOR.r), Math.max(dtint.g * s, tl * TORCH_COLOR.g), Math.max(dtint.b * s, tl * TORCH_COLOR.b));
     // glow: lights himself up, so he shows at full brightness in the dark (fades in as night falls)
     if (t.glow) { const gl = 1 - skyDay; m.light.setRGB(Math.max(m.light.r, gl), Math.max(m.light.g, gl), Math.max(m.light.b, gl)); }
+    if (t.faint) m.light.setRGB(Math.max(m.light.r, t.faint), Math.max(m.light.g, t.faint), Math.max(m.light.b, t.faint));
     // burning: in daylight with open sky straight above its head (and not in water). The host's game does the damage.
     const hx = Math.floor(m.x), hz = Math.floor(m.z);
     m.burning = t.burns && !m.dead && skyDay > 0.6 && hx >= 0 && hz >= 0 && hx < WX && hz < WZ &&
@@ -4323,6 +4384,104 @@ function updateMobs(dt) {
     } else m.burnIn = 1;
     if (m.hurt > 0) { m.hurt -= dt; m.light.lerp(new THREE.Color(1, 0.15, 0.1), 0.6); }
     for (const mat of m.mats) mat.color.copy(m.light);
+    // fading away (a Gloomling near a lit torch): it drifts up and turns see-through, then it's gone
+    if (m.fade) {
+      m.fade += dt;
+      const f = Math.min(1, m.fade / GLOOM_FADE_TIME);
+      for (const mat of m.mats) mat.opacity = 1 - f;
+      m.root.position.y += f * 0.6;
+      if (f >= 1 && !Net.client) removeMob(m);
+    }
+  }
+  updateRocks(dt);
+}
+// a Gloomling starts fading away (its parts become see-through)
+function startFade(m) {
+  m.fade = 0.001; m.state = 'idle';
+  for (const mat of m.mats) { mat.transparent = true; mat.depthWrite = false; mat.needsUpdate = true; }
+}
+// is anyone (you, or a friend in a game you're hosting) holding a lit torch within r blocks of (x, y, z)?
+function torchBearerNear(x, y, z, r) {
+  if (!player.dead && isLitTorch(HOTBAR[selected]) && Math.hypot(player.x - x, player.y + 1 - y, player.z - z) < r) return true;
+  return Net.torchBearerNear(x, y, z, r);
+}
+// the burning torch a Gloomling is heading for ({x, y, z}), or null. It looks for the nearest one every few seconds, and
+// gives up on one it can't get to in time (then wanders for a while).
+function snuffGoal(m, dt) {
+  const g = m.snuff;
+  if (g) {
+    const b = BLOCKS[getBlock(g.x, g.y, g.z)];
+    if (b && b.shape === 'torch' && b.burn < 2 && (g.time -= dt) > 0) return g;
+    m.snuff = null;
+    if (g.time <= 0) { m.snuffCheck = 8; return null; }   // (couldn't reach it)
+  }
+  if ((m.snuffCheck = (m.snuffCheck || 0) - dt) > 0) return null;
+  m.snuffCheck = 2;
+  let bd = 20;
+  for (const i of torches) {
+    if (!burnsDown(world[i])) continue;   // (lit or smoldering; not burnt, and not an Ever Torch)
+    const [x, y, z] = fromIdx(i), d = Math.hypot(x + 0.5 - m.x, y - m.y, z + 0.5 - m.z);
+    if (d < bd) { bd = d; m.snuff = { x, y, z, time: 25 }; }
+  }
+  return m.snuff;
+}
+// can this mob see you? (nothing solid on the line from its eyes to yours)
+function seesPlayer(m) {
+  const ox = m.x, oy = m.y + m.height * 0.85, oz = m.z, dx = player.x - ox, dy = player.y + 1.5 - oy, dz = player.z - oz;
+  const n = Math.ceil(Math.hypot(dx, dy, dz) / 0.3);
+  for (let k = 1; k < n; k++) if (solid(Math.floor(ox + dx * k / n), Math.floor(oy + dy * k / n), Math.floor(oz + dz * k / n))) return false;
+  return true;
+}
+// ---- Thrown Rocks (Skeletons): they fly in an arc at you. One that hits you hurts; one that hits a block breaks. ----
+const rocks = [];
+let rockCount = 0;
+const ROCK_GRAVITY = 20;
+function makeRock(x, y, z) {
+  const mat = withHaze(new THREE.MeshBasicMaterial({ map: iconTexture(ROCK), alphaTest: 0.5, side: THREE.DoubleSide }));
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), mat);
+  scene.add(mesh);
+  const r = { k: ++rockCount, x, y, z, vx: 0, vy: 0, vz: 0, age: 0, mesh, light: 0 };
+  rocks.push(r);
+  return r;
+}
+function removeRock(r) { scene.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose(); rocks.splice(rocks.indexOf(r), 1); }
+function throwRock(m) {
+  // from its right hand, aimed where you'll be when it gets there, a little off at random
+  const hx = m.x - Math.cos(m.yaw) * 0.3, hz = m.z + Math.sin(m.yaw) * 0.3, hy = m.y + m.height * 0.85;
+  const dist = Math.hypot(player.x - hx, player.z - hz), T = Math.min(1.3, Math.max(0.35, dist / 14));
+  const tx = player.x + player.vx * T * 0.6 + (Math.random() - 0.5) * 0.8, tz = player.z + player.vz * T * 0.6 + (Math.random() - 0.5) * 0.8;
+  const ty = player.y + 1.1;
+  const r = makeRock(hx, hy, hz);
+  r.vx = (tx - hx) / T; r.vz = (tz - hz) / T; r.vy = (ty - hy) / T + 0.5 * ROCK_GRAVITY * T;
+}
+function updateRocks(dt) {
+  for (const r of [...rocks]) {
+    r.age += dt;
+    if (Net.client) {   // a joined game: the host's game moves them
+      const a = Math.min(1, dt * 12);
+      r.x += (r.tx - r.x) * a; r.y += (r.ty - r.y) * a; r.z += (r.tz - r.z) * a;
+    } else {
+      r.vy -= ROCK_GRAVITY * dt;
+      r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt;
+      if (r.age > 5 || r.y < -10) { removeRock(r); continue; }
+      if (!player.dead && Math.abs(r.x - player.x) < 0.45 && Math.abs(r.z - player.z) < 0.45 && r.y > player.y && r.y < player.y + 1.85) {
+        hurtPlayer(MOB_TYPES.skeleton.damage, { x: r.x - r.vx, z: r.z - r.vz });
+        removeRock(r); continue;
+      }
+      if (solid(Math.floor(r.x), Math.floor(r.y), Math.floor(r.z))) {
+        if (Math.hypot(r.x - player.x, r.y - player.y, r.z - player.z) < 16) Sound.place(ROCK_BLOCK);   // (a clack, if you're close enough to hear it)
+        removeRock(r); continue;
+      }
+    }
+    r.mesh.position.set(r.x, r.y, r.z);
+    r.mesh.rotation.set(r.age * 9, r.age * 7, 0);
+    if ((r.light -= dt) <= 0) {
+      r.light = 0.2;
+      const bx = Math.floor(r.x), by = Math.floor(r.y), bz = Math.floor(r.z);
+      r.sky = skyExposure(bx, by, bz, new Map()); r.torch = LIGHT_CURVE(lightAt(bx, by, bz));
+    }
+    const t = DAY_TINT.value, tl = Math.max(r.torch, heldLightAt(r.x, r.y, r.z));
+    r.mesh.material.color.setRGB(Math.max(t.r * r.sky, tl * TORCH_COLOR.r), Math.max(t.g * r.sky, tl * TORCH_COLOR.g), Math.max(t.b * r.sky, tl * TORCH_COLOR.b));
   }
 }
 // distance along the look ray to a mob's box, or Infinity
@@ -4365,7 +4524,8 @@ function hitMob(m, from = player) {
 // ---- Dropped items: little spinning pictures of the item that you pick up by walking into them ----
 const drops = [];
 const dropTexCache = {};
-function dropItem(id, x, y, z) {
+// an item's flat picture as a texture for things in the world (dropped items, thrown Rocks)
+function iconTexture(id) {
   if (!dropTexCache[id]) {
     const c = document.createElement('canvas'); c.width = c.height = TILE;
     drawIcon(c, id, true);   // (flat: it's shown in the world)
@@ -4373,6 +4533,10 @@ function dropItem(id, x, y, z) {
     t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
     dropTexCache[id] = t;
   }
+  return dropTexCache[id];
+}
+function dropItem(id, x, y, z) {
+  iconTexture(id);
   // blocks, slabs, stairs, pieces and torches drop as a little 3D model of themselves; other things as their picture
   const box = iconBoxes(id) && boxModel(id);
   const mat = withHaze(new THREE.MeshBasicMaterial({ map: box ? box.tex : dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: !!box }));
@@ -4833,7 +4997,7 @@ const invEl = document.getElementById('inventory'), invGrid = document.getElemen
 const invIcons = [];
 // Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
 // click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, ...DYE, ...TOOLS]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, ...DYE, ...TOOLS]);
 const variantsOf = b => SPLITTABLE.includes(b)
   ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.quarter + b,
      SHAPE_ITEM.vslab + b, SHAPE_ITEM.vstairs + b, SHAPE_ITEM.vquarter + b]
@@ -4870,7 +5034,7 @@ function showVariants(b, plus) {
 const INV_TABS = [
   ['Building Blocks', [7, 61, 8, 9, 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, 10, 22, CRAFTING_BENCH, FURNACE]],
   ['Natural Blocks', [1, 2, 3, 4, 5, 6, 11, 63, ...FLOWERS, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, ...DYE, CRUDE_AXE, ...TOOLS]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, ...DYE, CRUDE_AXE, ...TOOLS]],
 ];
 const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
 let invTab = 0;
@@ -4992,6 +5156,7 @@ const SMELTS = [
   { out: BRICK, from: CLAY_BALL },   // Clay Ball -> Brick (quicker than leaving it on the ground to dry)
   { out: 65, from: 63 },             // Clay -> Terracotta
   { out: 3, from: 8 },               // Cobblestone -> Stone
+  { out: BONE_ASH, from: BONE },     // Bone -> Bone Ash
 ];
 const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1 };   // how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1
 const furnaceEl = document.getElementById('furnace'), furnaceName = document.getElementById('furnace-name');
@@ -5224,8 +5389,8 @@ const RECIPES = [
 ];
 // Dyes and colours. colour: only listed while you carry at least one of its ingredients (there are a lot of them)
 for (const f of FLOWERS) RECIPES.push({ out: BLOCKS[f].dye, n: 1, needs: [[f, 1]], at: 'hand', colour: true });   // a Flower -> its Dye
-RECIPES.push({ out: dyeOf('black'), n: 1, needs: [[BURNT_TORCH, 1]], at: 'hand', colour: true });   // a Burnt Torch (ash) -> Black Dye
-RECIPES.push({ out: dyeOf('white'), n: 1, needs: [[ROCK, 1]], at: 'hand', colour: true });          // a Rock (chalk) -> White Dye
+RECIPES.push({ out: dyeOf('black'), n: 1, needs: [[GLOOM_WISP, 1]], at: 'hand', colour: true });   // a Gloom Wisp -> Black Dye
+RECIPES.push({ out: dyeOf('white'), n: 1, needs: [[BONE_ASH, 1]], at: 'hand', colour: true });     // Bone Ash -> White Dye
 // two dyes mixed -> 2 of the colour in between
 for (const [out, a, b] of [['orange', 'red', 'yellow'], ['green', 'yellow', 'aqua'], ['blue', 'aqua', 'indigo'], ['purple', 'indigo', 'magenta'], ['pink', 'red', 'white']])
   RECIPES.push({ out: dyeOf(out), n: 2, needs: [[dyeOf(a), 1], [dyeOf(b), 1]], at: 'hand', colour: true });
@@ -5649,9 +5814,11 @@ addEventListener('pagehide', () => autoSave());
     // h: the item each player is holding (0 = nothing)
     const players = [{ id: 'host', name: myName, hue: HUES[0], x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0 }];
     for (const [id, f] of friends) { const p = others.get(id); if (p) players.push({ id, name: f.name, hue: f.hue, x: r2(p.tx), y: r2(p.ty), z: r2(p.tz), yaw: r2(p.tyaw), h: p.held | 0 }); }
-    const ms = mobs.map(m => [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0]);
+    // (a mob's last number is 1 while it's fading away, 2 while it's throwing)
+    const ms = mobs.map(m => [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0, m.fade ? 1 : m.throwT ? 2 : 0]);
     const ds = drops.map(d => [d.k, d.id, r2(d.x), r2(d.y), r2(d.z)]);
-    const msg = { t: 'tick', time: timeOfDay, players, mobs: ms, drops: ds };
+    const rs = rocks.map(r => [r.k, r2(r.x), r2(r.y), r2(r.z)]);
+    const msg = { t: 'tick', time: timeOfDay, players, mobs: ms, drops: ds, rocks: rs };
     const now = performance.now();
     for (const [id, f] of friends) {
       if (now - f.seen > 30000) { dropFriend(id); continue; }    // not heard from them in a while: they've gone
@@ -5743,7 +5910,7 @@ addEventListener('pagehide', () => autoSave());
       for (const id of [...others.keys()]) if (!seenP.has(id)) removeOther(id);
       // mobs: make, move or remove ours to match the host's
       const byK = new Map(mobs.map(m => [m.k, m])), seenM = new Set();
-      for (const [k, type, x, y, z, yaw, dead, hurt] of d.mobs) {
+      for (const [k, type, x, y, z, yaw, dead, hurt, act] of d.mobs) {
         seenM.add(k);
         let m = byK.get(k);
         if (!m) {
@@ -5754,8 +5921,19 @@ addEventListener('pagehide', () => autoSave());
         if (dead && !m.dead) { m.dead = 0.001; Net.gone.add(k); }
         if (hurt && !m.netHurt) m.hurt = 0.3;
         m.netHurt = hurt;
+        if (act === 1 && !m.fade) startFade(m);
+        if (act === 2 && !m.throwT) m.throwT = 0.001;
       }
       for (const m of [...mobs]) if (!m.dead && !seenM.has(m.k)) removeMob(m);
+      // Rocks thrown by Skeletons
+      const byR = new Map(rocks.map(r => [r.k, r])), seenR = new Set();
+      for (const [k, x, y, z] of d.rocks || []) {
+        seenR.add(k);
+        let r = byR.get(k);
+        if (!r) { r = makeRock(x, y, z); r.k = k; }
+        Object.assign(r, { tx: x, ty: y, tz: z });
+      }
+      for (const r of [...rocks]) if (!seenR.has(r.k)) removeRock(r);
       // dropped items
       const byD = new Map(drops.map(x => [x.k, x])), seenD = new Set();
       for (const [k, id, x, y, z] of d.drops) {
@@ -5804,6 +5982,11 @@ addEventListener('pagehide', () => autoSave());
     farthestPlayer(m) {
       for (const p of others.values()) if (Math.hypot(m.x - p.x, m.z - p.z) < 110) return Infinity;
       return 0;
+    },
+    // is another player here holding a lit torch within r blocks of (x, y, z)? (Gloomlings fade away from them)
+    torchBearerNear(x, y, z, r) {
+      for (const p of others.values()) if (isLitTorch(p.held) && Math.hypot(p.x - x, p.y + 1 - y, p.z - z) < r) return true;
+      return false;
     },
     update(dt) { flush(); animateOthers(dt); },
     infoLine() {

@@ -372,6 +372,9 @@ public partial class Main : Node3D
 			var fwd = new Vector3(-MathF.Sin(player.Yaw), 0, -MathF.Cos(player.Yaw)); var side = new Vector3(fwd.Z, 0, -fwd.X);
 			// --figures: the Player and Zombie models instead (test only: shows their jointed animations, even with the Zombie off)
 			var list = args.Contains("--figures") ? new[] { ("player", -1.0f), ("zombie", 1.0f) } : new[] { ("danthechocolateman", -1.2f), (ZombieReady ? "zombie" : "grrangry", 1.4f) };
+			// --mobtypes=skeleton,gloomling: these mobs instead, side by side (test)
+			var mtArg = args.FirstOrDefault(a => a.StartsWith("--mobtypes="));
+			if (mtArg != null) { var ts = mtArg[11..].Split(','); list = ts.Select((ty, i) => (ty, (i - (ts.Length - 1) / 2f) * 2.2f)).ToArray(); }
 			foreach (var (type, off) in list)
 			{
 				var at = player.Pos + fwd * 4.5f + side * off; int x = (int)MathF.Floor(at.X), z = (int)MathF.Floor(at.Z), y = world.Heights[z * World.WX + x] + 1;
@@ -421,7 +424,8 @@ public partial class Main : Node3D
 		if (shotTimer < (stay != null ? float.Parse(stay[7..]) : sceneBuilt ? 4f : 1.5f)) return;
 		GetViewport().GetTexture().GetImage().SavePng(arg[7..]);
 		GD.Print($"shot saved, {chunkNodes.Count} chunks");
-		foreach (var m in mobList) GD.Print($"mob {m.Type}: health {m.Health}{(m.Burning ? ", burning" : "")} at y {m.Y:0.0}");
+		foreach (var m in mobList) GD.Print($"mob {m.Type}: health {m.Health}{(m.Burning ? ", burning" : "")}{(m.Fade > 0 ? ", fading" : "")} at y {m.Y:0.0}");
+		GD.Print($"your health {health}, rocks flying {rocks.Count}");
 		GetTree().Quit();
 	}
 

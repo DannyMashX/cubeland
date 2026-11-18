@@ -103,8 +103,8 @@ public class Inventory
 	{
 		// dyes and colours
 		foreach (int f in Blocks.Flowers) Recipes.Add(new() { Out = Blocks.B[f].Dye, N = 1, Needs = new[] { (f, 1) }, Colour = true });   // a Flower -> its Dye
-		Recipes.Add(new() { Out = Blocks.DyeOf("black"), N = 1, Needs = new[] { (Blocks.BurntTorch, 1) }, Colour = true });   // a Burnt Torch (ash) -> Black Dye
-		Recipes.Add(new() { Out = Blocks.DyeOf("white"), N = 1, Needs = new[] { (Blocks.Rock, 1) }, Colour = true });         // a Rock (chalk) -> White Dye
+		Recipes.Add(new() { Out = Blocks.DyeOf("black"), N = 1, Needs = new[] { (Blocks.GloomWisp, 1) }, Colour = true });   // a Gloom Wisp -> Black Dye
+		Recipes.Add(new() { Out = Blocks.DyeOf("white"), N = 1, Needs = new[] { (Blocks.BoneAsh, 1) }, Colour = true });     // Bone Ash -> White Dye
 		foreach (var (o, a, b) in new[] { ("orange", "red", "yellow"), ("green", "yellow", "aqua"), ("blue", "aqua", "indigo"), ("purple", "indigo", "magenta"), ("pink", "red", "white") })
 			Recipes.Add(new() { Out = Blocks.DyeOf(o), N = 2, Needs = new[] { (Blocks.DyeOf(a), 1), (Blocks.DyeOf(b), 1) }, Colour = true });   // two dyes mixed
 		for (int k = 0; k < Blocks.Colours.Length; k++)
