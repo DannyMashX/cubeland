@@ -1,5 +1,17 @@
 [
     {
+        "version": "Alpha 0.0.7.3",
+        "folder": "alpha-0.0.7.3",
+        "date": "2026-11-18",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.7.3/CubeLand-Alpha-0.0.7.3-windows.zip",
+        "size": 74774579,
+        "exe": "CubeLand-Alpha-0.0.7.3-windows/CubeLand.exe",
+        "changes": [
+            "The arrow keys look around too, as a backup for laptops",
+            "Fixed looking around with the mouse on PCs where the mouse wouldn't turn the camera"
+        ]
+    },
+    {
         "version": "Alpha 0.0.7.2",
         "folder": "alpha-0.0.7.2",
         "date": "2026-11-18",
