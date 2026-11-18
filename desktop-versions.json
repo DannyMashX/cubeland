@@ -1,5 +1,20 @@
 [
     {
+        "version": "Alpha 0.0.9.0",
+        "folder": "alpha-0.0.9.0",
+        "date": "2026-11-18",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.9.0/CubeLand-Alpha-0.0.9.0-windows.zip",
+        "size": 74788484,
+        "exe": "CubeLand-Alpha-0.0.9.0-windows/CubeLand.exe",
+        "changes": [
+            "Farming! Right-click Grass or Dirt with a Hoe to till it into soil (tilling Grass sometimes turns up Grain Seeds)",
+            "Plant Grain Seeds on tilled soil; Grain grows through 8 stages, and ripe Grain gives Grain plus 1-2 seeds",
+            "Soil joined to water (through other tilled soil, up to 5 blocks away) is wet and grows Grain twice as fast",
+            "Bone Ash fertilizes soil for 2 harvests and makes Grain grow faster still",
+            "Dry tilled soil with nothing planted turns back into Dirt after a few minutes",
+            "Grain -> Flour by hand, Flour -> Bread in the Kiln; Bread is food"
+        ]
+    },        {
         "version": "Alpha 0.0.8.0",
         "folder": "alpha-0.0.8.0",
         "date": "2026-11-18",
