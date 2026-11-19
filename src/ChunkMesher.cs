@@ -4,7 +4,7 @@ using Godot;
 
 namespace Cubeland;
 
-// Turns one 16x16 column of the world (a chunk) into meshes: one for the solid blocks, one for the water.
+// Turns one 16x16x16 cube of the world (a chunk) into meshes: one for the solid blocks, one for the water.
 // Each corner carries: its shading (corner shadows and face direction, in COLOR), and its torch light and
 // sky light (in UV2), which the shader mixes with the time of day.
 public class ChunkMesher
@@ -55,14 +55,14 @@ public class ChunkMesher
 	public ChunkMesher(World w) { W = w; }
 	int Occ(int x, int y, int z) { int b = W.GetBlock(x, y, z); return b != 0 && !Blocks.B[b].Transparent ? 1 : 0; }
 
-	public (Part solid, Part water) Build(int cx, int cz)
+	public (Part solid, Part water) Build(int cx, int cy, int cz)
 	{
 		var P = new Part(); var Wt = new Part();
-		int top = W.ChunkTop[cz * World.NCX + cx];
+		int y0 = cy * World.CS, top = Math.Min(y0 + World.CS, W.ChunkTop[cz * World.NCX + cx]);   // (nothing above the column's highest block)
 		bool anyLight = W.LightMap.Count > 0;
 		var sky = new Dictionary<int, float>();
 		var p = new int[3]; var q = new int[3]; var ao = new int[4];
-		for (int y = 0; y < top; y++) for (int z = cz * World.CS; z < cz * World.CS + World.CS; z++) for (int x = cx * World.CS; x < cx * World.CS + World.CS; x++)
+		for (int y = y0; y < top; y++) for (int z = cz * World.CS; z < cz * World.CS + World.CS; z++) for (int x = cx * World.CS; x < cx * World.CS + World.CS; x++)
 		{
 			int id = W.Blocks[World.Idx(x, y, z)];
 			if (id == 0) continue;

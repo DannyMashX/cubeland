@@ -444,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.9.1"></script>
+<script src="textures.js?v=alpha-0.0.9.2"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.9.1';
+const GAME_VERSION = 'Alpha 0.0.9.2';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -468,8 +468,9 @@ function compareVersions(a, b) {
 
 // ===================== World settings =====================
 const WX = 640, WZ = 640, WY = 192;  // world size in blocks
-const CS = 16;                        // chunk size (x/z)
-const NCX = WX / CS, NCZ = WZ / CS;
+const CS = 16;                        // chunk size: chunks are 16x16x16 cubes
+const NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;
+const chunkKey = (cx, cy, cz) => (cy * NCZ + cz) * NCX + cx;
 const world = new Uint8Array(WX * WY * WZ);
 const idx = (x, y, z) => (y * WZ + z) * WX + x;
 
@@ -1794,13 +1795,14 @@ const FACES = [
   { dir: [ 0, 0,-1], shade: 0.65, c: [[1,0,0,0,0],[0,0,0,1,0],[1,1,0,0,1],[0,1,0,1,1]] },
   { dir: [ 0, 0, 1], shade: 0.65, c: [[0,0,1,0,0],[1,0,1,1,0],[0,1,1,0,1],[1,1,1,1,1]] },
 ];
-const chunkMeshes = new Array(NCX * NCZ).fill(null);
-const waterMeshes = new Array(NCX * NCZ).fill(null);
+const chunkMeshes = new Array(NCX * NCY * NCZ).fill(null);   // (null for a chunk with nothing to draw)
+const waterMeshes = new Array(NCX * NCY * NCZ).fill(null);
+const chunkBuilt = new Uint8Array(NCX * NCY * NCZ);          // 1 once a chunk has been built (even if it came out empty)
 // water is drawn after the solid blocks, see-through (using the texture's own transparency), and from both sides
 // so the surface still shows when you look up at it from underwater
 const waterMat = new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
 waterMat.onBeforeCompile = material.onBeforeCompile;
-// Highest y that holds a block in each chunk, so meshing skips the empty sky.
+// Highest y that holds a block in each 16x16 column of chunks, so meshing skips the empty sky.
 // Measured after everything (including trees that spill into neighbouring chunks) is placed.
 recomputeHeights();
 const chunkTop = new Int32Array(NCX * NCZ);
@@ -1845,7 +1847,7 @@ function relight(dirty) {      // recompute all torch light, mark chunks whose l
       if (l > 1) for (const [dx, dy, dz] of ORE_STEPS) if (lightPasses(x + dx, y + dy, z + dz)) q.push([x + dx, y + dy, z + dz, l - 1]);
     }
   }
-  const mark = i => markDirty(i % WX, Math.floor(i / WX) % WZ, dirty);
+  const mark = i => markDirty(i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ, dirty);
   for (const [i, l] of nm) if (old.get(i) !== l) mark(i);
   for (const i of old.keys()) if (!nm.has(i)) mark(i);
   lightMap = nm;
@@ -1893,23 +1895,26 @@ function skyExposure(x, y, z, cache) {
 }
 // digging changes what nearby spots can see, so chunks around an edit get rebuilt over the next few frames
 const rebuildSoon = new Set();
-function queueNearbyRebuilds(x, z) {
+// (sky rays only go up or sideways, so only spots at or below the change can see the difference)
+function queueNearbyRebuilds(x, y, z) {
   const R = 18;
-  for (let cz = Math.floor((z - R) / CS); cz <= Math.floor((z + R) / CS); cz++)
-    for (let cx = Math.floor((x - R) / CS); cx <= Math.floor((x + R) / CS); cx++)
-      if (cx >= 0 && cz >= 0 && cx < NCX && cz < NCZ) rebuildSoon.add(cz * NCX + cx);
+  for (let cy = 0; cy <= Math.min(NCY - 1, Math.floor((y + 1) / CS)); cy++)
+    for (let cz = Math.floor((z - R) / CS); cz <= Math.floor((z + R) / CS); cz++)
+      for (let cx = Math.floor((x - R) / CS); cx <= Math.floor((x + R) / CS); cx++)
+        if (cx >= 0 && cz >= 0 && cx < NCX && cz < NCZ) rebuildSoon.add(chunkKey(cx, cy, cz));
 }
 function pumpRebuildSoon() {
   let n = 0;
-  for (const k of rebuildSoon) { rebuildSoon.delete(k); if (chunkMeshes[k]) buildChunk(k % NCX, Math.floor(k / NCX)); if (++n >= 2) break; }
+  for (const k of rebuildSoon) { rebuildSoon.delete(k); if (chunkBuilt[k]) { buildChunkKey(k); if (++n >= 4) break; } }
 }
 
-function markDirty(x, z, dirty) {  // the chunk holding (x, z) plus any neighbour chunk touching it
-  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-    const gx = x + dx, gz = z + dz;
-    if (gx >= 0 && gz >= 0 && gx < WX && gz < WZ) dirty.add(Math.floor(gz / CS) * NCX + Math.floor(gx / CS));
+function markDirty(x, y, z, dirty) {  // the chunk holding (x, y, z) plus any neighbour chunk touching it
+  for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const gx = x + dx, gy = y + dy, gz = z + dz;
+    if (gx >= 0 && gz >= 0 && gy >= 0 && gx < WX && gz < WZ && gy < WY) dirty.add(chunkKey(Math.floor(gx / CS), Math.floor(gy / CS), Math.floor(gz / CS)));
   }
 }
+const buildChunkKey = k => buildChunk(k % NCX, Math.floor(k / (NCX * NCZ)), Math.floor(k / NCX) % NCZ);
 
 // a torch: a 4-pixel-wide stick; wall torches lean 22.5 degrees away from their wall.
 // Several torches in one block are spread out so they all fit inside it.
@@ -1995,14 +2000,14 @@ function addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
     ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
   }
 }
-function buildChunk(cx, cz) {
+function buildChunk(cx, cy, cz) {
   const pos = [], uv = [], col = [], ind = [], lt = [], sk = [];
   const wpos = [], wuv = [], wcol = [], wind = [], wlt = [], wsk = [];   // water goes in its own see-through mesh
   const p = [0, 0, 0], ao = [0, 0, 0, 0];
-  const top = chunkTop[cz * NCX + cx];
+  const y0 = cy * CS, top = Math.min(y0 + CS, chunkTop[cz * NCX + cx]);   // (nothing above the column's highest block)
   const anyLight = lightMap.size > 0;
   const skyCache = new Map();
-  for (let y = 0; y < top; y++) for (let z = cz * CS; z < cz * CS + CS; z++) for (let x = cx * CS; x < cx * CS + CS; x++) {
+  for (let y = y0; y < top; y++) for (let z = cz * CS; z < cz * CS + CS; z++) for (let x = cx * CS; x < cx * CS + CS; x++) {
     const id = world[idx(x, y, z)];
     if (!id) continue;
     const b = BLOCKS[id];
@@ -2048,10 +2053,10 @@ function buildChunk(cx, cz) {
       else ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
     }
   }
-  const k = cz * NCX + cx;
-  if (chunkMeshes[k]) { scene.remove(chunkMeshes[k]); chunkMeshes[k].geometry.dispose(); }
-  chunkMeshes[k] = new THREE.Mesh(makeGeo(pos, uv, col, lt, sk, ind), material);
-  scene.add(chunkMeshes[k]);
+  const k = chunkKey(cx, cy, cz);
+  chunkBuilt[k] = 1;
+  if (chunkMeshes[k]) { scene.remove(chunkMeshes[k]); chunkMeshes[k].geometry.dispose(); chunkMeshes[k] = null; }
+  if (ind.length) { chunkMeshes[k] = new THREE.Mesh(makeGeo(pos, uv, col, lt, sk, ind), material); scene.add(chunkMeshes[k]); }
   if (waterMeshes[k]) { scene.remove(waterMeshes[k]); waterMeshes[k].geometry.dispose(); waterMeshes[k] = null; }
   if (wind.length) { waterMeshes[k] = new THREE.Mesh(makeGeo(wpos, wuv, wcol, wlt, wsk, wind), waterMat); scene.add(waterMeshes[k]); }
 }
@@ -2147,15 +2152,18 @@ function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
 let buildQueue = null, buildDone = 0;
 function pumpChunkBuilds(budgetMs) {
   if (!buildQueue) {
-    const pcx = Math.floor(player.x / CS), pcz = Math.floor(player.z / CS);
+    const pcx = Math.floor(player.x / CS), pcy = Math.floor(player.y / CS), pcz = Math.floor(player.z / CS);
     buildQueue = [];
-    for (let cz = 0; cz < NCZ; cz++) for (let cx = 0; cx < NCX; cx++) buildQueue.push([cx, cz, (cx - pcx) ** 2 + (cz - pcz) ** 2]);
-    buildQueue.sort((a, b) => a[2] - b[2]);
+    for (let cz = 0; cz < NCZ; cz++) for (let cx = 0; cx < NCX; cx++) for (let cy = 0; cy < NCY; cy++) {
+      if (cy * CS >= chunkTop[cz * NCX + cx]) { chunkBuilt[chunkKey(cx, cy, cz)] = 1; continue; }   // (empty sky: nothing to build yet)
+      buildQueue.push([cx, cy, cz, (cx - pcx) ** 2 + (cy - pcy) ** 2 + (cz - pcz) ** 2]);
+    }
+    buildQueue.sort((a, b) => a[3] - b[3]);
   }
   const start = performance.now();
   while (buildDone < buildQueue.length && performance.now() - start < budgetMs) {
-    const [cx, cz] = buildQueue[buildDone++];
-    if (!chunkMeshes[cz * NCX + cx]) buildChunk(cx, cz);
+    const [cx, cy, cz] = buildQueue[buildDone++];
+    if (!chunkBuilt[chunkKey(cx, cy, cz)]) buildChunk(cx, cy, cz);
   }
 }
 
@@ -2179,14 +2187,14 @@ function setBlock(x, y, z, id) {
   if (wasOpaque !== isOpaque) {
     if (isOpaque && y > skyTop[col]) skyTop[col] = y;
     else if (!isOpaque && y === skyTop[col]) skyTop[col] = computeSkyTop(x, z, y);
-    queueNearbyRebuilds(x, z);
+    queueNearbyRebuilds(x, y, z);
   }
   const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
   if (id) chunkTop[cz * NCX + cx] = Math.max(chunkTop[cz * NCX + cx], y + 1);
   const dirty = new Set();
-  markDirty(x, z, dirty);
+  markDirty(x, y, z, dirty);
   if (isTorch(id) || isTorch(old) || nearTorch(x, y, z)) relight(dirty);
-  for (const k of dirty) { buildChunk(k % NCX, Math.floor(k / NCX)); rebuildSoon.delete(k); }
+  for (const k of dirty) { buildChunkKey(k); rebuildSoon.delete(k); }
   wakeWater(x, y, z);
   Net.blockChanged(i, id);   // multiplayer: tell the other players
 }
@@ -2261,11 +2269,11 @@ function updateWater(dt) {
     world[i] = id; edits.set(i, id);
     const c = Math.floor(z / CS) * NCX + Math.floor(x / CS);
     if (id) chunkTop[c] = Math.max(chunkTop[c], y + 1);
-    markDirty(x, z, dirty);
+    markDirty(x, y, z, dirty);
     wakeWater(x, y, z);
     Net.blockChanged(i, id);
   }
-  for (const k of dirty) { if (chunkMeshes[k]) buildChunk(k % NCX, Math.floor(k / NCX)); rebuildSoon.delete(k); }
+  for (const k of dirty) { if (chunkBuilt[k]) buildChunkKey(k); rebuildSoon.delete(k); }
 }
 // when a block is removed, torches standing on it or stuck to its sides fall off
 function dropTorchesAround(x, y, z) {

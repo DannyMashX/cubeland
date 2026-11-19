@@ -413,7 +413,7 @@ public partial class Main
 		for (int k = 0; k < idb.Length && k * 4 + 3 < ib.Length; k++) { idxs.Add((int)BitConverter.ToUInt32(ib, k * 4)); ids.Add(idb[k]); }
 		world.ApplyEdits(idxs, ids);
 		var dirtyNow = new HashSet<int>();
-		foreach (int i in idxs) { var (x, _, z) = World.FromIdx(i); World.MarkDirty(x, z, dirtyNow); }
+		foreach (int i in idxs) { var (x, y, z) = World.FromIdx(i); World.MarkDirty(x, y, z, dirtyNow); }
 		lock (dirty) foreach (int c in dirtyNow) dirty.Add(c);
 		player.Pos = new Vector3(d.F("x"), d.F("y"), d.F("z")); player.Yaw = d.F("yaw"); player.Vel = Vector3.Zero;
 		sky.TimeOfDay = d.F("time");

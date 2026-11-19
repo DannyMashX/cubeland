@@ -113,12 +113,14 @@ public partial class Main : Node3D
 		world.ChunksChanged = set => { lock (dirty) foreach (int c in set) dirty.Add(c); };
 		world.NearbyRebuild = (x, y, z) =>
 		{
+			// (sky rays only go up or sideways, so only spots at or below the change can see the difference)
 			const int R = 18;
-			for (int cz = Math.Max(0, (z - R) / World.CS); cz <= Math.Min(World.NCZ - 1, (z + R) / World.CS); cz++)
-				for (int cx = Math.Max(0, (x - R) / World.CS); cx <= Math.Min(World.NCX - 1, (x + R) / World.CS); cx++)
-					soon.Add(cz * World.NCX + cx);
+			for (int cy = 0; cy <= Math.Min(World.NCY - 1, (y + 1) / World.CS); cy++)
+				for (int cz = Math.Max(0, (z - R) / World.CS); cz <= Math.Min(World.NCZ - 1, (z + R) / World.CS); cz++)
+					for (int cx = Math.Max(0, (x - R) / World.CS); cx <= Math.Min(World.NCX - 1, (x + R) / World.CS); cx++)
+						soon.Add(World.ChunkKey(cx, cy, cz));
 		};
-		for (int c = 0; c < World.NCX * World.NCZ; c++) dirty.Add(c);
+		for (int c = 0; c < World.NChunks; c++) { var (cx, cy, cz) = World.FromChunkKey(c); if (cy * World.CS < world.ChunkTop[cz * World.NCX + cx]) dirty.Add(c); }   // (chunks of empty sky have nothing to build)
 		player.Pos = spawnPoint = FindSpawn();
 		outline = MakeOutline(); AddChild(outline);
 		ApplyPlayerSave();
@@ -545,8 +547,10 @@ public partial class Main : Node3D
 	void BuildChunks()
 	{
 		var start = Time.GetTicksUsec();
-		int pcx = (int)player.Pos.X / World.CS, pcz = (int)player.Pos.Z / World.CS;
-		int Dist(int c) { int dx = c % World.NCX - pcx, dz = c / World.NCX - pcz; return dx * dx + dz * dz; }
+		int pcx = (int)player.Pos.X / World.CS, pcy = (int)player.Pos.Y / World.CS, pcz = (int)player.Pos.Z / World.CS;
+		int Dist(int c) { var (cx, cy, cz) = World.FromChunkKey(c); int dx = cx - pcx, dy = cy - pcy, dz = cz - pcz; return dx * dx + dy * dy + dz * dz; }
+		int want = Math.Max(2, System.Environment.ProcessorCount);
+		var best = new int[want]; var bestD = new int[want];
 		while (Time.GetTicksUsec() - start < 8000)
 		{
 			int[] batch;
@@ -554,11 +558,21 @@ public partial class Main : Node3D
 			{
 				if (dirty.Count == 0 && soon.Count > 0) { foreach (int c in soon) dirty.Add(c); soon.Clear(); }
 				if (dirty.Count == 0) return;
-				batch = dirty.OrderBy(Dist).Take(Math.Max(2, System.Environment.ProcessorCount)).ToArray();
+				// the nearest few (one pass, keeping a short sorted list, rather than sorting thousands of chunks every time)
+				int n = 0;
+				foreach (int c in dirty)
+				{
+					int d = Dist(c);
+					if (n == want && d >= bestD[n - 1]) continue;
+					int j = n < want ? n++ : n - 1;
+					while (j > 0 && bestD[j - 1] > d) { best[j] = best[j - 1]; bestD[j] = bestD[j - 1]; j--; }
+					best[j] = c; bestD[j] = d;
+				}
+				batch = best[..n];
 				foreach (int c in batch) { dirty.Remove(c); soon.Remove(c); }
 			}
 			var parts = new (ChunkMesher.Part, ChunkMesher.Part)[batch.Length];
-			Parallel.For(0, batch.Length, i => parts[i] = mesher.Build(batch[i] % World.NCX, batch[i] / World.NCX));
+			Parallel.For(0, batch.Length, i => { var (cx, cy, cz) = World.FromChunkKey(batch[i]); parts[i] = mesher.Build(cx, cy, cz); });
 			for (int i = 0; i < batch.Length; i++) SetChunkMesh(batch[i], parts[i].Item1.ToMesh(), parts[i].Item2.ToMesh());
 		}
 	}
@@ -566,6 +580,7 @@ public partial class Main : Node3D
 	{
 		if (!chunkNodes.TryGetValue(c, out var n))
 		{
+			if (solid == null && water == null) return;   // (an empty chunk, all air or buried rock: no nodes for it)
 			n = (new MeshInstance3D { MaterialOverride = blockMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
 				 new MeshInstance3D { MaterialOverride = waterMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off });
 			AddChild(n.solid); AddChild(n.water);

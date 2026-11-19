@@ -7,13 +7,16 @@ namespace Cubeland;
 public partial class World
 {
 	public const int WX = 640, WZ = 640, WY = 192, CS = 16;
-	public const int NCX = WX / CS, NCZ = WZ / CS;
+	public const int NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;   // chunks are 16x16x16 cubes: 40 across, 40 deep, 12 high
+	public const int NChunks = NCX * NCY * NCZ;
+	public static int ChunkKey(int cx, int cy, int cz) => (cy * NCZ + cz) * NCX + cx;
+	public static (int cx, int cy, int cz) FromChunkKey(int k) => (k % NCX, k / (NCX * NCZ), (k / NCX) % NCZ);
 	public static int Idx(int x, int y, int z) => (y * WZ + z) * WX + x;
 	public static (int x, int y, int z) FromIdx(int i) => (i % WX, i / (WX * WZ), (i / WX) % WZ);
 
 	public readonly byte[] Blocks = new byte[WX * WY * WZ];
 	public readonly int[] Heights = new int[WX * WZ];
-	public readonly int[] ChunkTop = new int[NCX * NCZ];
+	public readonly int[] ChunkTop = new int[NCX * NCZ];   // highest block +1 in each 16x16 column of chunks
 	public readonly short[] SkyTop = new short[WX * WZ];
 	public readonly Dictionary<int, byte[]> PieceMap = new();   // world index -> which block fills each of its 8 piece spots
 	public readonly Dictionary<int, int> Edits = new();          // every block you've changed (what gets saved)
@@ -163,16 +166,16 @@ public partial class World
 				if (l > 1) foreach (var d in Steps6) if (LightPasses(x + d[0], y + d[1], z + d[2])) q.Add((x + d[0], y + d[1], z + d[2], l - 1));
 			}
 		}
-		foreach (var (i, l) in nm) if (!old.TryGetValue(i, out var o) || o != l) { var (x, _, z) = FromIdx(i); MarkDirty(x, z, dirty); }
-		foreach (int i in old.Keys) if (!nm.ContainsKey(i)) { var (x, _, z) = FromIdx(i); MarkDirty(x, z, dirty); }
+		foreach (var (i, l) in nm) if (!old.TryGetValue(i, out var o) || o != l) { var (x, y, z) = FromIdx(i); MarkDirty(x, y, z, dirty); }
+		foreach (int i in old.Keys) if (!nm.ContainsKey(i)) { var (x, y, z) = FromIdx(i); MarkDirty(x, y, z, dirty); }
 		LightMap = nm;
 	}
-	public static void MarkDirty(int x, int z, HashSet<int> dirty)   // the chunk holding (x, z) plus any neighbour chunk touching it
+	public static void MarkDirty(int x, int y, int z, HashSet<int> dirty)   // the chunk holding (x, y, z) plus any neighbour chunk touching it
 	{
-		for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
+		for (int dy = -1; dy <= 1; dy++) for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
 		{
-			int gx = x + dx, gz = z + dz;
-			if (gx >= 0 && gz >= 0 && gx < WX && gz < WZ) dirty.Add((gz / CS) * NCX + gx / CS);
+			int gx = x + dx, gy = y + dy, gz = z + dz;
+			if (Inside(gx, gy, gz)) dirty.Add(ChunkKey(gx / CS, gy / CS, gz / CS));
 		}
 	}
 
@@ -204,7 +207,7 @@ public partial class World
 		int ck = (z / CS) * NCX + x / CS;
 		if (id != 0) ChunkTop[ck] = Math.Max(ChunkTop[ck], y + 1);
 		var dirty = new HashSet<int>();
-		MarkDirty(x, z, dirty);
+		MarkDirty(x, y, z, dirty);
 		if (Cubeland.Blocks.IsTorch(id) || Cubeland.Blocks.IsTorch(old) || NearTorch(x, y, z)) Relight(dirty);
 		ChunksChanged?.Invoke(dirty);
 		WakeWater(x, y, z);
@@ -329,7 +332,7 @@ public partial class World
 			Blocks[i] = (byte)id; Edits[i] = id;
 			int c = (z / CS) * NCX + x / CS;
 			if (id != 0) ChunkTop[c] = Math.Max(ChunkTop[c], y + 1);
-			MarkDirty(x, z, dirty);
+			MarkDirty(x, y, z, dirty);
 			WakeWater(x, y, z);
 			BlockChanged?.Invoke(i, -1, id, 1);
 		}
