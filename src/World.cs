@@ -11,6 +11,11 @@ public partial class World
 	public const int NChunks = NCX * NCY * NCZ;
 	public static int ChunkKey(int cx, int cy, int cz) => (cy * NCZ + cz) * NCX + cx;
 	public static (int cx, int cy, int cz) FromChunkKey(int k) => (k % NCX, k / (NCX * NCZ), (k / NCX) % NCZ);
+	// chunks are BUILT as 16x16x16 cubes (a changed block only rebuilds the small cubes around it), but DRAWN glued
+	// together in 32x32x32 groups (2x2x2 chunks, one mesh each), because every separate mesh costs time to draw
+	public const int GS = 2, NGX = NCX / GS, NGY = NCY / GS, NGZ = NCZ / GS, NGroups = NGX * NGY * NGZ;
+	public static int GroupOf(int k) { var (cx, cy, cz) = FromChunkKey(k); return (cy / GS * NGZ + cz / GS) * NGX + cx / GS; }
+	public static (int gx, int gy, int gz) FromGroupKey(int g) => (g % NGX, g / (NGX * NGZ), (g / NGX) % NGZ);
 	public static int Idx(int x, int y, int z) => (y * WZ + z) * WX + x;
 	public static (int x, int y, int z) FromIdx(int i) => (i % WX, i / (WX * WZ), (i / WX) % WZ);
 

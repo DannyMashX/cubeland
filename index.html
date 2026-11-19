@@ -444,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.9.2"></script>
+<script src="textures.js?v=alpha-0.0.9.3"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.9.2';
+const GAME_VERSION = 'Alpha 0.0.9.3';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -1795,9 +1795,14 @@ const FACES = [
   { dir: [ 0, 0,-1], shade: 0.65, c: [[1,0,0,0,0],[0,0,0,1,0],[1,1,0,0,1],[0,1,0,1,1]] },
   { dir: [ 0, 0, 1], shade: 0.65, c: [[0,0,1,0,0],[1,0,1,1,0],[0,1,1,0,1],[1,1,1,1,1]] },
 ];
-const chunkMeshes = new Array(NCX * NCY * NCZ).fill(null);   // (null for a chunk with nothing to draw)
-const waterMeshes = new Array(NCX * NCY * NCZ).fill(null);
+// Chunks are BUILT as 16x16x16 cubes (so a changed block only rebuilds the small cubes around it), but DRAWN
+// glued together in 32x32x32 groups (2x2x2 chunks, one mesh each), because every separate mesh costs time to draw.
+const GS = 2, NGX = NCX / GS, NGY = NCY / GS, NGZ = NCZ / GS;
+const groupOf = k => (Math.floor(k / (NCX * NCZ) / GS) * NGZ + Math.floor(Math.floor(k / NCX) % NCZ / GS)) * NGX + Math.floor(k % NCX / GS);
+const chunkParts = new Array(NCX * NCY * NCZ).fill(null);    // each chunk's built pieces: [solid, water] (null when empty)
 const chunkBuilt = new Uint8Array(NCX * NCY * NCZ);          // 1 once a chunk has been built (even if it came out empty)
+const groupMeshes = new Array(NGX * NGY * NGZ).fill(null), groupWater = new Array(NGX * NGY * NGZ).fill(null);
+const groupsDirty = new Set();                                // groups to glue back together before the next frame is drawn
 // water is drawn after the solid blocks, see-through (using the texture's own transparency), and from both sides
 // so the surface still shows when you look up at it from underwater
 const waterMat = new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
@@ -2054,12 +2059,48 @@ function buildChunk(cx, cy, cz) {
     }
   }
   const k = chunkKey(cx, cy, cz);
+  const pack = (pos, uv, col, lt, sk, ind) => ind.length ? { pos: new Float32Array(pos), uv: new Float32Array(uv), col: new Float32Array(col), lt: new Float32Array(lt), sk: new Float32Array(sk), ind: new Uint32Array(ind) } : null;
   chunkBuilt[k] = 1;
-  if (chunkMeshes[k]) { scene.remove(chunkMeshes[k]); chunkMeshes[k].geometry.dispose(); chunkMeshes[k] = null; }
-  if (ind.length) { chunkMeshes[k] = new THREE.Mesh(makeGeo(pos, uv, col, lt, sk, ind), material); scene.add(chunkMeshes[k]); }
-  if (waterMeshes[k]) { scene.remove(waterMeshes[k]); waterMeshes[k].geometry.dispose(); waterMeshes[k] = null; }
-  if (wind.length) { waterMeshes[k] = new THREE.Mesh(makeGeo(wpos, wuv, wcol, wlt, wsk, wind), waterMat); scene.add(waterMeshes[k]); }
+  chunkParts[k] = ind.length || wind.length ? [pack(pos, uv, col, lt, sk, ind), pack(wpos, wuv, wcol, wlt, wsk, wind)] : null;
+  groupsDirty.add(groupOf(k));
 }
+// glue a group's chunks into one mesh for the solid blocks and one for the water
+function releaseArray() { this.array = null; }   // (once it's on the graphics card; the chunks keep their own copies)
+function mergeGroup(g) {
+  const gx = g % NGX, gz = Math.floor(g / NGX) % NGZ, gy = Math.floor(g / (NGX * NGZ));
+  for (const w of [0, 1]) {
+    const meshes = w ? groupWater : groupMeshes, parts = [];
+    for (let dy = 0; dy < GS; dy++) for (let dz = 0; dz < GS; dz++) for (let dx = 0; dx < GS; dx++) {
+      const p = chunkParts[chunkKey(gx * GS + dx, gy * GS + dy, gz * GS + dz)];
+      if (p && p[w]) parts.push(p[w]);
+    }
+    if (meshes[g]) { scene.remove(meshes[g]); meshes[g].geometry.dispose(); meshes[g] = null; }
+    if (!parts.length) continue;
+    let nv = 0, ni = 0;
+    for (const p of parts) { nv += p.lt.length; ni += p.ind.length; }
+    const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3), lt = new Float32Array(nv), sk = new Float32Array(nv);
+    const ind = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+    let v = 0, i = 0;
+    for (const p of parts) {
+      pos.set(p.pos, v * 3); uv.set(p.uv, v * 2); col.set(p.col, v * 3); lt.set(p.lt, v); sk.set(p.sk, v);
+      const pi = p.ind; for (let j = 0; j < pi.length; j++) ind[i + j] = pi[j] + v;
+      v += p.lt.length; i += pi.length;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('torch', new THREE.BufferAttribute(lt, 1));
+    geo.setAttribute('sky', new THREE.BufferAttribute(sk, 1));
+    geo.setIndex(new THREE.BufferAttribute(ind, 1));
+    geo.computeBoundingSphere(); geo.computeBoundingBox();
+    for (const name in geo.attributes) geo.attributes[name].onUpload(releaseArray);
+    geo.index.onUpload(releaseArray);
+    meshes[g] = new THREE.Mesh(geo, w ? waterMat : material);
+    scene.add(meshes[g]);
+  }
+}
+function flushGroups() { for (const g of groupsDirty) mergeGroup(g); groupsDirty.clear(); }
 // Pieces: each one is a half-size cube showing its own quarter of the block's texture, so 8 pieces of
 // the same block look exactly like the whole block. Faces hidden by a neighbouring piece or block aren't drawn.
 // For each face: which axis the texture's u and v run along (and whether backwards), worked out from FACES.
@@ -2152,13 +2193,15 @@ function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
 let buildQueue = null, buildDone = 0;
 function pumpChunkBuilds(budgetMs) {
   if (!buildQueue) {
-    const pcx = Math.floor(player.x / CS), pcy = Math.floor(player.y / CS), pcz = Math.floor(player.z / CS);
+    // (a whole 32x32x32 group at a time, nearest group first, so each group is glued together once)
+    const S = CS * GS, pgx = Math.floor(player.x / S), pgy = Math.floor(player.y / S), pgz = Math.floor(player.z / S);
     buildQueue = [];
     for (let cz = 0; cz < NCZ; cz++) for (let cx = 0; cx < NCX; cx++) for (let cy = 0; cy < NCY; cy++) {
       if (cy * CS >= chunkTop[cz * NCX + cx]) { chunkBuilt[chunkKey(cx, cy, cz)] = 1; continue; }   // (empty sky: nothing to build yet)
-      buildQueue.push([cx, cy, cz, (cx - pcx) ** 2 + (cy - pcy) ** 2 + (cz - pcz) ** 2]);
+      const gx = Math.floor(cx / GS), gy = Math.floor(cy / GS), gz = Math.floor(cz / GS);
+      buildQueue.push([cx, cy, cz, (gx - pgx) ** 2 + (gy - pgy) ** 2 + (gz - pgz) ** 2, groupOf(chunkKey(cx, cy, cz))]);
     }
-    buildQueue.sort((a, b) => a[3] - b[3]);
+    buildQueue.sort((a, b) => a[3] - b[3] || a[4] - b[4]);
   }
   const start = performance.now();
   while (buildDone < buildQueue.length && performance.now() - start < budgetMs) {
@@ -6443,6 +6486,7 @@ function frame(now) {
   if (fpsAcc >= 0.5) { fps = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }
   infoEl.textContent = `${fps} fps\nX ${player.x.toFixed(1)}  Y ${player.y.toFixed(1)}  Z ${player.z.toFixed(1)}${player.fly ? '\nFlying' : ''}${Sound.muted ? '\nSound off (M)' : ''}${Net.infoLine()}${!buildQueue ? (Net.client ? '\nJoining...' : '\nLoading save...') : buildDone < buildQueue.length ? `\nLoading world ${Math.floor(100 * buildDone / buildQueue.length)}%` : ''}`;
 
+  flushGroups();   // glue changed chunks back into their groups' meshes
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);

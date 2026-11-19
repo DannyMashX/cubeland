@@ -35,6 +35,13 @@ public class ChunkMesher
 		// (the web version's triangles, wound the other way round for Godot)
 		public void Quad(int b) { Ind.Add(b); Ind.Add(b + 2); Ind.Add(b + 1); Ind.Add(b + 2); Ind.Add(b + 3); Ind.Add(b + 1); }
 		public void QuadFlipped(int b) { Ind.Add(b); Ind.Add(b + 3); Ind.Add(b + 1); Ind.Add(b); Ind.Add(b + 2); Ind.Add(b + 3); }
+		// several chunks' pieces glued into one (for drawing a whole group at once)
+		public static Part Join(List<Part> ps)
+		{
+			var j = new Part();
+			foreach (var p in ps) { int b = j.Pos.Count; j.Pos.AddRange(p.Pos); j.Uv.AddRange(p.Uv); j.Uv2.AddRange(p.Uv2); j.Col.AddRange(p.Col); foreach (int i in p.Ind) j.Ind.Add(i + b); }
+			return j;
+		}
 		public ArrayMesh ToMesh()
 		{
 			if (Ind.Count == 0) return null;

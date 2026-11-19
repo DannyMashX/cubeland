@@ -20,7 +20,8 @@ public partial class Main : Node3D
 	ChunkMesher mesher;
 	Camera3D cam;
 	ShaderMaterial blockMat, waterMat;
-	readonly Dictionary<int, (MeshInstance3D solid, MeshInstance3D water)> chunkNodes = new();
+	readonly Dictionary<int, (MeshInstance3D solid, MeshInstance3D water)> groupNodes = new();   // one pair of meshes per 32x32x32 group
+	readonly Dictionary<int, (ChunkMesher.Part solid, ChunkMesher.Part water)> chunkParts = new();   // each built 16x16x16 chunk's pieces
 	readonly HashSet<int> dirty = new(), soon = new();
 	Task genTask; volatile float genProgress; bool ready;
 	Label info, loading;
@@ -462,7 +463,7 @@ public partial class Main : Node3D
 		var stay = args.FirstOrDefault(a => a.StartsWith("--stay="));
 		if (shotTimer < (stay != null ? float.Parse(stay[7..]) : sceneBuilt ? 4f : 1.5f)) return;
 		GetViewport().GetTexture().GetImage().SavePng(arg[7..]);
-		GD.Print($"shot saved, {chunkNodes.Count} chunks");
+		GD.Print($"shot saved, {chunkParts.Count} chunks in {groupNodes.Count} groups");
 		foreach (var m in mobList) GD.Print($"mob {m.Type}: health {m.Health}{(m.Burning ? ", burning" : "")}{(m.Fade > 0 ? ", fading" : "")} at y {m.Y:0.0}");
 		GD.Print($"your health {health}, rocks flying {rocks.Count}");
 		GetTree().Quit();
@@ -547,8 +548,16 @@ public partial class Main : Node3D
 	void BuildChunks()
 	{
 		var start = Time.GetTicksUsec();
-		int pcx = (int)player.Pos.X / World.CS, pcy = (int)player.Pos.Y / World.CS, pcz = (int)player.Pos.Z / World.CS;
-		int Dist(int c) { var (cx, cy, cz) = World.FromChunkKey(c); int dx = cx - pcx, dy = cy - pcy, dz = cz - pcz; return dx * dx + dy * dy + dz * dz; }
+		// (nearest GROUP first, and a group's chunks together, so each group gets glued together once)
+		const int S = World.CS * World.GS;
+		int pgx = (int)player.Pos.X / S, pgy = (int)player.Pos.Y / S, pgz = (int)player.Pos.Z / S;
+		int Dist(int c) { int g = World.GroupOf(c); var (gx, gy, gz) = World.FromGroupKey(g); int dx = gx - pgx, dy = gy - pgy, dz = gz - pgz; return (dx * dx + dy * dy + dz * dz) * World.NGroups + g; }
+		var touched = new HashSet<int>();
+		try { BuildSome(start, Dist, touched); }
+		finally { foreach (int g in touched) MergeGroup(g); }
+	}
+	void BuildSome(ulong start, Func<int, int> Dist, HashSet<int> touched)
+	{
 		int want = Math.Max(2, System.Environment.ProcessorCount);
 		var best = new int[want]; var bestD = new int[want];
 		while (Time.GetTicksUsec() - start < 8000)
@@ -573,18 +582,32 @@ public partial class Main : Node3D
 			}
 			var parts = new (ChunkMesher.Part, ChunkMesher.Part)[batch.Length];
 			Parallel.For(0, batch.Length, i => { var (cx, cy, cz) = World.FromChunkKey(batch[i]); parts[i] = mesher.Build(cx, cy, cz); });
-			for (int i = 0; i < batch.Length; i++) SetChunkMesh(batch[i], parts[i].Item1.ToMesh(), parts[i].Item2.ToMesh());
+			for (int i = 0; i < batch.Length; i++)
+			{
+				var (s, w) = parts[i];
+				if (s.Ind.Count == 0 && w.Ind.Count == 0) chunkParts.Remove(batch[i]);
+				else chunkParts[batch[i]] = (s.Ind.Count > 0 ? s : null, w.Ind.Count > 0 ? w : null);
+				touched.Add(World.GroupOf(batch[i]));
+			}
 		}
 	}
-	void SetChunkMesh(int c, ArrayMesh solid, ArrayMesh water)
+	// glue a group's chunks into one mesh for the solid blocks and one for the water
+	void MergeGroup(int g)
 	{
-		if (!chunkNodes.TryGetValue(c, out var n))
+		var (gx, gy, gz) = World.FromGroupKey(g);
+		var solids = new List<ChunkMesher.Part>(); var waters = new List<ChunkMesher.Part>();
+		for (int dy = 0; dy < World.GS; dy++) for (int dz = 0; dz < World.GS; dz++) for (int dx = 0; dx < World.GS; dx++)
+			if (chunkParts.TryGetValue(World.ChunkKey(gx * World.GS + dx, gy * World.GS + dy, gz * World.GS + dz), out var p))
+			{ if (p.solid != null) solids.Add(p.solid); if (p.water != null) waters.Add(p.water); }
+		var solid = solids.Count == 0 ? null : solids.Count == 1 ? solids[0].ToMesh() : ChunkMesher.Part.Join(solids).ToMesh();
+		var water = waters.Count == 0 ? null : waters.Count == 1 ? waters[0].ToMesh() : ChunkMesher.Part.Join(waters).ToMesh();
+		if (!groupNodes.TryGetValue(g, out var n))
 		{
-			if (solid == null && water == null) return;   // (an empty chunk, all air or buried rock: no nodes for it)
+			if (solid == null && water == null) return;   // (an empty group, all air or buried rock: no nodes for it)
 			n = (new MeshInstance3D { MaterialOverride = blockMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
 				 new MeshInstance3D { MaterialOverride = waterMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off });
 			AddChild(n.solid); AddChild(n.water);
-			chunkNodes[c] = n;
+			groupNodes[g] = n;
 		}
 		n.solid.Mesh = solid; n.water.Mesh = water;
 	}
