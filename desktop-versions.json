@@ -1,5 +1,23 @@
 [
     {
+        "version": "Alpha 0.0.9.1",
+        "folder": "alpha-0.0.9.1",
+        "date": "2026-11-18",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.9.1/CubeLand-Alpha-0.0.9.1-windows.zip",
+        "size": 74788607,
+        "exe": "CubeLand-Alpha-0.0.9.1-windows/CubeLand.exe",
+        "changes": [
+            "Tools in your hand are 50% bigger, and the Hoe is turned the right way round",
+            "Your hand shows the whole arm now, running right off the edge of the screen",
+            "Fixed the arm jittering when you sprint-jump",
+            "Clay Balls dry into Bricks in 2 minutes instead of 5",
+            "New recipe: 4 Clay Balls pack back into a Clay block",
+            "Dirt and Gravel have swapped sounds",
+            "Leaves only drop themselves when mined with a Hoe; anything else just has the 1 in 5 chance of a Stick",
+            "The GUI is one size smaller, still in whole pixels"
+        ]
+    },
+    {
         "version": "Alpha 0.0.9.0",
         "folder": "alpha-0.0.9.0",
         "date": "2026-11-18",
