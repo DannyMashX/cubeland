@@ -1,5 +1,17 @@
 [
     {
+        "version": "Alpha 0.0.9.5",
+        "folder": "alpha-0.0.9.5",
+        "date": "2026-11-19",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-alpha-0.0.9.5/CubeLand-Alpha-0.0.9.5-windows.zip",
+        "size": 74803136,
+        "exe": "CubeLand-Alpha-0.0.9.5-windows/CubeLand.exe",
+        "changes": [
+            "Fixed see-through walls of water showing inside the sea near the edge of the world",
+            "Plays multiplayer with web version Alpha 0.0.9.5"
+        ]
+    },
+    {
         "version": "Alpha 0.0.9.4",
         "folder": "alpha-0.0.9.4",
         "date": "2026-11-19",
