@@ -73,9 +73,10 @@ public partial class Main
 		if (h.Y <= 0) return;   // the bottom of the world can't be broken
 		int hb = h.Id;
 		if (NeedTool(hb)) return;
-		CollectBlock(hb, h.X, h.Y, h.Z);
+		// leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
+		if (hb != Blocks.Leaves || inv.Holding("hoe")) CollectBlock(hb, h.X, h.Y, h.Z);
 		Sound.I?.Break(hb);
-		if (hb == Blocks.Leaves && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);   // leaves: 1 in 5 chance of a stick too
+		if (hb == Blocks.Leaves && !inv.Holding("hoe") && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);
 		if (hb == Blocks.GrainRipe) for (int n = 1 + rnd.Next(2); n > 0; n--) Collect(Blocks.GrainSeeds, h.X, h.Y, h.Z);   // ripe Grain: 1-2 seeds too
 		var b = Blocks.B[hb];
 		if (Blocks.IsTorch(hb) && b.Count > 1) world.SetBlock(h.X, h.Y, h.Z, Blocks.TorchVariant(b.Wi, b.Count - 1, b.Burn));   // take one torch off

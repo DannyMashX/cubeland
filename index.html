@@ -444,7 +444,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.9.0"></script>
+<script src="textures.js?v=alpha-0.0.9.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +452,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.9.0';
+const GAME_VERSION = 'Alpha 0.0.9.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -612,7 +612,7 @@ BLOCKS[3].drop = 8;   // mining Stone gives Cobblestone
 BLOCKS[1].drop = 2;   // digging up Grass gives Dirt
 BLOCKS[CRUDE_AXE] = { name: 'Crude Axe', t: [34, 34, 34], item: true, tool: 'axe', material: 'crude', damage: 1 };
 // Clay Ball (215): put it down on the ground and it dries into a Brick (216) in DRY_TIME seconds, which you pick up.
-const CLAY_BALL = 215, BRICK = 216, CLAY_BALL_BLOCK = 71, BRICK_BLOCK = 72, DRY_TIME = 300;
+const CLAY_BALL = 215, BRICK = 216, CLAY_BALL_BLOCK = 71, BRICK_BLOCK = 72, DRY_TIME = 120;
 BLOCKS[CLAY_BALL] = { name: 'Clay Ball', t: [45, 45, 45], item: true, places: CLAY_BALL_BLOCK };
 BLOCKS[BRICK] = { name: 'Brick', t: [46, 46, 46], item: true };
 // Fire Essence: 1 in 20 Grrs drop one. Right-click while holding it to lift all your gloom at once (see Gloom)
@@ -1066,7 +1066,7 @@ let uiScale = 1, uiZoom = 1;
 // normal, heading, title.
 function fitFontSizes() {
   const real = window.devicePixelRatio || 1, root = document.documentElement.style;
-  uiScale = Math.max(1, Math.round(real)); uiZoom = uiScale / real;
+  uiScale = Math.max(1, Math.round(real) - 1); uiZoom = uiScale / real;   // (one step smaller than your display scaling: 150% -> 1x)
   document.body.style.zoom = uiZoom === 1 ? '' : uiZoom;
   root.setProperty('--unzoom', 1 / uiZoom);                      // (the world's canvas undoes it)
   root.setProperty('--vw', innerWidth / uiZoom + 'px'); root.setProperty('--vh', innerHeight / uiZoom + 'px');   // the window, in page pixels
@@ -2373,14 +2373,14 @@ const Sound = (() => {
   const musicLevel = () => muted ? 0 : 0.32 * levels.master * levels.music;
   try { muted = localStorage.getItem('cubeland-muted') === '1'; } catch (e) {}
   // which sound recipe each block uses (block id: recipe). Recipe names describe the sound, not the block:
-  // stone-type blocks use 'rock' (deep bm / crk), dirt uses the crumbly 'dirt' crunch, gravel uses the sharp 'stone' chk.
-  const MATERIAL = { 1: 'grass', 2: 'dirt', 3: 'rock', 4: 'wood', 5: 'grass', 6: 'sand', 7: 'wood', 8: 'cobble', 9: 'rock', 10: 'glass', 11: 'stone', 12: 'brick', 13: 'brick', 14: 'brick', 15: 'brick',
+  // stone-type blocks use 'rock' (deep bm / crk), dirt (and tilled soil) uses the sharp 'stone' chk, gravel the crumbly 'dirt' crunch.
+  const MATERIAL = { 1: 'grass', 2: 'stone', 3: 'rock', 4: 'wood', 5: 'grass', 6: 'sand', 7: 'wood', 8: 'cobble', 9: 'rock', 10: 'glass', 11: 'dirt', 12: 'brick', 13: 'brick', 14: 'brick', 15: 'brick',
     60: 'wood', 61: 'wood', 63: 'dirt', 64: 'brick', 65: 'brick', 66: 'brick', 67: 'brick', 68: 'brick', 69: 'rock' };
   for (let k = 0; k < 8; k++) MATERIAL[FURNACE + k] = 'brick';   // torches use 'wood' (see mat below)
   for (const b of NEW_COLOUR_BLOCKS) MATERIAL[b] = 'brick';
   for (const b of FLOWERS) MATERIAL[b] = 'grass';
   for (const b of GRAIN_STAGES) MATERIAL[b] = 'grass';
-  for (const b of [TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED]) MATERIAL[b] = 'dirt';
+  for (const b of [TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED]) MATERIAL[b] = 'stone';
   // materials whose placing sound is their footstep sound instead of their dig sound
   // materials with their own placing sound (others reuse the breaking sound, softer)
   const PLACE_RECIPES = {
@@ -3680,6 +3680,7 @@ function heldModel(id) {
   const tool = isHeldTool(id), geo = tool ? thickPicture(dropTexCache[id].image) : new THREE.PlaneGeometry(0.5, 0.5);
   if (tool) {   // the picture's handle runs from the bottom-left corner: move its grip to the middle and stand the handle straight up
     geo.translate(-HELD_GRIP[0], -HELD_GRIP[1], 0); geo.rotateZ(Math.PI / 4);
+    if (BLOCKS[id].tool === 'hoe') geo.rotateY(Math.PI);   // (the hoe's blade faces the other way, so it's turned round its handle)
   }
   const mesh = new THREE.Mesh(geo, withHaze(new THREE.MeshBasicMaterial({ map: dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: tool })));
   mesh.userData.tool = tool;
@@ -3736,8 +3737,10 @@ function updateHand(dt) {
     if (!(window.MODELS || {}).player) return;
     hand.arm.clear(); hand.id = -1;
     hand.body = buildMobMesh('player', { scale: 1, tex: PlayerSkin.texture() || undefined });
-    const fore = hand.body.arms[1] && hand.body.arms[1].lower;
-    if (fore) { fore.position.set(0, 0, 0); hand.arm.add(fore); }
+    // the whole right arm, upper arm and all, held straight with the elbow at the middle of the hand group: the
+    // upper arm carries on behind the forearm, so the arm runs off the edge of the screen instead of stopping short
+    const a = hand.body.arms[1];
+    if (a && a.lower) { a.pivot.position.set(-a.lower.position.x, -a.lower.position.y, -a.lower.position.z); a.pivot.rotation.set(0, 0, 0); hand.arm.add(a.pivot); }
   }
   hand.root.visible = !player.dead;
   const id = HOTBAR[selected] | 0;
@@ -3747,7 +3750,7 @@ function updateHand(dt) {
     setHeld(hand.body, id);
     const m = hand.body.heldMesh;   // facing you, instead of side-on like other players'
     if (m && m.userData.cube) { m.position.set(0, -8.5 / 16, 0); m.rotation.set(-1.55, Math.PI / 4, 0); }   // (upright, its top tipped toward you)
-    else if (m && m.userData.tool) { m.position.set(0, -5 / 16, 0); m.rotation.set(HAND_TOOL[0], HAND_TOOL[1], HAND_TOOL[2], 'XYZ'); }   // (by the handle, side-on)
+    else if (m && m.userData.tool) { m.position.set(0, -5 / 16, 0); m.rotation.set(HAND_TOOL[0], HAND_TOOL[1], HAND_TOOL[2], 'XYZ'); m.scale.setScalar(1.5); }   // (by the handle, side-on, half as big again)
     else if (m) { m.position.set(0, -7.5 / 16, -0.04); m.rotation.set(-Math.PI / 2, 0, 0); }
   }
   // swinging: one swing per click, and over and over while the left button is held (breaking)
@@ -3756,7 +3759,9 @@ function updateHand(dt) {
   hand.dip = Math.max(0, hand.dip - dt * 5);
   const speed = player.onGround && !player.fly ? Math.hypot(player.vx, player.vz) : 0;
   hand.bob += speed * dt * 1.6;
-  const walk = Math.min(1, speed / 4);
+  // how much the walking bob shows: eased in and out, so leaving the ground (a sprint jump) doesn't make it jump
+  hand.walk = (hand.walk || 0) + (Math.min(1, speed / 4) - (hand.walk || 0)) * Math.min(1, dt * 8);
+  const walk = hand.walk;
   const sw = hand.swing > 0 ? Math.sin(Math.PI * (1 - hand.swing)) : 0;
   const S = 0.4;   // drawn at 0.4 size, 0.4 as far away: looks the same, but stays clear of walls
   hand.root.scale.setScalar(S);
@@ -4686,8 +4691,9 @@ addEventListener('mousedown', e => {
   if (e.button === 0 && hit.y > 0) {
     if (needAxe(hb)) return;
     Sound.break(hb);
-    collectBlock(hb, hit.x, hit.y, hit.z);
-    if (hb === 5 && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);   // leaves: 1 in 5 chance of a stick too
+    // leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
+    if (hb !== 5 || holding('hoe')) collectBlock(hb, hit.x, hit.y, hit.z);
+    if (hb === 5 && !holding('hoe') && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);
     if (hb === GRAIN_RIPE) for (let n = 1 + (Math.random() < 0.5 ? 1 : 0); n > 0; n--) collect(GRAIN_SEEDS, hit.x, hit.y, hit.z);   // ripe Grain: 1-2 Seeds too
     if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn)); // take one torch off
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
@@ -5518,6 +5524,7 @@ const RECIPES = [
   { out: EVER_TORCH, n: 1, needs: [[TORCH, 1], [FIRE_ESSENCE, 1]], at: 'hand' },   // a Torch + Fire Essence -> an Ever Torch (never burns out)
   { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
   { out: CLAY_BALL, n: 1, needs: [[PIECE_ITEM + 63, 2]], at: 'hand' },   // 2 Clay Pieces -> a Clay Ball
+  { out: 63, n: 1, needs: [[CLAY_BALL, 4]], at: 'hand' },                // 4 Clay Balls packed back into Clay
   { out: 64, n: 1, needs: [[BRICK, 4]], at: 'bench' },                   // 4 Bricks -> Bricks (block)
   { out: FURNACE, n: 1, needs: [[BRICK, 8]], at: 'bench' },              // 8 Bricks -> Furnace
   // chiseled blocks: 1 block, carved with a pickaxe (not used up)

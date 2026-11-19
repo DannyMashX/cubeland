@@ -20,7 +20,7 @@ public partial class Sound : Node
 	public static bool Muted;
 	static readonly Dictionary<int, string> Material = new()
 	{
-		[1] = "grass", [2] = "dirt", [3] = "rock", [4] = "wood", [5] = "grass", [6] = "sand", [7] = "wood", [8] = "cobble", [9] = "rock", [10] = "glass", [11] = "stone",
+		[1] = "grass", [2] = "stone", [3] = "rock", [4] = "wood", [5] = "grass", [6] = "sand", [7] = "wood", [8] = "cobble", [9] = "rock", [10] = "glass", [11] = "dirt",
 		[12] = "brick", [13] = "brick", [14] = "brick", [15] = "brick", [60] = "wood", [61] = "wood", [63] = "dirt", [64] = "brick", [65] = "brick", [66] = "brick",
 		[67] = "brick", [68] = "brick", [69] = "rock",
 	};
@@ -30,7 +30,7 @@ public partial class Sound : Node
 		foreach (int b in Blocks.NewColourBlocks) Material[b] = "brick";
 		foreach (int b in Blocks.Flowers) Material[b] = "grass";
 		foreach (int b in Blocks.GrainStages) Material[b] = "grass";
-		foreach (int b in Blocks.Soils) Material[b] = "dirt";
+		foreach (int b in Blocks.Soils) Material[b] = "stone";   // (tilled soil sounds like dirt, which now has the sharp sound; gravel has the crumbly one)
 	}
 	static string Mat(int id) => Blocks.IsTorch(id) ? "wood" : Material.TryGetValue(id, out var m) ? m : "stone";
 

@@ -241,7 +241,7 @@ public partial class World
 
 	// ---- Torches burn down a stage when their time runs out (lit -> smoldering -> burnt); Clay Balls dry into Bricks ----
 	public static readonly float[][] BurnTimes = { new[] { 900f, 1500f }, new[] { 300f, 600f } };   // lit 15-25 min, smoldering 5-10 min
-	public const float DryTime = 300;
+	public const float DryTime = 120;
 	public readonly Dictionary<int, float> TorchBurn = new(), Drying = new();
 	static readonly Random burnRnd = new();
 	public static float BurnTime(int burn) => BurnTimes[burn][0] + (float)burnRnd.NextDouble() * (BurnTimes[burn][1] - BurnTimes[burn][0]);

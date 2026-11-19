@@ -40,7 +40,7 @@ public partial class Main : Node3D
 		var uiArg = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--uiscale="));
 		float uiScale = uiArg != null ? float.Parse(uiArg[10..], System.Globalization.CultureInfo.InvariantCulture)
 			: MathF.Floor(DisplayServer.ScreenGetDpi() / 96f + 0.5f);
-		uiScale = Mathf.Max(1, MathF.Round(uiScale));
+		uiScale = Mathf.Max(1, MathF.Round(uiScale) - (uiArg != null ? 0 : 1));   // (one step smaller than your display scaling: 150% -> 1x)
 		GetTree().Root.ContentScaleFactor = uiScale;
 		if (uiScale > 1 && DisplayServer.WindowGetMode() == DisplayServer.WindowMode.Windowed)
 		{

@@ -373,7 +373,8 @@ public partial class Main
 		var grip = new Vector2((4f / 16 - 0.5f) * 0.5f, (0.5f - 11f / 16) * 0.5f);
 		bool Solid(int i, int j) => i >= 0 && j >= 0 && i < n && j < n && img.GetPixel(i, j).A >= 0.5f;
 		var st = new SurfaceTool(); st.Begin(Mesh.PrimitiveType.Triangles);
-		Vector3 Place(Vector3 p) { var q = (new Vector2(p.X, p.Y) - grip).Rotated(MathF.PI / 4); return new Vector3(q.X, q.Y, p.Z); }
+		bool hoe = Blocks.Get(id)?.Tool == "hoe";   // (the hoe's blade faces the other way, so it's turned round its handle)
+		Vector3 Place(Vector3 p) { var q = (new Vector2(p.X, p.Y) - grip).Rotated(MathF.PI / 4); return hoe ? new Vector3(-q.X, q.Y, -p.Z) : new Vector3(q.X, q.Y, p.Z); }
 		void Quad(Vector3[] p, Vector2[] uv, float c)
 		{
 			foreach (int k in new[] { 0, 1, 2, 0, 2, 3 }) { st.SetColor(new Color(c, c, c)); st.SetUV(uv.Length == 1 ? uv[0] : uv[k]); st.AddVertex(Place(p[k])); }
@@ -444,7 +445,7 @@ public partial class Main
 	// Same as the web's HAND_TOOL.
 	static readonly Vector3 HandTool = new(-2.07f, MathF.PI / 2, 0);
 	float testSwing = -1;
-	Node3D handRoot, handArm; Mob handBody; int handId = -1; float handSwing, handDip, handBob, handLightTimer, handSky = 1, handTorch;
+	Node3D handRoot, handArm; Mob handBody; int handId = -1; float handSwing, handDip, handBob, handWalk, handLightTimer, handSky = 1, handTorch;
 	void SwingHand() => handSwing = 1;
 	// your skin changed: your hand is made again with it
 	void RemakeHand() { handRoot?.QueueFree(); handRoot = null; handBody = null; handId = -1; }
@@ -461,9 +462,11 @@ public partial class Main
 			handArm = new Node3D { RotationOrder = EulerOrder.Yxz }; handRoot.AddChild(handArm);
 			handBody = new Mob { Type = "player", T = new MobType { Scale = 1 }, Skin = PlayerSkin.Texture };
 			BuildMob(handBody);
-			var fore = handBody.Arms.Count > 1 ? handBody.Arms[1].Lower : null;
-			if (fore != null) { fore.GetParent().RemoveChild(fore); fore.Position = Vector3.Zero; handArm.AddChild(fore); }
-			handBody.Root.QueueFree(); handBody.Root = null;   // (only the forearm is kept)
+			// the whole right arm, upper arm and all, held straight with the elbow at the middle of handArm: the upper arm
+			// carries on behind the forearm, so the arm runs off the edge of the screen instead of stopping short
+			var arm = handBody.Arms.Count > 1 ? handBody.Arms[1] : null;
+			if (arm?.Lower != null) { arm.Pivot.GetParent().RemoveChild(arm.Pivot); arm.Pivot.Position = -arm.Lower.Position; arm.Pivot.Rotation = Vector3.Zero; handArm.AddChild(arm.Pivot); }
+			handBody.Root.QueueFree(); handBody.Root = null;   // (only the arm is kept)
 		}
 		handRoot.Visible = !dead;
 		int id = inv.Held;
@@ -474,7 +477,7 @@ public partial class Main
 			SetHeld(handBody, id);
 			var m = handBody.HeldMesh;   // facing you, instead of side-on like other players'
 			if (m != null && heldCubes.ContainsKey(id) && m.Mesh == heldCubes[id]) { m.Position = new Vector3(0, -8.5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-1.55f, MathF.PI / 4, 0); }   // (upright, its top tipped toward you)
-			else if (m != null && IsHeldTool(id)) { m.Position = new Vector3(0, -5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = HandTool; }   // (by the handle, side-on)
+			else if (m != null && IsHeldTool(id)) { m.Position = new Vector3(0, -5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = HandTool; m.Scale = Vector3.One * 1.5f; }   // (by the handle, side-on, half as big again)
 			else if (m != null) { m.Position = new Vector3(0, -7.5f / 16, -0.04f); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-MathF.PI / 2, 0, 0); }
 		}
 		// swinging: one swing per click, and over and over while the left button is held (breaking)
@@ -484,7 +487,9 @@ public partial class Main
 		handDip = Math.Max(0, handDip - dt * 5);
 		float speed = player.OnGround && !player.Flying ? new Vector2(player.Vel.X, player.Vel.Z).Length() : 0;
 		handBob += speed * dt * 1.6f;
-		float walk = Math.Min(1, speed / 4), sw = handSwing > 0 ? MathF.Sin(MathF.PI * (1 - handSwing)) : 0;
+		// how much the walking bob shows: eased in and out, so leaving the ground (a sprint jump) doesn't make it jump
+		handWalk += (Math.Min(1, speed / 4) - handWalk) * Math.Min(1, dt * 8);
+		float walk = handWalk, sw = handSwing > 0 ? MathF.Sin(MathF.PI * (1 - handSwing)) : 0;
 		if (testSwing >= 0) sw = testSwing;   // (test: held part way through a swing)
 		const float S = 0.4f;   // drawn at 0.4 size, 0.4 as far away: looks the same, but stays clear of walls
 		handRoot.Scale = Vector3.One * S;

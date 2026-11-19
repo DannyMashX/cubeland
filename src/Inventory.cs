@@ -93,6 +93,7 @@ public class Inventory
 		new() { Out = Blocks.EverTorch, N = 1, Needs = new[] { (Blocks.Torch, 1), (Blocks.FireEssence, 1) } },
 		new() { Out = Blocks.ClayBall, N = 4, Needs = new[] { (Blocks.Clay, 1) } },
 		new() { Out = Blocks.ClayBall, N = 1, Needs = new[] { (Blocks.PieceItem + Blocks.Clay, 2) } },
+		new() { Out = Blocks.Clay, N = 1, Needs = new[] { (Blocks.ClayBall, 4) } },   // 4 Clay Balls packed back into Clay
 		new() { Out = Blocks.BricksBlock, N = 1, Needs = new[] { (Blocks.Brick, 4) }, At = "bench" },
 		new() { Out = Blocks.Furnace, N = 1, Needs = new[] { (Blocks.Brick, 8) }, At = "bench" },
 		new() { Out = 67, N = 1, Needs = new[] { (65, 1) }, At = "bench", Tool = "pickaxe" },
