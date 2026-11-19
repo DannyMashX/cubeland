@@ -1,5 +1,14 @@
 [
     {
+        "version":  "Alpha 0.0.9.5",
+        "folder":  "alpha-0.0.9.5",
+        "date":  "2026-11-19",
+        "notes":  "Fixed see-through walls of water showing inside the sea near the edge of the world",
+        "changes":  [
+                        "Fixed see-through walls of water showing inside the sea near the edge of the world"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.9.4",
         "folder":  "alpha-0.0.9.4",
         "date":  "2026-11-19",

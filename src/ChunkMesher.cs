@@ -298,6 +298,9 @@ public class ChunkMesher
 		{
 			int n = W.GetBlock(x + f.Dir[0], y + f.Dir[1], z + f.Dir[2]);
 			if (Blocks.IsWater(n) || (n != 0 && !Blocks.B[n].Transparent)) continue;
+			// (no wall of water at the edge of the world: seen through the sea it showed up as see-through panes)
+			int ex = x + f.Dir[0], ez = z + f.Dir[2];
+			if (ex < 0 || ez < 0 || ex >= World.WX || ez >= World.WZ) continue;
 			int tile = Blocks.B[id].T[0], bas = P.Pos.Count;
 			foreach (var c in f.C)
 			{

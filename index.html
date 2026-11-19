@@ -445,7 +445,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.9.4"></script>
+<script src="textures.js?v=alpha-0.0.9.5"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -453,7 +453,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.9.4';
+const GAME_VERSION = 'Alpha 0.0.9.5';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -2191,6 +2191,9 @@ function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
   for (const f of FACES) {
     const n = getBlock(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
     if (isWater(n) || (n && !BLOCKS[n].transparent)) continue;
+    // (no wall of water at the edge of the world: seen through the sea it showed up as see-through panes)
+    const ex = x + f.dir[0], ez = z + f.dir[2];
+    if (ex < 0 || ez < 0 || ex >= WX || ez >= WZ) continue;
     const tile = BLOCKS[id].t[0], base = pos.length / 3;
     f.c.forEach(c => {
       const h = c[1] ? cornerH(c[0], c[2]) : 0;

@@ -126,6 +126,13 @@ public partial class Main : Node3D
 		player.Pos = spawnPoint = FindSpawn();
 		outline = MakeOutline(); AddChild(outline);
 		ApplyPlayerSave();
+		// (test: `--at=x,y,z[,yaw,pitch]` puts you there, flying)
+		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--at=")) is { } atArg)
+		{
+			var v = atArg[5..].Split(',').Select(t => float.Parse(t, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+			player.Pos = new Vector3(v[0], v[1], v[2]); player.Flying = true;
+			if (v.Length > 4) { player.Yaw = v[3]; player.Pitch = v[4]; }
+		}
 		if (netClient) ConnectToHost();
 		// tests go straight in; otherwise the main menu (or the Ready screen) is showing
 		Input.MouseMode = (tempWorld || HasArg("--play")) && !menuOpen ? LockMode : Input.MouseModeEnum.Visible;
