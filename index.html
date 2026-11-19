@@ -335,6 +335,7 @@
     <h2>Settings</h2>
     <div class="set-row"><span>Mouse sensitivity</span><input type="range" id="set-sens" min="20" max="300" step="10"><b id="set-sens-v"></b></div>
     <div class="set-row"><span>Field of view</span><input type="range" id="set-fov" min="50" max="110" step="5"><b id="set-fov-v"></b></div>
+    <div class="set-row"><span>Render distance</span><input type="range" id="set-render" min="4" max="32" step="1"><b id="set-render-v"></b></div>
     <div class="set-row"><span>Sound (M)</span><button id="set-sound"></button></div>
     <div class="set-row"><span>FPS and position</span><button id="set-info"></button></div>
     <div class="set-row"><span>Auto save</span><button id="set-autosave"></button></div>
@@ -444,7 +445,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=alpha-0.0.9.3"></script>
+<script src="textures.js?v=alpha-0.0.9.4"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -452,7 +453,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Alpha 0.0.9.3';
+const GAME_VERSION = 'Alpha 0.0.9.4';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -568,7 +569,7 @@ const BURN_TIMES = [[900, 1500], [300, 600]];
 const burnTime = burn => { const [lo, hi] = BURN_TIMES[burn]; return lo + Math.random() * (hi - lo); };
 const torchBurn = new Map();   // world index of a lit or smoldering torch spot -> seconds until it burns down a stage
 // farming (Till & Tend, see farmChanged)
-const crops = new Map();      // world index of growing (not yet ripe) Grain -> seconds of growing left until its next stage
+const crops = new Map();      // world index of growing (not yet ripe) Grain -> lucky ticks it has had in this stage (see stageChance)
 const soils = new Set();      // world index of every tilled / fertilized soil block
 const fertLeft = new Map();   // world index of fertilized soil -> ripe harvests it has left (FARM.fertHarvests to start)
 const soilIdle = new Map();   // world index of dry, empty tilled soil -> seconds it has been like that
@@ -638,11 +639,16 @@ BLOCKS[GLOOM_WISP] = { name: 'Gloom Wisp', t: [104, 104, 104], item: true };
 const GRAIN_SEEDS = 623, GRAIN = 624, FLOUR = 625, BREAD = 626;
 const TILLED = 93, WET_TILLED = 94, FERTILIZED = 95, WET_FERTILIZED = 96;
 const GRAIN_STAGES = [42, 43, 44, 45, 46, 47, 48, 49], GRAIN_RIPE = 49;
-const FARM = { stageTime: 40, dryRate: 0.5, fertRate: 1.6, wetReach: 5, fertHarvests: 2, revertTime: 180, seedChance: 1 / 6 };
+const FARM = { stageTime: 40, stageHits: 3, dryRate: 0.5, fertRate: 1.6, wetReach: 5, fertHarvests: 2, revertTime: 180, seedChance: 1 / 6 };
 BLOCKS[GRAIN_SEEDS] = { name: 'Grain Seeds', t: [105, 105, 105], item: true };
 BLOCKS[GRAIN] = { name: 'Grain', t: [106, 106, 106], item: true };
 BLOCKS[FLOUR] = { name: 'Flour', t: [107, 107, 107], item: true };
 BLOCKS[BREAD] = { name: 'Bread', t: [108, 108, 108], item: true, food: 6 };
+// cows: Leather (more from a cow with room to roam), Raw Meat (more from a well-fed cow) -> Cooked Meat in the Kiln
+const LEATHER = 627, RAW_MEAT = 628, COOKED_MEAT = 629;
+BLOCKS[LEATHER] = { name: 'Leather', t: [121, 121, 121], item: true };
+BLOCKS[RAW_MEAT] = { name: 'Raw Meat', t: [122, 122, 122], item: true, food: 2 };
+BLOCKS[COOKED_MEAT] = { name: 'Cooked Meat', t: [123, 123, 123], item: true, food: 8 };
 [['Tilled Dirt', 109], ['Wet Tilled Dirt', 110], ['Fertilized Dirt', 111], ['Wet Fertilized Dirt', 112]].forEach(([name, top], k) => {
   BLOCKS[TILLED + k] = { name, t: [2, top, 2], drop: 2, soil: true, wet: k % 2 === 1, fert: k >= 2 };   // (t: side, top, bottom)
 });
@@ -789,7 +795,7 @@ const placeId = id => BLOCKS[id] && BLOCKS[id].places ? BLOCKS[id].places : BRIC
 let selected = 0;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 121;   // the texture atlas holds 121 pictures side by side (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes, 105+ Till & Tend)
+const TILE = 16, NT = 124;   // the texture atlas holds 124 pictures side by side (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows)
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -873,7 +879,7 @@ const TEXTURE_SLOTS = {
   stick: 32, rock: 33, crude_axe: 34, fire_essence: 47,
   stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
   bone: 102, bone_ash: 103, gloom_wisp: 104,
-  grain_seeds: 105, grain: 106, flour: 107, bread: 108, tilled_dirt: 109, wet_tilled_dirt: 110, fertilized_dirt: 111, wet_fertilized_dirt: 112,
+  grain_seeds: 105, grain: 106, flour: 107, bread: 108, tilled_dirt: 109, wet_tilled_dirt: 110, fertilized_dirt: 111, wet_fertilized_dirt: 112, leather: 121, raw_meat: 122, cooked_meat: 123,
 };
 // the colours: <colour>_terracotta, <colour>_chiseled_terracotta, <colour>_bricks, <colour>_dye, <colour>_flower
 COLOURS.forEach((c, k) => {
@@ -1600,6 +1606,7 @@ const material = new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, alp
 const FOG = {
   density: { value: 0.045 }, // how fast the haze builds up with distance (higher = thicker sooner)
   max:     { value: 0.82 },  // the most it can ever cover (1.0 would hide distant blocks completely)
+  edge:    { value: 160 },   // the render distance, in blocks: everything is fully hazed by here (see applyRenderDist)
 };
 // Daylight brightness/tint for blocks (set by the day/night cycle). Torch light is added on top of it,
 // so torches still glow when the night is pitch black.
@@ -1614,6 +1621,7 @@ const heldLightAt = (x, y, z) => HELD_LIGHT.value > 0 ?
 material.onBeforeCompile = shader => {
   shader.uniforms.fogThickness = FOG.density;
   shader.uniforms.fogMax = FOG.max;
+  shader.uniforms.fogEdge = FOG.edge;
   shader.uniforms.dayTint = DAY_TINT;
   shader.uniforms.torchColor = { value: TORCH_COLOR };
   shader.uniforms.heldLight = HELD_LIGHT;
@@ -1626,10 +1634,11 @@ material.onBeforeCompile = shader => {
     .replace('#include <color_fragment>', `#include <color_fragment>
       float held = heldLight > 0.0 ? min(1.2, pow(max(0.0, heldLight - length(vEye)) / ${TORCH_LIGHT.toFixed(1)}, 1.4)) : 0.0;   // (the same curve as LIGHT_CURVE)
       diffuseColor.rgb *= max(dayTint * vSky, max(vTorch, held) * torchColor);`)
-    .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nuniform float fogThickness;\nuniform float fogMax;')
+    .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nuniform float fogThickness;\nuniform float fogMax;\nuniform float fogEdge;')
     .replace('#include <fog_fragment>', `
       #ifdef USE_FOG
         float hazeAmount = (1.0 - exp(-fogThickness * fogDepth)) * fogMax;
+        hazeAmount = max(hazeAmount, smoothstep(fogEdge * 0.6, fogEdge, length(vEye)));   // the render distance: fully hazed at its edge, so nothing pops in or out
         // haze colour only depends on where YOU are (it darkens when you're under blocks, see camSky), not on each block's light
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, hazeAmount);
       #endif`);
@@ -1639,14 +1648,19 @@ material.onBeforeCompile = shader => {
 const HAZE_FRAGMENT = `
       #ifdef USE_FOG
         float hazeAmount = (1.0 - exp(-fogThickness * fogDepth)) * fogMax;
+        hazeAmount = max(hazeAmount, smoothstep(fogEdge * 0.6, fogEdge, vHazeRange));   // the render distance: fully hazed at its edge, so nothing pops in or out
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, hazeAmount);
       #endif`;
 function withHaze(mat) {
   mat.onBeforeCompile = shader => {
     shader.uniforms.fogThickness = FOG.density;
     shader.uniforms.fogMax = FOG.max;
+    shader.uniforms.fogEdge = FOG.edge;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vHazeRange;')
+      .replace('#include <fog_vertex>', '#include <fog_vertex>\nvHazeRange = length(mvPosition.xyz);');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nuniform float fogThickness;\nuniform float fogMax;')
+      .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nuniform float fogThickness;\nuniform float fogMax;\nuniform float fogEdge;\nvarying float vHazeRange;')
       .replace('#include <fog_fragment>', HAZE_FRAGMENT);
   };
   return mat;
@@ -2097,6 +2111,7 @@ function mergeGroup(g) {
     for (const name in geo.attributes) geo.attributes[name].onUpload(releaseArray);
     geo.index.onUpload(releaseArray);
     meshes[g] = new THREE.Mesh(geo, w ? waterMat : material);
+    meshes[g].visible = groupInRange(g);
     scene.add(meshes[g]);
   }
 }
@@ -2188,9 +2203,48 @@ function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
     ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
   }
 }
+// ---- render distance (also how far out mobs are simulated) ----
+const renderBlocks = () => settings.renderDist * CS;   // (in blocks)
+const fogThickness = () => 0.045 * 10 / settings.renderDist;   // (the haze thins out as you see further, so 10 chunks looks like it always did)
+const FORGET_MOBS = 128;   // (mobs other than cows are forgotten past this, or the render distance if it's nearer)
+const mobRange = t => t.cow ? renderBlocks() : Math.min(renderBlocks(), FORGET_MOBS);   // (how far from everyone a mob keeps going)
+let lastGroupAt = null;
+function applyRenderDist() {
+  settings.renderDist = Math.min(32, Math.max(4, Math.round(+settings.renderDist) || 10));
+  FOG.edge.value = renderBlocks();
+  lastGroupAt = null;   // (show and hide groups, and build the newly near ones, straight away)
+}
+// how far (sideways) you are from the nearest edge of group g
+function groupDist(g) {
+  const S = CS * GS, gx = g % NGX, gz = Math.floor(g / NGX) % NGZ;
+  const dx = Math.max(0, gx * S - player.x, player.x - (gx + 1) * S), dz = Math.max(0, gz * S - player.z, player.z - (gz + 1) * S);
+  return Math.hypot(dx, dz);
+}
+const groupInRange = g => groupDist(g) < renderBlocks();
+// whenever you move into another group: hide the groups past the render distance, show the ones within it, and
+// queue up the chunks that were too far to build if they're near enough now
+let farBuilds = [];
+function cullGroups() {
+  const S = CS * GS, at = Math.floor(player.x / S) * 1000 + Math.floor(player.z / S);
+  if (at === lastGroupAt) return;
+  lastGroupAt = at;
+  for (let g = 0; g < groupMeshes.length; g++) {
+    if (!groupMeshes[g] && !groupWater[g]) continue;
+    const v = groupInRange(g);
+    if (groupMeshes[g]) groupMeshes[g].visible = v;
+    if (groupWater[g]) groupWater[g].visible = v;
+  }
+  if (buildQueue && farBuilds.length) {
+    const pgx = Math.floor(player.x / S), pgy = Math.floor(player.y / S), pgz = Math.floor(player.z / S);
+    buildQueue = buildQueue.slice(buildDone).concat(farBuilds); buildDone = 0; farBuilds = [];
+    for (const e of buildQueue) { const g = e[4], gx = g % NGX, gz = Math.floor(g / NGX) % NGZ, gy = Math.floor(g / (NGX * NGZ)); e[3] = (gx - pgx) ** 2 + (gy - pgy) ** 2 + (gz - pgz) ** 2; }
+    buildQueue.sort((a, b) => a[3] - b[3] || a[4] - b[4]);
+  }
+}
+
 // The world is too big to mesh all at once without freezing, so chunks are
-// built a few per frame, nearest to the player first.
-let buildQueue = null, buildDone = 0;
+// built a few per frame, nearest to the player first (only the ones within the render distance).
+let buildQueue = null, buildDone = 0, firstBuildDone = false;
 function pumpChunkBuilds(budgetMs) {
   if (!buildQueue) {
     // (a whole 32x32x32 group at a time, nearest group first, so each group is glued together once)
@@ -2203,11 +2257,15 @@ function pumpChunkBuilds(budgetMs) {
     }
     buildQueue.sort((a, b) => a[3] - b[3] || a[4] - b[4]);
   }
+  cullGroups();
   const start = performance.now();
   while (buildDone < buildQueue.length && performance.now() - start < budgetMs) {
-    const [cx, cy, cz] = buildQueue[buildDone++];
-    if (!chunkBuilt[chunkKey(cx, cy, cz)]) buildChunk(cx, cy, cz);
+    const e = buildQueue[buildDone++], [cx, cy, cz] = e;
+    if (chunkBuilt[chunkKey(cx, cy, cz)]) continue;
+    if (!groupInRange(e[4])) { farBuilds.push(e); continue; }   // (too far to see: built once you come near)
+    buildChunk(cx, cy, cz);
   }
+  if (buildDone >= buildQueue.length) firstBuildDone = true;
 }
 
 const edits = new Map();   // every block you've changed (world index -> block id): this is what gets saved
@@ -2736,9 +2794,43 @@ const Sound = (() => {
     return finish(out, sr, 0.8);
   }
 
+  // the Cow's "moo": a low, steady voice that starts with closed lips (a hummed "mm") and opens into a long "ooo",
+  // sliding up a little and then sagging down at the end
+  function moo(r, sr) {
+    const len = 1.0 + r() * 0.5, n = Math.floor(sr * len);
+    const src = new Float32Array(n), breath = new Float32Array(n);
+    const f0 = 105 + r() * 30;
+    for (let t = 0.005; t < len;) {
+      const p = t / len, f = f0 * (0.9 + 0.22 * Math.sin(Math.PI * Math.min(1, p * 1.5)) - 0.18 * Math.max(0, p - 0.65)) * (0.985 + r() * 0.03);
+      const o = Math.floor(t * sr), plen = Math.floor(sr / f);
+      for (let i = 0; i < plen && o + i < n; i++) src[o + i] += Math.exp(-i / (plen * 0.3));
+      t += 1 / f;
+    }
+    for (let i = 0; i < n; i++) breath[i] = r() * 2 - 1;
+    const hum = filter(src.slice(), 'lp', 260, 0.7, sr);               // "mm" (lips closed)
+    const oo1 = filter(src.slice(), 'bp', 330 + r() * 40, 2.2, sr);    // "ooo"
+    const oo2 = filter(src.slice(), 'bp', 760 + r() * 80, 3, sr);
+    filter(breath, 'bp', 500, 0.7, sr);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, open = Math.min(1, Math.max(0, (t - 0.12) / 0.25));
+      const env = Math.min(1, t / 0.1) * (t > len * 0.7 ? Math.pow(1 - (t - len * 0.7) / (len * 0.3), 1.6) : 1);
+      out[i] = env * (hum[i] * (1.4 - 0.8 * open) + (oo1[i] * 2.4 + oo2[i] * 0.9) * open + breath[i] * 0.05);
+    }
+    filter(out, 'hp', 60, 0.7, sr);
+    return finish(out, sr, 0.85);
+  }
+
   function buildBank() {
     bank = {};
     const sr = ctx.sampleRate;
+    bank.moo = { say: [] };
+    for (let v = 0; v < VARIANTS; v++) {
+      const data = moo(rng(52000 + v * 31), sr);
+      const b = ctx.createBuffer(1, data.length, sr);
+      b.copyToChannel(data, 0);
+      bank.moo.say.push(b);
+    }
     bank.hrr = { say: [] };
     for (let v = 0; v < VARIANTS; v++) {
       const data = hrr(rng(36000 + v * 43), sr);
@@ -3052,7 +3144,7 @@ function updateSaveText() {
 }
 
 // ---- Settings (saved in this browser) ----
-const settings = { sens: 100, fov: 75, info: true, autosave: true, vol: { master: 100, block: 100, player: 100, mob: 100, music: 100 } };
+const settings = { sens: 100, fov: 75, renderDist: 10, info: true, autosave: true, vol: { master: 100, block: 100, player: 100, mob: 100, music: 100 } };
 try {
   const saved = JSON.parse(localStorage.getItem('cubeland-settings')) || {};
   Object.assign(settings, saved, { vol: Object.assign(settings.vol, saved.vol) });
@@ -3060,11 +3152,14 @@ try {
 const volSliders = [...document.querySelectorAll('.set-vol')];
 volSliders.forEach(r => r.addEventListener('input', () => { settings.vol[r.dataset.vol] = +r.value; applySettings(); }));
 const settingsEl = document.getElementById('settings');
+applyRenderDist();
 function applySettings() {
   camera.fov = settings.fov; camera.updateProjectionMatrix();
   document.getElementById('info').style.display = settings.info ? '' : 'none';
   document.getElementById('set-sens').value = settings.sens; document.getElementById('set-sens-v').textContent = settings.sens + '%';
   document.getElementById('set-fov').value = settings.fov; document.getElementById('set-fov-v').textContent = settings.fov;
+  document.getElementById('set-render').value = settings.renderDist; document.getElementById('set-render-v').textContent = settings.renderDist + ' chunks';
+  applyRenderDist();
   document.getElementById('set-sound').textContent = Sound.muted ? 'Off' : 'On';
   document.getElementById('set-info').textContent = settings.info ? 'Shown' : 'Hidden';
   document.getElementById('set-autosave').textContent = settings.autosave ? 'On (every 30 seconds)' : 'Off';
@@ -3075,6 +3170,7 @@ function applySettings() {
 }
 document.getElementById('set-sens').addEventListener('input', e => { settings.sens = +e.target.value; applySettings(); });
 document.getElementById('set-fov').addEventListener('input', e => { settings.fov = +e.target.value; applySettings(); });
+document.getElementById('set-render').addEventListener('input', e => { settings.renderDist = +e.target.value; applySettings(); });
 document.getElementById('set-sound').addEventListener('click', () => { Sound.toggleMute(); applySettings(); });
 document.getElementById('set-info').addEventListener('click', () => { settings.info = !settings.info; applySettings(); });
 document.getElementById('set-autosave').addEventListener('click', () => { settings.autosave = !settings.autosave; applySettings(); });
@@ -3218,6 +3314,9 @@ const MOB_TYPES = {
   // out a stage at a time (lit -> smoldering -> burnt). Light doesn't hurt it, but it fades away (dropping nothing) when someone
   // comes near holding a lit torch. faint: it never looks darker than this, so you can just make it out in the dark.
   gloomling: { name: 'Gloomling', health: 4, speed: 1.1, max: 3, deep: true, snuffer: true, faint: 0.3, scale: 1, drops: [[GLOOM_WISP, 1, 1]] },
+  // cow: lives in herds and is saved with the world; grazes, fattens on Grain, has calves (see Cows). max 0: it has its own spawning.
+  // Its model is 13 pixels tall; 1.5x makes it about 1.2 blocks. What it drops depends on how it was kept (cowDrops).
+  cow: { name: 'Cow', health: 6, speed: 1, max: 0, cow: true, scale: 1.5, growl: 'moo' },
 };
 // how close (in blocks) someone holding a lit torch has to come for a Gloomling to fade away, and how long fading takes (seconds)
 const GLOOM_FADE_RANGE = 6, GLOOM_FADE_TIME = 1.2;
@@ -3227,7 +3326,7 @@ function mobGrowl(m) {
   const dx = m.x - player.x, dz = m.z - player.z, d = Math.hypot(dx, dz, m.y - player.y);
   const vol = 0.85 * Math.pow(Math.max(0, 1 - d / 28), 1.5);
   const side = d > 0.5 ? (dx * Math.cos(player.yaw) - dz * Math.sin(player.yaw)) / Math.hypot(dx, dz) : 0;  // +1 = to your right
-  Sound.growl(vol * (MOB_TYPES[m.type].growl === 'hrr' ? 0.8 : 1), side * 0.8, MOB_TYPES[m.type].growl);
+  Sound.growl(vol * ({ hrr: 0.8, moo: 0.7 }[MOB_TYPES[m.type].growl] || 1), side * 0.8, MOB_TYPES[m.type].growl);
 }
 // a block broke or was placed: curious mobs that can hear it go and check it out (newest sound wins)
 function mobNoise(x, y, z) {
@@ -3513,7 +3612,7 @@ function buildMobMesh(type, opts = {}) {
   const root = new THREE.Group(), legs = [], arms = [], mats = [];
   if (!model) return { root, legs, arms, mats, half: 0.3, height: 1 };
   let head = null;   // a part named "head": nods and tilts from its neck (the Zombie's lolling head)
-  const limbOf = {}, lowers = [];   // limbs by name, and the "<limb>_lower" parts (forearms, shins) that hang off them
+  const limbOf = {}, lowers = [], headParts = [];   // limbs by name, and the "<limb>_lower" parts (forearms, shins) that hang off them
   const S = opts.scale || (MOB_TYPES[type] && MOB_TYPES[type].scale) || 1;
   const body = new THREE.Group();    // the model itself, scaled; root is what gets moved, turned and tipped over
   body.scale.setScalar(S);
@@ -3524,7 +3623,7 @@ function buildMobMesh(type, opts = {}) {
   (function walk(list, tag) {
     for (const c of list || []) {
       if (typeof c === 'number') { if (tag) groupOf[c] = tag; continue; }
-      walk(c.children, /arm/i.test(c.name) ? 'arm' : /leg/i.test(c.name) ? 'leg' : tag);
+      walk(c.children, /arm/i.test(c.name) ? 'arm' : /leg/i.test(c.name) ? 'leg' : /^head$/i.test(c.name) ? 'head' : tag);
     }
   })(model.groups);
   const partOf = (e, ei) => /arm/i.test(e.name || '') ? 'arm' : /leg/i.test(e.name || '') ? 'leg' : groupOf[ei];
@@ -3574,6 +3673,8 @@ function buildMobMesh(type, opts = {}) {
     if (part !== 'arm')   // arms sticking out don't count
       foot = Math.max(foot, Math.abs(x0 - cx) * 2, Math.abs(x1 - cx) * 2, Math.abs(z0 - cz) * 2, Math.abs(z1 - cz) * 2);
     if (/_lower$/i.test(e.name || '')) { lowers.push({ e, mesh, mx, my, mz }); continue; }   // (joined on below, once its limb exists)
+    // the rest of a "head" group (a cow's snout, ears, horns): they turn with the head (joined on below, once the head exists)
+    if (part === 'head' && !/^head$/i.test(e.name || '') && !(e.rotation && e.rotation.angle)) { headParts.push({ mesh, mx, my, mz }); continue; }
     if (/^head$/i.test(e.name || '') && !(e.rotation && e.rotation.angle)) {
       // the head: turns from the middle of its bottom (the neck)
       const pivot = new THREE.Group();
@@ -3613,6 +3714,10 @@ function buildMobMesh(type, opts = {}) {
         body.add(mesh);
       }
     }
+  }
+  for (const { mesh, mx, my, mz } of headParts) {
+    if (head) { mesh.position.set(mx - head.position.x, my - head.position.y, mz - head.position.z); head.add(mesh); }
+    else { mesh.position.set(mx, my, mz); body.add(mesh); }
   }
   // elbows and knees: a part named "<limb>_lower" (arm_left_lower, leg_right_lower...) hangs off its limb and bends at its
   // pivot point (or the middle of its top), so arms and legs can bend as well as swing
@@ -4233,10 +4338,13 @@ function mobBlocked(m, x, y, z) {
   for (let yy = y0; yy <= y1; yy++) for (let zz = z0; zz <= z1; zz++) for (let xx = x0; xx <= x1; xx++) if (solid(xx, yy, zz)) return true;
   return false;
 }
-function spawnMob(type, x, y, z) {
+function spawnMob(type, x, y, z, variant = 0) {
   const t = MOB_TYPES[type];
-  const body = buildMobMesh(type);
-  const m = { k: ++mobCount, type, x, y, z, vx: 0, vy: 0, vz: 0, yaw: Math.random() * Math.PI * 2, walk: 0, stride: 0,
+  const body = buildMobMesh(t.cow ? modelOf({ type, variant }) : type, { scale: t.scale });
+  // (cows: baby = seconds until a calf grows up (0 = grown), fed = Grain eaten, happy = seconds of happiness left,
+  // room = 0 (crowded) .. 1 (-1 = not worked out yet), variant = which model it wears; see Cows)
+  const m = { k: ++mobCount, type, variant, baby: 0, fed: 0, happy: 0, room: -1, mateCool: 0, mateCheck: 0, mateFor: 0, roomIn: 0, grazing: 0, grazeIn: 0,
+    grazeAnim: 0, heartIn: 0, near: 0, mate: null, x, y, z, vx: 0, vy: 0, vz: 0, yaw: Math.random() * Math.PI * 2, walk: 0, stride: 0,
     state: 'idle', timer: 1 + Math.random() * 3, health: t.health, hurt: 0, flee: 0, dead: 0, onGround: false, bumped: false,
     light: new THREE.Color(1, 1, 1), lightTimer: 0, ...body };
   scene.add(m.root);
@@ -4293,9 +4401,227 @@ function mobDies(m) {
   m.dead = 0.001;
   for (const [id, lo, hi, chance = 1] of MOB_TYPES[m.type].drops || [])
     if (Math.random() < chance) for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) dropItem(id, m.x, m.y + 0.5, m.z);
+  if (MOB_TYPES[m.type].cow) cowDrops(m);
+}
+// ===================== Cows =====================
+// Cows live in herds on grassy ground and are saved with the world (they stay put when you walk away).
+// - Grazing: a cow that isn't very happy now and then stops, lowers its head and eats the Grass it's standing on. The spot
+//   turns to Dirt and grows back to Grass a few minutes later. Grazing makes it happy.
+// - Grain: right-click a cow holding Grain to feed it. That makes it happy too, and each Grain fattens it a little:
+//   after COW.fatAt of them it's a big round cow, and a fatter cow gives more Raw Meat. (A calf fed Grain grows up sooner.)
+// - Happy cows show pink hearts. Being happy doesn't make a cow mate, but a happy grown cow *may* go looking for another
+//   happy one nearby; when they meet, a calf is born. Not if it's crowded: a cow with COW.crowdedAt or more cows close by
+//   won't mate, however happy it is.
+// - Breeding stops at COW.perChunk cows in one 16x16 chunk (all the way up), counting calves, fat cows and the rest:
+//   no cow there mates and no calf is born. It only stops breeding: cows can still spawn or wander in past it.
+// - Leather: a cow that's had room to roam (few cows close by, for a while) gives more Leather.
+// The desktop game's src/Main.Cows.cs has the same rules (these numbers must match the ones there).
+const COW = { perChunk: 8, crowdedAt: 4, fatAt: 3, fedMax: 5, happyMax: 180, grazeHappy: 45, grainHappy: 90, grazeBelow: 60, grazeTime: 2,
+  mateCooldown: 300, mateCost: 60, calfTime: 600, calfGrainBoost: 60, nearRange: 6, calfHealth: 3, regrowMin: 120, regrowMax: 300 };
+const grazed = new Map();   // world index of eaten grass (now Dirt) -> seconds until it grows back
+// which model a cow wears: 0 = cow, 1 = calf (cowbaby), 2 = fat cow (cowfat)
+const cowVariant = m => m.baby > 0 ? 1 : m.fed >= COW.fatAt ? 2 : 0;
+const modelOf = m => !MOB_TYPES[m.type].cow ? m.type : m.variant === 1 ? 'cowbaby' : m.variant === 2 ? 'cowfat' : 'cow';
+// a cow grew up or got fat: it's built again in its new shape
+function setVariant(m, v) {
+  if (m.variant === v) return;
+  m.variant = v;
+  scene.remove(m.root);
+  m.root.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  m.mats.forEach(x => x.dispose());
+  Object.assign(m, buildMobMesh(modelOf(m), { scale: MOB_TYPES[m.type].scale }));
+  m.root.position.set(m.x, m.y, m.z); m.root.rotation.y = m.yaw;
+  scene.add(m.root);
+}
+const chunkOf = (x, z) => Math.floor(x / CS) + ',' + Math.floor(z / CS);
+const cowsInChunk = (c, skip) => mobs.filter(o => o !== skip && MOB_TYPES[o.type].cow && !o.dead && chunkOf(o.x, o.z) === c).length;
+const cowsNear = (m, r) => mobs.filter(o => o !== m && MOB_TYPES[o.type].cow && !o.dead && (o.x - m.x) ** 2 + (o.z - m.z) ** 2 < r * r).length;
+function spawnCow(x, y, z, baby = 0) {
+  const m = spawnMob('cow', x, y, z, baby > 0 ? 1 : 0);
+  m.baby = baby; if (baby > 0) m.health = COW.calfHealth;
+  m.room = -1;
+  return m;
+}
+// a small herd now and then on grass a little way off, while there are few cows about (cows are never forgotten,
+// so herds you leave behind are still there when you come back)
+let cowSpawnIn = 5;
+function spawnCows() {
+  if ((cowSpawnIn -= 3) > 0) return;
+  cowSpawnIn = 20 + Math.random() * 40;
+  if (mobs.filter(m => MOB_TYPES[m.type].cow && (m.x - player.x) ** 2 + (m.z - player.z) ** 2 < 80 * 80).length >= 6) return;
+  const none = !mobs.some(m => MOB_TYPES[m.type].cow);
+  const s = findMobSpot(none ? 12 : 30, none ? 32 : 60);
+  if (!s) return;
+  const n = 2 + Math.floor(Math.random() * 3);
+  for (let k = 0; k < n; k++) {
+    const x = s[0] + (Math.random() - 0.5) * 5, z = s[2] + (Math.random() - 0.5) * 5, y = standSpot(x, s[1], z);
+    if (y === null) continue;
+    spawnCow(x, y, z, k > 0 && Math.random() < 0.25 ? COW.calfTime * (0.3 + Math.random() * 0.7) : 0);
+  }
+}
+// the top of the ground at (x, z) within a couple of blocks of y, with room for a cow to stand
+function standSpot(x, y, z) {
+  const bx = Math.floor(x), bz = Math.floor(z);
+  for (let by = Math.floor(y) + 2; by >= Math.floor(y) - 3; by--)
+    if (solid(bx, by - 1, bz) && !isWater(getBlock(bx, by - 1, bz)) && !solid(bx, by, bz) && !solid(bx, by + 1, bz)) return by;
+  return null;
+}
+const turnBy = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
+function walkToward(m, x, z, dt) {
+  m.state = 'walk';
+  m.yaw += turnBy(m.yaw, Math.atan2(m.x - x, m.z - z)) * Math.min(1, dt * 4); m.turnTo = m.yaw;
+}
+// a cow's own thinking each frame (the host's game). Returns true while it's busy (grazing, going to a mate, a calf
+// trotting after a grown cow), so the usual wandering waits.
+function cowThink(m, dt) {
+  m.happy = Math.max(0, m.happy - dt);
+  m.mateCool = Math.max(0, m.mateCool - dt);
+  if (m.baby > 0 && (m.baby -= dt) <= 0) { m.baby = 0; m.health = MOB_TYPES.cow.health; setVariant(m, cowVariant(m)); }
+  // how much room it has: how many cows are close by, eased in slowly (Leather)
+  if ((m.roomIn -= dt) <= 0) {
+    m.roomIn = 2;
+    m.near = cowsNear(m, COW.nearRange);
+    const want = Math.min(1, Math.max(0, 1 - m.near / COW.crowdedAt));
+    m.room = m.room < 0 ? want : m.room + (want - m.room) * 0.05;
+  }
+  // grazing: head down for a moment, then the grass is eaten
+  if (m.grazing > 0) {
+    m.state = 'idle';
+    if ((m.grazing -= dt) <= 0) {
+      const x = Math.floor(m.x), y = Math.floor(m.y) - 1, z = Math.floor(m.z);
+      if (getBlock(x, y, z) === 1) { graze(x, y, z); m.happy = Math.min(COW.happyMax, m.happy + COW.grazeHappy); }
+      m.timer = 1 + Math.random() * 2;
+    }
+    return true;
+  }
+  // looking for a mate (grown, happy, not crowded, with room in the chunk for a calf)
+  const mate = m.mate;
+  if (mate) {
+    if (mate.dead || mate.mate !== m || (m.mateFor -= dt) <= 0 || !mobs.includes(mate)) { m.mate = null; if (mate.mate === m) mate.mate = null; return false; }
+    if (Math.hypot(mate.x - m.x, mate.z - m.z) < 1.6) { calve(m, mate); return false; }
+    walkToward(m, mate.x, mate.z, dt);
+    return true;
+  }
+  if (!m.baby && m.happy > 0 && m.mateCool <= 0 && (m.mateCheck -= dt) <= 0) {
+    m.mateCheck = 3 + Math.random() * 3;
+    if (canMate(m) && Math.random() < 0.5) {
+      const d2 = o => (o.x - m.x) ** 2 + (o.z - m.z) ** 2;
+      const other = mobs.filter(o => o !== m && MOB_TYPES[o.type].cow && !o.mate && d2(o) < 64 && canMate(o)).sort((a, b) => d2(a) - d2(b))[0];
+      if (other) { m.mate = other; other.mate = m; m.mateFor = other.mateFor = 20; m.grazing = other.grazing = 0; return true; }
+    }
+  }
+  // a calf keeps near a grown cow
+  if (m.baby > 0) {
+    const d2 = o => (o.x - m.x) ** 2 + (o.z - m.z) ** 2;
+    const mum = mobs.filter(o => MOB_TYPES[o.type].cow && !o.baby && !o.dead && d2(o) < 16 * 16).sort((a, b) => d2(a) - d2(b))[0];
+    if (mum && d2(mum) > 16) { walkToward(m, mum.x, mum.z, dt); return true; }
+  }
+  // standing about and not very happy: graze (if it's on grass)
+  if (m.state !== 'walk' && m.happy < COW.grazeBelow && (m.grazeIn -= dt) <= 0) {
+    m.grazeIn = 5 + Math.random() * 10;
+    if (getBlock(Math.floor(m.x), Math.floor(m.y) - 1, Math.floor(m.z)) === 1) { m.grazing = COW.grazeTime; return true; }
+  }
+  return false;
+}
+const canMate = m => !m.dead && !m.baby && m.happy > 0 && m.mateCool <= 0 && m.flee <= 0 && cowsNear(m, COW.nearRange) < COW.crowdedAt
+  && cowsInChunk(chunkOf(m.x, m.z)) < COW.perChunk;
+// two cows met: a calf between them (if the chunk has room), and neither wants to again for a while
+function calve(a, b) {
+  a.mate = b.mate = null;
+  a.mateCool = b.mateCool = COW.mateCooldown;
+  a.happy = Math.max(0, a.happy - COW.mateCost); b.happy = Math.max(0, b.happy - COW.mateCost);
+  const x = (a.x + b.x) / 2, z = (a.z + b.z) / 2, y = standSpot(x, Math.max(a.y, b.y), z);
+  if (y === null || cowsInChunk(chunkOf(x, z)) >= COW.perChunk) return;   // (the chunk has as many cows as it can breed to)
+  const calf = spawnCow(x, y, z, COW.calfTime);
+  calf.room = (Math.max(0, a.room) + Math.max(0, b.room)) / 2;
+  for (let k = 0; k < 4; k++) addHeart(x, y + 1, z, k * 0.15);
+}
+// eaten grass: Dirt for now, back to Grass in a few minutes (tickFarm counts it down)
+function graze(x, y, z) {
+  setBlock(x, y, z, 2);
+  grazed.set(idx(x, y, z), COW.regrowMin + Math.random() * (COW.regrowMax - COW.regrowMin));
+  Sound.place(1);
+}
+// right-click a cow holding Grain: it eats it (unless it's had all it wants)
+function feedCow() {
+  if (player.dead || HOTBAR[selected] !== GRAIN) return false;
+  const m = mobInSights();
+  if (!m || !MOB_TYPES[m.type].cow) return false;
+  if (Net.client) { Net.feed(m); useOne(); return true; }   // a friend's game: their game feeds it (and gives the Grain back if the cow didn't want it)
+  if (feed(m)) useOne();
+  return true;   // (it doesn't want it: nothing else happens either)
+}
+function feed(m) {
+  if (m.dead || (m.fed >= COW.fedMax && m.happy > COW.happyMax / 2 && !m.baby)) return false;
+  m.happy = Math.min(COW.happyMax, m.happy + COW.grainHappy);
+  if (m.baby > 0) m.baby = Math.max(0.01, m.baby - COW.calfGrainBoost);
+  else m.fed = Math.min(COW.fedMax, m.fed + 1);
+  m.grazing = 0.6;   // (a quick munch)
+  setVariant(m, cowVariant(m));
+  for (let k = 0; k < 3; k++) addHeart(m.x, m.y + m.height, m.z, k * 0.2);
+  Sound.place(1);
+  return true;
+}
+// what a cow leaves behind: more Raw Meat the more it was fed, more Leather the more room it had (a calf: nothing)
+function cowDrops(m) {
+  if (m.baby > 0) return;
+  const meat = 1 + m.fed, leather = Math.round(Math.max(0, m.room) * 3);
+  for (let n = 0; n < meat; n++) dropItem(RAW_MEAT, m.x, m.y + 0.5, m.z);
+  for (let n = 0; n < leather; n++) dropItem(LEATHER, m.x, m.y + 0.5, m.z);
+}
+// what other players' games need to show a cow: its shape (0-2), +4 while happy, +8 while grazing
+const cowLook = m => m.variant | (m.happy > 0 ? 4 : 0) | (m.grazing > 0 ? 8 : 0);
+function applyCowLook(m, look) {
+  setVariant(m, look & 3);
+  m.happy = look & 4 ? 1 : 0;
+  m.grazing = look & 8 ? 0.2 : 0;
+}
+// every frame, after its body is posed: head down while grazing, hearts while happy
+function cowShow(m, dt) {
+  m.grazeAnim += ((m.grazing > 0 ? 1 : 0) - m.grazeAnim) * Math.min(1, dt * 8);
+  if (m.head && m.grazeAnim > 0.01) m.head.rotation.set(-0.85 * m.grazeAnim + Math.sin(m.anim * 14) * 0.05 * m.grazeAnim, 0, 0);
+  if (m.happy > 0 && !m.dead && (m.heartIn -= dt) <= 0) {
+    m.heartIn = 1.2 + Math.random() * 1.5;
+    addHeart(m.x + (Math.random() - 0.5) * 0.5, m.y + m.height + 0.1, m.z + (Math.random() - 0.5) * 0.5);
+  }
+}
+// ---- pink hearts (the pink row, FF00FF, of textures/gui/heart_atlas.png): float up and fade ----
+const hearts = [], HEART_LIFE = 1.3;
+let heartMat = null;
+function addHeart(x, y, z, delay = 0) {
+  if (!heartMat) {
+    const src = (window.TEXTURES || {})['gui/heart_atlas'];
+    if (!src) return;
+    const c = document.createElement('canvas'), tex = new THREE.CanvasTexture(c), img = new Image();
+    tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
+    img.onload = () => {
+      const hp = img.width / 9.9, s = Math.round(hp * 0.9);
+      c.width = c.height = s;
+      c.getContext('2d').drawImage(img, 0, Math.round(hp * 8), s, s, 0, 0, s, s);   // (pink row, full heart)
+      tex.needsUpdate = true;
+    };
+    img.src = src;
+    heartMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+  }
+  const s = new THREE.Sprite(heartMat.clone());
+  s.scale.set(0.28, 0.28, 1); s.position.set(x, y, z); s.visible = delay <= 0;
+  scene.add(s);
+  hearts.push({ s, age: 0, delay, x, y, z });
+}
+function updateHearts(dt) {
+  for (const h of [...hearts]) {
+    if (h.delay > 0) { h.delay -= dt; continue; }
+    h.s.visible = true;
+    h.age += dt;
+    const f = h.age / HEART_LIFE;
+    if (f >= 1) { scene.remove(h.s); h.s.material.dispose(); hearts.splice(hearts.indexOf(h), 1); continue; }
+    h.s.position.set(h.x + Math.sin(h.age * 5) * 0.05, h.y + f * 0.7, h.z);
+    h.s.material.opacity = f < 0.7 ? 1 : 1 - (f - 0.7) / 0.3;
+  }
 }
 let mobSpawnTimer = 0;
 function updateMobs(dt) {
+  updateHearts(dt);
   // keep a few Dans around the player: spawn out of the way, forget ones that wandered far off
   mobSpawnTimer -= dt;
   // (when you've joined someone else's game, their game runs the mobs and yours just shows them)
@@ -4311,6 +4637,7 @@ function updateMobs(dt) {
         if (s) spawnMob(type, ...s);
       }
     }
+    if ((window.MODELS || {}).cow) spawnCows();
   }
   for (const m of [...mobs]) {
     const t = MOB_TYPES[m.type];
@@ -4325,8 +4652,13 @@ function updateMobs(dt) {
       m.yaw += Math.atan2(Math.sin(m.tyaw - m.yaw), Math.cos(m.tyaw - m.yaw)) * a;
     }
     if (Net.client || m.dead) { /* no thinking or walking of its own */ }
-    else if (Math.hypot(m.x - player.x, m.z - player.z) > Math.max(110, Net.farthestPlayer(m))) { removeMob(m); continue; }
+    else if (Math.hypot(m.x - player.x, m.z - player.z) > Math.max(mobRange(t), Net.farthestPlayer(m))) {
+      // past the render distance from everyone: forgotten, except cows, which wait where they are, unseen (they're saved)
+      if (t.cow) { m.root.visible = false; continue; }
+      removeMob(m); continue;
+    }
     else {
+      m.root.visible = true;   // (a cow back within the render distance)
       // wander: stand around for a bit, then walk somewhere for a bit. After being hit, run away from the player.
       m.timer -= dt;
       m.attackCool = Math.max(0, (m.attackCool || 0) - dt);
@@ -4390,6 +4722,8 @@ function updateMobs(dt) {
         m.state = 'walk';
         const away = Math.atan2(-(m.x - player.x), -(m.z - player.z));
         m.yaw += Math.atan2(Math.sin(away - m.yaw), Math.cos(away - m.yaw)) * Math.min(1, dt * 6);
+      } else if (t.cow && cowThink(m, dt)) {
+        // (grazing, going to a mate, a calf following: see Cows)
       } else if (m.timer <= 0) {
         if (m.state === 'idle') { m.state = 'walk'; m.timer = 1.5 + Math.random() * 4; m.turnTo = m.yaw + (Math.random() - 0.5) * Math.PI * 1.6; }
         else { m.state = 'idle'; m.timer = 1 + Math.random() * 5; }
@@ -4448,11 +4782,12 @@ function updateMobs(dt) {
       if (p >= 1) { m.throwT = 0; m.thrown = false; }
     }
     poseBody(m, dt, swipe, t.shamble, throwing);
+    if (t.cow) cowShow(m, dt);
     m.root.position.set(m.x, m.y, m.z);
     m.root.rotation.y = m.yaw;
     if (t.growl && !m.dead) {
       if (m.growlIn === undefined) m.growlIn = 2 + Math.random() * 8;
-      if ((m.growlIn -= dt) <= 0) { m.growlIn = 6 + Math.random() * 10; mobGrowl(m); }
+      if ((m.growlIn -= dt) <= 0) { m.growlIn = (6 + Math.random() * 10) * (t.cow ? 2.5 : 1); mobGrowl(m); }   // (cows moo less often)
     }
     // lighting: same rules as blocks (sky light x time of day, or torch light, whichever is brighter)
     m.lightTimer -= dt;
@@ -4693,6 +5028,7 @@ function updateDrops(dt) {
 addEventListener('mousedown', e => {
   if (!locked) return;
   if (e.button === 0) { const m = mobInSights(); if (m) { hitMob(m); return; } }
+  if (e.button === 2 && feedCow()) return;   // holding Grain, looking at a cow: feed it
   if (e.button === 2 && eat()) return;   // holding food (survival): right-click eats it
   if (e.button === 2 && useFireEssence()) return;   // holding Fire Essence while gloomed: right-click lifts the gloom
   const hit = raycast();
@@ -5093,7 +5429,7 @@ const invEl = document.getElementById('inventory'), invGrid = document.getElemen
 const invIcons = [];
 // Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
 // click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, ...DYE, ...TOOLS]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, ...TOOLS]);
 const variantsOf = b => SPLITTABLE.includes(b)
   ? [PIECE_ITEM + b, SHAPE_ITEM.slab + b, SHAPE_ITEM.stairs + b, SHAPE_ITEM.quarter + b,
      SHAPE_ITEM.vslab + b, SHAPE_ITEM.vstairs + b, SHAPE_ITEM.vquarter + b]
@@ -5130,7 +5466,7 @@ function showVariants(b, plus) {
 const INV_TABS = [
   ['Building Blocks', [7, 61, 8, 9, 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, 10, 22, CRAFTING_BENCH, FURNACE]],
   ['Natural Blocks', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, 4, 5, 6, 11, 63, ...FLOWERS, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, ...DYE, CRUDE_AXE, ...TOOLS]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, CRUDE_AXE, ...TOOLS]],
 ];
 const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
 let invTab = 0;
@@ -5254,6 +5590,7 @@ const SMELTS = [
   { out: 3, from: 8 },               // Cobblestone -> Stone
   { out: BONE_ASH, from: BONE },     // Bone -> Bone Ash
   { out: BREAD, from: FLOUR },       // Flour -> Bread
+  { out: COOKED_MEAT, from: RAW_MEAT }, // Raw Meat -> Cooked Meat
 ];
 const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1 };   // how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1
 const furnaceEl = document.getElementById('furnace'), furnaceName = document.getElementById('furnace-name');
@@ -5423,7 +5760,7 @@ function farmChanged(i, old, id, loading) {
   if (isSoil(id)) soils.add(i); else { soils.delete(i); soilIdle.delete(i); }
   if (!(BLOCKS[id] && BLOCKS[id].fert)) fertLeft.delete(i);
   else if (!fertLeft.has(i)) fertLeft.set(i, FARM.fertHarvests);
-  if (isCrop(id) && id !== GRAIN_RIPE) { if (old !== id) crops.set(i, FARM.stageTime); } else crops.delete(i);
+  if (isCrop(id) && id !== GRAIN_RIPE) { if (old !== id) crops.set(i, 0); } else crops.delete(i);
   // a ripe Grain harvested (or trampled away) from fertilized soil uses up one of the fertilizer's harvests
   if (!loading && old === GRAIN_RIPE && id !== GRAIN_RIPE && fertLeft.has(i - WX * WZ) && !Net.client) {
     const n = fertLeft.get(i - WX * WZ) - 1;
@@ -5437,19 +5774,32 @@ function growRate(soil) {
   if (!b || !b.soil) return 0;
   return (b.wet ? 1 : FARM.dryRate) * (b.fert ? FARM.fertRate : 1);
 }
+// Random growth: every second each crop has a small chance of a lucky tick, and FARM.stageHits lucky ticks take it to
+// its next stage. On average a stage still takes stageTime / growRate seconds, but some plants get ahead and some lag a
+// little, so a field doesn't all ripen at the same moment. (Needing 3 ticks, not 1, keeps the randomness gentle.)
+const stageChance = (rate, step) => Math.min(1, step * rate * FARM.stageHits / FARM.stageTime);
 function tickFarm(dt) {
   if (Net.client) return;   // (in a friend's world their game does it)
   if ((wetTimer -= dt) <= 0) { wetTimer = 2; updateWetSoil(); }
   if ((farmTimer += dt) < 1) return;
   const step = farmTimer; farmTimer = 0;
   // growing
-  for (const [i, left] of [...crops]) {
+  for (const [i, got] of [...crops]) {
     const id = world[i];
     if (!isCrop(id) || id === GRAIN_RIPE) { crops.delete(i); continue; }
-    const t = left - step * growRate(world[i - WX * WZ]);
-    if (t > 0) { crops.set(i, t); continue; }
+    if (Math.random() >= stageChance(growRate(world[i - WX * WZ]), step)) continue;
+    const hits = got >= FARM.stageHits ? 1 : got + 1;   // (a save from before random growth held seconds left here)
+    if (hits < FARM.stageHits) { crops.set(i, hits); continue; }
     const [x, y, z] = fromIdx(i);
-    setBlock(x, y, z, id + 1);   // (the next stage starts its own timer)
+    setBlock(x, y, z, id + 1);
+  }
+  // grass a cow ate grows back (if it's still Dirt with nothing on top)
+  for (const [i, left] of [...grazed]) {
+    if (world[i] !== 2) { grazed.delete(i); continue; }
+    if (left - step > 0) { grazed.set(i, left - step); continue; }
+    grazed.delete(i);
+    const [x, y, z] = fromIdx(i);
+    if (!solid(x, y + 1, z) && !isWater(getBlock(x, y + 1, z))) setBlock(x, y, z, 1);
   }
   // dry tilled soil with nothing growing on it turns back into Dirt after a while
   for (const i of [...soils]) {
@@ -5694,13 +6044,15 @@ function gatherSave() {
               gloom: player.gloom, darkTime: player.darkTime, lightTime: player.lightTime },
     time: timeOfDay,
     hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), selected,
-    mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health })),
+    mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health,
+      ...(MOB_TYPES[m.type].cow ? { baby: m.baby, fed: m.fed, happy: Math.round(m.happy), room: m.room, mateCool: Math.round(m.mateCool) } : {}) })),
     drops: drops.map(d => ({ id: d.id, x: d.x, y: d.y, z: d.z, age: d.age })),
     drying: [...drying],                                   // [[index, seconds left], ...]
     torchBurn: [...torchBurn].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds until it burns down a stage], ...]
     furnaces: [...furnaces].map(([i, f]) => [i, f]),       // [[index, {fuel, fuelN, heat, queue, t}], ...]
-    crops: [...crops].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds of growing until its next stage], ...]
+    crops: [...crops].map(([i, t]) => [i, Math.round(t)]),   // [[index, lucky ticks so far in this stage], ...]
     fert: [...fertLeft],                                   // [[index of fertilized soil, ripe harvests it has left], ...]
+    grazed: [...grazed].map(([i, t]) => [i, Math.round(t)]),   // [[index of grass a cow ate, seconds until it grows back], ...]
   };
 }
 async function saveWorld() {
@@ -5743,6 +6095,7 @@ function applySave(s) {
   for (const [i, f] of s.furnaces || []) if (isFurnace(world[i]) && f) furnaces.set(i, f);
   for (const [i, left] of s.crops || []) if (crops.has(i)) crops.set(i, Math.max(0, +left || 0));
   for (const [i, n] of s.fert || []) if (BLOCKS[world[i]] && BLOCKS[world[i]].fert) fertLeft.set(i, Math.max(1, n | 0));
+  for (const [i, left] of s.grazed || []) if (world[i] === 2) grazed.set(i, Math.max(0, +left || 0));
   applyPlayerSave(s);
 }
 // blocks you changed, put back on top of the freshly grown terrain (also used when joining a friend's game)
@@ -5784,6 +6137,13 @@ function applyPlayerSave(s) {
   for (const m of s.mobs || []) {
     if (ZOMBIE_READY && m.type === 'grrangry') m.type = 'zombie';   // worlds saved before the Zombie replaced Grr Angry
     if (!MOB_TYPES[m.type] || !(window.MODELS || {})[m.type]) continue;
+    if (MOB_TYPES[m.type].cow) {   // a cow, as it was kept
+      const c = { baby: Math.max(0, +m.baby || 0), fed: Math.min(COW.fedMax, Math.max(0, m.fed | 0)) };
+      const mob = spawnMob(m.type, m.x, m.y, m.z, cowVariant(c));
+      Object.assign(mob, c, { yaw: m.yaw || 0, health: m.health || MOB_TYPES.cow.health, happy: Math.max(0, +m.happy || 0),
+        room: isFinite(m.room) ? m.room : -1, mateCool: Math.max(0, +m.mateCool || 0) });
+      continue;
+    }
     const mob = spawnMob(m.type, m.x, m.y, m.z);
     mob.yaw = m.yaw || 0; mob.health = m.health || MOB_TYPES[m.type].health;
   }
@@ -6007,6 +6367,9 @@ addEventListener('pagehide', () => autoSave());
     } else if (d.t === 'hit') {
       const m = mobs.find(m => m.k === d.k && !m.dead), p = others.get(conn.peer);
       if (m && p) hitMob(m, p);
+    } else if (d.t === 'feed') {    // a friend fed a cow Grain (they've used it up: if the cow doesn't want it, it goes back)
+      const m = mobs.find(m => m.k === d.k && !m.dead);
+      if (!m || !MOB_TYPES[m.type].cow || !feed(m)) conn.send({ t: 'give', id: GRAIN });
     } else if (d.t === 'pickup') {
       const dr = drops.find(x => x.k === d.k);
       if (dr && dr.age > 0.5) { removeDrop(dr); conn.send({ t: 'give', id: dr.id }); }
@@ -6017,14 +6380,18 @@ addEventListener('pagehide', () => autoSave());
     const players = [{ id: 'host', name: myName, hue: HUES[0], x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0 }];
     for (const [id, f] of friends) { const p = others.get(id); if (p) players.push({ id, name: f.name, hue: f.hue, x: r2(p.tx), y: r2(p.ty), z: r2(p.tz), yaw: r2(p.tyaw), h: p.held | 0 }); }
     // (a mob's last number is 1 while it's fading away, 2 while it's throwing)
-    const ms = mobs.map(m => [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0, m.fade ? 1 : m.throwT ? 2 : 0]);
+    // (a cow also has its look: see cowLook)
+    const ms = mobs.map(m => { const a = [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0, m.fade ? 1 : m.throwT ? 2 : 0];
+      if (MOB_TYPES[m.type].cow) a.push(cowLook(m)); return [m, a]; });
     const ds = drops.map(d => [d.k, d.id, r2(d.x), r2(d.y), r2(d.z)]);
     const rs = rocks.map(r => [r.k, r2(r.x), r2(r.y), r2(r.z)]);
-    const msg = { t: 'tick', time: timeOfDay, players, mobs: ms, drops: ds, rocks: rs };
-    const now = performance.now();
+    const now = performance.now(), r = renderBlocks();
     for (const [id, f] of friends) {
       if (now - f.seen > 30000) { dropFriend(id); continue; }    // not heard from them in a while: they've gone
-      if (f.conn.open) f.conn.send(msg);
+      // (each friend is only sent the mobs within the render distance of them)
+      const p = others.get(id) || player;
+      const near = ms.filter(([m]) => Math.hypot(m.x - p.x, m.z - p.z) < r).map(e => e[1]);
+      if (f.conn.open) f.conn.send({ t: 'tick', time: timeOfDay, players, mobs: near, drops: ds, rocks: rs });
     }
   }
 
@@ -6112,13 +6479,14 @@ addEventListener('pagehide', () => autoSave());
       for (const id of [...others.keys()]) if (!seenP.has(id)) removeOther(id);
       // mobs: make, move or remove ours to match the host's
       const byK = new Map(mobs.map(m => [m.k, m])), seenM = new Set();
-      for (const [k, type, x, y, z, yaw, dead, hurt, act] of d.mobs) {
+      for (const [k, type, x, y, z, yaw, dead, hurt, act, look] of d.mobs) {
         seenM.add(k);
         let m = byK.get(k);
         if (!m) {
           if (dead || Net.gone.has(k) || !MOB_TYPES[type] || !(window.MODELS || {})[type]) continue;
-          m = spawnMob(type, x, y, z); m.k = k; m.yaw = yaw;
+          m = spawnMob(type, x, y, z, (look | 0) & 3); m.k = k; m.yaw = yaw;
         }
+        if (look !== undefined && MOB_TYPES[type].cow) applyCowLook(m, look | 0);
         Object.assign(m, { tx: x, ty: y, tz: z, tyaw: yaw });
         if (dead && !m.dead) { m.dead = 0.001; Net.gone.add(k); }
         if (hurt && !m.netHurt) m.hurt = 0.3;
@@ -6179,10 +6547,11 @@ addEventListener('pagehide', () => autoSave());
       if (Net.hosting ? friends.size : (Net.client && !Net.applying)) pending.push(i, id);
     },
     hitMob(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'hit', k: m.k }); },
+    feed(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'feed', k: m.k }); },
     pickup(d) { if (hostConn && hostConn.open) hostConn.send({ t: 'pickup', k: d.k }); },
     // (host) keep a mob around if it's near any friend, even when it's far from you
     farthestPlayer(m) {
-      for (const p of others.values()) if (Math.hypot(m.x - p.x, m.z - p.z) < 110) return Infinity;
+      for (const p of others.values()) if (Math.hypot(m.x - p.x, m.z - p.z) < mobRange(MOB_TYPES[m.type])) return Infinity;
       return 0;
     },
     // is another player here holding a lit torch within r blocks of (x, y, z)? (Gloomlings fade away from them)
@@ -6425,7 +6794,7 @@ function frame(now) {
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
   updateSky(dt);
-  updateMobs(dt);
+  updateMobs(worldLoaded && (locked || invOpen || Net.hosting) || Net.client ? dt : 0);   // (mobs wait while you're paused, like the rest of the world; a joined game follows the host)
   updateDrops(dt);
   updateWater(dt);
   updateHealth(dt);
@@ -6446,7 +6815,7 @@ function frame(now) {
     scene.fog.color.setRGB(0.07, 0.2, 0.45).multiplyScalar(Math.max(0.15, DAY_TINT.value.g * camSky));
     scene.background.copy(scene.fog.color);
   }
-  FOG.density.value = underwater ? 0.22 : 0.045;
+  FOG.density.value = underwater ? 0.22 : fogThickness();
   FOG.max.value = underwater ? 0.97 : 0.82;
   const far = underwater ? 40 : 1000;     // underwater you can't see far, and the sky and clouds vanish in the murk
   if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
@@ -6484,7 +6853,7 @@ function frame(now) {
 
   fpsAcc += dt; fpsFrames++;
   if (fpsAcc >= 0.5) { fps = Math.round(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }
-  infoEl.textContent = `${fps} fps\nX ${player.x.toFixed(1)}  Y ${player.y.toFixed(1)}  Z ${player.z.toFixed(1)}${player.fly ? '\nFlying' : ''}${Sound.muted ? '\nSound off (M)' : ''}${Net.infoLine()}${!buildQueue ? (Net.client ? '\nJoining...' : '\nLoading save...') : buildDone < buildQueue.length ? `\nLoading world ${Math.floor(100 * buildDone / buildQueue.length)}%` : ''}`;
+  infoEl.textContent = `${fps} fps\nX ${player.x.toFixed(1)}  Y ${player.y.toFixed(1)}  Z ${player.z.toFixed(1)}${player.fly ? '\nFlying' : ''}${Sound.muted ? '\nSound off (M)' : ''}${Net.infoLine()}${!buildQueue ? (Net.client ? '\nJoining...' : '\nLoading save...') : !firstBuildDone ? `\nLoading world ${Math.floor(100 * buildDone / buildQueue.length)}%` : ''}`;
 
   flushGroups();   // glue changed chunks back into their groups' meshes
   renderer.render(scene, camera);

@@ -15,6 +15,7 @@ public partial class Main
 		public string Name; public int Health; public float Speed; public int Max;
 		public bool Hostile, Night, Dark, Burns, Shamble, Glow, Curious; public int Damage; public float Sight, Reach, Hearing, LightRange, Scale = 1;
 		public bool Thrower, Deep, Snuffer; public float Near, Far, Faint;   // (see the Skeleton and Gloomling below)
+		public bool Cow;                                                     // (see Main.Cows.cs)
 		public string Growl; public (int id, int lo, int hi, float chance)[] Drops = Array.Empty<(int, int, int, float)>();
 	}
 	// drops: (item, fewest, most, chance) dropped when killed. hostile: chases and attacks you, survival only. dark: spawns anywhere dark (caves any time, open ground at night).
@@ -44,6 +45,9 @@ public partial class Main
 		// it out a stage at a time (lit -> smoldering -> burnt). Light doesn't hurt it, but it fades away (dropping nothing) when someone
 		// comes near holding a lit torch. faint: it never looks darker than this, so you can just make it out in the dark.
 		d["gloomling"] = new() { Name = "Gloomling", Health = 4, Speed = 1.1f, Max = 3, Deep = true, Snuffer = true, Faint = 0.3f, Drops = new[] { (Blocks.GloomWisp, 1, 1, 1f) } };
+		// cow: lives in herds and is saved with the world; grazes, fattens on Grain, has calves (Main.Cows.cs). Max 0: it has its own spawning.
+		// Its model is 13 pixels tall; 1.5x makes it about 1.2 blocks. What it drops depends on how it was kept (CowDrops).
+		d["cow"] = new() { Name = "Cow", Health = 6, Speed = 1f, Max = 0, Cow = true, Scale = 1.5f, Growl = "moo" };
 		return d;
 	}
 
@@ -61,6 +65,9 @@ public partial class Main
 		public float Half = 0.3f, Height = 1;
 		public float Fade, ThrowT, ThrowCool = -1, SnuffCheck, Snuffing; public bool Thrown, Backing;   // fading away (Gloomling), throwing (Skeleton)
 		public (int x, int y, int z, float time)? Snuff;                                                  // the torch a Gloomling is heading for
+		// cows: Baby = seconds until a calf grows up (0 = grown), Fed = Grain eaten, Happy = seconds of happiness left, Room = 0 (crowded) .. 1
+		// (-1 = not worked out yet), Variant = which model it wears (see Main.Cows.cs)
+		public float Baby, Happy, Room, MateCool, MateCheck, MateFor, RoomIn, Grazing, GrazeIn, GrazeAnim, HeartIn; public int Fed, Near, Variant; public Mob Mate;
 	}
 	// an arm or leg: swings at Pivot (shoulder/hip); Lower (forearm/shin, if the model has one) bends at the elbow/knee
 	public class Limb { public Node3D Pivot, Lower; public float Phase; }
@@ -151,10 +158,11 @@ public partial class Main
 	void BuildMob(Mob m)
 	{
 		var root = new Node3D(); m.Root = root; mobRoot.AddChild(root);
-		if (!models.TryGetValue(m.Type, out var md)) return;
+		if (!models.TryGetValue(ModelOf(m), out var md)) return;
 		var model = md.json; float S = m.T.Scale;
 		var body = new Node3D { Scale = Vector3.One * S }; root.AddChild(body); m.Figure = body;
 		var limbOf = new Dictionary<string, Limb>(); var lowers = new List<(JsonElement e, MeshInstance3D mi, Vector3 mid)>();
+		var headParts = new List<(MeshInstance3D mi, Vector3 mid)>();   // the rest of a "head" group (a cow's snout, ears, horns): they turn with the head
 		var els = model.GetProperty("elements").EnumerateArray().ToList();
 		// Blockbench groups (outliner folders) named like "arms" / "legs" mark which parts are arms and legs
 		var groupOf = new Dictionary<int, string>();
@@ -165,7 +173,8 @@ public partial class Main
 			{
 				if (c.ValueKind == JsonValueKind.Number) { if (tag != null) groupOf[c.GetInt32()] = tag; continue; }
 				string gn = c.TryGetProperty("name", out var g) ? g.GetString() ?? "" : "";
-				Walk(c.TryGetProperty("children", out var ch) ? ch : default, gn.Contains("arm", StringComparison.OrdinalIgnoreCase) ? "arm" : gn.Contains("leg", StringComparison.OrdinalIgnoreCase) ? "leg" : tag);
+				Walk(c.TryGetProperty("children", out var ch) ? ch : default, gn.Contains("arm", StringComparison.OrdinalIgnoreCase) ? "arm" : gn.Contains("leg", StringComparison.OrdinalIgnoreCase) ? "leg"
+					: gn.Equals("head", StringComparison.OrdinalIgnoreCase) ? "head" : tag);
 			}
 		}
 		if (model.TryGetProperty("groups", out var groups)) Walk(groups, null);
@@ -244,6 +253,7 @@ public partial class Main
 			string en = (e.TryGetProperty("name", out var enm) ? enm.GetString() ?? "" : "").ToLowerInvariant();
 			bool angled = rot.ValueKind == JsonValueKind.Object && rot.TryGetProperty("angle", out var an0) && an0.GetDouble() != 0;
 			if (en.EndsWith("_lower")) { lowers.Add((e, mi, mid)); continue; }   // (joined on below, once its limb exists)
+			if (part == "head" && en != "head" && !angled) { headParts.Add((mi, mid)); continue; }   // (joined on below, once the head exists)
 			if (en == "head" && !angled)
 			{   // the head: turns from the middle of its bottom (the neck)
 				var pivot = new Node3D { Position = new Vector3(mid.X, from[1] / 16, mid.Z) };
@@ -274,6 +284,8 @@ public partial class Main
 			}
 			else { mi.Position = mid; body.AddChild(mi); }
 		}
+		foreach (var (mi, mid) in headParts)
+			if (m.Head != null) { mi.Position = mid - m.Head.Position; m.Head.AddChild(mi); } else { mi.Position = mid; body.AddChild(mi); }
 		// elbows and knees: a part named "<limb>_lower" (arm_left_lower, leg_right_lower...) hangs off its limb and bends at its
 		// pivot point (or the middle of its top), so arms and legs can bend as well as swing
 		foreach (var (e, mi, mid) in lowers)
@@ -515,10 +527,10 @@ public partial class Main
 	}
 
 	void InitMobs() { LoadModels(); mobRoot = new Node3D(); AddChild(mobRoot); }
-	Mob SpawnMob(string type, float x, float y, float z)
+	Mob SpawnMob(string type, float x, float y, float z, int variant = 0)
 	{
 		var t = MobTypes[type];
-		var m = new Mob { K = ++mobCount, Type = type, T = t, X = x, Y = y, Z = z, Yaw = (float)(rnd.NextDouble() * Math.PI * 2), Timer = 1 + (float)rnd.NextDouble() * 3, Health = t.Health };
+		var m = new Mob { K = ++mobCount, Type = type, T = t, X = x, Y = y, Z = z, Yaw = (float)(rnd.NextDouble() * Math.PI * 2), Timer = 1 + (float)rnd.NextDouble() * 3, Health = t.Health, Variant = variant };
 		BuildMob(m); mobList.Add(m);
 		return m;
 	}
@@ -571,6 +583,7 @@ public partial class Main
 	void MobDies(Mob m)
 	{
 		m.Dead = 0.001f;
+		if (m.T.Cow) CowDrops(m);
 		foreach (var (id, lo, hi, chance) in m.T.Drops)
 			if (rnd.NextDouble() < chance) for (int n = lo + rnd.Next(hi - lo + 1); n > 0; n--) drops.Add(id, m.X, m.Y + 0.5f, m.Z);
 	}
@@ -585,7 +598,7 @@ public partial class Main
 	void MobGrowl(Mob m)
 	{
 		float d = new Vector3(m.X - player.Pos.X, m.Y - player.Pos.Y, m.Z - player.Pos.Z).Length();
-		float vol = 0.85f * MathF.Pow(Math.Max(0, 1 - d / 28), 1.5f) * (m.T.Growl == "hrr" ? 0.8f : 1);
+		float vol = 0.85f * MathF.Pow(Math.Max(0, 1 - d / 28), 1.5f) * (m.T.Growl == "hrr" ? 0.8f : m.T.Growl == "moo" ? 0.7f : 1);
 		Sound.I?.PlayAt(m.T.Growl, new Vector3(m.X, m.Y + m.Height * 0.8f, m.Z), vol);
 	}
 	// a block broke or was placed: curious mobs that can hear it go and check it out (newest sound wins)
@@ -618,6 +631,7 @@ public partial class Main
 		if ((mobSpawnTimer -= dt) <= 0 && dirty.Count == 0 && !HasArg("--nomobs") && !netClient)   // (a joined game shows the host's mobs)
 		{
 			mobSpawnTimer = 3;
+			if (models.ContainsKey("cow")) SpawnCows();
 			foreach (var (type, t) in MobTypes)
 			{
 				if (!models.ContainsKey(type) || (t.Night && sky.SkyDay > 0.3f)) continue;
@@ -644,9 +658,15 @@ public partial class Main
 				m.X += (m.Tx - m.X) * a; m.Y += (m.Ty - m.Y) * a; m.Z += (m.Tz - m.Z) * a;
 				m.Yaw += Turn(m.Yaw, m.Tyaw) * a;
 			}
-			else if (MathF.Sqrt((m.X - P.X) * (m.X - P.X) + (m.Z - P.Z) * (m.Z - P.Z)) > 110 && !NearAFriend(m)) { RemoveMob(m); continue; }
+			else if (MathF.Sqrt((m.X - P.X) * (m.X - P.X) + (m.Z - P.Z) * (m.Z - P.Z)) > MobRange(t) && !NearAFriend(m))
+			{   // past the render distance from everyone: forgotten, except cows, which just wait where they are, unseen
+				// (they're saved with the world)
+				if (t.Cow) { m.Root.Visible = false; continue; }
+				RemoveMob(m); continue;
+			}
 			else
 			{
+				m.Root.Visible = true;   // (a cow back within the render distance)
 				// wander: stand around, then walk somewhere for a bit. After being hit, run away from you.
 				m.Timer -= dt;
 				m.AttackCool = Math.Max(0, m.AttackCool - dt);
@@ -710,6 +730,7 @@ public partial class Main
 					float away = MathF.Atan2(-(m.X - P.X), -(m.Z - P.Z));
 					m.Yaw += Turn(m.Yaw, away) * Math.Min(1, dt * 6);
 				}
+				else if (t.Cow && CowThink(m, dt)) { }   // (grazing, going to a mate, a calf following: see Main.Cows.cs)
 				else if (m.Timer <= 0)
 				{
 					if (!m.Walking) { m.Walking = true; m.Timer = 1.5f + (float)rnd.NextDouble() * 4; m.TurnTo = m.Yaw + ((float)rnd.NextDouble() - 0.5f) * MathF.PI * 1.6f; }
@@ -761,12 +782,13 @@ public partial class Main
 				if (p >= 1) { m.ThrowT = 0; m.Thrown = false; }
 			}
 			PoseBody(m, dt, swipe, t.Shamble, throwing);
+			if (t.Cow) CowShow(m, dt);
 			m.Root.Position = new Vector3(m.X, m.Y, m.Z);
 			if (m.Dead == 0) m.Root.Rotation = new Vector3(0, m.Yaw, 0);
 			if (t.Growl != null && m.Dead == 0)
 			{
 				if (m.GrowlIn < 0) m.GrowlIn = 2 + (float)rnd.NextDouble() * 8;
-				if ((m.GrowlIn -= dt) <= 0) { m.GrowlIn = 6 + (float)rnd.NextDouble() * 10; MobGrowl(m); }
+				if ((m.GrowlIn -= dt) <= 0) { m.GrowlIn = (6 + (float)rnd.NextDouble() * 10) * (t.Cow ? 2.5f : 1); MobGrowl(m); }   // (cows moo less often)
 			}
 			// lighting: the same as blocks (sky light x time of day, or torch light, whichever is brighter)
 			if ((m.LightTimer -= dt) <= 0)
@@ -803,6 +825,7 @@ public partial class Main
 			}
 		}
 		UpdateRocks(dt);
+		UpdateHearts(dt);
 	}
 	// how close (in blocks) someone holding a lit torch has to come for a Gloomling to fade away, and how long fading takes (seconds)
 	const float GloomFadeRange = 6, GloomFadeTime = 1.2f;

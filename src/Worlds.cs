@@ -18,7 +18,7 @@ public static class Worlds
 		[JsonIgnore] public bool Survival => Mode == "survival";
 	}
 	public class PlayerSave { public float X, Y, Z, Yaw, Pitch, DarkTime, LightTime; public bool Fly; public int Health, Gloom; }
-	public class MobSave { public string Type; public float X, Y, Z, Yaw; public int Health; }
+	public class MobSave { public string Type; public float X, Y, Z, Yaw; public int Health; public float Baby, Happy, Room, MateCool; public int Fed; }   // (the last five: cows)
 	public class DropSave { public int Id; public float X, Y, Z, Age; }
 	public class Save
 	{
@@ -27,8 +27,9 @@ public static class Worlds
 		public PlayerSave Player; public float Time;
 		public int[] Hotbar, Counts; public int Selected;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();
-		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: growing time left in each stage)
+		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: lucky ticks so far in each stage)
 		public Dictionary<int, int> Fert = new();   // fertilized soil -> harvests left
+		public Dictionary<int, float> Grazed = new();   // grass a cow ate -> seconds until it grows back
 		public Dictionary<int, Kilns.Kiln> Kilns = new();
 	}
 	static readonly JsonSerializerOptions Opts = new() { IncludeFields = true };

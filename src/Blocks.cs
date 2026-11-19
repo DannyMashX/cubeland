@@ -44,6 +44,7 @@ public static class Blocks
 	public const int Bone = 620, BoneAsh = 621, GloomWisp = 622;   // Fear & Foes (items 620+; 600-611 are the dyes)
 	// Till & Tend (farming Grain; see Farm.cs): items 623-626, soil blocks 93-96, Grain growing 42-49 (49 = ripe)
 	public const int GrainSeeds = 623, Grain = 624, Flour = 625, Bread = 626;
+	public const int Leather = 627, RawMeat = 628, CookedMeat = 629;   // cows (items 627-629)
 	public const int Tilled = 93, WetTilled = 94, Fertilized = 95, WetFertilized = 96, GrainRipe = 49;
 	public static readonly int[] GrainStages = { 42, 43, 44, 45, 46, 47, 48, 49 };
 	public static readonly int[] Soils = { Tilled, WetTilled, Fertilized, WetFertilized };
@@ -189,6 +190,10 @@ public static class Blocks
 		B[Grain] = new BlockDef { Name = "Grain", T = new[] { 106, 106, 106 }, Item = true };
 		B[Flour] = new BlockDef { Name = "Flour", T = new[] { 107, 107, 107 }, Item = true };
 		B[Bread] = new BlockDef { Name = "Bread", T = new[] { 108, 108, 108 }, Item = true, Food = 6 };
+		// cows: Leather (more from a cow with room to roam), Raw Meat (more from a well-fed cow) -> Cooked Meat in the Kiln
+		B[Leather] = new BlockDef { Name = "Leather", T = new[] { 121, 121, 121 }, Item = true };
+		B[RawMeat] = new BlockDef { Name = "Raw Meat", T = new[] { 122, 122, 122 }, Item = true, Food = 2 };
+		B[CookedMeat] = new BlockDef { Name = "Cooked Meat", T = new[] { 123, 123, 123 }, Item = true, Food = 8 };
 		string[] soilNames = { "Tilled Dirt", "Wet Tilled Dirt", "Fertilized Dirt", "Wet Fertilized Dirt" };
 		for (int k = 0; k < 4; k++) Def(Tilled + k, soilNames[k], 2, 109 + k, 2).Drop = Dirt;
 		for (int k = 0; k < 8; k++)

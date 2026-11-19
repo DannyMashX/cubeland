@@ -270,6 +270,35 @@ public partial class Sound : Node
 		Filter(outp, "hp", 45, 0.7);
 		return Finish(outp, 0.9);
 	}
+	// the Cow's "moo": a low, steady voice that starts with closed lips (a hummed "mm") and opens into a long "ooo",
+	// sliding up a little and then sagging down at the end
+	static float[] Moo(Func<double> r)
+	{
+		double len = 1.0 + r() * 0.5; int n = (int)(SR * len);
+		var src = new float[n]; var breath = new float[n];
+		double f0 = 105 + r() * 30;
+		for (double t = 0.005; t < len;)
+		{
+			double p = t / len, f = f0 * (0.9 + 0.22 * Math.Sin(Math.PI * Math.Min(1, p * 1.5)) - 0.18 * Math.Max(0, p - 0.65)) * (0.985 + r() * 0.03);
+			int o = (int)(t * SR), plen = (int)(SR / f);
+			for (int i = 0; i < plen && o + i < n; i++) src[o + i] += (float)Math.Exp(-i / (plen * 0.3));
+			t += 1 / f;
+		}
+		for (int i = 0; i < n; i++) breath[i] = (float)(r() * 2 - 1);
+		var hum = Filter((float[])src.Clone(), "lp", 260, 0.7);            // "mm" (lips closed)
+		var oo1 = Filter((float[])src.Clone(), "bp", 330 + r() * 40, 2.2); // "ooo"
+		var oo2 = Filter((float[])src.Clone(), "bp", 760 + r() * 80, 3);
+		Filter(breath, "bp", 500, 0.7);
+		var outp = new float[n];
+		for (int i = 0; i < n; i++)
+		{
+			double t = (double)i / SR, open = Math.Min(1, Math.Max(0, (t - 0.12) / 0.25));
+			double env = Math.Min(1, t / 0.1) * (t > len * 0.7 ? Math.Pow(1 - (t - len * 0.7) / (len * 0.3), 1.6) : 1);
+			outp[i] = (float)(env * (hum[i] * (1.4 - 0.8 * open) + (oo1[i] * 2.4 + oo2[i] * 0.9) * open + breath[i] * 0.05));
+		}
+		Filter(outp, "hp", 60, 0.7);
+		return Finish(outp, 0.85);
+	}
 	// Dan The Chocolate Man's "hrr": a high, cat-like trilled chirp ("mrrp")
 	static float[] Hrr(Func<double> r)
 	{
@@ -376,6 +405,7 @@ public partial class Sound : Node
 		string[] wk = { "splash", "swim", "place" };
 		for (int ki = 0; ki < wk.Length; ki++) { int k = ki; Add("water:" + wk[k], v => Water(wk[k], Rng(41000 + k * 211 + v * 37))); }
 		Add("growl:say", v => Growl(Rng(31000 + v * 29)));
+		Add("moo:say", v => Moo(Rng(52000 + v * 31)));
 		for (int mi = 0; mi < Recipes.Length; mi++)
 		{
 			int m = mi;

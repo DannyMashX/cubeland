@@ -8,7 +8,7 @@ namespace Cubeland;
 // Your pictures in textures/blocks and textures/items fill the slots below (by file name).
 public static class Atlas
 {
-	public const int TILE = 16, NT = 121;   // 121 pictures side by side (52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend)
+	public const int TILE = 16, NT = 124;   // 124 pictures side by side (52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows)
 	public const int PW = TILE + 2;        // the GPU copy pads each picture with a 1px copy of its edge (no colour bleeding)
 
 	// Which atlas slot each texture file fills (a file can fill more than one)
@@ -33,6 +33,7 @@ public static class Atlas
 		["bone"] = new[] { 102 }, ["bone_ash"] = new[] { 103 }, ["gloom_wisp"] = new[] { 104 },
 		["grain_seeds"] = new[] { 105 }, ["grain"] = new[] { 106 }, ["flour"] = new[] { 107 }, ["bread"] = new[] { 108 },
 		["tilled_dirt"] = new[] { 109 }, ["wet_tilled_dirt"] = new[] { 110 }, ["fertilized_dirt"] = new[] { 111 }, ["wet_fertilized_dirt"] = new[] { 112 },
+		["leather"] = new[] { 121 }, ["raw_meat"] = new[] { 122 }, ["cooked_meat"] = new[] { 123 },
 	};
 
 	// the colours: <colour>_terracotta 52-62, <colour>_chiseled_terracotta 63-73, <colour>_bricks 74-84 (orange..black),

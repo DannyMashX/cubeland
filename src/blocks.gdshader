@@ -10,7 +10,8 @@ global uniform vec3 torch_color;
 global uniform float held_light;      // a torch in your hand: how far its light reaches (0 = none). Measured from your eye, so walls don't stop it
 global uniform vec3 fog_color;
 global uniform float fog_thickness;   // how fast the haze builds up with distance
-global uniform float fog_max;         // the most it can ever cover
+global uniform float fog_max;
+global uniform float fog_edge;          // the render distance, in blocks         // the most it can ever cover
 
 varying float v_torch;
 varying float v_sky;
@@ -31,5 +32,6 @@ void fragment() {
 	float held = held_light > 0.0 ? min(1.2, pow(max(0.0, held_light - length(v_eye)) / 14.0, 1.4)) : 0.0;   // (the same curve as World.LightCurve)
 	vec3 c = t.rgb * COLOR.rgb * max(day_tint * v_sky, max(v_torch, held) * torch_color);
 	float haze = (1.0 - exp(-fog_thickness * v_depth)) * fog_max;
+	if (fog_edge > 0.0) haze = max(haze, smoothstep(fog_edge * 0.6, fog_edge, length(v_eye)));   // the render distance: fully hazed at its edge, so nothing pops in or out
 	ALBEDO = mix(c, fog_color, haze);   // (the Compatibility renderer shows this as-is, like the web version did)
 }

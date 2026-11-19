@@ -8,7 +8,7 @@ config_version=5
 
 config/name="CubeLand Alpha"
 config/description="A block-building game."
-config/version="Alpha 0.0.9.3"
+config/version="Alpha 0.0.9.4"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 
@@ -51,6 +51,10 @@ fog_thickness={
 fog_max={
 "type": "float",
 "value": 0.82
+}
+fog_edge={
+"type": "float",
+"value": 160.0
 }
 
 [rendering]

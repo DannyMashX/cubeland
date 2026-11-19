@@ -99,7 +99,7 @@ public partial class Main
 		("Building Blocks", new[] { 7, 61, 8, 9, 64 }.Concat(Blocks.ColourBricks).Append(65).Concat(Blocks.ColourTerracotta).Append(67).Concat(Blocks.ColourChiseled)
 			.Concat(new[] { 69, 10, 22, Blocks.CraftingBench, Blocks.Furnace }).ToArray()),
 		("Natural Blocks", new[] { 1, 2, 3, 4, 5, 6, 11, 63 }.Concat(Blocks.Flowers).Append(Blocks.Water).Concat(Blocks.Soils).ToArray()),
-		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread }.Concat(Blocks.Dye).Append(Blocks.CrudeAxe).Concat(Blocks.Tools).ToArray()),
+		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }.Concat(Blocks.Dye).Append(Blocks.CrudeAxe).Concat(Blocks.Tools).ToArray()),
 	};
 	static int TabOf(int id) => Math.Max(0, Array.FindIndex(InvTabs, t => t.ids.Contains(id)));
 	static int[] VariantsOf(int b) => Array.IndexOf(Blocks.Splittable, b) >= 0
@@ -114,7 +114,7 @@ public partial class Main
 			for (int k = 0; k < InvTabs.Length; k++) { int kk = k; var b = new Button { Text = InvTabs[k].name, ToggleMode = true }; b.Pressed += () => ShowInvTab(kk); tabs.AddChild(b); invTabButtons.Add(b); }
 			invGrid = new GridContainer { Columns = 9 }; invGrid.AddThemeConstantOverride("h_separation", 4); invGrid.AddThemeConstantOverride("v_separation", 4);
 			body.AddChild(invGrid);
-			var list = Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread }).Concat(Blocks.Dye).Concat(Blocks.Tools)
+			var list = Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }).Concat(Blocks.Dye).Concat(Blocks.Tools)
 				.OrderBy(TabOf).ThenBy(id => Array.IndexOf(InvTabs[TabOf(id)].ids, id)).ToList();
 			foreach (int id in list)
 			{

@@ -119,7 +119,7 @@ public partial class Main
 	void Place()
 	{
 		// holding food: eat it (survival); holding Fire Essence: it lifts the gloom
-		if (UseFireEssence() || Eat()) return;
+		if (FeedCow() || UseFireEssence() || Eat()) return;
 		if (player.Raycast() is not { } h) return;
 		lastAim = h;
 		int hb = h.Id, id = inv.Held;

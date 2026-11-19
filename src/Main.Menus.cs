@@ -25,7 +25,7 @@ public partial class Main
 	// ---- Settings (saved in the game's user folder) ----
 	public class SettingsData
 	{
-		public int Sens = 100, Fov = 75; public bool Info = true, Autosave = true, Muted; public string Name = "Player";
+		public int Sens = 100, Fov = 75, RenderDist = 10; public bool Info = true, Autosave = true, Muted; public string Name = "Player";
 		public Dictionary<string, int> Vol = new() { ["master"] = 100, ["block"] = 100, ["player"] = 100, ["mob"] = 100, ["music"] = 100 };
 	}
 	static SettingsData settings;
@@ -40,6 +40,8 @@ public partial class Main
 	void ApplySettings()
 	{
 		cam.Fov = settings.Fov;
+		settings.RenderDist = Math.Clamp(settings.RenderDist, MinRender, MaxRender);
+		ApplyRenderDist();
 		info.Visible = settings.Info;
 		foreach (var (k, v) in settings.Vol) Sound.Levels[k] = v / 100f;
 		Sound.Muted = settings.Muted;
@@ -185,6 +187,7 @@ public partial class Main
 		}
 		Slider("Mouse sensitivity", 20, 300, 10, () => settings.Sens, x => settings.Sens = x, "%");
 		Slider("Field of view", 50, 110, 5, () => settings.Fov, x => settings.Fov = x, "");
+		Slider("Render distance", MinRender, MaxRender, 1, () => settings.RenderDist, x => settings.RenderDist = x, " chunks");
 		Toggle("Sound (M)", () => settings.Muted ? "Off" : "On", () => settings.Muted = !settings.Muted);
 		Toggle("FPS and position", () => settings.Info ? "Shown" : "Hidden", () => settings.Info = !settings.Info);
 		Toggle("Auto save", () => settings.Autosave ? "On (every 30 seconds)" : "Off", () => settings.Autosave = !settings.Autosave);
@@ -348,10 +351,12 @@ public partial class Main
 			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => (int)v))).ToArray(),
 			Player = new() { X = player.Pos.X, Y = player.Pos.Y, Z = player.Pos.Z, Yaw = player.Yaw, Pitch = player.Pitch, Fly = player.Flying, Health = health, Gloom = gloom, DarkTime = darkTime, LightTime = lightTime },
 			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Selected = inv.Selected,
-			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health }).ToList(),
+			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health,
+				Baby = m.Baby, Happy = MathF.Round(m.Happy), Room = MathF.Round(Math.Max(0, m.Room) * 100) / 100, MateCool = MathF.Round(m.MateCool), Fed = m.Fed }).ToList(),
 			Drops = drops.All.Select(d => new Worlds.DropSave { Id = d.Id, X = d.P.X, Y = d.P.Y, Z = d.P.Z, Age = d.Age }).ToList(),
 			Drying = new(world.Drying), TorchBurn = world.TorchBurn.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
 			Crops = world.Crops.ToDictionary(k => k.Key, k => MathF.Round(k.Value)), Fert = new(world.FertLeft),
+			Grazed = world.Grazed.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
 			Kilns = new(kilns.All),
 		};
 		try { if (!Worlds.WriteSave(current, s)) return false; unsaved = false; return true; }
@@ -377,6 +382,7 @@ public partial class Main
 			foreach (var (i, left) in s.TorchBurn) if (world.TorchBurn.ContainsKey(i)) world.TorchBurn[i] = Math.Max(0, left);
 			if (s.Crops != null) foreach (var (i, left) in s.Crops) if (world.Crops.ContainsKey(i)) world.Crops[i] = Math.Max(0, left);
 			if (s.Fert != null) foreach (var (i, n) in s.Fert) if (world.FertLeft.ContainsKey(i)) world.FertLeft[i] = Math.Max(1, n);
+			if (s.Grazed != null) foreach (var (i, left) in s.Grazed) if (i >= 0 && i < world.Blocks.Length && world.Blocks[i] == Blocks.Dirt) world.Grazed[i] = Math.Max(0, left);
 			pendingSave = s;
 		}
 		catch (Exception e) { GD.PrintErr("Could not load the world (it will still play, but may not save): " + e.Message); }
@@ -409,7 +415,14 @@ public partial class Main
 			SelectSlot(Math.Clamp(s.Selected, 0, Inventory.Slots - 1));
 		}
 		foreach (var m in s.Mobs) if (ZombieReady && m.Type == "grrangry") m.Type = "zombie";   // worlds saved before the Zombie replaced Grr Angry
-		foreach (var m in s.Mobs) if (MobTypes.ContainsKey(m.Type) && models.ContainsKey(m.Type)) { var mob = SpawnMob(m.Type, m.X, m.Y, m.Z); mob.Yaw = m.Yaw; mob.Health = m.Health > 0 ? m.Health : mob.T.Health; }
+		foreach (var m in s.Mobs)
+		{
+			if (!MobTypes.ContainsKey(m.Type) || !models.ContainsKey(m.Type)) continue;
+			var t = MobTypes[m.Type];
+			var mob = SpawnMob(m.Type, m.X, m.Y, m.Z, t.Cow ? (m.Baby > 0 ? 1 : m.Fed >= FatAt ? 2 : 0) : 0);
+			mob.Yaw = m.Yaw; mob.Health = m.Health > 0 ? m.Health : t.Health;
+			if (t.Cow) { mob.Baby = Math.Max(0, m.Baby); mob.Fed = Math.Clamp(m.Fed, 0, FedMax); mob.Happy = Math.Max(0, m.Happy); mob.Room = Math.Clamp(m.Room, 0, 1); mob.MateCool = Math.Max(0, m.MateCool); }
+		}
 		foreach (var d in s.Drops) if (Blocks.Get(d.Id) != null) { var dr = drops.Add(d.Id, d.X, d.Y, d.Z); dr.V = Vector3.Zero; dr.Age = d.Age; }
 		DrawHearts();
 	}

@@ -23,6 +23,7 @@ public partial class Main : Node3D
 	readonly Dictionary<int, (MeshInstance3D solid, MeshInstance3D water)> groupNodes = new();   // one pair of meshes per 32x32x32 group
 	readonly Dictionary<int, (ChunkMesher.Part solid, ChunkMesher.Part water)> chunkParts = new();   // each built 16x16x16 chunk's pieces
 	readonly HashSet<int> dirty = new(), soon = new();
+	readonly HashSet<int> far = new();   // chunks waiting to be built that are past the render distance (built once you come near)
 	Task genTask; volatile float genProgress; bool ready;
 	Label info, loading;
 	MeshInstance3D outline;
@@ -182,7 +183,7 @@ public partial class Main : Node3D
 		UpdateSkyAndWater(dt);
 		UpdateHealth(dt);
 		TickLifeUi(dt);
-		UpdateMobs(dt);
+		UpdateMobs(moving || invOpen || hosting || netClient ? dt : 0);   // (mobs wait while you're paused, like the rest of the world; a joined game follows the host)
 		UpdateHand(dt);
 		if ((moving || invOpen || hosting) && !netClient)
 		{   // (torches burning down, clay drying and kilns all wait while you're paused)
@@ -241,7 +242,7 @@ public partial class Main : Node3D
 		if (under != wasUnder)
 		{
 			wasUnder = under;
-			RenderingServer.GlobalShaderParameterSet("fog_thickness", under ? 0.22f : 0.045f);
+			RenderingServer.GlobalShaderParameterSet("fog_thickness", under ? 0.22f : FogThickness);
 			RenderingServer.GlobalShaderParameterSet("fog_max", under ? 0.97f : 0.82f);
 			cam.Far = under ? 40 : 1000;
 			waterOverlay.Visible = under;
@@ -254,7 +255,7 @@ public partial class Main : Node3D
 	float target = 1;
 
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -397,6 +398,85 @@ public partial class Main : Node3D
 			if (pa != null) player.Pitch = float.Parse(pa[8..], System.Globalization.CultureInfo.InvariantCulture);
 			if (inv.Survival) { health = 13; gloom = 3; changeTime = 0; DrawHearts(); }
 		}
+		if (args.Contains("--cows") && !cowsTested && !menuOpen)
+		{   // (test: cows on a grass field up in the air: the 8-a-chunk limit, feeding, growing up, mating, crowding, grazing, drops)
+			cowsTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			foreach (var o in mobList.ToArray()) RemoveMob(o);
+			int x0 = (int)MathF.Floor(player.Pos.X / 16) * 16 - 16, z0 = (int)MathF.Floor(player.Pos.Z / 16) * 16, fy = 150;
+			for (int x = x0; x < x0 + 64; x++) for (int z = z0; z < z0 + 16; z++) { world.SetBlock(x, fy, z, Blocks.Grass); world.SetBlock(x, fy + 1, z, 0); world.SetBlock(x, fy + 2, z, 0); }
+			for (int x = x0 - 1; x <= x0 + 64; x++) for (int z = z0 - 1; z <= z0 + 16; z++)
+				if (x < x0 || x >= x0 + 64 || z < z0 || z >= z0 + 16) { world.SetBlock(x, fy + 1, z, Blocks.Stone); world.SetBlock(x, fy + 2, z, Blocks.Stone); }   // (a wall round it)
+			float Y = fy + 1;
+			var A = (x0 / 16, z0 / 16);
+			// 1. the 8-a-chunk limit is only for breeding: 12 cows can all be in one chunk
+			for (int k = 0; k < 12; k++) SpawnCow(x0 + 2 + k % 6 * 2, Y, z0 + 3 + k / 6 * 4);
+			Check($"12 cows can all be in one chunk (got {CowsInChunk(A)})", CowsInChunk(A) == 12);
+			foreach (var o in mobList.ToArray()) RemoveMob(o);
+			// 2. two happy cows with room, in a chunk with 8 cows in all (a calf and a fat cow among them): no calf.
+			//    With one of the others gone (7), they have one.
+			Mob MakePair(out Mob b2) { var a2 = SpawnCow(x0 + 8, Y, z0 + 8); b2 = SpawnCow(x0 + 9, Y, z0 + 8); a2.Happy = b2.Happy = 100; return a2; }
+			var others = new List<Mob> { SpawnCow(x0 + 0.5f, Y, z0 + 0.5f, CalfTime), SpawnCow(x0 + 15.5f, Y, z0 + 0.5f), SpawnCow(x0 + 0.5f, Y, z0 + 15.5f),
+				SpawnCow(x0 + 15.5f, Y, z0 + 15.5f), SpawnCow(x0 + 0.5f, Y, z0 + 8), SpawnCow(x0 + 15.5f, Y, z0 + 8) };
+			for (int k = 0; k < FatAt; k++) Feed(others[1]);
+			others[1].Happy = 0;
+			var pa = MakePair(out var pb);
+			bool Born() => mobList.Count(o => o.T.Cow && o.Baby > 0) > 1;
+			for (int f = 0; f < 600 && !Born(); f++) { CowThink(pa, 0.1f); CowThink(pb, 0.1f); }
+			Check($"8 cows in the chunk (calf and fat cow count too): no breeding ({CowsInChunk(A)} cows)", CowsInChunk(A) == 8 && !Born());
+			RemoveMob(others[5]); pa.MateCool = pb.MateCool = 0; pa.Happy = pb.Happy = 100;
+			for (int f = 0; f < 600 && !Born(); f++) { CowThink(pa, 0.1f); CowThink(pb, 0.1f); }
+			Check($"7 cows: they have a calf ({CowsInChunk(A)} cows now)", Born() && CowsInChunk(A) == 8);
+			foreach (var o in mobList.ToArray()) RemoveMob(o);
+			// 3. feeding Grain: fatter (the fat model after FatAt), happy, and it stops wanting it when full
+			var c = SpawnCow(x0 + 40.5f, Y, z0 + 8);
+			for (int k = 0; k < FatAt; k++) Feed(c);
+			Check($"after {FatAt} Grain it's a fat cow (fed {c.Fed}, model {ModelOf(c)})", c.Fed == FatAt && c.Variant == 2 && ModelOf(c) == "cowfat" && c.Happy > 0);
+			Feed(c); Feed(c);
+			Check($"fed up to {FedMax}, then it turns Grain down", c.Fed == FedMax && !Feed(c));
+			// 4. drops: 1 + Grain eaten Raw Meat; Leather by room (all the room in the world: 3)
+			c.Room = 1; int before = drops.All.Count; MobDies(c);
+			int meat = drops.All.Skip(before).Count(d => d.Id == Blocks.RawMeat), leather = drops.All.Skip(before).Count(d => d.Id == Blocks.Leather);
+			Check($"a well-fed cow with room drops {meat} Raw Meat and {leather} Leather (expect {1 + FedMax} and 3)", meat == 1 + FedMax && leather == 3);
+			var crowdedCow = SpawnCow(x0 + 44.5f, Y, z0 + 8); crowdedCow.Room = 0.2f; before = drops.All.Count; MobDies(crowdedCow);
+			Check("a crowded, unfed cow drops 1 Raw Meat and 1 Leather", drops.All.Skip(before).Count(d => d.Id == Blocks.RawMeat) == 1 && drops.All.Skip(before).Count(d => d.Id == Blocks.Leather) == 1);
+			foreach (var o in mobList.ToArray()) RemoveMob(o);
+			foreach (var d in drops.All.ToArray()) drops.Remove(d);
+			// 5. a calf grows up into a cow
+			var calf = SpawnCow(x0 + 40.5f, Y, z0 + 8, 1);
+			Check("a calf wears the calf model", calf.Variant == 1 && ModelOf(calf) == "cowbaby" && calf.Health == CalfHealth);
+			CowThink(calf, 1.5f);
+			Check("and grows up into a cow", calf.Baby == 0 && calf.Variant == 0 && calf.Health == MobTypes["cow"].Health);
+			RemoveMob(calf);
+			// 6. two happy cows with room: a calf
+			var a = SpawnCow(x0 + 40.5f, Y, z0 + 8); var b = SpawnCow(x0 + 41.5f, Y, z0 + 8);
+			a.Happy = b.Happy = 100;
+			for (int f = 0; f < 600 && mobList.Count(o => o.T.Cow) == 2; f++) { CowThink(a, 0.1f); CowThink(b, 0.1f); }
+			Check($"two happy cows with room have a calf ({mobList.Count(o => o.T.Cow && o.Baby > 0)} calf)", mobList.Count(o => o.T.Cow && o.Baby > 0) == 1 && a.MateCool > 0 && b.MateCool > 0);
+			foreach (var o in mobList.ToArray()) RemoveMob(o);
+			// 7. crowded: five happy cows close together never mate
+			var five = Enumerable.Range(0, 5).Select(k => SpawnCow(x0 + 34.5f + k % 3, Y, z0 + 7 + k / 3)).ToList();
+			foreach (var o in five) { o.Happy = 100; o.RoomIn = 0; }
+			for (int f = 0; f < 600; f++) foreach (var o in five) { CowThink(o, 0.1f); o.Grazing = 0; }
+			Check("five happy cows crowded together don't mate", mobList.Count(o => o.T.Cow) == 5);
+			Check("happy cows' hearts don't make them mate: feeding alone doesn't either", five.All(o => o.Mate == null));
+			foreach (var o in mobList.ToArray()) RemoveMob(o);
+			// 8. grazing: an unhappy cow eats the grass under it (Dirt), gets happy, and the grass grows back
+			var gz = SpawnCow(x0 + 52.5f, Y, z0 + 8); gz.Walking = false;
+			int gx = (int)MathF.Floor(gz.X), gzz = (int)MathF.Floor(gz.Z);
+			for (int f = 0; f < 400 && world.GetBlock(gx, fy, gzz) == Blocks.Grass; f++) { gz.Walking = false; CowThink(gz, 0.1f); }
+			Check("an unhappy cow grazes: the grass under it is eaten", world.GetBlock(gx, fy, gzz) == Blocks.Dirt && world.Grazed.ContainsKey(World.Idx(gx, fy, gzz)) && gz.Happy > 0);
+			world.TickTimers(World.RegrowMax + 2);
+			world.TickTimers(1.1f);
+			Check("and it grows back to Grass", world.GetBlock(gx, fy, gzz) == Blocks.Grass && !world.Grazed.ContainsKey(World.Idx(gx, fy, gzz)));
+			RemoveMob(gz);
+			// for the picture: a cow, a calf and a fat cow side by side, happy (hearts), in front of you
+			player.Pos = new Vector3(x0 + 40.5f, Y + 0.3f, z0 + 10.5f); player.Yaw = MathF.PI; player.Pitch = -0.3f; player.Flying = true;
+			var p1 = SpawnCow(x0 + 37f, Y, z0 + 5); var p2 = SpawnCow(x0 + 43.5f, Y, z0 + 5.5f, CalfTime); var p3 = SpawnCow(x0 + 40.3f, Y, z0 + 5);
+			for (int k = 0; k < FatAt; k++) Feed(p3);
+			foreach (var o in new[] { p1, p2, p3 }) { o.Yaw = 2.5f; o.TurnTo = o.Yaw; o.Walking = false; o.Timer = 999; o.Happy = 100; o.MateCool = 999; o.GrazeIn = 999; o.Grazing = 0; }
+			p1.Grazing = 999;   // (head down, eating)
+		}
 		if (args.Contains("--farm") && !farmTested && !menuOpen)
 		{   // (test: a row of soil in front of you with water at one end, tilled and planted the way you would, then 200 seconds of growing)
 			farmTested = true;
@@ -424,11 +504,23 @@ public partial class Main : Node3D
 			string Soil() => string.Join(" ", Enumerable.Range(1, 8).Select(k => { var (x, z) = At(k); return world.GetBlock(x, y, z) + "/" + world.GetBlock(x, y + 1, z); }));
 			GD.Print("farm after 3s (soil/crop): " + Soil());
 			Check("soil joined to water is wet up to 5 away, the next is dry", Enumerable.Range(1, 6).All(k => { var (x, z) = At(k); return Blocks.SoilWet(world.GetBlock(x, y, z)); }) && !Blocks.SoilWet(world.GetBlock(At(7).x, y, At(7).z)));
-			for (int s = 0; s < 200; s++) world.TickTimers(1);
-			GD.Print("farm after 203s (soil/crop): " + Soil());
-			var (fx, fz) = At(1); var (wx, wz) = At(3); var (dx, dz) = At(8);
+			for (int s = 0; s < 400; s++) world.TickTimers(1);
+			GD.Print("farm after 403s (soil/crop): " + Soil());
+			var (fx, fz) = At(1);
 			Check("wet + fertilized is ripe", world.GetBlock(fx, y + 1, fz) == Blocks.GrainRipe);
-			Check("wet grows faster than dry", world.GetBlock(wx, y + 1, wz) > world.GetBlock(dx, y + 1, dz));
+			double Avg(int a, int b) => Enumerable.Range(a, b - a + 1).Average(k => { var (x, z) = At(k); return world.GetBlock(x, y + 1, z); });
+			Check("wet grows faster than dry (on average)", Avg(2, 6) > Avg(7, 8));
+			{   // random growth: how long 2000 plants take from seed to ripe, at each growing speed
+				var r = new Random(1);
+				foreach (var (name, rate) in new[] { ("wet", 1f), ("dry", World.DryRate), ("wet+fertilized", World.FertRate) })
+				{
+					var times = new List<int>();
+					for (int p = 0; p < 2000; p++) { int t = 0, st = 0; while (st < 7 * World.StageHits) { t++; if (r.NextDouble() < World.StageChance(rate, 1)) st++; } times.Add(t); }
+					times.Sort(); double want = 7 * World.StageTime / rate;
+					GD.Print($"ripe ({name}): average {times.Average():0}s (fixed timers gave {want:0}s), half of them between {times[500]}s and {times[1500]}s, fastest {times[0]}s, slowest {times[^1]}s");
+					Check($"random growth keeps the average ({name})", Math.Abs(times.Average() - want) < want * 0.05);
+				}
+			}
 			world.SetBlock(fx, y + 1, fz, 0);
 			Check("a harvest uses up one of the fertilizer's 2", world.FertLeft.GetValueOrDefault(World.Idx(fx, y, fz)) == 1);
 			Check("Flour by hand, Bread in the kiln, Bread is food", Inventory.Recipes.Any(r => r.Out == Blocks.Flour) && Kilns.Smelts.Any(s => s.Out == Blocks.Bread && s.From == Blocks.Flour) && Blocks.Get(Blocks.Bread)?.Food > 0);
@@ -544,9 +636,43 @@ public partial class Main : Node3D
 		GD.Print($"burn timers: {world.TorchBurn.Count}  (expect 2: lit + smoldering)");
 	}
 
+	// ---- render distance (also how far out mobs are simulated) ----
+	const int MinRender = 4, MaxRender = 32;
+	const float ForgetMobs = 128;   // (mobs other than cows are forgotten past this, or the render distance if it's nearer)
+	float RenderBlocks => (settings?.RenderDist ?? 10) * World.CS;   // (in blocks)
+	float FogThickness => 0.045f * 10 / (settings?.RenderDist ?? 10);   // (the haze thins out as you see further, so 10 chunks looks like it always did)
+	void ApplyRenderDist()
+	{
+		RenderingServer.GlobalShaderParameterSet("fog_edge", RenderBlocks);
+		if (!wasUnder) RenderingServer.GlobalShaderParameterSet("fog_thickness", FogThickness);
+		lastGroupAt = -1;   // (show and hide groups, and build the newly near ones, straight away)
+	}
+	// how far (sideways) the camera is from the nearest edge of group g
+	static float GroupDist(int g, float px, float pz)
+	{
+		const int S = World.CS * World.GS;
+		var (gx, _, gz) = World.FromGroupKey(g);
+		float dx = Math.Max(0, Math.Max(gx * S - px, px - (gx + 1) * S)), dz = Math.Max(0, Math.Max(gz * S - pz, pz - (gz + 1) * S));
+		return MathF.Sqrt(dx * dx + dz * dz);
+	}
+	bool InRange(int g) => player == null || GroupDist(g, player.Pos.X, player.Pos.Z) < RenderBlocks;
+	int lastGroupAt = -1;
+	// whenever you move into another group: hide the groups past the render distance, show the ones within it, and
+	// let the chunks that were too far to build get built if they're near enough now
+	void CullGroups()
+	{
+		const int S = World.CS * World.GS;
+		int at = (int)(player.Pos.X / S) * 1000 + (int)(player.Pos.Z / S);
+		if (at == lastGroupAt) return;
+		lastGroupAt = at;
+		foreach (var (g, n) in groupNodes) { bool v = InRange(g); n.solid.Visible = v; n.water.Visible = v; }
+		lock (dirty) { foreach (int c in far) dirty.Add(c); far.Clear(); }
+	}
+
 	// rebuild changed chunks, nearest first, for up to a few milliseconds a frame (several at once, on all CPU cores)
 	void BuildChunks()
 	{
+		CullGroups();
 		var start = Time.GetTicksUsec();
 		// (nearest GROUP first, and a group's chunks together, so each group gets glued together once)
 		const int S = World.CS * World.GS;
@@ -568,15 +694,18 @@ public partial class Main : Node3D
 				if (dirty.Count == 0 && soon.Count > 0) { foreach (int c in soon) dirty.Add(c); soon.Clear(); }
 				if (dirty.Count == 0) return;
 				// the nearest few (one pass, keeping a short sorted list, rather than sorting thousands of chunks every time)
-				int n = 0;
+				int n = 0; List<int> tooFar = null;
 				foreach (int c in dirty)
 				{
+					if (!InRange(World.GroupOf(c))) { (tooFar ??= new()).Add(c); continue; }
 					int d = Dist(c);
 					if (n == want && d >= bestD[n - 1]) continue;
 					int j = n < want ? n++ : n - 1;
 					while (j > 0 && bestD[j - 1] > d) { best[j] = best[j - 1]; bestD[j] = bestD[j - 1]; j--; }
 					best[j] = c; bestD[j] = d;
 				}
+				if (tooFar != null) foreach (int c in tooFar) { dirty.Remove(c); soon.Remove(c); far.Add(c); }
+				if (n == 0) return;
 				batch = best[..n];
 				foreach (int c in batch) { dirty.Remove(c); soon.Remove(c); }
 			}
@@ -608,6 +737,7 @@ public partial class Main : Node3D
 				 new MeshInstance3D { MaterialOverride = waterMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off });
 			AddChild(n.solid); AddChild(n.water);
 			groupNodes[g] = n;
+			n.solid.Visible = n.water.Visible = InRange(g);
 		}
 		n.solid.Mesh = solid; n.water.Mesh = water;
 	}
