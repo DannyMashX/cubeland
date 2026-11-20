@@ -27,12 +27,44 @@ public class BlockDef
 	public string Form;             // a shape item: "slab", "stairs"...
 	public int Of;                  // a shape item: the block it's made of
 	public int Dye;                 // a flower: the dye it makes
+	public int Layer;               // deep stone sets: which layer of the strata (2-8; the normal stone set is layer 1)
+	public int Pick;                // ores: how good a pickaxe it needs (Blocks.PickTier)
+	public int Armor = -1, Pack, Belt, BeltTools;   // gear: which piece of armor (0 helmet .. 3 boots), backpack slots, belt offhand slots and tool slots
+	public int[] HandDrop;          // dug without a shovel it gives [item, fewest, most] of that instead (Fireclay -> Fireclay Balls)
 }
 
 // Every block and item in the game (the same numbers as the web version, so saved worlds line up).
 public static class Blocks
 {
-	public const int MaxId = 1800;
+	public const int MaxId = 2000;
+	// Strata (640-tall worlds): from sea level down, a new layer of stone every 64 blocks, down to bedrock at the very bottom.
+	// Layer 1 is the normal Stone (and everything above sea level); layers 2-8 are blocks 113-119, each darker and
+	// harder: past a few layers, only a better pickaxe can mine it (see StrataPickaxe). All of them are called Stone.
+	// Bedrock (120) can't be broken in survival (and nothing can break the bottom layer of the world).
+	// Each deep layer has its own stone set, in that layer's shade: Stone (113-119), Cobblestone (121-127), Stone Bricks
+	// (128-134) and Chiseled Stone (135-141). Deep Stone gives its layer's Cobblestone; the Kiln turns that back into its Stone.
+	public const int StrataLayers = 8, StrataThick = 64, Strata = 113, Bedrock = 120;
+	public const int DeepCobble = 121, DeepBricks = 128, DeepChiseled = 135, DeepLast = DeepChiseled + StrataLayers - 2;
+	// a normal stone-set block (Stone, Cobblestone, Stone Bricks, Chiseled Stone) -> its versions in layers 2, 3, ...
+	public static int[] DeepRow(int b) => Enumerable.Range(b == 3 ? Strata : b == 8 ? DeepCobble : b == 9 ? DeepBricks : DeepChiseled, StrataLayers - 1).ToArray();
+	public static int[] DeepShown(int b) => World.TallWorlds ? DeepRow(b) : Array.Empty<int>();   // the same, but only while tall worlds are on
+	public static readonly int[] DeepBlocks = new[] { 3, 8, 9, 69 }.SelectMany(DeepRow).ToArray();
+	// what a piece, slab or stairs of this block gives when broken (Stone, deep or not, gives its Cobblestone)
+	public static int StoneDropOf(int b) => b == 3 || (b >= Strata && b < Bedrock) ? B[b].Drop : b;
+	// The deep stone sets' piece, slab, stairs... items can't use 100 + b and 1000 + b (those numbers clash with other blocks'),
+	// so theirs are 1800 + 7 x (the block's place in DeepBlocks) + (piece 0, slab 1, vslab 2, stairs 3, quarter 4, vstairs 5, vquarter 6).
+	public static readonly string[] Forms = { "piece", "slab", "vslab", "stairs", "quarter", "vstairs", "vquarter" };
+	public const int DeepFormItem = 1800;
+	// the item for a piece / slab / stairs... of block b
+	public static int BenchOut(string mode, int b) => FormItem(mode == "pieces" ? "piece" : mode, b);   // what a bench mode makes from block b
+	public static int FormItem(string form, int b)
+	{
+		int i = Array.IndexOf(DeepBlocks, b);
+		return i >= 0 ? DeepFormItem + 7 * i + Array.IndexOf(Forms, form) : (form == "piece" ? PieceItem : ShapeItem[form]) + b;
+	}
+	public static int StoneLayer(int b) => b == 3 ? 1 : Get(b)?.Layer ?? 0;
+	// the deepest layer each pickaxe can mine, by what it's made of (copper and up are still to come)
+	public static readonly Dictionary<string, int> StrataPickaxe = new() { ["stone"] = 2, ["copper"] = 3, ["iron"] = 4, ["bronite"] = 6, ["rosium"] = 7, ["steel"] = 8 };
 	public static readonly BlockDef[] B = new BlockDef[MaxId];
 	public static BlockDef Get(int id) => id > 0 && id < MaxId ? B[id] : null;
 
@@ -45,6 +77,26 @@ public static class Blocks
 	// Till & Tend (farming Grain; see Farm.cs): items 623-626, soil blocks 93-96, Grain growing 42-49 (49 = ripe)
 	public const int GrainSeeds = 623, Grain = 624, Flour = 625, Bread = 626;
 	public const int Leather = 627, RawMeat = 628, CookedMeat = 629;   // cows (items 627-629)
+	// ---- Pack & Plate: ores, Fireclay and the Foundry ----
+	// Ores (142-145) lie in veins in the stone (WorldGen.PlaceOres). Mining one gives its Chunk, and needs a good enough pickaxe
+	// (Pick: the PickTier it needs): Copper Ore any pickaxe, Iron Ore copper or better, Tin and Gold Ore iron or better.
+	// The Foundry melts Chunks into Bricks (items 630-643), mixes two metals' Bricks into an alloy, and makes Steel.
+	// Fireclay (146) is found in patches a little below the surface; it works like Clay: by hand it comes up as Fireclay Balls,
+	// which the Kiln fires into Fireclay Bricks (and the block into Fireclay Terracotta). These blocks (146-150) build the Foundry.
+	// (They can't be cut into pieces: 246-250 are already the pieces' item numbers of other blocks.)
+	public const int CopperOre = 142, IronOre = 143, GoldOre = 144, TinOre = 145;
+	public const int Fireclay = 146, FireclayTerracotta = 147, FireclayBricks = 148, FireclayCasing = 149, ChiseledFireclay = 150;
+	public const int Foundry = 151;   // the Foundry's Furnace: 151-154 unlit, 155-158 lit; it faces the way you put it down, like the Kiln
+	public const int SteelScrap = 640, SteelBrick = 641, FireclayBall = 642, FireclayBrick = 643;
+	public static readonly int[] Ores = { CopperOre, IronOre, GoldOre, TinOre };
+	public static readonly string[] Metals = { "copper", "iron", "gold", "tin" };
+	public static readonly Dictionary<string, int> Chunk = new() { ["copper"] = 630, ["iron"] = 631, ["gold"] = 632, ["tin"] = 633 };
+	public static readonly Dictionary<string, int> MetalBrick = new() { ["copper"] = 634, ["iron"] = 635, ["gold"] = 636, ["tin"] = 637, ["bronite"] = 638, ["rosium"] = 639, ["steel"] = SteelBrick };
+	public static readonly Dictionary<string, int> PickTier = new() { ["stone"] = 1, ["copper"] = 2, ["iron"] = 3, ["bronite"] = 4, ["rosium"] = 5, ["steel"] = 6 };   // how good each pickaxe is
+	public static readonly int[] FireclayBlocks = { FireclayTerracotta, FireclayBricks, FireclayCasing, ChiseledFireclay };
+	public static readonly int[] FoundryIds = Enumerable.Range(Foundry, 8).ToArray();
+	public static readonly int[] PackItems = { 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, SteelScrap, SteelBrick, FireclayBall, FireclayBrick };
+	public static bool IsFoundry(int id) => id >= Foundry && id < Foundry + 8;
 	public const int Tilled = 93, WetTilled = 94, Fertilized = 95, WetFertilized = 96, GrainRipe = 49;
 	public static readonly int[] GrainStages = { 42, 43, 44, 45, 46, 47, 48, 49 };
 	public static readonly int[] Soils = { Tilled, WetTilled, Fertilized, WetFertilized };
@@ -59,6 +111,14 @@ public static class Blocks
 	public static readonly int[][] TorchWalls = { null, new[] { -1, 0 }, new[] { 1, 0 }, new[] { 0, -1 }, new[] { 0, 1 } };
 	static readonly Dictionary<string, int> torchIds = new();
 	public static readonly List<int> Tools = new();
+	// ---- gear (Pack & Plate): armor, backpacks and utility belts, in six tiers ----
+	public static readonly string[] GearTiers = { "leather", "copper", "iron", "bronite", "rosium", "steel" };
+	public static readonly string[] ArmorPieces = { "helmet", "chestplate", "leggings", "boots" };
+	public static int ArmorItem(int t, int k) => 669 + t * 4 + k;   // 669-692
+	public static readonly int[] Backpacks = { 693, 694, 695, 696, 697, 698 }, Belts = { 699, 700, 701, 702, 703, 704 };
+	public static readonly int[] PackSlots = { 5, 10, 15, 20, 30, 40 }, BeltSlots = { 1, 2, 3, 5, 7, 9 };
+	public static readonly List<int> GearItems = new();
+	public static bool IsGear(int id) => Get(id) is { } d && (d.Armor >= 0 || d.Pack > 0 || d.Belt > 0);
 	// ---- Colours (Brick & Bloom): 12 colours, each with a Terracotta, a Chiseled Terracotta, Bricks and a Dye ----
 	// Red's blocks came first (Red Terracotta 66, Chiseled Red Terracotta 68, Red Bricks 12); the other 11 colours use 218-250.
 	// (Placed blocks must be numbered under 256, and a block's slab/stairs items are 1000/1100/.../1500 + its number, so new
@@ -75,12 +135,14 @@ public static class Blocks
 	public static readonly string[] FlowerColours = { "red", "yellow", "aqua", "indigo", "magenta" };
 	public static readonly int[] Flowers = { 194, 195, 196, 197, 198 };
 	public static bool IsFlower(int id) => id >= 194 && id <= 198;
-	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).ToArray();
-	public static readonly int[] NeedsAxe = { 4, 7, 61 }, Diggable = { 1, 2, 6, 11, 63, 93, 94, 95, 96 };
-	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).ToArray();
+	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(DeepBlocks).ToArray();
+	public static readonly int[] NeedsAxe = { 4, 7, 61 }, Diggable = { 1, 2, 6, 11, 63, Fireclay, 93, 94, 95, 96 };
+	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).Concat(DeepBlocks)
+		.Concat(Ores).Concat(FireclayBlocks).Concat(FoundryIds).ToArray();
 	// Every block you can pick from the creative inventory
-	public static readonly int[] Items = new[] { 1, 2, 3, 8, 7, 60, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(Flowers)
-		.Concat(new[] { Furnace, 22, Water }).ToArray();
+	public static readonly int[] Items = new[] { new[] { 1, 2, 3 }, DeepShown(3), new[] { 8 }, DeepShown(8), new[] { 7, 60, 4, 61, 5, 6, 9 }, DeepShown(9),
+		new[] { 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }, DeepShown(69) }.SelectMany(a => a).Concat(NewColourBlocks).Concat(Flowers)
+		.Concat(new[] { Furnace, 22, Water, Bedrock }).Concat(Ores).Append(Fireclay).Concat(FireclayBlocks).Append(Foundry).ToArray();
 	public const int StackMax = 64;
 
 	// shapes made of pieces: bit masks of the 8 spots (spot number = x + y*2 + z*4)
@@ -110,6 +172,15 @@ public static class Blocks
 		Def(1, "Grass", 1, 0, 2).Drop = 2;   // digging up Grass gives Dirt
 		Def(2, "Dirt", 2, 2, 2);
 		Def(3, "Stone", 3, 3, 3).Drop = 8;   // mining Stone gives Cobblestone
+		for (int n = 2; n <= StrataLayers; n++)   // the deep stone sets: pictures 124-130 (stone), 132-138, 139-145, 146-152
+		{
+			int k = n - 2;
+			var d = Def(Strata + k, "Stone", 122 + n, 122 + n, 122 + n); d.Drop = DeepCobble + k; d.Layer = n;
+			Def(DeepCobble + k, "Cobblestone", 130 + n, 130 + n, 130 + n).Layer = n;
+			Def(DeepBricks + k, "Stone Bricks", 137 + n, 137 + n, 137 + n).Layer = n;
+			Def(DeepChiseled + k, "Chiseled Stone", 144 + n, 144 + n, 144 + n).Layer = n;
+		}
+		Def(Bedrock, "Bedrock", 131, 131, 131);
 		Def(4, "Log", 4, 5, 5);
 		Def(5, "Leaves", 6, 6, 6).Transparent = true;
 		Def(6, "Sand", 7, 7, 7);
@@ -166,13 +237,16 @@ public static class Blocks
 		B[Chocolate] = new BlockDef { Name = "Chocolate", T = new[] { 26, 26, 26 }, Item = true, Food = 4 };
 		B[Stick] = new BlockDef { Name = "Stick", T = new[] { 32, 32, 32 }, Item = true };
 		string[] kinds = { "Axe", "Pickaxe", "Shovel", "Sword", "Hoe" };
-		for (int k = 0; k < 5; k++)
-		{
-			int id = 207 + k, tile = 38 + k, sword = 3;
-			B[id] = new BlockDef { Name = "Stone " + kinds[k], T = new[] { tile, tile, tile }, Item = true, Tool = kinds[k].ToLower(), Material = "stone",
-				Damage = kinds[k] == "Sword" ? sword : kinds[k] == "Axe" ? sword - 1 : 1 };
-			Tools.Add(id);
-		}
+		// stone tools 207-211; metal tools (Pack & Plate) 644-668: copper, iron, bronite, rosium, steel, 5 each in the same order (pictures 179-203)
+		foreach (var (key, label, firstTile, sword, firstId) in new[] { ("stone", "Stone", 38, 3, 207), ("copper", "Copper", 179, 4, 644), ("iron", "Iron", 184, 5, 649),
+			("bronite", "Bronite", 189, 6, 654), ("rosium", "Rosium", 194, 7, 659), ("steel", "Steel", 199, 8, 664) })
+			for (int k = 0; k < 5; k++)
+			{
+				int id = firstId + k, tile = firstTile + k;
+				B[id] = new BlockDef { Name = label + " " + kinds[k], T = new[] { tile, tile, tile }, Item = true, Tool = kinds[k].ToLower(), Material = key,
+					Damage = kinds[k] == "Sword" ? sword : kinds[k] == "Axe" ? sword - 1 : 1 };
+				Tools.Add(id);
+			}
 		B[Rock] = new BlockDef { Name = "Rock", T = new[] { 33, 33, 33 }, Item = true, Places = RockBlock };
 		B[RockBlock].Drop = Rock;
 		B[CrudeAxe] = new BlockDef { Name = "Crude Axe", T = new[] { 34, 34, 34 }, Item = true, Tool = "axe", Material = "crude", Damage = 1 };
@@ -194,6 +268,50 @@ public static class Blocks
 		B[Leather] = new BlockDef { Name = "Leather", T = new[] { 121, 121, 121 }, Item = true };
 		B[RawMeat] = new BlockDef { Name = "Raw Meat", T = new[] { 122, 122, 122 }, Item = true, Food = 2 };
 		B[CookedMeat] = new BlockDef { Name = "Cooked Meat", T = new[] { 123, 123, 123 }, Item = true, Food = 8 };
+		// Pack & Plate: ores 153-156, Fireclay blocks 157-161, the Foundry's Furnace 162-164, chunks 165-168, bricks 169-176, fireclay items 177-178
+		for (int k = 0; k < 4; k++)
+		{
+			string m = Metals[k], M = char.ToUpper(m[0]) + m[1..];
+			Def(Ores[k], M + " Ore", 153 + k, 153 + k, 153 + k).Drop = Chunk[m];
+			B[Ores[k]].Pick = new[] { 1, 2, 3, 3 }[k];
+			B[Chunk[m]] = new BlockDef { Name = M + " Chunk", T = new[] { 165 + k, 165 + k, 165 + k }, Item = true };
+			B[MetalBrick[m]] = new BlockDef { Name = M + " Brick", T = new[] { 169 + k, 169 + k, 169 + k }, Item = true };
+		}
+		B[MetalBrick["bronite"]] = new BlockDef { Name = "Bronite Brick", T = new[] { 173, 173, 173 }, Item = true };
+		B[MetalBrick["rosium"]] = new BlockDef { Name = "Rosium Brick", T = new[] { 174, 174, 174 }, Item = true };
+		B[SteelScrap] = new BlockDef { Name = "Steel Scrap", T = new[] { 175, 175, 175 }, Item = true };
+		B[SteelBrick] = new BlockDef { Name = "Steel Brick", T = new[] { 176, 176, 176 }, Item = true };
+		B[FireclayBall] = new BlockDef { Name = "Fireclay Ball", T = new[] { 177, 177, 177 }, Item = true };
+		B[FireclayBrick] = new BlockDef { Name = "Fireclay Brick", T = new[] { 178, 178, 178 }, Item = true };
+		// gear: armor pictures 204-227, backpacks 228-233, belts 234-239
+		for (int t = 0; t < GearTiers.Length; t++)
+		{
+			string m = GearTiers[t], M = char.ToUpper(m[0]) + m[1..];
+			for (int k = 0; k < 4; k++)
+			{
+				int tile = 204 + t * 4 + k;
+				B[ArmorItem(t, k)] = new BlockDef { Name = $"{M} {char.ToUpper(ArmorPieces[k][0]) + ArmorPieces[k][1..]}", T = new[] { tile, tile, tile }, Item = true, Armor = k, Material = m };
+				GearItems.Add(ArmorItem(t, k));
+			}
+		}
+		for (int t = 0; t < GearTiers.Length; t++)
+		{
+			string m = GearTiers[t], M = char.ToUpper(m[0]) + m[1..];
+			B[Backpacks[t]] = new BlockDef { Name = M + " Backpack", T = new[] { 228 + t, 228 + t, 228 + t }, Item = true, Pack = PackSlots[t], Material = m };
+			B[Belts[t]] = new BlockDef { Name = M + " Utility Belt", T = new[] { 234 + t, 234 + t, 234 + t }, Item = true, Belt = BeltSlots[t], BeltTools = t + 2, Material = m };
+		}
+		GearItems.AddRange(Backpacks); GearItems.AddRange(Belts);
+		Def(Fireclay, "Fireclay", 157, 157, 157).HandDrop = new[] { FireclayBall, 1, 4 };
+		Def(FireclayTerracotta, "Fireclay Terracotta", 158, 158, 158);
+		Def(FireclayBricks, "Fireclay Bricks", 159, 159, 159);
+		Def(FireclayCasing, "Fireclay Casing", 160, 160, 160);
+		Def(ChiseledFireclay, "Chiseled Fireclay", 161, 161, 161);
+		for (int k = 0; k < 4; k++)
+		{
+			B[Foundry + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 160, 164, 162 }, Front = FurnaceFronts[k], Facing = k, Drop = Foundry };
+			B[Foundry + 4 + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 160, 164, 163 }, Front = FurnaceFronts[k], Facing = k, Lit = true, Drop = Foundry };
+		}
+		B[Foundry].Icon = 162;
 		string[] soilNames = { "Tilled Dirt", "Wet Tilled Dirt", "Fertilized Dirt", "Wet Fertilized Dirt" };
 		for (int k = 0; k < 4; k++) Def(Tilled + k, soilNames[k], 2, 109 + k, 2).Drop = Dirt;
 		for (int k = 0; k < 8; k++)
@@ -221,15 +339,16 @@ public static class Blocks
 		}
 		// Pieces: a space holding pieces is block 70; which block fills each of its 8 spots is kept separately
 		B[Pieces] = new BlockDef { Name = "Pieces", T = new[] { 3, 3, 3 }, Transparent = true, Shape = "pieces" };
-		foreach (int b in Splittable) B[PieceItem + b] = new BlockDef { Name = B[b].Name + " Piece", T = B[b].T, Item = true, Piece = b };
+		foreach (int b in Splittable) B[FormItem("piece", b)] = new BlockDef { Name = B[b].Name + " Piece", T = B[b].T, Item = true, Piece = b };
 		foreach (int b in Splittable)
-			foreach (var (k, baseId) in ShapeItem)
-				B[baseId + b] = new BlockDef { Name = $"{B[b].Name} {shapeName[k]}", T = B[b].T, Item = true, Form = k, Of = b };
+			foreach (var k in ShapeItem.Keys)
+				B[FormItem(k, b)] = new BlockDef { Name = $"{B[b].Name} {shapeName[k]}", T = B[b].T, Item = true, Form = k, Of = b };
 	}
 
 	public static bool IsTorch(int id) => Get(id)?.Shape == "torch";
 	public static bool IsWater(int id) => id >= Water && id <= Water + 7;
-	public static bool IsFurnace(int id) => id >= Furnace && id < Furnace + 8;
+	public static bool IsFurnace(int id) => (id >= Furnace && id < Furnace + 8) || IsFoundry(id);   // a Kiln or the Foundry's Furnace (they work the same way)
+	public static int FurnaceBase(int id) => IsFoundry(id) ? Foundry : Furnace;   // its first (unlit, facing 0) id
 	public static bool IsItem(int id) => Get(id)?.Item == true;
 	public static bool IsTool(int id) => Get(id)?.Tool != null;
 	public static bool IsPiece(int id) => Get(id)?.Piece > 0;
@@ -238,7 +357,7 @@ public static class Blocks
 	public static int TorchMax(int wi) => wi > 0 ? 2 : 4;
 	public static int WallIndex(int dx, int dz) { for (int i = 1; i < 5; i++) if (TorchWalls[i][0] == dx && TorchWalls[i][1] == dz) return i; return -1; }
 	public static int TorchDrop(int id) => B[id].Burn == 3 ? EverTorch : BurntTorch;
-	public static int StackMaxOf(int id) => IsTool(id) ? 1 : StackMax;
+	public static int StackMaxOf(int id) => IsTool(id) || IsGear(id) ? 1 : StackMax;
 	// how high the water's surface sits in its block (water with more water on top fills the whole block)
 	public static float WaterHeight(int id, int above) => IsWater(above) ? 1 : id == Water ? 0.875f : Math.Max(0.15f, 0.875f * (8 - (id - Water)) / 8f);
 	public static string ShapeOfMask(int m) => ShapeMasks.FirstOrDefault(kv => kv.Value.Contains(m)).Key;

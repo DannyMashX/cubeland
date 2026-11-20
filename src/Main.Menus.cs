@@ -67,13 +67,13 @@ public partial class Main
 		if (sa != null)
 		{   // testing: a throwaway world that isn't in your list and never saves
 			tempWorld = true;
-			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = 2, Mode = HasArg("--survival") ? "survival" : "creative" };
+			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, Mode = HasArg("--survival") ? "survival" : "creative" };
 			menuOpen = HasArg("--menu");
 			return;
 		}
 		if (joinInfo != null && openWorldId == "join-" + joinInfo.Code)
 		{   // a friend's world you're joining: it isn't one of your worlds and isn't saved here
-			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
+			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
 			menuOpen = false; wantPlay = true; playOnLoad = false;
 			return;
 		}
@@ -116,7 +116,7 @@ public partial class Main
 		mainMenu = Backdrop(0.35f);
 		var mm = Centered(mainMenu, false);
 		var title = Centre(Text("CUBELAND", 64)); title.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.6f)); title.AddThemeConstantOverride("shadow_offset_y", 4); mm.AddChild(title);
-		mm.AddChild(Centre(Text("Alpha", 18, 0.8f)));
+		mm.AddChild(Centre(Text(Version.Split(' ')[0], 18, 0.8f)));   // (the stage: Alpha, Beta, ...)
 		mm.AddChild(new Control { CustomMinimumSize = new Vector2(0, 12) });
 		mm.AddChild(Btn("Singleplayer", () => ShowWorlds(true)));
 		mm.AddChild(Btn("Multiplayer", () => { RefreshNetUi(); multiPanel.Visible = true; }));
@@ -240,7 +240,7 @@ public partial class Main
 			var info = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 			info.AddChild(Text(w.Name + (w.Id == current.Id ? "  (open now)" : ""), 16));
 			string played = DateTimeOffset.FromUnixTimeMilliseconds(w.Played).ToLocalTime().ToString("g");
-			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
+			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {(w.H == 640 ? 640 : 192)} tall · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
 			row.AddChild(info);
 			var id = w.Id;
 			row.AddChild(Btn("Play", () =>
@@ -344,16 +344,18 @@ public partial class Main
 	{
 		if (!ready || tempWorld || discarding || current == null || netClient) return false;   // (a friend's world: their game saves it)
 		saveTimer = 0;
+		falling.Settle();
 		var s = new Worlds.Save
 		{
 			Seed = current.Seed, SavedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 			Idxs = world.Edits.Keys.ToArray(), Ids = world.Edits.Values.ToArray(),
 			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => (int)v))).ToArray(),
 			Player = new() { X = player.Pos.X, Y = player.Pos.Y, Z = player.Pos.Z, Yaw = player.Yaw, Pitch = player.Pitch, Fly = player.Flying, Health = health, Gloom = gloom, DarkTime = darkTime, LightTime = lightTime },
-			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Selected = inv.Selected,
-			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health,
+			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Wear = inv.Wear.ToArray(), Selected = inv.Selected, OffSel = inv.OffSel,
+			Data = Enumerable.Range(0, Inventory.NS).Where(i => inv.Data[i] != null).ToDictionary(i => i, i => inv.Data[i]),
+			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health, Layer = m.Layer,
 				Baby = m.Baby, Happy = MathF.Round(m.Happy), Room = MathF.Round(Math.Max(0, m.Room) * 100) / 100, MateCool = MathF.Round(m.MateCool), Fed = m.Fed }).ToList(),
-			Drops = drops.All.Select(d => new Worlds.DropSave { Id = d.Id, X = d.P.X, Y = d.P.Y, Z = d.P.Z, Age = d.Age }).ToList(),
+			Drops = drops.All.Select(d => new Worlds.DropSave { Id = d.Id, X = d.P.X, Y = d.P.Y, Z = d.P.Z, Age = d.Age, Wear = d.Wear, Data = d.Data }).ToList(),
 			Drying = new(world.Drying), TorchBurn = world.TorchBurn.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
 			Crops = world.Crops.ToDictionary(k => k.Key, k => MathF.Round(k.Value)), Fert = new(world.FertLeft),
 			Grazed = world.Grazed.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
@@ -405,13 +407,14 @@ public partial class Main
 			if (gloom >= health) gloom = Math.Max(0, health - 1);   // (never load straight into a gloom death)
 		}
 		if (float.IsFinite(s.Time)) sky.TimeOfDay = s.Time;
-		if (s.Hotbar?.Length == Inventory.Slots)
+		if (s.Hotbar?.Length is Inventory.Slots or Inventory.NS)   // (worlds saved before Pack & Plate have just the hotbar)
 		{
-			for (int i = 0; i < Inventory.Slots; i++)
+			for (int i = 0; i < s.Hotbar.Length; i++)
 			{
 				int id = s.Hotbar[i]; if (id != 0 && Blocks.Get(id) == null) id = 0;
-				inv.SetSlot(i, id, inv.Counted(id) ? Math.Max(1, s.Counts?.ElementAtOrDefault(i) ?? 1) : 0);
+				inv.SetSlot(i, id, inv.Counted(id) ? Math.Max(1, s.Counts?.ElementAtOrDefault(i) ?? 1) : 0, s.Wear?.ElementAtOrDefault(i) ?? 0, s.Data?.GetValueOrDefault(i));
 			}
+			inv.OffSel = Math.Clamp(s.OffSel, 0, inv.OffCount - 1);
 			SelectSlot(Math.Clamp(s.Selected, 0, Inventory.Slots - 1));
 		}
 		foreach (var m in s.Mobs) if (ZombieReady && m.Type == "grrangry") m.Type = "zombie";   // worlds saved before the Zombie replaced Grr Angry
@@ -419,11 +422,11 @@ public partial class Main
 		{
 			if (!MobTypes.ContainsKey(m.Type) || !models.ContainsKey(m.Type)) continue;
 			var t = MobTypes[m.Type];
-			var mob = SpawnMob(m.Type, m.X, m.Y, m.Z, t.Cow ? (m.Baby > 0 ? 1 : m.Fed >= FatAt ? 2 : 0) : 0);
-			mob.Yaw = m.Yaw; mob.Health = m.Health > 0 ? m.Health : t.Health;
+			var mob = SpawnMob(m.Type, m.X, m.Y, m.Z, t.Cow ? (m.Baby > 0 ? 1 : m.Fed >= FatAt ? 2 : 0) : 0, Math.Clamp(m.Layer, 1, Blocks.StrataLayers));
+			mob.Yaw = m.Yaw; mob.Health = m.Health > 0 ? m.Health : mob.Health;
 			if (t.Cow) { mob.Baby = Math.Max(0, m.Baby); mob.Fed = Math.Clamp(m.Fed, 0, FedMax); mob.Happy = Math.Max(0, m.Happy); mob.Room = Math.Clamp(m.Room, 0, 1); mob.MateCool = Math.Max(0, m.MateCool); }
 		}
-		foreach (var d in s.Drops) if (Blocks.Get(d.Id) != null) { var dr = drops.Add(d.Id, d.X, d.Y, d.Z); dr.V = Vector3.Zero; dr.Age = d.Age; }
+		foreach (var d in s.Drops) if (Blocks.Get(d.Id) != null) { var dr = drops.Add(d.Id, d.X, d.Y, d.Z); dr.V = Vector3.Zero; dr.Age = d.Age; dr.Wear = d.Wear; dr.Data = d.Data; }
 		DrawHearts();
 	}
 

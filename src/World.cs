@@ -6,20 +6,31 @@ namespace Cubeland;
 // The world: every block, plus the light (sky and torches) worked out from them.
 public partial class World
 {
-	public const int WX = 640, WZ = 640, WY = 192, CS = 16;
-	public const int NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;   // chunks are 16x16x16 cubes: 40 across, 40 deep, 12 high
-	public const int NChunks = NCX * NCY * NCZ;
+	public const int WX = 640, WZ = 640, CS = 16;
+	// Tall worlds (640 blocks) and the strata (deep stone layers and their stone sets) are saved for a later update: until
+	// this is turned on, new worlds are 192 tall and the deep blocks aren't in the inventory or recipes. (A world already made
+	// 640 tall still loads and plays as one.) Bedrock is in now: it lines the bottom of every world.
+	public const bool TallWorlds = false;
+	// the height: new worlds are a 640 cube; worlds made before that stay 192 tall. Set by the World being made (one at a time).
+	// A tall world is the same land lifted up by Lift, with solid rock below it (the same ~130 blocks of air above the sea).
+	public static int WY { get; private set; } = 192;
+	public static int Lift => WY - 192;
+	public const int NCX = WX / CS, NCZ = WZ / CS;   // chunks are 16x16x16 cubes: 40 across, 40 deep, 12 or 40 high
+	public static int NCY => WY / CS;
+	public static int NChunks => NCX * NCY * NCZ;
 	public static int ChunkKey(int cx, int cy, int cz) => (cy * NCZ + cz) * NCX + cx;
 	public static (int cx, int cy, int cz) FromChunkKey(int k) => (k % NCX, k / (NCX * NCZ), (k / NCX) % NCZ);
 	// chunks are BUILT as 16x16x16 cubes (a changed block only rebuilds the small cubes around it), but DRAWN glued
 	// together in 32x32x32 groups (2x2x2 chunks, one mesh each), because every separate mesh costs time to draw
-	public const int GS = 2, NGX = NCX / GS, NGY = NCY / GS, NGZ = NCZ / GS, NGroups = NGX * NGY * NGZ;
+	public const int GS = 2, NGX = NCX / GS, NGZ = NCZ / GS;
+	public static int NGY => NCY / GS;
+	public static int NGroups => NGX * NGY * NGZ;
 	public static int GroupOf(int k) { var (cx, cy, cz) = FromChunkKey(k); return (cy / GS * NGZ + cz / GS) * NGX + cx / GS; }
 	public static (int gx, int gy, int gz) FromGroupKey(int g) => (g % NGX, g / (NGX * NGZ), (g / NGX) % NGZ);
 	public static int Idx(int x, int y, int z) => (y * WZ + z) * WX + x;
 	public static (int x, int y, int z) FromIdx(int i) => (i % WX, i / (WX * WZ), (i / WX) % WZ);
 
-	public readonly byte[] Blocks = new byte[WX * WY * WZ];
+	public readonly byte[] Blocks;
 	public readonly int[] Heights = new int[WX * WZ];
 	public readonly int[] ChunkTop = new int[NCX * NCZ];   // highest block +1 in each 16x16 column of chunks
 	public readonly short[] SkyTop = new short[WX * WZ];
@@ -35,7 +46,13 @@ public partial class World
 	public Action<int, int, int> NearbyRebuild;   // (x, z): chunks around here need their sky light redone soon
 	public Action<int, int, int, int> BlockChanged;   // (index, old, new, ...) for the game's own bookkeeping
 
-	public World(long seed, int gen) { Gen = new WorldGen(this, seed, gen); }
+	// height: 640 for new worlds, 192 for ones made before tall worlds
+	public World(long seed, int gen, int height = 192)
+	{
+		WY = height == 640 ? 640 : 192;
+		Blocks = new byte[WX * WY * WZ];
+		Gen = new WorldGen(this, seed, gen);
+	}
 
 	public void Generate(Action<float> progress)
 	{
@@ -216,6 +233,7 @@ public partial class World
 		if (Cubeland.Blocks.IsTorch(id) || Cubeland.Blocks.IsTorch(old) || NearTorch(x, y, z)) Relight(dirty);
 		ChunksChanged?.Invoke(dirty);
 		WakeWater(x, y, z);
+		WakeFall(x, y, z);
 	}
 
 	// ---- Loading a save: the blocks you changed, put back on top of the freshly grown terrain (before any chunk is built) ----
@@ -290,6 +308,15 @@ public partial class World
 		if (Inside(x, y, z)) WaterQueue.Add(Idx(x, y, z));
 		foreach (var d in Steps6) if (Inside(x + d[0], y + d[1], z + d[2])) WaterQueue.Add(Idx(x + d[0], y + d[1], z + d[2]));
 	}
+	// a block changed here: it and the blocks next to it get checked for loose Sand, Gravel and Dirt (see Falling).
+	// Not when a save is loaded, so land that floats stays put until something next to it changes.
+	public readonly HashSet<int> FallQueue = new();
+	public void WakeFall(int x, int y, int z)
+	{
+		if (NoWater) return;   // (in a joined game the host's game does this)
+		if (Inside(x, y, z)) FallQueue.Add(Idx(x, y, z));
+		foreach (var d in Steps6) if (Inside(x + d[0], y + d[1], z + d[2])) FallQueue.Add(Idx(x + d[0], y + d[1], z + d[2]));
+	}
 	static readonly int[][] Sides = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 } };
 	int WaterWants(int x, int y, int z, int cur)
 	{
@@ -339,6 +366,7 @@ public partial class World
 			if (id != 0) ChunkTop[c] = Math.Max(ChunkTop[c], y + 1);
 			MarkDirty(x, y, z, dirty);
 			WakeWater(x, y, z);
+			WakeFall(x, y, z);
 			BlockChanged?.Invoke(i, -1, id, 1);
 		}
 		if (dirty.Count > 0) ChunksChanged?.Invoke(dirty);

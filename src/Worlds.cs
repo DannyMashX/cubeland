@@ -14,18 +14,18 @@ public static class Worlds
 {
 	public class Info
 	{
-		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2; public long Created, Played;
+		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall)
 		[JsonIgnore] public bool Survival => Mode == "survival";
 	}
 	public class PlayerSave { public float X, Y, Z, Yaw, Pitch, DarkTime, LightTime; public bool Fly; public int Health, Gloom; }
-	public class MobSave { public string Type; public float X, Y, Z, Yaw; public int Health; public float Baby, Happy, Room, MateCool; public int Fed; }   // (the last five: cows)
-	public class DropSave { public int Id; public float X, Y, Z, Age; }
+	public class MobSave { public string Type; public float X, Y, Z, Yaw; public int Health, Layer; public float Baby, Happy, Room, MateCool; public int Fed; }   // (the last five: cows)
+	public class DropSave { public int Id, Wear; public float X, Y, Z, Age; public Inventory.PackData Data; }
 	public class Save
 	{
 		public int Version = 1, Seed; public long SavedAt;
 		public int[] Idxs = Array.Empty<int>(), Ids = Array.Empty<int>(), Pieces = Array.Empty<int>();   // pieces: index, 8 block ids, index, ...
 		public PlayerSave Player; public float Time;
-		public int[] Hotbar, Counts; public int Selected;
+		public int[] Hotbar, Counts, Wear; public int Selected, OffSel; public Dictionary<int, Inventory.PackData> Data;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();
 		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: lucky ticks so far in each stage)
 		public Dictionary<int, int> Fert = new();   // fertilized soil -> harvests left
@@ -70,7 +70,7 @@ public static class Worlds
 		name = (name ?? "").Trim(); if (name.Length > 32) name = name[..32];
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		var w = new Info { Id = Convert.ToString(now, 16) + Random.Shared.Next(0x1000, 0xffff).ToString("x"), Name = name == "" ? $"World {list.Count + 1}" : name,
-			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now };
+			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192 };
 		list.Add(w); SaveList();
 		return w;
 	}

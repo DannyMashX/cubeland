@@ -8,7 +8,7 @@ namespace Cubeland;
 public partial class Drops : Node3D
 {
 	// K: its own number, so players in a multiplayer game know which one is which. T: (joined game) where the host's game says it is
-	public class Drop { public int Id, K; public Vector3 P, V, T; public float Age, Spin, LightT; public bool Asked; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
+	public class Drop { public int Id, K, Wear; public Inventory.PackData Data; public Vector3 P, V, T; public float Age, Spin, LightT; public bool Asked; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
 	int count;
 	public bool Client;                      // in a friend's world: their game moves the items; walking into one asks them for it
 	public Action<Drop> AskPickup;
@@ -70,7 +70,7 @@ public partial class Drops : Node3D
 			if (d.P.Y < -10) { Remove(d); continue; }
 			// pick up: walk into it (after a short moment so it can pop out first)
 			var pp = player.Pos + new Vector3(0, 0.9f, 0);
-			if (d.Age > 0.5f && MathF.Abs(d.P.X - pp.X) < 1.1f && MathF.Abs(d.P.Y + 0.25f - pp.Y) < 1.4f && MathF.Abs(d.P.Z - pp.Z) < 1.1f && inv.Give(d.Id)) { Remove(d); continue; }
+			if (d.Age > 0.5f && MathF.Abs(d.P.X - pp.X) < 1.1f && MathF.Abs(d.P.Y + 0.25f - pp.Y) < 1.4f && MathF.Abs(d.P.Z - pp.Z) < 1.1f && inv.Give(d.Id, d.Wear, d.Data)) { Remove(d); continue; }
 			}
 			d.Spin += dt * 2;
 			d.Mesh.Position = new Vector3(d.P.X, d.P.Y + 0.25f + MathF.Sin(d.Age * 3) * 0.06f, d.P.Z);

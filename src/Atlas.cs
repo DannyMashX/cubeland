@@ -8,7 +8,7 @@ namespace Cubeland;
 // Your pictures in textures/blocks and textures/items fill the slots below (by file name).
 public static class Atlas
 {
-	public const int TILE = 16, NT = 124;   // 124 pictures side by side (52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows)
+	public const int TILE = 16, NT = 240;   // 240 pictures (204+ are armor, backpacks and belts) side by side (153+ are Pack & Plate's ores, Fireclay, Foundry, metals and metal tools, 52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows, 124+ the deep stone layers and bedrock, 132+ the deep cobblestone, stone bricks and chiseled stone)
 	public const int PW = TILE + 2;        // the GPU copy pads each picture with a 1px copy of its edge (no colour bleeding)
 
 	// Which atlas slot each texture file fills (a file can fill more than one)
@@ -49,6 +49,30 @@ public static class Atlas
 		}
 		for (int k = 0; k < Blocks.FlowerColours.Length; k++) Slots[Blocks.FlowerColours[k] + "_flower"] = new[] { 85 + k };
 		for (int k = 0; k < 8; k++) Slots["grain_stage_" + k] = new[] { 113 + k };
+		for (int n = 2; n <= Blocks.StrataLayers; n++) Slots["stone_layer_" + n] = new[] { 122 + n };   // stone_layer_2 .. _8: pictures 124-130
+		Slots["bedrock"] = new[] { 131 };
+		for (int n = 2; n <= Blocks.StrataLayers; n++)   // the deep stone sets: pictures 132-138, 139-145, 146-152
+		{
+			Slots["cobblestone_layer_" + n] = new[] { 130 + n };
+			Slots["stone_bricks_layer_" + n] = new[] { 137 + n };
+			Slots["chiseled_stone_layer_" + n] = new[] { 144 + n };
+		}
+		// Pack & Plate: ores 153-156, Fireclay blocks 157-161, the Foundry's Furnace 162-164, chunks 165-168, bricks 169-176, fireclay items 177-178,
+		// metal tools 179-203
+		string[] pack = { "copper_ore", "iron_ore", "gold_ore", "tin_ore", "fireclay", "fireclay_terracotta", "fireclay_bricks", "fireclay_casing", "chiseled_fireclay",
+			"furnace_front", "furnace_front_on", "furnace_bottom", "copper_chunk", "iron_chunk", "gold_chunk", "tin_chunk",
+			"copper_brick", "iron_brick", "gold_brick", "tin_brick", "bronite_brick", "rosium_brick", "steel_scrap", "steel_brick", "fireclay_ball", "fireclay_brick" };
+		for (int k = 0; k < pack.Length; k++) Slots[pack[k]] = new[] { 153 + k };
+		string[] metals = { "copper", "iron", "bronite", "rosium", "steel" }, kinds = { "axe", "pickaxe", "shovel", "sword", "hoe" };
+		for (int j = 0; j < 5; j++) for (int k = 0; k < 5; k++) Slots[$"{metals[j]}_{kinds[k]}"] = new[] { 179 + j * 5 + k };
+		// gear: armor 204-227, backpacks 228-233, utility belts 234-239
+		string[] tiers = { "leather", "copper", "iron", "bronite", "rosium", "steel" }, pieces = { "helmet", "chestplate", "leggings", "boots" };
+		for (int t = 0; t < 6; t++)
+		{
+			for (int k = 0; k < 4; k++) Slots[$"{tiers[t]}_{pieces[k]}"] = new[] { 204 + t * 4 + k };
+			Slots[tiers[t] + "_backpack"] = new[] { 228 + t };
+			Slots[tiers[t] + "_utility_belt"] = new[] { 234 + t };
+		}
 	}
 
 	public static Image Image;          // TILE*NT x TILE, the plain strip (used to draw icons)

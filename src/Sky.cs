@@ -18,7 +18,7 @@ public partial class Sky : Node3D
 	readonly List<MeshInstance3D> clouds = new();
 	ShaderMaterial cloudMat;
 	float cloudDrift;
-	const float CloudY = 150, CloudCell = 12, CloudThick = 4, CloudSpeed = 1.2f, CloudCoverage = 0.42f; const int CloudGrid = 48;
+	static float CloudY => World.Lift + 150; const float CloudCell = 12, CloudThick = 4, CloudSpeed = 1.2f, CloudCoverage = 0.42f; const int CloudGrid = 48;
 
 	static float Smooth(float a, float b, float x) { float t = Math.Clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
 	static Func<double> SkyRng(int seed)

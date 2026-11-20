@@ -1,5 +1,24 @@
 [
     {
+        "version":  "Beta 0.1.0.0",
+        "title":  "Pack \u0026 Plate",
+        "folder":  "beta-0.1.0.0",
+        "date":  "2026-11-20",
+        "notes":  "Armor: helmets, chestplates, leggings and boots in leather, copper, iron, bronite, rosium and steel; they soak up hits and wear out",
+        "changes":  [
+                        "Armor: helmets, chestplates, leggings and boots in leather, copper, iron, bronite, rosium and steel; they soak up hits and wear out",
+                        "Backpacks (5 to 40 more slots) and Utility Belts (more offhand slots and 2 to 7 more tool slots), worn on your back and waist",
+                        "A bigger survival inventory: 10 Pockets, tool slots that pick the right tool for you, and an offhand (R picks, F swaps, right-click uses it)",
+                        "The inventory is laid out side by side: your slots on the left, crafting on the right, the same in the web and desktop editions",
+                        "Ores: Copper, Iron, Tin and Gold, each needing a good enough pickaxe",
+                        "Fireclay, its bricks and blocks, and the Foundry, which melts ore Chunks into Bricks and mixes alloys: Bronite, Rosium and Steel",
+                        "Metal tools in copper, iron, bronite, rosium and steel",
+                        "Tools wear out with use and break; a bar shows how much is left",
+                        "Bedrock lines the bottom of the world",
+                        "Sand, Gravel and Dirt fall when there\u0027s nothing under them"
+                    ]
+    },
+    {
         "version":  "Alpha 0.0.9.5",
         "folder":  "alpha-0.0.9.5",
         "date":  "2026-11-19",

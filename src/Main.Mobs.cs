@@ -55,12 +55,14 @@ public partial class Main
 	{
 		public string Type; public MobType T;
 		public float X, Y, Z, Vx, Vy, Vz, Yaw, Walk, Stride, Timer, Hurt, Flee, Dead, AttackCool, Swing, LightTimer, GoalCheck, GrowlIn = -1, Sky = 1, Torch, BurnIn = 1;
-		public float? TurnTo; public int Health; public bool Walking, OnGround, Bumped, Burning;
+		public float? TurnTo; public int Health, Layer = 1; public bool Walking, OnGround, Bumped, Burning;
 		public int K, Hue = -1; public float Tx, Ty, Tz, Tyaw; public bool NetHurt;   // K: its own number (multiplayer); T: where the host's game says it is; Hue: recoloured skin (players)
 		public (string kind, float x, float y, float z, float time)? Goal;
 		public Node3D Root; public List<Limb> Legs = new(), Arms = new(); public List<ShaderMaterial> Mats = new();
 		public Node3D Head, Figure; public float Anim, HeadY;   // Head: nods/tilts from the neck. Figure: the scaled model inside Root (sways)
 		public int HeldId; public MeshInstance3D HeldMesh;     // the item shown in its right hand (other players)
+		public float Cx, Cz; public Dictionary<string, Limb> LimbOf;   // the model's middle, and its arms and legs by name
+		public string GearKey = ""; public List<Node3D> GearMeshes = new();   // what armor, backpack and belt it wears (other players)
 		public Texture2D Skin;                                 // a picture of its own instead of the model's (your skin, a friend's)
 		public float Half = 0.3f, Height = 1;
 		public float Fade, ThrowT, ThrowCool = -1, SnuffCheck, Snuffing; public bool Thrown, Backing;   // fading away (Gloomling), throwing (Skeleton)
@@ -299,6 +301,7 @@ public partial class Main
 			else { joint.Position = j; body.AddChild(joint); }   // (no limb with that name: it just stays put)
 			mi.Position = mid - j; joint.AddChild(mi);
 		}
+		m.Cx = cx; m.Cz = cz; m.LimbOf = limbOf;
 		// Half = half the width of its body for bumping into blocks; Height = how tall it stands (both in blocks)
 		m.Half = Math.Min(0.49f, foot / 32 * 0.85f * S); m.Height = top / 16 * S;
 	}
@@ -348,6 +351,77 @@ public partial class Main
 		}
 		if (b.Head != null) { b.Head.Rotation = Vector3.Zero; b.Head.Position = new Vector3(b.Head.Position.X, b.HeadY + breath * 0.012f, b.Head.Position.Z); }
 		if (b.Figure != null) b.Figure.Rotation = Vector3.Zero;
+	}
+	// ---- what another player wears: [helmet, chestplate, leggings, boots, backpack, belt] (item ids, 0 = none) ----
+	// Each is drawn from the Armor, Backpack and UtilityBelt models, with that tier's picture, on the part of the body it covers.
+	static readonly string[] GearModel = { "armor", "armor", "armor", "armor", "backpack", "utilitybelt" };
+	static readonly System.Text.RegularExpressions.Regex[] GearParts =
+		{ new("^helmet$"), new("^(chestplate|arm_(left|right)_armor)$"), new("^leg_(left|right)(_lower)?_armor$"), new("^boot_"), new("^backpack"), new("^belt") };
+	static string GearTex(int k, string m) => k < 4 ? $"entity/armor/{m}_armor" : k == 4 ? $"entity/backpack/{m}_backpack" : $"entity/belt/{m}_utility_belt";
+	void SetGear(Mob b, int[] gear)
+	{
+		string key = gear == null ? "" : string.Join(",", gear);
+		if (b.GearKey == key || b.LimbOf == null || b.Figure == null) return;
+		b.GearKey = key;
+		foreach (var n in b.GearMeshes) n.QueueFree();
+		b.GearMeshes.Clear();
+		for (int k = 0; k < (gear?.Length ?? 0) && k < 6; k++)
+		{
+			var def = Blocks.Get(gear[k]);
+			if (def?.Material == null || !models.TryGetValue(GearModel[k], out var md)) continue;
+			var tex = MobTexture(GearTex(k, def.Material)); if (tex == null) continue;
+			var mat = b.Mats.FirstOrDefault(x => (Texture2D)x.GetShaderParameter("tex") == tex);
+			if (mat == null) { itemShader ??= GD.Load<Shader>("res://src/item.gdshader"); mat = new ShaderMaterial { Shader = itemShader }; mat.SetShaderParameter("tex", tex); b.Mats.Add(mat); }
+			foreach (var e in md.json.GetProperty("elements").EnumerateArray())
+			{
+				string n = (e.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "").ToLowerInvariant();
+				if (!GearParts[k].IsMatch(n)) continue;
+				var from = Vec(e.GetProperty("from")); var to = Vec(e.GetProperty("to"));
+				var mi = new MeshInstance3D { Mesh = BoxMesh(from, to, e.TryGetProperty("faces", out var fc) ? fc : default, mat), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+				string side = n.Contains("left") ? "left" : "right";
+				Limb L(string name) => b.LimbOf.GetValueOrDefault(name);
+				Node3D on = b.Figure;
+				if (k == 0) on = b.Head ?? b.Figure;
+				else if (n.StartsWith("arm_")) on = L("arm_" + side)?.Pivot ?? b.Figure;
+				else if (n.EndsWith("_lower_armor") || n.StartsWith("boot_")) on = L("leg_" + side)?.Lower ?? L("leg_" + side)?.Pivot ?? b.Figure;
+				else if (n.StartsWith("leg_")) on = L("leg_" + side)?.Pivot ?? b.Figure;
+				// its middle in the model, less where that part sits on the body
+				var pos = new Vector3(((from[0] + to[0]) / 2 - b.Cx) / 16, (from[1] + to[1]) / 2 / 16, ((from[2] + to[2]) / 2 - b.Cz) / 16);
+				for (var o = on; o != null && o != b.Figure; o = o.GetParent() as Node3D) pos -= o == b.Head ? new Vector3(o.Position.X, b.HeadY, o.Position.Z) : o.Position;
+				mi.Position = pos;
+				on.AddChild(mi); b.GearMeshes.Add(mi);
+			}
+		}
+	}
+	// one model box, all faces with one picture (the same layout as BuildMob's)
+	static ArrayMesh BoxMesh(float[] from, float[] to, JsonElement faces, ShaderMaterial mat)
+	{
+		var size = new[] { (to[0] - from[0]) / 16, (to[1] - from[1]) / 16, (to[2] - from[2]) / 16 };
+		var v = new List<Vector3>(); var uv = new List<Vector2>(); var idx = new List<int>();
+		for (int fi = 0; fi < 6; fi++)
+		{
+			JsonElement face = default; bool has = faces.ValueKind == JsonValueKind.Object && faces.TryGetProperty(McFaces[fi], out face);
+			if (!has) continue;
+			float[] fuv = face.TryGetProperty("uv", out var fu) ? Vec(fu) : new float[] { 0, 0, 16, 16 };
+			int turn = face.TryGetProperty("rotation", out var fr) ? ((int)(fr.GetDouble() / 90)) & 3 : 0;
+			var c = new[] { new Vector2(fuv[0], fuv[1]), new Vector2(fuv[2], fuv[1]), new Vector2(fuv[0], fuv[3]), new Vector2(fuv[2], fuv[3]) };
+			var p = Planes[fi]; int b0 = v.Count;
+			for (int k = 0; k < 4; k++)
+			{
+				int ix = k & 1, iy = k >> 1;
+				var pos = new float[3];
+				pos[p.u] = (ix - 0.5f) * size[p.u] * p.ud; pos[p.v] = (iy - 0.5f) * size[p.v] * p.vd; pos[p.w] = size[p.w] / 2 * p.ws;
+				v.Add(new Vector3(pos[0], pos[1], pos[2])); uv.Add(c[TurnOrder[turn][k]] / 16);
+			}
+			idx.AddRange(new[] { b0, b0 + 1, b0 + 2, b0 + 2, b0 + 1, b0 + 3 });
+		}
+		var mesh = new ArrayMesh();
+		if (v.Count == 0) return mesh;
+		var arr = new Godot.Collections.Array(); arr.Resize((int)Mesh.ArrayType.Max);
+		arr[(int)Mesh.ArrayType.Vertex] = v.ToArray(); arr[(int)Mesh.ArrayType.TexUV] = uv.ToArray(); arr[(int)Mesh.ArrayType.Index] = idx.ToArray();
+		mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr);
+		mesh.SurfaceSetMaterial(0, mat);
+		return mesh;
 	}
 	// shows item `id` in a body's right hand (0 = empty-handed). Needs a model with a right forearm (arm_right_lower).
 	static QuadMesh heldQuad;
@@ -407,8 +481,10 @@ public partial class Main
 			}
 		return heldTools[id] = st.Commit();
 	}
-	// a model of item `id` to hold: a small cube for an ordinary block, otherwise its flat picture (both sides)
+	// a model of item `id` to hold: a small cube for an ordinary block, a small model of its shape for a slab, stairs,
+	// quarter or piece (the same one it drops as), otherwise its flat picture (both sides)
 	static readonly Dictionary<int, Mesh> heldCubes = new();
+	static bool IsHeldShape(int id) => (Blocks.IsPiece(id) || Blocks.FormOf(id) != null) && Atlas.Is3DIcon(id);   // (a slab, stairs, quarter or piece: held as a model of its shape)
 	static (MeshInstance3D mi, ShaderMaterial mat, bool cube) HeldModel(int id)
 	{
 		itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
@@ -416,6 +492,12 @@ public partial class Main
 		bool cube = b != null && b.T != null && b.T.Length >= 3 && !b.Item && b.Shape == null && !b.Liquid && !Blocks.IsPiece(id) && Blocks.FormOf(id) == null;
 		var mat = new ShaderMaterial { Shader = itemShader };
 		Mesh mesh;
+		if (IsHeldShape(id))
+		{   // (the model is 1 for a whole block: shrunk to the held cube's size)
+			var (bm, btex) = Atlas.BoxModel(id);
+			mat.SetShaderParameter("tex", btex);
+			return (new MeshInstance3D { Mesh = bm, MaterialOverride = mat, Scale = Vector3.One * 0.3f, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off }, mat, true);
+		}
 		if (cube)
 		{
 			mat.SetShaderParameter("tex", Atlas.Texture);
@@ -488,7 +570,7 @@ public partial class Main
 			handId = id;
 			SetHeld(handBody, id);
 			var m = handBody.HeldMesh;   // facing you, instead of side-on like other players'
-			if (m != null && heldCubes.ContainsKey(id) && m.Mesh == heldCubes[id]) { m.Position = new Vector3(0, -8.5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-1.55f, MathF.PI / 4, 0); }   // (upright, its top tipped toward you)
+			if (m != null && (heldCubes.ContainsKey(id) && m.Mesh == heldCubes[id] || IsHeldShape(id))) { m.Position = new Vector3(0, -8.5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-1.55f, MathF.PI / 4, 0); }   // (upright, its top tipped toward you)
 			else if (m != null && IsHeldTool(id)) { m.Position = new Vector3(0, -5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = HandTool; m.Scale = Vector3.One * 1.5f; }   // (by the handle, side-on, half as big again)
 			else if (m != null) { m.Position = new Vector3(0, -7.5f / 16, -0.04f); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-MathF.PI / 2, 0, 0); }
 		}
@@ -519,7 +601,8 @@ public partial class Main
 		}
 		// a torch in your hand: lights the world around you (a smoldering one half as far, a burnt one not at all)
 		var hb = Blocks.Get(id);
-		heldLight = !dead && Blocks.IsTorch(id) && hb.Burn != 2 ? (hb.Burn == 1 ? MathF.Round(World.TorchLight / 2f) : World.TorchLight) : 0;
+		static float TorchLightOf(int t) => Blocks.Get(t) is { } tb && Blocks.IsTorch(t) && tb.Burn != 2 ? (tb.Burn == 1 ? MathF.Round(World.TorchLight / 2f) : World.TorchLight) : 0;
+		heldLight = dead ? 0 : Math.Max(TorchLightOf(id), inv.Survival ? TorchLightOf(inv.Id[Inventory.Off0 + inv.OffSel]) : 0);   // (a torch in the offhand too)
 		RenderingServer.GlobalShaderParameterSet("held_light", heldLight);
 		var t = sky.DayTint; var tc = new Vector3(1, 0.82f, 0.58f) * Math.Max(handTorch, World.LightCurve(heldLight));
 		var light = new Vector3(Math.Max(t.X * handSky, tc.X), Math.Max(t.Y * handSky, tc.Y), Math.Max(t.Z * handSky, tc.Z));
@@ -527,10 +610,18 @@ public partial class Main
 	}
 
 	void InitMobs() { LoadModels(); mobRoot = new Node3D(); AddChild(mobRoot); }
-	Mob SpawnMob(string type, float x, float y, float z, int variant = 0)
+	// Deeper strata breed tougher monsters: a hostile (or deep-dwelling) mob is 10% stronger (health and the damage it does) for every
+	// strata layer below the first one it spawns in, so at the bottom layer (8) it's 1.7x as strong. It keeps that strength wherever it goes.
+	const float MobLayerBoost = 0.1f;
+	int StrataLayerAt(float y) => World.WY == 640 ? Math.Clamp(1 + (world.SeaLevel - (int)MathF.Floor(y)) / Blocks.StrataThick, 1, Blocks.StrataLayers) : 1;
+	static float LayerBoost(int layer) => 1 + MobLayerBoost * (Math.Max(1, layer) - 1);
+	static int MobDamage(Mob m) => (int)MathF.Round(m.T.Damage * LayerBoost(m.Layer), MidpointRounding.AwayFromZero);
+	Mob SpawnMob(string type, float x, float y, float z, int variant = 0, int layer = 0)
 	{
 		var t = MobTypes[type];
-		var m = new Mob { K = ++mobCount, Type = type, T = t, X = x, Y = y, Z = z, Yaw = (float)(rnd.NextDouble() * Math.PI * 2), Timer = 1 + (float)rnd.NextDouble() * 3, Health = t.Health, Variant = variant };
+		if (layer <= 0) layer = t.Hostile || t.Deep ? StrataLayerAt(y) : 1;
+		var m = new Mob { K = ++mobCount, Type = type, T = t, X = x, Y = y, Z = z, Yaw = (float)(rnd.NextDouble() * Math.PI * 2), Timer = 1 + (float)rnd.NextDouble() * 3, Layer = layer,
+			Health = (int)MathF.Round(t.Health * LayerBoost(layer), MidpointRounding.AwayFromZero), Variant = variant };
 		BuildMob(m); mobList.Add(m);
 		return m;
 	}
@@ -710,7 +801,7 @@ public partial class Main
 					m.Walking = true; m.Flee = 0;
 					float toward = MathF.Atan2(m.X - P.X, m.Z - P.Z);
 					m.Yaw += Turn(m.Yaw, toward) * Math.Min(1, dt * 6); m.TurnTo = m.Yaw;
-					if (pdist < t.Reach && m.AttackCool <= 0) { m.AttackCool = 1; m.Swing = 0.35f; HurtPlayer(t.Damage, new Vector3(m.X, m.Y, m.Z)); }
+					if (pdist < t.Reach && m.AttackCool <= 0) { m.AttackCool = 1; m.Swing = 0.35f; HurtPlayer(MobDamage(m), new Vector3(m.X, m.Y, m.Z)); }
 				}
 				else if (t.Curious && m.Flee <= 0 && (m.Goal != null || (m.GoalCheck -= dt) <= 0))
 				{   // curious: heads for the last noise heard, otherwise the nearest torch
@@ -834,7 +925,7 @@ public partial class Main
 	void StartFade(Mob m) { m.Fade = 0.001f; m.Walking = false; }
 	// is anyone (you, or a friend in a game you're hosting) holding a lit torch within r blocks of p?
 	bool TorchBearerNear(Vector3 p, float r) =>
-		(!dead && IsLitTorch(inv.Held) && new Vector3(player.Pos.X - p.X, player.Pos.Y + 1 - p.Y, player.Pos.Z - p.Z).Length() < r) || FriendTorchNear(p, r);
+		(!dead && (IsLitTorch(inv.Held) || (inv.Survival && IsLitTorch(inv.Id[Inventory.Off0 + inv.OffSel]))) && new Vector3(player.Pos.X - p.X, player.Pos.Y + 1 - p.Y, player.Pos.Z - p.Z).Length() < r) || FriendTorchNear(p, r);
 	// the burning torch a Gloomling is heading for, or null. It looks for the nearest one every couple of seconds, and gives up on
 	// one it can't get to in time (then wanders for a while).
 	(int x, int y, int z, float time)? SnuffGoal(Mob m, float dt)
@@ -869,7 +960,7 @@ public partial class Main
 	}
 
 	// ---- Thrown Rocks (Skeletons): they fly in an arc at you. One that hits you hurts; one that hits a block breaks. ----
-	public class Rock { public int K; public Vector3 P, V, T; public float Age, LightTimer, Sky = 1, Torch; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
+	public class Rock { public int K, Damage; public Vector3 P, V, T; public float Age, LightTimer, Sky = 1, Torch; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
 	readonly List<Rock> rocks = new();
 	int rockCount;
 	const float RockGravity = 20;
@@ -893,6 +984,7 @@ public partial class Main
 		float dist = new Vector2(P.X - h.X, P.Z - h.Z).Length(), T = Math.Min(1.3f, Math.Max(0.35f, dist / 14));
 		float tx = P.X + player.Vel.X * T * 0.6f + ((float)rnd.NextDouble() - 0.5f) * 0.8f, tz = P.Z + player.Vel.Z * T * 0.6f + ((float)rnd.NextDouble() - 0.5f) * 0.8f, ty = P.Y + 1.1f;
 		var r = MakeRock(h);
+		r.Damage = MobDamage(m);
 		r.V = new Vector3((tx - h.X) / T, (ty - h.Y) / T + 0.5f * RockGravity * T, (tz - h.Z) / T);
 	}
 	void UpdateRocks(float dt)
@@ -908,7 +1000,7 @@ public partial class Main
 				var P = player.Pos;
 				if (!dead && Math.Abs(r.P.X - P.X) < 0.45f && Math.Abs(r.P.Z - P.Z) < 0.45f && r.P.Y > P.Y && r.P.Y < P.Y + 1.85f)
 				{
-					HurtPlayer(MobTypes["skeleton"].Damage, r.P - r.V);
+					HurtPlayer(r.Damage > 0 ? r.Damage : MobTypes["skeleton"].Damage, r.P - r.V);
 					RemoveRock(r); continue;
 				}
 				if (world.Solid((int)MathF.Floor(r.P.X), (int)MathF.Floor(r.P.Y), (int)MathF.Floor(r.P.Z)))

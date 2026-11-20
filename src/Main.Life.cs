@@ -38,7 +38,10 @@ public partial class Main
 			player.Vel.X += d.X / l * 7; player.Vel.Z += d.Y / l * 7; player.Vel.Y = Math.Max(player.Vel.Y, 5);
 		}
 		ShowChange(health, "red");
-		health = Math.Max(0, health - Math.Max(1, amount));
+		int dmg = Math.Max(1, amount);
+		float guard = inv.ArmorBlock();   // armor takes its share (rounded up or down at random, so small hits still add up right)
+		if (guard > 0) { float left = dmg * (1 - guard); dmg = (int)MathF.Floor(left) + (rnd.NextDouble() < left % 1 ? 1 : 0); WearArmor(); }
+		health = Math.Max(0, health - dmg);
 		hurtFlash = 0.35f;
 		DrawHearts();
 		if (health <= gloom) Die();   // (blackened quarters count as empty)
@@ -97,7 +100,16 @@ public partial class Main
 	{
 		dead = true;
 		// everything you carried falls where you died (in a friend's world items live in their game, so you keep yours)
-		if (!netClient) for (int i = 0; i < Inventory.Slots; i++) { for (int n = inv.Count[i]; n > 0; n--) drops.Add(inv.Id[i], player.Pos.X, player.Pos.Y + 1, player.Pos.Z); inv.Id[i] = 0; inv.Count[i] = 0; }
+		if (!netClient)
+		{
+			inv.PackBack();   // (a backpack keeps what's in it)
+			for (int i = 0; i < Inventory.NS; i++)
+			{
+				for (int n = inv.Count[i]; n > 0; n--) { var d = drops.Add(inv.Id[i], player.Pos.X, player.Pos.Y + 1, player.Pos.Z); d.Wear = inv.Wear[i]; d.Data = inv.Data[i]; }
+				inv.Id[i] = 0; inv.Count[i] = 0; inv.Wear[i] = 0; inv.Data[i] = null;
+			}
+			inv.OffSel = 0;
+		}
 		inv.Changed?.Invoke(); SelectSlot(inv.Selected);
 		deathNote.Text = (gloomDeath ? "The gloom took you. " : "") + (netClient ? "You kept your things." : "Your things are where you fell.");
 		gloomDeath = false;

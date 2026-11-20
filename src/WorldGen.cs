@@ -9,7 +9,8 @@ public class WorldGen
 	readonly long seed;
 	readonly int gen;
 	const byte RAW = 255;   // "land, decide grass/dirt/stone later"
-	public int SeaLevel => gen == 1 ? 38 : 63;
+	static int Lift => World.Lift;   // (tall worlds: the land is lifted this far, with rock below)
+	public int SeaLevel => Lift + (gen == 1 ? 38 : 63);
 
 	public WorldGen(World w, long seed, int gen) { W = w; this.seed = seed; this.gen = gen; }
 
@@ -58,7 +59,8 @@ public class WorldGen
 
 	byte[] world => W.Blocks;
 	static int Idx(int x, int y, int z) => World.Idx(x, y, z);
-	const int WX = World.WX, WY = World.WY, WZ = World.WZ;
+	const int WX = World.WX, WZ = World.WZ;
+	static int WY => World.WY;
 	void Put(int x, int y, int z, int id, bool onlyAir = false)
 	{
 		if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
@@ -87,7 +89,9 @@ public class WorldGen
 		// Water: every low spot open to the sky fills up to sea level
 		for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
 			for (int y = SeaLevel; y > 0 && world[Idx(x, y, z)] == 0; y--) world[Idx(x, y, z)] = Blocks.Water;
+		PlaceOres();
 		if (gen == 2) CarveCaves();
+		Strata();
 		Progress?.Invoke(0.75f);
 		Trees();
 		Rocks();
@@ -103,7 +107,7 @@ public class WorldGen
 		double wz = z + (Fbm(x / 90.0 + 50, z / 90.0 + 50, 2, 8) - 0.45) * 110;
 		double region = Fbm(wx / 220, wz / 220, 2, 200);
 		double h = 4 + Fbm(wx / 70, wz / 70, 2, 1) * 70 + region * 50;
-		return (int)(Math.Floor(h / TerraceStep) * TerraceStep);
+		return Lift + (int)(Math.Floor(h / TerraceStep) * TerraceStep);
 	}
 
 	// --- Rolling hills (the style for new worlds): density worked out on a coarse grid and blended ---
@@ -123,8 +127,8 @@ public class WorldGen
 				double amp = 5 + rough * 34;
 				for (int gy = 0; gy < ny; gy++)
 				{
-					int y = gy * GY;
-					double n = Noise3(x / 52.0, y / 34.0, z / 52.0, 920) * 0.6 + Noise3(x / 22.0, y / 15.0, z / 22.0, 930) * 0.3 + Noise3(x / 9.0, y / 8.0, z / 9.0, 940) * 0.1 - 0.5;
+					int y = gy * GY, ny0 = y - Lift;   // (the same shapes as a short world, just lifted)
+					double n = Noise3(x / 52.0, ny0 / 34.0, z / 52.0, 920) * 0.6 + Noise3(x / 22.0, ny0 / 15.0, z / 22.0, 930) * 0.3 + Noise3(x / 9.0, ny0 / 8.0, z / 9.0, 940) * 0.1 - 0.5;
 					dens[(gy * nz + gz) * nx + gx] = (float)((bas - y) + n * 2 * amp);
 				}
 			}
@@ -161,7 +165,7 @@ public class WorldGen
 			int x = cx + 4 + (int)Math.Floor(Hash(cx, cz, 1235) * (CELL - 8));
 			int z = cz + 4 + (int)Math.Floor(Hash(cx, cz, 1236) * (CELL - 8));
 			int y = W.Heights[z * WX + x];
-			if (y > 115) continue;
+			if (y > Lift + 115) continue;
 			double r = Hash(cx, cz, 1234), v = Hash(cx, cz, 1237);
 			if (r < 0.10) MushroomSpire(x, y, z, v);
 			else if (r < 0.17) BalancedBoulder(x, y, z, v);
@@ -249,7 +253,7 @@ public class WorldGen
 	// --- Gravel: rounded clumps scattered through the stone ---
 	void Gravel()
 	{
-		const int PATCHES = 10000;
+		int PATCHES = (int)Math.Floor(10000.0 * WY / 192);   // (as common in a tall world: spread through more rock)
 		for (int i = 0, tries = 0; i < PATCHES && tries < PATCHES * 20; tries++)
 		{
 			int x = (int)Math.Floor(Hash(tries, 1, 7001) * WX), z = (int)Math.Floor(Hash(tries, 2, 7002) * WZ);
@@ -270,9 +274,54 @@ public class WorldGen
 	}
 
 	// --- Caves (hills worlds): winding "worm" tunnels, never cutting right next to water ---
+	// --- Bedrock along the bottom of every world; and strata (640-tall worlds): the stone gets a new layer every 64 blocks down from sea level ---
+	void Strata()
+	{
+		int slab = WX * WZ;
+		Array.Fill(world, (byte)Blocks.Bedrock, 0, slab);
+		if (WY != 640) return;
+		for (int y = 1; y <= SeaLevel - Blocks.StrataThick; y++)
+		{
+			byte id = (byte)(Blocks.Strata + Math.Min(Blocks.StrataLayers, 1 + (SeaLevel - y) / Blocks.StrataThick) - 2);
+			for (int i = y * slab, end = i + slab; i < end; i++) if (world[i] == 3) world[i] = id;
+		}
+	}
+
+	// --- Ores and Fireclay: veins in the ground, by depth below the surface (before the caves, which cut through them) ---
+	// (block, veins per 10,000 columns, blocks per vein, shallowest, deepest (blocks below the surface)). A vein is a short
+	// random walk that turns the Stone it passes through into ore (Fireclay also takes Dirt). (The same as the web version.)
+	static readonly (int ore, int per, int size, int top, int deep)[] OreVeins =
+	{
+		(Blocks.CopperOre, 110, 8, 3, 999), (Blocks.TinOre, 90, 6, 3, 999), (Blocks.IronOre, 70, 6, 10, 999), (Blocks.GoldOre, 18, 4, 28, 999), (Blocks.Fireclay, 20, 20, 4, 20),
+	};
+	static readonly int[][] OreSteps = { new[] { 1, 0, 0 }, new[] { -1, 0, 0 }, new[] { 0, 1, 0 }, new[] { 0, -1, 0 }, new[] { 0, 0, 1 }, new[] { 0, 0, -1 } };
+	void PlaceOres()
+	{
+		for (int o = 0; o < OreVeins.Length; o++)
+		{
+			var (ore, per, size, top, deep) = OreVeins[o];
+			int s = 7001 + o * 10, n = (int)((long)WX * WZ * per / 10000);
+			for (int k = 0; k < n; k++)
+			{
+				int x = (int)Math.Floor(Hash(k, 1, s) * WX), z = (int)Math.Floor(Hash(k, 2, s) * WZ);
+				int h = W.Heights[z * WX + x], hi = h - top, lo = Math.Max(2, h - deep);
+				if (hi < lo) continue;
+				int y = lo + (int)Math.Floor(Hash(k, 3, s) * (hi - lo + 1));
+				for (int j = 0; j < size; j++)
+				{
+					int i = Idx(x, y, z), b = world[i];
+					if (b == Blocks.Stone || (ore == Blocks.Fireclay && b == Blocks.Dirt)) world[i] = (byte)ore;
+					var d = OreSteps[(int)Math.Floor(Hash3(k, j, o, s + 5) * 6)];
+					x += d[0]; y += d[1]; z += d[2];
+					if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 2 || y >= WY) break;
+				}
+			}
+		}
+	}
+
 	void CarveCaves()
 	{
-		int n = WX * WZ / 400;
+		int n = (int)Math.Floor(WX * WZ / 400.0 * WY / 192);   // (more in a tall world, so the deep rock has as many as the shallow)
 		void Carve(double cx, double cy, double cz, double r)
 		{
 			int R = (int)Math.Ceiling(r);

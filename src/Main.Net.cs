@@ -26,7 +26,7 @@ public partial class Main
 	static List<(string[] urls, string user, string pass)> relayServers;
 
 	// a friend's game you're joining (kept while the game restarts into their world)
-	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host);
+	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host, int H);
 	static JoinInfo joinInfo;
 	bool netClient => joinInfo != null && current?.Id == "join-" + joinInfo.Code;
 
@@ -34,7 +34,7 @@ public partial class Main
 	bool hosting, welcomed, applying, netLeft;
 	string netCode, myId = "host";
 	float netTimer, lastHeard, joinTimer;
-	public class Other { public string Name, Skin; public int Hue, Held; public float X, Y, Z, Yaw, Tx, Ty, Tz, Tyaw; public Mob Av; public Label3D Tag; }
+	public class Other { public string Name, Skin; public int Hue, Held; public int[] Gear; public float X, Y, Z, Yaw, Tx, Ty, Tz, Tyaw; public Mob Av; public Label3D Tag; }
 	readonly Dictionary<string, Other> others = new();
 	readonly Dictionary<string, string> skins = new();   // other players' skins (PNG data: text), by their id
 	static Dictionary<string, object> SkinMsg(string id, string s) => new() { ["t"] = "skin", ["id"] = id ?? "", ["s"] = s ?? "" };
@@ -77,7 +77,7 @@ public partial class Main
 	static double R2(float v) => Math.Round(v * 100) / 100;
 
 	// ---------------- other players' bodies ----------------
-	Other SetOther(string id, string name, int hue, float x, float y, float z, float yaw, int held = 0)
+	Other SetOther(string id, string name, int hue, float x, float y, float z, float yaw, int held = 0, int[] gear = null)
 	{
 		if (!others.TryGetValue(id, out var p)) { p = new Other { X = x, Y = y, Z = z, Yaw = yaw }; others[id] = p; }
 		string sk = skins.GetValueOrDefault(id);
@@ -92,6 +92,8 @@ public partial class Main
 		}
 		p.Held = held;
 		if (p.Av != null) SetHeld(p.Av, held);   // what they're holding shows in their hand
+		p.Gear = gear;
+		if (p.Av != null) SetGear(p.Av, gear);   // and what they wear on them
 		return p;
 	}
 	void RemoveBody(Other p) { p.Av?.Root.QueueFree(); p.Av = null; p.Tag = null; }
@@ -209,7 +211,7 @@ public partial class Main
 		if (known) friends[conn.PeerId] = f with { seen = Now };
 		string t = d.S("t");
 		if (t == "hello")   // someone checking which world this is, before they load it
-			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["mode"] = current.Mode, ["host"] = settings.Name });
+			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["h"] = current.H, ["mode"] = current.Mode, ["host"] = settings.Name });
 		else if (t == "join")
 		{
 			if (d.S("ver") != NetVersion) { conn.Send(new Dictionary<string, object> { ["t"] = "refuse", ["why"] = $"You need the same version of the game. They have {NetVersion}, you have {d.S("ver")}." }); return; }
@@ -230,7 +232,7 @@ public partial class Main
 			RefreshNetUi();
 		}
 		else if (!known) return;
-		else if (t == "me") SetOther(conn.PeerId, f.name, f.hue, d.F("x"), d.F("y"), d.F("z"), d.F("yaw"), d.I("h"));
+		else if (t == "me") SetOther(conn.PeerId, f.name, f.hue, d.F("x"), d.F("y"), d.F("z"), d.F("yaw"), d.I("h"), Ints(d.L("g")).ToArray());
 		else if (t == "sets" && d.L("l") is { } l) ApplySets(Ints(l), Ints(d.L("p")));
 		else if (t == "skin")
 		{   // a friend's skin: shown on them here, and passed on to everyone else
@@ -257,13 +259,14 @@ public partial class Main
 	void HostTick()
 	{
 		// h: the item each player is holding (0 = nothing)
-		var players = new List<object> { new Dictionary<string, object> { ["id"] = "host", ["name"] = settings.Name, ["hue"] = Hues[0], ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw), ["h"] = inv.Held } };
+		var players = new List<object> { new Dictionary<string, object> { ["id"] = "host", ["name"] = settings.Name, ["hue"] = Hues[0], ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw), ["h"] = inv.Held, ["g"] = inv.GearIds() } };
 		foreach (var (id, f) in friends) if (others.TryGetValue(id, out var p))
-			players.Add(new Dictionary<string, object> { ["id"] = id, ["name"] = f.name, ["hue"] = f.hue, ["x"] = R2(p.Tx), ["y"] = R2(p.Ty), ["z"] = R2(p.Tz), ["yaw"] = R2(p.Tyaw), ["h"] = p.Held });
+			players.Add(new Dictionary<string, object> { ["id"] = id, ["name"] = f.name, ["hue"] = f.hue, ["x"] = R2(p.Tx), ["y"] = R2(p.Ty), ["z"] = R2(p.Tz), ["yaw"] = R2(p.Tyaw), ["h"] = p.Held, ["g"] = p.Gear ?? Array.Empty<int>() });
 		// (a mob's 9th number is 1 while it's fading away, 2 while it's throwing; a cow has a 10th: how it looks, see CowLook)
 		var ms = mobList.Select(m => { var l = new List<object> { m.K, m.Type, R2(m.X), R2(m.Y), R2(m.Z), R2(m.Yaw), m.Dead > 0 ? 1 : 0, m.Hurt > 0 ? 1 : 0, m.Fade > 0 ? 1 : m.ThrowT > 0 ? 2 : 0 }; if (m.T.Cow) l.Add(CowLook(m)); return (m, l: (object)l); }).ToList();
 		var ds = drops.All.Select(d => (object)new List<object> { d.K, d.Id, R2(d.P.X), R2(d.P.Y), R2(d.P.Z) }).ToList();
 		var rs = rocks.Select(r => (object)new List<object> { r.K, R2(r.P.X), R2(r.P.Y), R2(r.P.Z) }).ToList();
+		var fs = falling.All.Select(b => (object)new List<object> { b.K, b.Id, b.X, R2(b.Y), b.Z }).ToList();
 		foreach (var (id, f) in friends.ToArray())
 		{
 			if (Now - f.seen > 30) { DropFriend(id); continue; }   // not heard from them in a while: they've gone
@@ -271,7 +274,7 @@ public partial class Main
 			float fx = player.Pos.X, fz = player.Pos.Z, r = RenderBlocks;
 			if (others.TryGetValue(id, out var o)) { fx = o.X; fz = o.Z; }
 			var near = ms.Where(e => (e.m.X - fx) * (e.m.X - fx) + (e.m.Z - fz) * (e.m.Z - fz) < r * r).Select(e => e.l).ToList();
-			f.conn.Send(new Dictionary<string, object> { ["t"] = "tick", ["time"] = sky.TimeOfDay, ["players"] = players, ["mobs"] = near, ["drops"] = ds, ["rocks"] = rs });
+			f.conn.Send(new Dictionary<string, object> { ["t"] = "tick", ["time"] = sky.TimeOfDay, ["players"] = players, ["mobs"] = near, ["drops"] = ds, ["rocks"] = rs, ["falls"] = fs });
 		}
 	}
 
@@ -304,7 +307,7 @@ public partial class Main
 				done = true; joinTimer = 0;
 				NetStatus("Joining...");
 				p.Destroy(); peer = null;
-				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player");
+				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192);
 				SwitchWorld("join-" + code, true);
 			};
 		};
@@ -355,7 +358,7 @@ public partial class Main
 			foreach (var o in d.L("players") ?? new())
 			{
 				if (o is not Dictionary<string, object> p || p.S("id") == myId) continue;
-				seenP.Add(p.S("id")); SetOther(p.S("id"), p.S("name") ?? "Player", p.I("hue"), p.F("x"), p.F("y"), p.F("z"), p.F("yaw"), p.I("h"));
+				seenP.Add(p.S("id")); SetOther(p.S("id"), p.S("name") ?? "Player", p.I("hue"), p.F("x"), p.F("y"), p.F("z"), p.F("yaw"), p.I("h"), Ints(p.L("g")).ToArray());
 			}
 			foreach (var id in others.Keys.ToArray()) if (!seenP.Contains(id)) RemoveOther(id);
 			// mobs: make, move or remove ours to match the host's
@@ -405,6 +408,19 @@ public partial class Main
 				dr.T = at;
 			}
 			foreach (var dr in drops.All.ToArray()) if (!seenD.Contains(dr.K)) drops.Remove(dr);
+			// falling Sand, Gravel and Dirt (the host's game puts the block down where each one lands)
+			var byF = falling.All.ToDictionary(x => x.K); var seenF = new HashSet<int>();
+			foreach (var o in d.L("falls") ?? new())
+			{
+				if (o is not List<object> a || a.Count < 5) continue;
+				int k = (int)BinaryPack.Num(a[0]), id = (int)BinaryPack.Num(a[1]);
+				if (!Falling.Falls.Contains(id)) continue;
+				float y = (float)BinaryPack.Num(a[3]);
+				seenF.Add(k);
+				if (!byF.TryGetValue(k, out var fb)) { fb = falling.Add(id, (int)BinaryPack.Num(a[2]), y, (int)BinaryPack.Num(a[4])); fb.K = k; }
+				fb.Ty = y;
+			}
+			foreach (var fb in falling.All.ToArray()) if (!seenF.Contains(fb.K)) falling.Remove(fb);
 		}
 		else if (t == "sets" && d.L("l") is { } l) ApplySets(Ints(l), Ints(d.L("p")));
 		else if (t == "give") inv.Give(d.I("id"));
@@ -446,7 +462,7 @@ public partial class Main
 		Flush();
 		if (hosting && friends.Count > 0) HostTick();
 		if (netClient && welcomed && hostConn?.IsOpen == true)
-			hostConn.Send(new Dictionary<string, object> { ["t"] = "me", ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw), ["h"] = inv.Held });
+			hostConn.Send(new Dictionary<string, object> { ["t"] = "me", ["x"] = R2(player.Pos.X), ["y"] = R2(player.Pos.Y), ["z"] = R2(player.Pos.Z), ["yaw"] = R2(player.Yaw), ["h"] = inv.Held, ["g"] = inv.GearIds() });
 	if (netClient && welcomed && Now - lastHeard > 30) HostGone();
 	}
 	string NetInfoLine() => hosting ? $"\nHosting: code {netCode} · {friends.Count} friend{(friends.Count == 1 ? "" : "s")} here" : netClient ? $"\nIn {current.Name}" + (welcomed ? "" : "\nJoining...") : "";

@@ -27,7 +27,7 @@ public partial class Main : Node3D
 	Task genTask; volatile float genProgress; bool ready;
 	Label info, loading;
 	MeshInstance3D outline;
-	Inventory inv; Drops drops; Kilns kilns;
+	Inventory inv; Drops drops; Falling falling; Kilns kilns;
 	Sky sky; Godot.Environment env;
 	float camSky = 1, camSkyCheck; bool nightMusic, wasUnder;
 	readonly Random rnd = new();
@@ -73,7 +73,7 @@ public partial class Main : Node3D
 		BuildMenus();
 		ApplySettings();
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
-		world = new World(current.Seed, current.Gen);
+		world = new World(current.Seed, current.Gen, current.H);
 		genTask = Task.Run(() => { world.Generate(p => genProgress = p); LoadSaveBlocks(); });
 	}
 
@@ -104,6 +104,7 @@ public partial class Main : Node3D
 		player = new Player(world);
 		inv = new Inventory(current.Survival);
 		drops = new Drops(); AddChild(drops); drops.Init(world, player, inv); drops.DayTint = () => sky.DayTint; drops.HeldLight = HeldLightAt;
+		falling = new Falling { Client = netClient }; AddChild(falling); falling.Init(world, Collect, DropFor); falling.DayTint = () => sky.DayTint; falling.HeldLight = HeldLightAt;
 		kilns = new Kilns(world) { Survival = inv.Survival };
 		world.Drop = Collect;
 		world.NoWater = netClient;   // (in a joined game the host's game runs the water)
@@ -200,6 +201,7 @@ public partial class Main : Node3D
 		world.UpdateWater(dt);
 		UpdateScreens(dt);
 		drops.Update(dt);
+		falling.Update(dt);
 		TickHud(dt);
 		TickEverSparks(dt);
 		BuildChunks();
@@ -262,6 +264,8 @@ public partial class Main : Node3D
 	float target = 1;
 
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
+	(int x, int g, int z)? fallAt;   // (--falltest)
+	bool caveTested, caveFound;   // (--cavetest)
 	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested;
 	void TestShot(float dt)
 	{
@@ -302,6 +306,17 @@ public partial class Main : Node3D
 		if (timeArg != null && !timeArgDone) { timeArgDone = true; sky.TimeOfDay = float.Parse(timeArg[7..], System.Globalization.CultureInfo.InvariantCulture); }
 		var holdArg = args.FirstOrDefault(a => a.StartsWith("--hold="));   // (test: put item ID in the first hotbar slot and hold it)
 		if (holdArg != null && int.TryParse(holdArg[7..], out int holdId) && inv.Id[0] != holdId) { inv.SetSlot(0, holdId); SelectSlot(0); }
+		if (args.Contains("--gear") && !gearShown && inv.Survival && !menuOpen)
+		{   // (test: survival gear to look at: iron armor, an iron backpack with things in it, a bronite belt, tools, Pockets)
+			gearShown = true;
+			for (int k = 0; k < 4; k++) inv.SetSlot(Inventory.Armor0 + k, Blocks.ArmorItem(2, k), 1, k == 1 ? 120 : 0);
+			inv.SetSlot(Inventory.BackSlot, Blocks.Backpacks[2]); inv.SetSlot(Inventory.BeltSlot, Blocks.Belts[3]);
+			inv.SetSlot(Inventory.Tool0, Blocks.Tools[1]); inv.SetSlot(Inventory.Tool0 + 1, 649 + 1, 1, 200); inv.SetSlot(Inventory.Tool0 + 2, Blocks.CrudeAxe);
+			inv.SetSlot(Inventory.Off0, Blocks.Torch, 12); inv.SetSlot(Inventory.Off0 + 1, Blocks.Cobblestone, 40);
+			inv.SetSlot(Inventory.Pocket0, Blocks.Leather, 9); inv.SetSlot(Inventory.Pocket0 + 1, Blocks.MetalBrick["iron"], 14); inv.SetSlot(Inventory.Pocket0 + 2, Blocks.Backpacks[0]);
+			inv.SetSlot(Inventory.Pack0, Blocks.Rock, 30); inv.SetSlot(Inventory.Pack0 + 1, Blocks.Grain, 8); inv.SetSlot(Inventory.Pack0 + 2, Blocks.Planks, 64);
+			inv.SetSlot(0, Blocks.Dirt, 20); inv.SetSlot(1, Blocks.Tools[1]);
+		}
 		if (args.Contains("--inventory") && !invOpen && !menuOpen) OpenPanel(invPanel);   // (test: the inventory open)
 		var varArg = args.FirstOrDefault(a => a.StartsWith("--variants="));   // (test: a block's other forms shown under the grid)
 		if (varArg != null && invOpen && openVariants == 0) ShowVariants(int.Parse(varArg[11..]), null);
@@ -399,6 +414,7 @@ public partial class Main : Node3D
 				m.Yaw = player.Yaw + MathF.PI + off * 0.3f; m.Timer = 99; m.GoalCheck = 99;
 				if (args.Contains("--figures")) m.Yaw = player.Yaw + MathF.PI / 2;   // side on, to see how the arms and legs move
 				if (type == "player") SetHeld(m, holdArg != null && int.TryParse(holdArg[7..], out int hid) ? hid : Blocks.CrudeAxe);   // and holding something
+				if (type == "player" && args.Contains("--gear")) SetGear(m, new[] { Blocks.ArmorItem(2, 0), Blocks.ArmorItem(2, 1), Blocks.ArmorItem(2, 2), Blocks.ArmorItem(2, 3), Blocks.Backpacks[2], Blocks.Belts[3] });   // (test: wearing gear)
 			}
 			player.Pitch = -0.15f;
 			var pa = args.FirstOrDefault(a => a.StartsWith("--pitch="));
@@ -484,6 +500,36 @@ public partial class Main : Node3D
 			foreach (var o in new[] { p1, p2, p3 }) { o.Yaw = 2.5f; o.TurnTo = o.Yaw; o.Walking = false; o.Timer = 999; o.Happy = 100; o.MateCool = 999; o.GrazeIn = 999; o.Grazing = 0; }
 			p1.Grazing = 999;   // (head down, eating)
 		}
+		if (args.Contains("--falltest") && fallAt == null && !menuOpen && shotTimer > 0.5f)   // (once the world is built)
+		{   // (test: Sand, Gravel, Dirt and Sand put down in the air in front of you; they fall and stack up on the ground)
+			player.Yaw = 0; player.Pitch = 1.2f; player.Flying = true;
+			int x = (int)MathF.Floor(player.Pos.X), z = (int)MathF.Floor(player.Pos.Z) - 6, g = world.Heights[z * World.WX + x];
+			for (int u = 1; u < 20; u++) world.SetBlock(x, g + u, z, 0);
+			int[] ids = { Blocks.Sand, Blocks.Gravel, Blocks.Dirt, Blocks.Sand };
+			for (int k = 0; k < 4; k++) world.SetBlock(x, (int)player.Pos.Y + 25 + k * 2, z, ids[k]);
+			fallAt = (x, g, z);
+		}
+		if (args.FirstOrDefault(a => a.StartsWith("--cavetest=")) is { } ct && !caveTested && !menuOpen)
+		{   // (test: find an open cave near the middle of the world at about this height, light it with torches and look around it)
+			caveTested = true;
+			int want = int.Parse(ct[11..]);
+			bool Open(int x, int y, int z) => world.GetBlock(x, y, z) == 0 && world.GetBlock(x, y + 1, z) == 0;
+			for (int r = 0; r < 200 && !caveFound; r += 2)
+				for (int dz = -r; dz <= r && !caveFound; dz += 2) for (int dx = -r; dx <= r && !caveFound; dx += 2)
+				{
+					int x = World.WX / 2 + dx, z = World.WZ / 2 + dz;
+					for (int y = want + 20; y > want - 20 && !caveFound; y--)
+						if (Open(x, y, z) && Open(x + 3, y, z) && Open(x - 3, y, z) && Open(x, y, z + 3) && Open(x, y, z - 3))
+						{
+							caveFound = true;
+							player.Pos = new Vector3(x + 0.5f, y, z + 0.5f); player.Flying = true; player.Pitch = -0.2f;
+							for (int ox = -9; ox <= 9; ox += 3) for (int oz = -9; oz <= 9; oz += 3)
+								for (int ty = y + 4; ty > y - 10; ty--)
+									if (world.GetBlock(x + ox, ty, z + oz) == 0 && world.GetBlock(x + ox, ty - 1, z + oz) is int u && u != 0 && !Blocks.B[u].Transparent) { world.SetBlock(x + ox, ty, z + oz, Blocks.Torch); break; }
+							GD.Print($"cavetest: at {x},{y},{z}: stone layers here " + string.Join(" ", Enumerable.Range(-12, 25).Select(d => Blocks.StoneLayer(world.GetBlock(x, y + d, z + 4)))));
+						}
+				}
+		}
 		if (args.Contains("--farm") && !farmTested && !menuOpen)
 		{   // (test: a row of soil in front of you with water at one end, tilled and planted the way you would, then 200 seconds of growing)
 			farmTested = true;
@@ -563,8 +609,9 @@ public partial class Main : Node3D
 		if (shotTimer < (stay != null ? float.Parse(stay[7..]) : sceneBuilt ? 4f : 1.5f)) return;
 		GetViewport().GetTexture().GetImage().SavePng(arg[7..]);
 		GD.Print($"shot saved, {chunkParts.Count} chunks in {groupNodes.Count} groups");
-		foreach (var m in mobList) GD.Print($"mob {m.Type}: health {m.Health}{(m.Burning ? ", burning" : "")}{(m.Fade > 0 ? ", fading" : "")} at y {m.Y:0.0}");
+		foreach (var m in mobList) GD.Print($"mob {m.Type}: layer {m.Layer}, health {m.Health}{(m.Burning ? ", burning" : "")}{(m.Fade > 0 ? ", fading" : "")} at y {m.Y:0.0}");
 		GD.Print($"your health {health}, rocks flying {rocks.Count}");
+		if (fallAt is var (tx, tg, tz)) GD.Print($"falltest: {falling.All.Count} still falling; ground {world.GetBlock(tx, tg, tz)} at y {tg}, then " + string.Join(", ", Enumerable.Range(1, 5).Select(u => world.GetBlock(tx, tg + u, tz))) + $"; you at {player.Pos} yaw {player.Yaw} pitch {player.Pitch}; falling at " + string.Join(" ", falling.All.Select(b => $"{b.Mesh.GlobalPosition}{(b.Mesh.IsVisibleInTree() ? "" : " hidden")}")));
 		GetTree().Quit();
 	}
 
@@ -572,6 +619,80 @@ public partial class Main : Node3D
 	void SelfTest()
 	{
 		void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+		Check($"bedrock along the bottom of the world ({World.WY} tall)", world.GetBlock(100, 0, 100) == Blocks.Bedrock && world.GetBlock(500, 0, 37) == Blocks.Bedrock
+			&& Blocks.Items.Contains(Blocks.Bedrock) && Blocks.Items.Contains(Blocks.Strata) == World.TallWorlds);
+		// Pack & Plate: ores in the ground (gold only deep), and the counts to compare with the web version
+		var oreCount = new int[5]; int goldShallow = 0;
+		for (int q = 0; q < world.Blocks.Length; q++)
+		{
+			int ob = world.Blocks[q]; if (ob < Blocks.CopperOre || ob > Blocks.Fireclay) continue;
+			oreCount[ob - Blocks.CopperOre]++;
+			if (ob == Blocks.GoldOre) { var (ox, oy, oz) = World.FromIdx(q); if (world.Heights[oz * World.WX + ox] - oy < 20) goldShallow++; }
+		}
+		GD.Print("ores 142-146: " + string.Join(", ", oreCount));
+		Check("ores and fireclay are in the ground, gold only deep", oreCount.All(n => n > 0) && goldShallow == 0);
+		Check("ores need the right pickaxe", Blocks.B[Blocks.CopperOre].Pick == Blocks.PickTier["stone"] && Blocks.B[Blocks.IronOre].Pick == Blocks.PickTier["copper"]
+			&& Blocks.B[Blocks.TinOre].Pick == Blocks.PickTier["iron"] && Blocks.B[Blocks.GoldOre].Pick == Blocks.PickTier["iron"] && Blocks.B[Blocks.IronOre].Drop == Blocks.Chunk["iron"]);
+		// the Foundry: only works when it's all built
+		{
+			int fx = (int)player.Pos.X, fy = (int)player.Pos.Y + 12, fz = (int)player.Pos.Z;
+			for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
+			{
+				world.SetBlock(fx + dx, fy - 1, fz + dz, Blocks.FireclayTerracotta); world.SetBlock(fx + dx, fy + 1, fz + dz, Blocks.FireclayBricks);
+				world.SetBlock(fx + dx, fy, fz + dz, dx != 0 || dz != 0 ? Blocks.FireclayCasing : 0);
+			}
+			world.SetBlock(fx, fy, fz + 1, Blocks.Foundry);   // facing +z: the middle is behind it
+			var fk = new Kilns(world) { Survival = false }; int fi = World.Idx(fx, fy, fz + 1);
+			bool built = fk.FoundryBuilt(fi);
+			world.SetBlock(fx - 1, fy, fz, 0);
+			fk.Of(fi).Queue.Add(Blocks.MetalBrick["bronite"]);
+			for (int t = 0; t < 80; t++) fk.Tick(0.1f, null);
+			bool waited = fk.Of(fi).Done.Count == 0 && !Blocks.B[world.Blocks[fi]].Lit;
+			world.SetBlock(fx - 1, fy, fz, Blocks.FireclayCasing);
+			for (int t = 0; t < 80; t++) fk.Tick(0.1f, null);
+			Check("the Foundry waits until it's all built, then makes Bronite", built && waited && fk.Of(fi).Done.GetValueOrDefault(Blocks.MetalBrick["bronite"]) == 1);
+			Check("Foundry recipes: chunks, alloys, steel; the Kiln fires Fireclay", Kilns.Smelts.Count(m => m.At == "foundry") == 8
+				&& Kilns.Smelts.Any(m => m.Out == Blocks.FireclayBrick && m.At == "kiln") && Inventory.Recipes.Any(r => r.Out == Blocks.Foundry) && Inventory.Recipes.Any(r => r.Out == 646));
+		}
+		// tool durability: a stone pickaxe lasts 160 uses, its wear moves with it, and it breaks at the end
+		{
+			var w = new Inventory(true); w.Give(Blocks.Tools[1]); w.Selected = 0;
+			bool none = w.WearTool(159) == null && w.Id[0] == Blocks.Tools[1];
+			w.Move(0, 3); bool moved = w.Wear[3] == 159 && w.Wear[0] == 0;
+			w.Selected = 3; bool broke = w.WearTool(1) == "Stone Pickaxe" && w.Id[3] == 0;
+			w.Give(Blocks.Tools[1], 40); bool kept = w.Wear[Array.IndexOf(w.Id, Blocks.Tools[1])] == 40;
+			var cw = new Inventory(false); cw.SetSlot(0, Blocks.Tools[1]); cw.Selected = 0; cw.WearTool(500);
+			Check("tools wear out and break; the wear moves and drops with them; creative tools never wear", none && moved && broke && kept && cw.Id[0] == Blocks.Tools[1]
+				&& Inventory.MaxWear(649 + 1) == 480 && Inventory.MaxWear(Blocks.CrudeAxe) == 32 && Inventory.MaxWear(Blocks.Stick) == 0);
+		}
+		// gear: Pockets fill after the hotbar; a backpack opens its slots and keeps what's in it when taken off; slots only take
+		// what fits; a belt's offhand slots empty out when it comes off; a full set of armor takes half; armor wears and breaks;
+		// the tool slots give the longest-lasting tool of a kind
+		{
+			const int P = Inventory.Pocket0, B0 = Inventory.Pack0;
+			var g = new Inventory(true);
+			for (int k = 0; k < 10; k++) g.SetSlot(k, Blocks.Dirt, 64);
+			g.Give(Blocks.Stick); bool pocket = g.Id[P] == Blocks.Stick && !g.SlotOpen(B0);
+			g.SetSlot(P + 1, Blocks.Backpacks[2]);
+			bool worn = g.Move(P + 1, Inventory.BackSlot) && g.PackSize == 15 && g.SlotOpen(B0 + 14) && !g.SlotOpen(B0 + 15);
+			g.SetSlot(B0, Blocks.Rock, 5);
+			g.Move(Inventory.BackSlot, P + 1); bool kept = g.Data[P + 1] != null && g.Id[B0] == 0 && g.PackSize == 0;
+			g.Move(P + 1, Inventory.BackSlot); bool back = g.Id[B0] == Blocks.Rock && g.Count[B0] == 5;
+			bool fits = !g.Fits(Inventory.Tool0, Blocks.Dirt) && g.Fits(Inventory.Tool0, Blocks.Tools[1]) && g.Fits(Inventory.Armor0 + 1, Blocks.ArmorItem(2, 1))
+				&& !g.Fits(Inventory.Armor0, Blocks.ArmorItem(2, 1)) && !g.Fits(B0, Blocks.Backpacks[0]) && !g.Move(P + 2 - 2, Inventory.Armor0);
+			int thrown = 0; g.ThrowOut = k => { thrown++; g.SetSlot(k, 0); return true; };
+			g.SetSlot(P + 2, Blocks.Belts[3]); bool six = g.Move(P + 2, Inventory.BeltSlot) && g.OffCount == 6;
+			g.SetSlot(Inventory.Off0 + 4, Blocks.Torch, 3); g.Move(Inventory.BeltSlot, P + 2); bool out1 = thrown == 1 && g.OffCount == 1;
+			g.Move(P + 2, Inventory.BeltSlot); bool tools = g.ToolCount == 10 && g.SlotOpen(Inventory.Tool0 + 9) && !g.SlotOpen(Inventory.Tool0 + 10);
+			g.SetSlot(Inventory.Tool0 + 9, Blocks.Tools[0]); g.Move(Inventory.BeltSlot, P + 2); out1 &= tools && thrown == 2 && g.ToolCount == 5;
+			for (int k = 0; k < 4; k++) g.SetSlot(Inventory.Armor0 + k, Blocks.ArmorItem(0, k));
+			bool half = Math.Abs(g.ArmorBlock() - 0.5f) < 0.001f;
+			g.Wear[Inventory.Armor0] = 99; var broke = g.WearArmor();
+			bool brk = broke.Count == 1 && broke[0] == "Leather Helmet" && g.Id[Inventory.Armor0] == 0 && g.Wear[Inventory.Armor0 + 1] == 1 && Inventory.MaxWear(Blocks.ArmorItem(5, 0)) == 900;
+			g.SetSlot(Inventory.Tool0, Blocks.Tools[1]); g.SetSlot(Inventory.Tool0 + 1, 649 + 1); bool best = g.BestTool("pickaxe") == Inventory.Tool0 + 1 && g.BestTool("hoe") == -1;
+			Check($"gear: pockets {pocket}, backpack {worn}/{kept}/{back}, fits {fits}, belt {six}/{out1}, armor {half}/{brk}, tool slots {best}", pocket && worn && kept && back && fits && six && out1 && half && brk && best
+				&& Blocks.StackMaxOf(Blocks.Belts[0]) == 1 && Inventory.Recipes.Any(r => r.Out == Blocks.ArmorItem(5, 1) && r.Needs[0] == (Blocks.SteelBrick, 5)));
+		}
 		var s = new Inventory(true);
 		for (int k = 0; k < 2; k++) s.Give(Blocks.Rock); s.Give(Blocks.Stick);
 		var axe = Inventory.Recipes.First(r => r.Out == Blocks.CrudeAxe);
@@ -582,6 +703,12 @@ public partial class Main : Node3D
 		Check("log -> 4 planks with an axe", s.Craft(planks) == true && s.CountOf(Blocks.Planks) == 4);
 		Check("bench: planks need 3 for stairs", s.BenchCut(Blocks.Planks, 3).StartsWith("Made 4") && s.CountOf(1200 + Blocks.Planks) == 4 && s.CountOf(Blocks.Planks) == 1);
 		Check("bench: 1 plank -> 8 pieces", s.BenchCut(Blocks.Planks, 0).StartsWith("Took 8") && s.CountOf(Blocks.PieceItem + Blocks.Planks) == 8);
+		// deep stone sets: every piece / slab / stairs item has its own number, and each layer's stone gives its own cobblestone
+		var forms = Blocks.Splittable.SelectMany(b => Blocks.Forms.Select(f => (b, f, id: Blocks.FormItem(f, b)))).ToArray();
+		Check("deep sets: all piece and shape items are different", forms.Select(x => x.id).Distinct().Count() == forms.Length
+			&& forms.All(x => x.f == "piece" ? Blocks.B[x.id].Piece == x.b : Blocks.B[x.id].Of == x.b && Blocks.B[x.id].Form == x.f));
+		Check("deep sets: layer 5 stone gives layer 5 cobblestone (which smelts back while tall worlds are on)", Blocks.B[Blocks.Strata + 3].Drop == Blocks.DeepCobble + 3 && Blocks.B[Blocks.DeepCobble + 3].Layer == 5
+			&& Kilns.Smelts.Any(m => m.Out == Blocks.Strata + 3 && m.From == Blocks.DeepCobble + 3) == World.TallWorlds && Blocks.B[Blocks.FormItem("slab", Blocks.DeepBricks + 3)].Of == Blocks.DeepBricks + 3);
 		for (int k = 0; k < 70; k++) s.Give(Blocks.Dirt);
 		Check("stacks stop at 64", s.Count.Max() == 64 && s.CountOf(Blocks.Dirt) == 70);
 		var c = new Inventory(false);
@@ -662,14 +789,22 @@ public partial class Main : Node3D
 		float dx = Math.Max(0, Math.Max(gx * S - px, px - (gx + 1) * S)), dz = Math.Max(0, Math.Max(gz * S - pz, pz - (gz + 1) * S));
 		return MathF.Sqrt(dx * dx + dz * dz);
 	}
-	bool InRange(int g) => player == null || GroupDist(g, player.Pos.X, player.Pos.Z) < RenderBlocks;
+	// how far up or down the camera is from group g (tall worlds: deep caves and the sky far above aren't built or drawn)
+	static float GroupDistY(int g, float py)
+	{
+		const int S = World.CS * World.GS;
+		var (_, gy, _) = World.FromGroupKey(g);
+		return Math.Max(0, Math.Max(gy * S - py, py - (gy + 1) * S));
+	}
+	const int ViewUpDown = 64;
+	bool InRange(int g) => player == null || GroupDist(g, player.Pos.X, player.Pos.Z) < RenderBlocks && GroupDistY(g, player.Pos.Y) < RenderBlocks + ViewUpDown;
 	int lastGroupAt = -1;
 	// whenever you move into another group: hide the groups past the render distance, show the ones within it, and
 	// let the chunks that were too far to build get built if they're near enough now
 	void CullGroups()
 	{
 		const int S = World.CS * World.GS;
-		int at = (int)(player.Pos.X / S) * 1000 + (int)(player.Pos.Z / S);
+		int at = ((int)(player.Pos.X / S) * 1000 + (int)(player.Pos.Z / S)) * 100 + (int)Math.Floor(player.Pos.Y / S);
 		if (at == lastGroupAt) return;
 		lastGroupAt = at;
 		foreach (var (g, n) in groupNodes) { bool v = InRange(g); n.solid.Visible = v; n.water.Visible = v; }
@@ -846,6 +981,7 @@ public partial class Main : Node3D
 		if (at != middle) DisplayServer.WarpMouse(middle);
 		lookPrimed = true;
 	}
+	bool gearShown;   // (test: --gear)
 	public override void _UnhandledInput(InputEvent e)
 	{
 		if (skinPanel?.Visible == true) { SkinKey(e); return; }   // (the skin editor has keys of its own)
@@ -856,8 +992,8 @@ public partial class Main : Node3D
 		{
 			if (invOpen || menuOpen || pauseMenu.Visible || dead) return;
 			if (!locked) { Input.MouseMode = LockMode; return; }
-			if (mb.ButtonIndex == MouseButton.Left) { SwingHand(); Break(); }
-			else if (mb.ButtonIndex == MouseButton.Right) { SwingHand(); Place(); }
+			if (mb.ButtonIndex == MouseButton.Left) { inv.Act = ActSlot(mb.ButtonIndex); SwingHand(); try { Break(); } finally { inv.Act = -1; } }
+			else if (mb.ButtonIndex == MouseButton.Right) { inv.Act = ActSlot(mb.ButtonIndex); SwingHand(); try { Place(); } finally { inv.Act = -1; } }
 			else if (mb.ButtonIndex == MouseButton.WheelDown) SelectSlot(inv.Selected + 1);
 			else if (mb.ButtonIndex == MouseButton.WheelUp) SelectSlot(inv.Selected - 1);
 		}
@@ -875,7 +1011,9 @@ public partial class Main : Node3D
 			if (menuOpen || pauseMenu.Visible || AnyPanel || dead) return;
 			if (k.PhysicalKeycode == Key.M) { settings.Muted = !settings.Muted; ApplySettings(); ShowNote(settings.Muted ? "Sound off" : "Sound on"); }
 			else if (k.PhysicalKeycode == Key.T && locked) sky.TimeOfDay = (sky.TimeOfDay + 0.125f) % 1;   // skip ahead 1/8 of a day
-			else if (k.PhysicalKeycode == Key.F && locked && !inv.Survival) { player.Flying = !player.Flying; player.Vel.Y = 0; }
+			else if (k.PhysicalKeycode == Key.F && locked && inv.Survival) SwapOffhand();   // survival: swap the offhand item with your hand
+			else if (k.PhysicalKeycode == Key.F && locked) { player.Flying = !player.Flying; player.Vel.Y = 0; }
+			else if (k.PhysicalKeycode == Key.R && inv.Survival) CycleOffhand();             // the next offhand slot
 			else if (k.PhysicalKeycode == Key.E) { if (invOpen) CloseInventory(); else OpenPanel(invPanel); }
 			else if (k.PhysicalKeycode >= Key.Key1 && k.PhysicalKeycode <= Key.Key9) SelectSlot((int)(k.PhysicalKeycode - Key.Key1));
 			else if (k.PhysicalKeycode == Key.Key0) SelectSlot(9);

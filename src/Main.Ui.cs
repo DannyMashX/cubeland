@@ -10,6 +10,28 @@ public partial class Main
 {
 	CanvasLayer uiLayer;
 	readonly Slot[] hotSlots = new Slot[Inventory.Slots];
+	readonly Slot[] gearSlots = new Slot[Inventory.NS];   // survival: the rest of your slots, in the inventory
+	Slot offSlot; Control offBox; Label packTitle; Control packWrap;
+	// the faint word in an empty gear slot
+	static string SlotWord(int i) => i >= Inventory.Armor0 && i < Inventory.BackSlot ? new[] { "Head", "Chest", "Legs", "Feet" }[i - Inventory.Armor0]
+		: i == Inventory.BackSlot ? "Pack" : i == Inventory.BeltSlot ? "Belt" : i >= Inventory.Tool0 && i < Inventory.Off0 ? "Tool" : "";
+	static string SlotName(int i) => i >= Inventory.Armor0 && i < Inventory.BackSlot ? Blocks.ArmorPieces[i - Inventory.Armor0] switch { var s => char.ToUpper(s[0]) + s[1..] }
+		: i == Inventory.BackSlot ? "Backpack" : i == Inventory.BeltSlot ? "Utility Belt" : i >= Inventory.Tool0 && i < Inventory.Off0 ? "Tool" : "Empty";
+	// drag slot `from` onto slot `to`
+	void MoveSlot(int from, int to) { if (!inv.Move(from, to)) { if (invName != null) invName.Text = "That doesn't go there"; ShowNote("That doesn't go there"); } }
+	// one of the inventory's gear slots: drag to move, right-click to throw out
+	Slot GearSlot(int i)
+	{
+		var s = new Slot();
+		s.Clicked = b => { if (invOpen && b == MouseButton.Right) ThrowSlot(i); };
+		s.DragData = () => invOpen && inv.Id[i] != 0 ? "slot:" + i : null;
+		s.CanDrop = d => invOpen && d.StartsWith("slot:");
+		s.Dropped = d => MoveSlot(int.Parse(d[5..]), i);
+		s.Hover = () => invName.Text = inv.Id[i] != 0 ? Blocks.B[inv.Id[i]].Name : SlotName(i);
+		s.Leave = () => invName.Text = "";
+		gearSlots[i] = s;
+		return s;
+	}
 	Label nameLabel; float nameTimer;
 	bool invOpen;
 	Control dim, invPanel, benchPanel, kilnPanel;
@@ -41,6 +63,13 @@ public partial class Main
 		center.AddChild(col);
 		heartsHolder = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };   // (survival: your hearts, above the left end of the hotbar)
 		col.AddChild(heartsHolder);
+		// survival: the offhand slot to the left of the hotbar (R picks the next one, F swaps it with your hand)
+		var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore }; row.AddThemeConstantOverride("separation", 8);
+		center.RemoveChild(col); center.AddChild(row);
+		var offPanel = new PanelContainer { SizeFlagsVertical = Control.SizeFlags.ShrinkEnd, Visible = inv.Survival };
+		offPanel.AddThemeStyleboxOverride("panel", Skin.Panel(4, 4));
+		offSlot = new Slot { Interactive = false }; offPanel.AddChild(offSlot); offBox = offPanel;
+		row.AddChild(offPanel); row.AddChild(col);
 		col.AddChild(barBg);
 		var bar = new HBoxContainer(); bar.AddThemeConstantOverride("separation", 4);
 		barBg.AddChild(bar);
@@ -59,13 +88,15 @@ public partial class Main
 			s.CanDrop = d => invOpen && (d.StartsWith("slot:") || (d.StartsWith("item:") && !inv.Survival));
 			s.Dropped = d =>
 			{
-				if (d.StartsWith("slot:")) inv.Move(int.Parse(d[5..]), k);
+				if (d.StartsWith("slot:")) MoveSlot(int.Parse(d[5..]), k);
 				else inv.SetSlot(k, int.Parse(d[5..]));
 				SelectSlot(k);
 			};
 			hotSlots[i] = s; bar.AddChild(s);
 		}
 		inv.Changed = () => { DrawHotbar(); RefreshPanels(); };
+		// a belt came off: what was in the offhand slots it gave drops in front of you (in a friend's world, into your other slots)
+		inv.ThrowOut = k => { if (netClient) { if (inv.Give(inv.Id[k], inv.Wear[k], inv.Data[k])) inv.SetSlot(k, 0); } else ThrowSlot(k); return true; };
 
 		// ---- the screens (one at a time), over a dark backdrop ----
 		dim = new ColorRect { Color = new Color(0, 0, 0, 0.45f), Visible = false };
@@ -96,14 +127,14 @@ public partial class Main
 	readonly List<Button> invTabButtons = new();
 	static readonly (string name, int[] ids)[] InvTabs =
 	{
-		("Building Blocks", new[] { 7, 61, 8, 9, 64 }.Concat(Blocks.ColourBricks).Append(65).Concat(Blocks.ColourTerracotta).Append(67).Concat(Blocks.ColourChiseled)
-			.Concat(new[] { 69, 10, 22, Blocks.CraftingBench, Blocks.Furnace }).ToArray()),
-		("Natural Blocks", new[] { 1, 2, 3, 4, 5, 6, 11, 63 }.Concat(Blocks.Flowers).Append(Blocks.Water).Concat(Blocks.Soils).ToArray()),
-		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }.Concat(Blocks.Dye).Append(Blocks.CrudeAxe).Concat(Blocks.Tools).ToArray()),
+		("Building Blocks", new[] { 7, 61, 8 }.Concat(Blocks.DeepShown(8)).Append(9).Concat(Blocks.DeepShown(9)).Append(64).Concat(Blocks.ColourBricks).Append(65).Concat(Blocks.ColourTerracotta).Append(67).Concat(Blocks.ColourChiseled)
+			.Append(69).Concat(Blocks.DeepShown(69)).Concat(new[] { 10, 22, Blocks.CraftingBench, Blocks.Furnace }).Concat(Blocks.FireclayBlocks).Append(Blocks.Foundry).ToArray()),
+		("Natural Blocks", new[] { 1, 2, 3 }.Concat(Blocks.DeepShown(3)).Concat(Blocks.Ores).Concat(new[] { 4, 5, 6, 11, 63, Blocks.Fireclay }).Concat(Blocks.Flowers).Append(Blocks.Water).Concat(Blocks.Soils).ToArray()),
+		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireclayBall, Blocks.FireclayBrick, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, Blocks.SteelScrap, Blocks.SteelBrick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }.Concat(Blocks.Dye).Append(Blocks.CrudeAxe).Concat(Blocks.Tools).Concat(Blocks.GearItems).ToArray()),
 	};
 	static int TabOf(int id) => Math.Max(0, Array.FindIndex(InvTabs, t => t.ids.Contains(id)));
 	static int[] VariantsOf(int b) => Array.IndexOf(Blocks.Splittable, b) >= 0
-		? new[] { Blocks.PieceItem + b, 1000 + b, 1200 + b, 1300 + b, 1100 + b, 1400 + b, 1500 + b }
+		? new[] { "piece", "slab", "stairs", "quarter", "vslab", "vstairs", "vquarter" }.Select(f => Blocks.FormItem(f, b)).ToArray()
 		: b == Blocks.Torch ? new[] { Blocks.SmolderingTorch, Blocks.BurntTorch, Blocks.EverTorch } : Array.Empty<int>();
 	Control BuildInventory()
 	{
@@ -114,7 +145,7 @@ public partial class Main
 			for (int k = 0; k < InvTabs.Length; k++) { int kk = k; var b = new Button { Text = InvTabs[k].name, ToggleMode = true }; b.Pressed += () => ShowInvTab(kk); tabs.AddChild(b); invTabButtons.Add(b); }
 			invGrid = new GridContainer { Columns = 9 }; invGrid.AddThemeConstantOverride("h_separation", 4); invGrid.AddThemeConstantOverride("v_separation", 4);
 			body.AddChild(invGrid);
-			var list = Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }).Concat(Blocks.Dye).Concat(Blocks.Tools)
+			var list = Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }).Concat(Blocks.Dye).Concat(Blocks.Tools).Concat(Blocks.PackItems).Concat(Blocks.GearItems)
 				.OrderBy(TabOf).ThenBy(id => Array.IndexOf(InvTabs[TabOf(id)].ids, id)).ToList();
 			foreach (int id in list)
 			{
@@ -134,10 +165,37 @@ public partial class Main
 			invVariants = new HBoxContainer { Visible = false }; invVariants.AddThemeConstantOverride("separation", 4);
 			body.AddChild(invVariants);
 		}
-		else body.AddChild(RecipeList(out invRecipes));
+		else
+		{   // survival: your slots on the left, crafting on the right
+			var split = new HBoxContainer(); split.AddThemeConstantOverride("separation", 20);
+			body.AddChild(split);
+			var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(10 * 48 + 12, 460), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+			split.AddChild(scroll);
+			var left = new VBoxContainer(); left.AddThemeConstantOverride("separation", 4); scroll.AddChild(left);
+			HBoxContainer Row(Control into) { var r = new HBoxContainer(); r.AddThemeConstantOverride("separation", 4); into.AddChild(r); return r; }
+			GridContainer Grid(Control into) { var g = new GridContainer { Columns = 10 }; g.AddThemeConstantOverride("h_separation", 4); g.AddThemeConstantOverride("v_separation", 4); into.AddChild(g); return g; }
+			void Head(Control into, string t) => into.AddChild(Text(t, 12, 0.85f));
+			var top = Row(left); top.AddThemeConstantOverride("separation", 16);
+			var armor = new VBoxContainer(); top.AddChild(armor); Head(armor, "Armor"); var ar = Row(armor);
+			for (int k = 0; k < 4; k++) ar.AddChild(GearSlot(Inventory.Armor0 + k));
+			var equip = new VBoxContainer(); top.AddChild(equip); Head(equip, "Backpack & Belt"); var eq = Row(equip);
+			eq.AddChild(GearSlot(Inventory.BackSlot)); eq.AddChild(GearSlot(Inventory.BeltSlot));
+			Head(left, "Tools (the right one is picked for you)"); var tl = Grid(left);
+			for (int i = Inventory.Tool0; i < Inventory.Off0; i++) tl.AddChild(GearSlot(i));
+			Head(left, "Offhand (R picks one · F swaps it with your hand · right-click uses it)"); var off = Grid(left);
+			for (int i = Inventory.Off0; i < Inventory.Armor0; i++) off.AddChild(GearSlot(i));
+			Head(left, "Pockets"); var pk = Grid(left);
+			for (int i = Inventory.Pocket0; i < Inventory.Pack0; i++) pk.AddChild(GearSlot(i));
+			var pw = new VBoxContainer(); pw.AddThemeConstantOverride("separation", 4); left.AddChild(pw); packWrap = pw;
+			packTitle = Text("Backpack", 12, 0.85f); pw.AddChild(packTitle); var pg = Grid(pw);
+			for (int i = Inventory.Pack0; i < Inventory.Tool0; i++) pg.AddChild(GearSlot(i));
+			var craft = new VBoxContainer(); craft.AddThemeConstantOverride("separation", 4); split.AddChild(craft);
+			craft.AddChild(Text("Crafting", 12, 0.85f));
+			var rl = RecipeList(out invRecipes); rl.CustomMinimumSize = new Vector2(440, 440); craft.AddChild(rl);
+		}
 		invName = Text(""); invName.CustomMinimumSize = new Vector2(0, 18); body.AddChild(invName);
 		body.AddChild(Text(inv.Survival
-			? "Survival: break blocks to collect them · click a recipe to craft it (tools need a Crafting Bench)\ndrag hotbar slots to move or stack them · right-click a hotbar slot to throw it out · E to close"
+			? "Survival: break blocks to collect them · click a recipe to craft it (tools, armor and gear need a Crafting Bench)\ndrag slots to move or stack them · right-click a slot to throw it out · E to close"
 			: "Click a block to put it in the selected hotbar slot, or drag it onto a slot · right-click a hotbar slot to empty it · E to close", 12, 0.65f));
 		if (!inv.Survival) ShowInvTab(0);
 		return scr;
@@ -220,8 +278,8 @@ public partial class Main
 		{
 			if (benchBlock == 0) return;
 			var m = Inventory.BenchModes[benchMode];
-			benchName.Text = m.key == "pieces" ? (inv.InfinitePiece(Blocks.PieceItem + benchBlock) ? $"{Blocks.B[benchBlock].Name} Piece (click to take)" : $"{Blocks.B[benchBlock].Name} Piece x8 (click to take)")
-				: $"{Blocks.B[m.baseId + benchBlock].Name} x{m.n} (click to take)";
+			benchName.Text = m.key == "pieces" ? (inv.InfinitePiece(Blocks.FormItem("piece", benchBlock)) ? $"{Blocks.B[benchBlock].Name} Piece (click to take)" : $"{Blocks.B[benchBlock].Name} Piece x8 (click to take)")
+				: $"{Blocks.B[Blocks.BenchOut(m.key, benchBlock)].Name} x{m.n} (click to take)";
 		};
 		var modes = new HFlowContainer(); body.AddChild(modes);
 		for (int k = 0; k < Inventory.BenchModes.Length; k++)
@@ -239,16 +297,17 @@ public partial class Main
 	{
 		var m = Inventory.BenchModes[benchMode];
 		benchIn.Show(benchBlock);
-		benchOut.Show(benchBlock != 0 ? m.baseId + benchBlock : 0);
-		benchCount.Text = benchBlock != 0 && !(m.key == "pieces" && inv.InfinitePiece(Blocks.PieceItem + benchBlock)) ? m.n.ToString() : "";
+		benchOut.Show(benchBlock != 0 ? Blocks.BenchOut(m.key, benchBlock) : 0);
+		benchCount.Text = benchBlock != 0 && !(m.key == "pieces" && inv.InfinitePiece(Blocks.FormItem("piece", benchBlock))) ? m.n.ToString() : "";
 		for (int k = 0; k < benchModeButtons.Count; k++) benchModeButtons[k].ButtonPressed = k == benchMode;
 	}
 
 	// ===================== Kiln =====================
-	Label kilnName, kilnStatus; Slot kilnFuel; VBoxContainer kilnRecipes; HBoxContainer kilnOut;
+	Label kilnName, kilnStatus, kilnTitle; Slot kilnFuel; VBoxContainer kilnRecipes; HBoxContainer kilnOut;
 	Control BuildKiln()
 	{
 		var scr = Screen("Kiln", out var body);
+		kilnTitle = body.GetChild<Label>(0);   // Kiln or Foundry
 		var row = new HBoxContainer(); row.AddThemeConstantOverride("separation", 12); body.AddChild(row);
 		kilnFuel = new Slot(56) { SizeFlagsVertical = Control.SizeFlags.ShrinkCenter }; row.AddChild(kilnFuel);
 		kilnFuel.Clicked = b => { if (b == MouseButton.Right) TakeFuel(); else AddFuel(); };
@@ -266,19 +325,24 @@ public partial class Main
 	{
 		if (kilnAt < 0) return;
 		var f = kilns.Of(kilnAt);
+		bool foundry = Blocks.IsFoundry(world.Blocks[kilnAt]);
+		kilnTitle.Text = foundry ? "Foundry" : "Kiln";
 		kilnFuel.Show(inv.Survival ? f.Fuel : 0, inv.Survival ? f.FuelN : 0);
 		DrawKilnStatus();
 		foreach (var c in kilnRecipes.GetChildren()) c.QueueFree();
-		foreach (var (outId, from) in Kilns.Smelts)
+		foreach (var r in Kilns.Smelts)
 		{
-			var b = new Button { Text = $"{Blocks.B[outId].Name}\n1 {Blocks.B[from].Name} · {Kilns.SmeltTime} seconds", Icon = Atlas.SlotIcon(outId),
-				Alignment = HorizontalAlignment.Left, Disabled = inv.Survival && inv.CountOf(from) < 1, TextureFilter = Atlas.Is3DIcon(outId) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
+			if (r.At != (foundry ? "foundry" : "kiln")) continue;
+			int outId = r.Out; var needs = r.Needs;
+			var b = new Button { Text = $"{Blocks.B[outId].Name}\n{string.Join(" + ", needs.Select(n => $"{n.N} {Blocks.B[n.Id].Name}"))} · {Kilns.SmeltTime} seconds", Icon = Atlas.SlotIcon(outId),
+				Alignment = HorizontalAlignment.Left, Disabled = inv.Survival && needs.Any(n => inv.CountOf(n.Id) < n.N), TextureFilter = Atlas.Is3DIcon(outId) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
 			b.AddThemeConstantOverride("icon_max_width", 32);
 			b.Pressed += () =>
 			{
 				var g = kilns.Of(kilnAt);
-				if (g.Queue.Count >= 64) { kilnName.Text = "The kiln is full up"; return; }
-				if (inv.Survival && !inv.Take(from, 1)) return;
+				if (g.Queue.Count >= 64) { kilnName.Text = foundry ? "The foundry is full up" : "The kiln is full up"; return; }
+				if (inv.Survival && needs.Any(n => inv.CountOf(n.Id) < n.N)) return;
+				if (inv.Survival) foreach (var (id, n) in needs) inv.Take(id, n);
 				g.Queue.Add(outId);
 				kilnName.Text = $"Smelting {Blocks.B[outId].Name}";
 				DrawKiln();
@@ -303,6 +367,7 @@ public partial class Main
 	}
 	void DrawKilnStatus()
 	{
+		if (kilnAt >= 0 && Blocks.IsFoundry(world.Blocks[kilnAt]) && !kilns.FoundryBuilt(kilnAt)) { kilnStatus.Text = "Build the rest of the Foundry around it"; return; }
 		if (kilnAt < 0 || !kilns.All.TryGetValue(kilnAt, out var f) || f.Queue.Count == 0) { kilnStatus.Text = "Pick something to smelt"; return; }
 		string more = f.Queue.Count > 1 ? $" ({f.Queue.Count - 1} more waiting)" : "";
 		kilnStatus.Text = f.Burning ? $"Making {Blocks.B[f.Queue[0]].Name}: {Math.Max(1, (int)Math.Ceiling(Kilns.SmeltTime - f.T))} s{more}" : $"Needs fuel{more}";
@@ -361,8 +426,28 @@ public partial class Main
 	// ===================== the hotbar =====================
 	void DrawHotbar()
 	{
-		for (int i = 0; i < Inventory.Slots; i++)
-			hotSlots[i].Show(inv.Id[i], inv.Counted(inv.Id[i]) && !inv.InfinitePiece(inv.Id[i]) ? inv.Count[i] : 0);
+		for (int i = 0; i < Inventory.NS; i++)
+		{
+			var sl = i < Inventory.Slots ? hotSlots[i] : gearSlots[i];
+			if (sl == null) continue;
+			sl.Show(inv.Id[i], inv.Counted(inv.Id[i]) && !inv.InfinitePiece(inv.Id[i]) ? inv.Count[i] : 0);
+			int max = Inventory.MaxWear(inv.Id[i]);   // a worn tool or piece of armor: a bar of what's left
+			sl.ShowWear(inv.Survival && max > 0 && inv.Wear[i] > 0 ? 1 - (float)inv.Wear[i] / max : -1);
+			if (i < Inventory.Slots) continue;
+			sl.Visible = inv.SlotOpen(i);
+			sl.Num.Text = inv.Id[i] == 0 ? SlotWord(i) : ""; sl.Num.Modulate = new Color(1, 1, 1, 0.4f);
+		}
+		if (packWrap != null)
+		{
+			packWrap.Visible = inv.PackSize > 0;
+			if (inv.PackSize > 0) packTitle.Text = $"{Blocks.B[inv.Id[Inventory.BackSlot]].Name} ({inv.PackSize} slots)";
+		}
+		if (offSlot != null && inv.Survival)
+		{
+			int o = Inventory.Off0 + inv.OffSel;
+			offSlot.Show(inv.Id[o], inv.Counted(inv.Id[o]) ? inv.Count[o] : 0);
+			offSlot.Num.Text = inv.OffCount > 1 ? $"R{inv.OffSel + 1}" : "R";
+		}
 	}
 	void SelectSlot(int i)
 	{
@@ -375,9 +460,11 @@ public partial class Main
 	{
 		if (inv.Id[i] == 0) return;
 		if (netClient) { ShowNote("You can't throw things out in a friend's world yet", 2); return; }
+		if (i == Inventory.BackSlot) inv.PackBack();   // (a backpack keeps what was in it)
 		var at = player.Pos + player.Forward * 1.2f;
-		for (int n = inv.Count[i]; n > 0; n--) drops.Add(inv.Id[i], at.X, player.Pos.Y + 1.2f, at.Z).Age = -1;   // (can't be picked straight back up)
+		for (int n = inv.Count[i]; n > 0; n--) { var d = drops.Add(inv.Id[i], at.X, player.Pos.Y + 1.2f, at.Z); d.Age = -1; d.Wear = inv.Wear[i]; d.Data = inv.Data[i]; }   // (can't be picked straight back up)
 		inv.SetSlot(i, 0);
+		if (i == Inventory.BeltSlot) inv.FitBelt();
 	}
 	// a short note above the hotbar (the selected block's name, "Lit the torch again"...)
 	void ShowNote(string text, float secs = 1.5f) { nameLabel.Text = text; nameLabel.Modulate = Colors.White; nameTimer = secs; }
