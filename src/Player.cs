@@ -35,6 +35,7 @@ public class Player
 					into.Add(new Aabb(new Vector3(x + (s & 1) * 0.5f, y + ((s >> 1) & 1) * 0.5f, z + (s >> 2) * 0.5f), new Vector3(0.5f, 0.5f, 0.5f)));
 			return;
 		}
+		if (Blocks.B[id].Shape == "half") { into.Add(new Aabb(new Vector3(x, y, z), new Vector3(1, 0.5f, 1))); return; }   // a half-tall block: just its bottom half
 		if (Blocks.B[id].NoCollide) return;
 		into.Add(new Aabb(new Vector3(x, y, z), Vector3.One));
 	}

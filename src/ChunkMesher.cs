@@ -79,6 +79,12 @@ public class ChunkMesher
 			if (b.Shape == "plant") { AddPlant(x, y, z, b, P, anyLight, sky); continue; }
 			if (b.Liquid) { AddWater(x, y, z, id, Wt, anyLight, sky); continue; }
 			if (id == Blocks.Pieces) { AddPieces(x, y, z, P, anyLight, sky); continue; }
+			if (b.Shape == "half")   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
+			{
+				AddPieces(x, y, z, P, anyLight, sky, new byte[] { (byte)id, (byte)id, 0, 0, (byte)id, (byte)id, 0, 0 });
+				if (id == Blocks.Cutter) AddSaw(x, y, z, P, anyLight, sky);
+				continue;
+			}
 			float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);   // a little darker deep down
 			foreach (var f in Faces)
 			{
@@ -203,6 +209,17 @@ public class ChunkMesher
 		}
 		P.Quad(bas); P.Ind.Add(bas); P.Ind.Add(bas + 1); P.Ind.Add(bas + 2); P.Ind.Add(bas + 2); P.Ind.Add(bas + 1); P.Ind.Add(bas + 3);   // both sides
 	}
+	// the Cutter's saw blade: the top half of the cutter_saw picture, standing up across the middle of the block above its half-tall base,
+	// seen from both sides
+	const int SawTile = 243;
+	void AddSaw(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky)
+	{
+		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, s = W.SkyExposure(x, y, z, sky);
+		int bas = P.Pos.Count;
+		foreach (var (u, v) in new[] { (0f, 0.5f), (1f, 0.5f), (0f, 1f), (1f, 1f) })
+			P.V(x + 0.5f, y + v, z + u, Atlas.UV(SawTile, u, v), 1, light, s);
+		P.Quad(bas); P.Ind.Add(bas); P.Ind.Add(bas + 1); P.Ind.Add(bas + 2); P.Ind.Add(bas + 2); P.Ind.Add(bas + 1); P.Ind.Add(bas + 3);   // both sides
+	}
 	// a plant (a flower): its picture twice, standing up and crossed like an X, seen from both sides.
 	// Nudged a little off-centre at random (always the same for the same spot) so a patch doesn't look like a grid.
 	void AddPlant(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky)
@@ -244,9 +261,9 @@ public class ChunkMesher
 		}
 		return r;
 	}
-	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky, byte[] a = null)
 	{
-		if (!W.PieceMap.TryGetValue(World.Idx(x, y, z), out var a)) return;
+		if (a == null && !W.PieceMap.TryGetValue(World.Idx(x, y, z), out a)) return;
 		float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);
 		var lp = new float[3];
 		for (int s = 0; s < 8; s++)

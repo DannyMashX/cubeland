@@ -484,7 +484,7 @@ public partial class Main
 	// a model of item `id` to hold: a small cube for an ordinary block, a small model of its shape for a slab, stairs,
 	// quarter or piece (the same one it drops as), otherwise its flat picture (both sides)
 	static readonly Dictionary<int, Mesh> heldCubes = new();
-	static bool IsHeldShape(int id) => (Blocks.IsPiece(id) || Blocks.FormOf(id) != null) && Atlas.Is3DIcon(id);   // (a slab, stairs, quarter or piece: held as a model of its shape)
+	static bool IsHeldShape(int id) => (Blocks.IsPiece(id) || Blocks.FormOf(id) != null || Blocks.Get(id)?.Shape == "half") && Atlas.Is3DIcon(id);   // (a slab, stairs, quarter or piece: held as a model of its shape)
 	static (MeshInstance3D mi, ShaderMaterial mat, bool cube) HeldModel(int id)
 	{
 		itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
@@ -801,7 +801,8 @@ public partial class Main
 					m.Walking = true; m.Flee = 0;
 					float toward = MathF.Atan2(m.X - P.X, m.Z - P.Z);
 					m.Yaw += Turn(m.Yaw, toward) * Math.Min(1, dt * 6); m.TurnTo = m.Yaw;
-					if (pdist < t.Reach && m.AttackCool <= 0) { m.AttackCool = 1; m.Swing = 0.35f; HurtPlayer(MobDamage(m), new Vector3(m.X, m.Y, m.Z)); }
+					// (only when it's really next to you: about level with you, with nothing solid in between, so one in a cave under you or behind a wall can't hit you)
+					if (pdist < t.Reach && Math.Abs(P.Y - m.Y) < 1.5f && m.AttackCool <= 0 && SeesPlayer(m)) { m.AttackCool = 1; m.Swing = 0.35f; HurtPlayer(MobDamage(m), new Vector3(m.X, m.Y, m.Z)); }
 				}
 				else if (t.Curious && m.Flee <= 0 && (m.Goal != null || (m.GoalCheck -= dt) <= 0))
 				{   // curious: heads for the last noise heard, otherwise the nearest torch

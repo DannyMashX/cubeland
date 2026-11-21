@@ -305,7 +305,7 @@
 <div id="bench">
   <div class="panel">
     <h2>Crafting Bench</h2>
-    <div class="bench-row">
+    <div class="bench-row" id="bench-row">
       <div id="bench-grid"></div>
       <div class="bench-craft">
         <div class="slot" id="bench-in"></div>
@@ -316,7 +316,8 @@
     <div class="bench-modes" id="bench-modes"></div>
     <div id="bench-name"></div>
     <div class="crafting" id="bench-crafting" style="display:none"><h3>Crafting</h3><div class="recipes" id="bench-recipes"></div></div>
-    <div class="hint">Click a block to put it on the bench &middot; pick what to cut it into &middot; click the result to take it &middot; pieces put back together in the shape of a slab, stairs or a whole block become one &middot; each block splits into 8 pieces (in creative they never run out; in survival it uses up one of that block from your hotbar) &middot; E to close</div>
+    <div class="hint" id="bench-craft-hint">Click a recipe to craft it &middot; tools, armor and gear need a Crafting Bench &middot; E to close</div>
+    <div class="hint" id="bench-hint">Click a block to put it on the Cutter &middot; pick what to cut it into &middot; click the result to take it &middot; pieces put back together in the shape of a slab, stairs or a whole block become one &middot; each block splits into 8 pieces (in creative they never run out; in survival it uses up one of that block from your hotbar) &middot; E to close</div>
   </div>
 </div>
 <div id="furnace">
@@ -477,7 +478,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=beta-0.1.0.0"></script>
+<script src="textures.js?v=beta-0.1.0.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -485,7 +486,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.0.0';
+const GAME_VERSION = 'Beta 0.1.0.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -618,6 +619,9 @@ const BLOCKS = {
   // (16-21 were ores, now removed from the game; those numbers are left unused)
   // (22-41 are torches and 50-57 water, see below)
   60: { name: 'Crafting Bench', t: [28, 29, 8] },   // bottom is planks
+  // the Cutter: cuts blocks into pieces, slabs and stairs. Half a block tall (shape 'half': drawn, walked on and aimed at like a bottom slab).
+  // Pictures: cutter_base on the sides (its bottom half), the stripped log top on top, cutter_bottom underneath, and cutter_saw for its blade.
+  159: { name: 'Cutter', t: [241, 31, 242], shape: 'half', transparent: true, box: [0, 0, 0, 1, 0.5, 1] },
   61: { name: 'Stripped Log',  t: [30, 31, 31] },
   // a rock lying flat on the ground (your rock picture, turned a random way); breaking it gives you a Rock to carry
   // box: the part you can aim at and hit (inside the block space)
@@ -865,8 +869,8 @@ BLOCKS[FIRECLAY_BRICKS] = { name: 'Fireclay Bricks', t: [159, 159, 159] };
 BLOCKS[FIRECLAY_CASING] = { name: 'Fireclay Casing', t: [160, 160, 160] };
 BLOCKS[CHISELED_FIRECLAY] = { name: 'Chiseled Fireclay', t: [161, 161, 161] };
 FURNACE_FRONTS.forEach((front, k) => {
-  BLOCKS[FOUNDRY + k] = { name: 'Furnace', t: [160, 160, 164, 162], front, facing: k, drop: FOUNDRY };
-  BLOCKS[FOUNDRY + 4 + k] = { name: 'Furnace', t: [160, 160, 164, 163], front, facing: k, lit: true, drop: FOUNDRY };
+  BLOCKS[FOUNDRY + k] = { name: 'Furnace', t: [160, 159, 164, 162], front, facing: k, drop: FOUNDRY };
+  BLOCKS[FOUNDRY + 4 + k] = { name: 'Furnace', t: [160, 159, 164, 163], front, facing: k, lit: true, drop: FOUNDRY };
 });
 BLOCKS[FOUNDRY].icon = 162;
 const isFoundry = id => id >= FOUNDRY && id < FOUNDRY + 8;
@@ -920,7 +924,7 @@ const BRICK_VARIANTS = [12, 13, 14, 15];
 // at the Crafting Bench. Pieces are placed one at a time, and one block space can hold pieces of different blocks.
 // A space holding pieces is block 70 in the world; which block fills each of its 8 spots is kept in pieceMap.
 // Spot number = x + y*2 + z*4, where x, y and z are 0 (low half) or 1 (high half) of the block space.
-const PIECES = 70, CRAFTING_BENCH = 60;
+const PIECES = 70, CRAFTING_BENCH = 60, CUTTER = 159;
 BLOCKS[PIECES] = { name: 'Pieces', t: [3, 3, 3], transparent: true, shape: 'pieces' };
 const pieceMap = new Map();     // world index -> Uint8Array(8) of block ids (0 = empty spot)
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
@@ -988,7 +992,7 @@ function setSpots(x, y, z, mask, id) {
   return true;
 }
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
-const ITEMS = [1, 2, 3, ...deepShown(3), 8, ...deepShown(8), 7, 60, 4, 61, 5, 6, 9, ...deepShown(9), 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...deepShown(69), ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER, BEDROCK,
+const ITEMS = [1, 2, 3, ...deepShown(3), 8, ...deepShown(8), 7, 60, CUTTER, 4, 61, 5, 6, 9, ...deepShown(9), 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...deepShown(69), ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER, BEDROCK,
   ...ORES, FIRECLAY, ...FIRECLAY_BLOCKS, FOUNDRY];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 // Survival also has more slots, kept in the same arrays (by number):
@@ -1033,7 +1037,7 @@ let selected = 0;
 let act = 0, offSel = 0, clicking = false;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 240;   // the texture atlas holds 240 pictures side by side (204+ are armor, backpacks and belts) (153+ are Pack & Plate's ores, Fireclay, Foundry, metals and metal tools) (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows, 124+ the deep stone layers and bedrock, 132+ the deep cobblestone, stone bricks and chiseled stone)
+const TILE = 16, NT = 246;   // the texture atlas holds 246 pictures side by side (240-245 are the Cutter and its spinning saw blade) (204+ are armor, backpacks and belts) (153+ are Pack & Plate's ores, Fireclay, Foundry, metals and metal tools) (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows, 124+ the deep stone layers and bedrock, 132+ the deep cobblestone, stone bricks and chiseled stone)
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -1128,6 +1132,12 @@ FLOWER_COLOURS.forEach((c, k) => { TEXTURE_SLOTS[c + '_flower'] = 85 + k; });
 for (let k = 0; k < 8; k++) TEXTURE_SLOTS['grain_stage_' + k] = 113 + k;
 for (let n = 2; n <= STRATA_LAYERS; n++) TEXTURE_SLOTS['stone_layer_' + n] = 122 + n;   // stone_layer_2 .. _8: pictures 124-130
 TEXTURE_SLOTS.bedrock = 131;
+// the Cutter: pictures 241-243 (243: the saw blade standing up out of it; 240 is spare: its top is the stripped log top). Until there is a cutter_base/_bottom picture, it borrows one
+// (the Crafting Bench's side, and planks underneath)
+// The blade spins: 243 is the one drawn, and every so often it gets the next frame copied into it (244: cutter_saw, 245: cutter_saw_1; see spinSaw)
+Object.assign(TEXTURE_SLOTS, { cutter_base: 241, cutter_bottom: 242, cutter_saw: [243, 244], cutter_saw_1: 245 });   // (cutter_base: its sides)
+for (const [mine, borrow] of [['cutter_base', 'crafting_bench_side'], ['cutter_bottom', 'planks'], ['cutter_saw_1', 'cutter_saw']])
+  if (!(window.TEXTURES || {})[mine] && (window.TEXTURES || {})[borrow]) TEXTURE_SLOTS[borrow] = [].concat(TEXTURE_SLOTS[borrow], TEXTURE_SLOTS[mine]);
 // Pack & Plate: ores 153-156, Fireclay blocks 157-161, the Foundry's Furnace 162-164, chunks 165-168, bricks 169-176, fireclay items 177-178,
 // metal tools 179-203
 ['copper_ore', 'iron_ore', 'gold_ore', 'tin_ore', 'fireclay', 'fireclay_terracotta', 'fireclay_bricks', 'fireclay_casing', 'chiseled_fireclay',
@@ -1772,6 +1782,7 @@ function getBlock(x, y, z) {
 // the block at a spot on the half-block grid (X, Y, Z = 2x the world position): a piece, or the whole block there
 function subBlock(X, Y, Z) {
   const x = Math.floor(X / 2), y = Math.floor(Y / 2), z = Math.floor(Z / 2), b = getBlock(x, y, z);
+  if (b && BLOCKS[b].shape === 'half') return Y - 2 * y ? 0 : b;   // (a half-tall block fills only the bottom half)
   if (b !== PIECES) return b;
   const a = pieceMap.get(idx(x, y, z));
   return a ? a[(X - 2 * x) + (Y - 2 * y) * 2 + (Z - 2 * z) * 4] : 0;
@@ -1812,6 +1823,18 @@ function rebuildGpuAtlas() {
 }
 rebuildGpuAtlas();
 const tex = new THREE.CanvasTexture(gpuAtlas);
+// the Cutter's saw blade spins: its two frames (pictures 244 and 245) take turns being copied into the picture it's drawn with (243)
+const SAW_FRAMES = [244, 245], SAW_FPS = 10;
+let sawTime = 0, sawFrame = 0;
+function spinSaw(dt) {
+  sawTime += dt;
+  const f = Math.floor(sawTime * SAW_FPS) % SAW_FRAMES.length;
+  if (f === sawFrame) return;
+  sawFrame = f;
+  const gctx = gpuAtlas.getContext('2d');
+  gctx.putImageData(gctx.getImageData(SAW_FRAMES[f] * PW, 0, PW, PW), 243 * PW, 0);
+  tex.needsUpdate = true;
+}
 tex.generateMipmaps = false;
 const material = new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, alphaTest: 0.5 });
 
@@ -2218,6 +2241,18 @@ function addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
   // both sides, so it shows whichever way round the corners ended up
   ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
 }
+// the Cutter's saw blade: the top half of the cutter_saw picture, standing up across the middle of the block above its half-tall base,
+// seen from both sides
+const SAW_TILE = 243;
+function addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
+  const light = anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, sky = skyExposure(x, y, z, skyCache), base = pos.length / 3;
+  for (const [u, v] of [[0, 0.5], [1, 0.5], [0, 1], [1, 1]]) {
+    pos.push(x + 0.5, y + v, z + u);
+    uv.push((SAW_TILE * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+    col.push(1, 1, 1); lt.push(light); sk.push(sky);
+  }
+  ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
+}
 // a plant (a flower): its picture twice, standing up and crossed like an X, seen from both sides.
 // Nudged a little off-centre at random (always the same for the same spot) so a patch doesn't look like a grid.
 function addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
@@ -2250,6 +2285,7 @@ function buildChunk(cx, cy, cz) {
     if (b.shape === 'plant') { addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
     if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
+    if (b.shape === 'half') { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [id, id, 0, 0, id, id, 0, 0]); if (id === CUTTER) addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
     for (const f of FACES) {
       const n = getBlock(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
       if (n && (n === id || !BLOCKS[n].transparent)) continue;
@@ -2343,8 +2379,7 @@ const FACE_UV = FACES.map(f => {
   };
   return { u: along(3), v: along(4) };
 });
-function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
-  const a = pieceMap.get(idx(x, y, z));
+function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a = pieceMap.get(idx(x, y, z))) {
   if (!a) return;
   const depth = 0.75 + 0.25 * Math.min(1, y / 20);
   for (let s = 0; s < 8; s++) {
@@ -2739,6 +2774,8 @@ function solidBoxes(x0, y0, z0, x1, y1, z1) {
         if (!solid(x, y, z)) continue;
         const inside = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY;
         const a = inside && world[idx(x, y, z)] === PIECES ? pieceMap.get(idx(x, y, z)) : null;
+        const half = inside && !a && BLOCKS[world[idx(x, y, z)]].shape === 'half';   // a half-tall block: just its bottom half
+        if (half) { if (y < y1 && y + 0.5 > y0) out.push([x, y, z, x + 1, y + 0.5, z + 1]); continue; }
         if (!a) { out.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
         for (let s = 0; s < 8; s++) {
           if (!a[s]) continue;
@@ -4178,7 +4215,7 @@ function setHeld(b, id) {
 // quarter or piece (the same one it drops as), otherwise its flat picture (both sides)
 function heldModel(id) {
   const b = BLOCKS[id];
-  if ((isPiece(id) || formOf(id)) && iconBoxes(id)) {   // (the model is 1 for a whole block: shrunk to the held cube's size)
+  if ((isPiece(id) || formOf(id) || (b && b.shape === 'half')) && iconBoxes(id)) {   // (the model is 1 for a whole block: shrunk to the held cube's size)
     const box = boxModel(id);
     const mesh = new THREE.Mesh(box.geo, withHaze(new THREE.MeshBasicMaterial({ map: box.tex, vertexColors: true, alphaTest: 0.5 })));
     mesh.scale.setScalar(0.3);
@@ -5083,7 +5120,8 @@ function updateMobs(dt) {
         const toward = Math.atan2(m.x - player.x, m.z - player.z);
         m.yaw += Math.atan2(Math.sin(toward - m.yaw), Math.cos(toward - m.yaw)) * Math.min(1, dt * 6);
         m.turnTo = m.yaw;
-        if (pdist < t.reach && m.attackCool <= 0) { m.attackCool = 1; m.swing = 0.35; hurtPlayer(mobDamage(m), m); }
+        // (only when it's really next to you: about level with you, with nothing solid in between, so one in a cave under you or behind a wall can't hit you)
+        if (pdist < t.reach && Math.abs(player.y - m.y) < 1.5 && m.attackCool <= 0 && seesPlayer(m)) { m.attackCool = 1; m.swing = 0.35; hurtPlayer(mobDamage(m), m); }
       } else if (t.curious && m.flee <= 0 && (m.goal || (m.goalCheck = (m.goalCheck || 0) - dt) <= 0)) {
         // curious: heads for the last noise heard (blocks breaking or being placed), otherwise the nearest torch
         if (!m.goal) { m.goalCheck = 1 + Math.random(); m.goal = nearestTorchGoal(m, t.lightRange); }
@@ -5442,8 +5480,8 @@ addEventListener('mousedown', e => {
     mobNoise(hit.x, hit.y, hit.z);
     return;
   }
-  // right-click a Crafting Bench to use it (hold Shift to build against it instead)
-  if (e.button === 2 && hb === CRAFTING_BENCH && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(); return; }
+  // right-click a Crafting Bench (survival: its recipes) or a Cutter to use it (hold Shift to build against it instead)
+  if (e.button === 2 && (hb === CUTTER || hb === CRAFTING_BENCH && SURVIVAL) && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(hb === CUTTER); return; }
   // right-click a lit (burning) furnace holding a Stick: the stick catches fire and becomes a Torch
   if (e.button === 2 && isFurnace(hb) && BLOCKS[hb].lit && HOTBAR[act] === STICK) { lightStick(); return; }
   if (e.button === 2 && isFurnace(hb) && !(keys.ShiftLeft || keys.ShiftRight)) { openFurnace(idx(hit.x, hit.y, hit.z)); return; }
@@ -5682,6 +5720,7 @@ function iconBoxes(id) {
     }
     return boxes;
   }
+  if (b.shape === 'half') return [[0, 16, 0, 16, 0, 8]];   // the Cutter: half a block tall
   if (!isCubeIcon(id)) return null;
   return isTorch(id) ? [[6, 10, 6, 10, 0, 16]] : [[0, 16, 0, 16, 0, 16]];
 }
@@ -6055,7 +6094,7 @@ function showVariants(b, plus) {
 }
 // the tabs along the top of the creative inventory (anything not listed goes in Building Blocks)
 const INV_TABS = [
-  ['Building Blocks', [7, 61, 8, ...deepShown(8), 9, ...deepShown(9), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, ...deepShown(69), 10, 22, CRAFTING_BENCH, FURNACE, ...FIRECLAY_BLOCKS, FOUNDRY]],
+  ['Building Blocks', [7, 61, 8, ...deepShown(8), 9, ...deepShown(9), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, ...deepShown(69), 10, 22, CRAFTING_BENCH, CUTTER, FURNACE, ...FIRECLAY_BLOCKS, FOUNDRY]],
   ['Natural Blocks', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, ...deepShown(3), ...ORES, 4, 5, 6, 11, 63, FIRECLAY, ...FLOWERS, WATER]],
   ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...PACK_ITEMS.slice(0, 12), FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
 ];
@@ -6099,7 +6138,7 @@ document.getElementById('bench-in').append(benchIn);
 document.getElementById('bench-out').append(benchOut);
 let benchBlock = 0;
 const benchIcons = [];
-SPLITTABLE.forEach(id => {
+SPLITTABLE.filter(id => TALL_WORLDS || !DEEP_BLOCKS.includes(id)).forEach(id => {   // (the deep layers' stone only while tall worlds are on)
   const slot = document.createElement('div');
   slot.className = 'slot';
   const c = document.createElement('canvas'); c.width = c.height = TILE;
@@ -6169,7 +6208,18 @@ document.getElementById('bench-out').addEventListener('click', () => {
   Sound.place(benchBlock);
 });
 document.getElementById('bench-out').addEventListener('mouseenter', () => { if (benchBlock && benchMode !== 'pieces') benchName.textContent = `${BLOCKS[benchOutOf(benchMode, benchBlock)].name} x${BENCH_MODES[benchMode][3]} (click to take)`; else if (benchBlock) benchName.textContent = infinitePiece(formItem('piece', benchBlock)) ? `${BLOCKS[benchBlock].name} Piece (click to take)` : `${BLOCKS[benchBlock].name} Piece x8 (click to take)`; });
-function openBench() { drawBench(); setInventory(true, benchEl); }
+// The same screen is the Crafting Bench (its recipes) or the Cutter (cutting blocks into pieces, slabs and stairs)
+let benchIsCutter = false;
+function openBench(cutter) {
+  benchIsCutter = cutter;
+  benchEl.querySelector('h2').textContent = cutter ? 'Cutter' : 'Crafting Bench';
+  for (const id of ['bench-row', 'bench-modes', 'bench-hint']) document.getElementById(id).style.display = cutter ? '' : 'none';
+  document.getElementById('bench-crafting').style.display = !cutter && SURVIVAL ? '' : 'none';
+  document.getElementById('bench-craft-hint').style.display = cutter ? 'none' : '';
+  benchName.textContent = '';
+  drawBench(); setInventory(true, benchEl);
+  if (!cutter) drawRecipes(benchRecipes, true, benchName);
+}
 
 // ===================== Furnace (right-click one) =====================
 // The Foundry's Furnace works the same way, with its own list (at: 'foundry'), but only while the whole Foundry is built
@@ -6544,6 +6594,7 @@ const RECIPES = [
   { out: 7, n: 4, needs: [[61, 1]], at: 'hand', axe: true },     // Stripped Log -> 4 Planks
   { out: STICK, n: 4, needs: [[7, 2]], at: 'bench', axe: true }, // 2 Planks -> 4 Sticks (sticks also sometimes drop from leaves)
   { out: CRAFTING_BENCH, n: 1, needs: [[7, 4], [4, 1]], at: 'hand' },   // 4 Planks + a Log -> Crafting Bench
+  { out: CUTTER, n: 1, needs: [[7, 3], [METAL_BRICK.copper, 1]], at: 'bench' },   // 3 Planks + a Copper Brick (its blade) -> Cutter
   { out: TORCH, n: 2, needs: [[STICK, 1], [TORCH, 1]], at: 'hand' },     // a Stick + a Torch -> 2 Torches (light the first one at a lit furnace)
   { out: EVER_TORCH, n: 1, needs: [[TORCH, 1], [FIRE_ESSENCE, 1]], at: 'hand' },   // a Torch + Fire Essence -> an Ever Torch (never burns out)
   { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
@@ -6638,10 +6689,10 @@ const invRecipes = document.getElementById('inv-recipes'), benchRecipes = docume
 function refreshRecipes() {
   if (!SURVIVAL || !invOpen) return;
   if (invEl.style.display !== 'none') drawRecipes(invRecipes, false, invName);
-  if (benchEl.style.display !== 'none') drawRecipes(benchRecipes, true, benchName);
+  if (benchEl.style.display !== 'none' && !benchIsCutter) drawRecipes(benchRecipes, true, benchName);
   if (furnaceEl.style.display !== 'none') drawFurnace();
 }
-if (SURVIVAL) document.getElementById('inv-crafting').style.display = document.getElementById('bench-crafting').style.display = '';
+if (SURVIVAL) document.getElementById('inv-crafting').style.display = '';   // (the Crafting Bench's list shows when you open one: see openBench)
 
 function drawInventoryIcons() { invIcons.forEach(([c, id]) => drawIcon(c, id)); }
 // panel: which screen to show (the inventory, or the Crafting Bench); both pause the game the same way
@@ -7372,7 +7423,7 @@ function frame(now) {
   if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
   if (worldLoaded && settings.autosave && performance.now() - lastSave > 30000) saveWorld();   // auto save every 30 seconds
   if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); tickTorches(dt); tickFarm(dt); }   // (not while paused)
-  if (worldLoaded) tickEverSparks(dt);
+  if (worldLoaded) { tickEverSparks(dt); spinSaw(dt); }
   pumpRebuildSoon();
 
   // movement intent

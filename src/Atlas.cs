@@ -8,7 +8,7 @@ namespace Cubeland;
 // Your pictures in textures/blocks and textures/items fill the slots below (by file name).
 public static class Atlas
 {
-	public const int TILE = 16, NT = 240;   // 240 pictures (204+ are armor, backpacks and belts) side by side (153+ are Pack & Plate's ores, Fireclay, Foundry, metals and metal tools, 52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows, 124+ the deep stone layers and bedrock, 132+ the deep cobblestone, stone bricks and chiseled stone)
+	public const int TILE = 16, NT = 246;   // 246 pictures (241-245 are the Cutter and its spinning saw blade; 240 is spare) (204+ are armor, backpacks and belts) side by side (153+ are Pack & Plate's ores, Fireclay, Foundry, metals and metal tools, 52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows, 124+ the deep stone layers and bedrock, 132+ the deep cobblestone, stone bricks and chiseled stone)
 	public const int PW = TILE + 2;        // the GPU copy pads each picture with a 1px copy of its edge (no colour bleeding)
 
 	// Which atlas slot each texture file fills (a file can fill more than one)
@@ -73,6 +73,9 @@ public static class Atlas
 			Slots[tiers[t] + "_backpack"] = new[] { 228 + t };
 			Slots[tiers[t] + "_utility_belt"] = new[] { 234 + t };
 		}
+		// the Cutter: 241-243 (its top is the stripped log top; until you make its pictures it borrows the Crafting Bench side, with planks underneath: see Build)
+		// its saw blade spins: 243 is the one drawn, and the frames (244: cutter_saw, 245: cutter_saw_1) take turns being copied into it (see SpinSaw)
+		Slots["cutter_saw"] = new[] { 243, 244 }; Slots["cutter_saw_1"] = new[] { 245 }; Slots["cutter_base"] = new[] { 241 }; Slots["cutter_bottom"] = new[] { 242 };   // (cutter_base: its sides)
 	}
 
 	public static Image Image;          // TILE*NT x TILE, the plain strip (used to draw icons)
@@ -87,22 +90,55 @@ public static class Atlas
 		// placeholder for any slot with no picture: a plain grey-pink check, so a missing file is easy to spot
 		for (int t = 0; t < NT; t++) for (int y = 0; y < TILE; y++) for (int x = 0; x < TILE; x++)
 			Image.SetPixel(t * TILE + x, y, ((x / 4 + y / 4) & 1) == 0 ? new Color(0.8f, 0.4f, 0.7f) : new Color(0.3f, 0.3f, 0.3f));
+		var loaded = new HashSet<string>();
 		foreach (string folder in new[] { "res://textures/blocks", "res://textures/items" })
 			foreach (var (name, path) in Pictures(folder))
 			{
 				if (!Slots.TryGetValue(name, out var slots)) continue;
 				var img = LoadImage(path);
 				if (img == null) continue;
+				loaded.Add(name);
 				if (img.GetWidth() != TILE || img.GetHeight() != TILE) img.Resize(TILE, TILE, Image.Interpolation.Nearest);
 				foreach (int t in slots) Image.BlitRect(img, new Rect2I(0, 0, TILE, TILE), new Vector2I(t * TILE, 0));
 			}
-		var gpu = Image.CreateEmpty(PW * NT, PW, false, Image.Format.Rgba8);
+		// a Cutter picture you haven't made yet: the Crafting Bench's side or planks (bottom) for now
+		// (and no second saw frame: the blade just stands still)
+		foreach (var (mine, borrow) in new[] { ("cutter_base", 28), ("cutter_bottom", 8), ("cutter_saw_1", 244) })
+			if (!loaded.Contains(mine)) Image.BlitRect(Image.GetRegion(new Rect2I(borrow * TILE, 0, TILE, TILE)), new Rect2I(0, 0, TILE, TILE), new Vector2I(Slots[mine][0] * TILE, 0));
+		gpu = Image.CreateEmpty(PW * NT, PW, false, Image.Format.Rgba8);
 		for (int t = 0; t < NT; t++) for (int y = 0; y < PW; y++) for (int x = 0; x < PW; x++)
 		{
 			int sx = t * TILE + Mathf.Clamp(x - 1, 0, TILE - 1), sy = Mathf.Clamp(y - 1, 0, TILE - 1);
 			gpu.SetPixel(t * PW + x, y, Image.GetPixel(sx, sy));
 		}
 		Texture = ImageTexture.CreateFromImage(gpu);
+	}
+	static Image gpu;
+	// the Cutter's saw blade spins: its two frames (pictures 244 and 245) take turns being copied into the picture it's drawn with (243)
+	const int SawFps = 10;
+	static readonly int[] SawFrames = { 244, 245 };
+	static double sawTime; static int sawFrame;
+	public static void SpinSaw(double dt)
+	{
+		if (gpu == null || Texture == null) return;
+		sawTime += dt;
+		int f = (int)(sawTime * SawFps) % SawFrames.Length;
+		if (f == sawFrame) return;
+		sawFrame = f;
+		gpu.BlitRect(gpu, new Rect2I(SawFrames[f] * PW, 0, PW, PW), new Vector2I(243 * PW, 0));
+		Texture.Update(gpu);
+	}
+	// (self-test: stepping on by one frame's time shows the other frame, then the first again)
+	public static bool SawSpins()
+	{
+		byte[] Tile(int t) => gpu.GetRegion(new Rect2I(t * PW, 0, PW, PW)).GetData();
+		bool Shows(int t) => Tile(243).AsSpan().SequenceEqual(Tile(t));
+		if (gpu == null || Tile(244).AsSpan().SequenceEqual(Tile(245))) return false;   // (two different pictures needed)
+		int a = SawFrames[sawFrame], b = SawFrames[1 - sawFrame];
+		bool ok = Shows(a) || sawTime == 0;
+		SpinSaw(1.0 / SawFps); ok &= Shows(b);
+		SpinSaw(1.0 / SawFps); ok &= Shows(a);
+		return ok;
 	}
 
 	// the PNGs in a folder: (lower-case name without .png, path). Works in the editor and in exported games.
@@ -145,6 +181,7 @@ public static class Atlas
 			}
 			return boxes.ToArray();
 		}
+		if (b.Shape == "half") return new[] { new[] { 0, 16, 0, 16, 0, 8 } };   // the Cutter: half a block tall
 		if (!IsCubeIcon(id)) return null;
 		return b.Shape == "torch" ? new[] { new[] { 6, 10, 6, 10, 0, 16 } } : new[] { new[] { 0, 16, 0, 16, 0, 16 } };
 	}

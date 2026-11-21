@@ -157,6 +157,7 @@ public partial class Main : Node3D
 	{
 		float dt = (float)Math.Min(delta, 0.1);
 		NetUpdate(dt);
+		Atlas.SpinSaw(delta);   // (the Cutter's saw blade)
 		if (!ready)
 		{
 			if (genTask.IsFaulted) { loading.Text = "Couldn't make the world:\n" + genTask.Exception?.InnerException?.Message; return; }
@@ -600,7 +601,8 @@ public partial class Main : Node3D
 		else if (open != null && !invOpen)
 		{
 			if (open == "--open=kiln") { int x = (int)player.Pos.X, y = (int)player.Pos.Y + 3, z = (int)player.Pos.Z; world.SetBlock(x, y, z, Blocks.Furnace); kilnAt = World.Idx(x, y, z); var f = kilns.Of(kilnAt); f.Queue.Add(Blocks.Brick); f.Queue.Add(Blocks.Stone); f.Done[Blocks.Terracotta] = 3; OpenPanel(kilnPanel); }
-			else if (open == "--open=bench") { benchBlock = Blocks.Planks; benchMode = 3; OpenPanel(benchPanel); }
+			else if (open == "--open=bench") { benchBlock = Blocks.Planks; benchMode = 3; OpenBench(true); }
+			else if (open == "--open=craftbench") OpenBench(false);
 			else { if (!inv.Survival) ShowVariants(Blocks.Stone, null); OpenPanel(invPanel); }
 		}
 		lock (dirty) if (dirty.Count > 0) return;
@@ -697,6 +699,10 @@ public partial class Main : Node3D
 		for (int k = 0; k < 2; k++) s.Give(Blocks.Rock); s.Give(Blocks.Stick);
 		var axe = Inventory.Recipes.First(r => r.Out == Blocks.CrudeAxe);
 		Check("survival: 2 rocks + stick can make a Crude Axe", s.CanCraft(axe));
+		// the Cutter: made at the bench from 3 Planks + a Copper Brick; cutting moved off the Crafting Bench onto it
+		Check("the Cutter: a block made from 3 Planks + a Copper Brick at the bench", Blocks.B[Blocks.Cutter]?.Name == "Cutter" && Blocks.Items.Contains(Blocks.Cutter)
+			&& Inventory.Recipes.Any(r => r.Out == Blocks.Cutter && r.At == "bench" && r.Needs.Contains((Blocks.Planks, 3)) && r.Needs.Contains((Blocks.MetalBrick["copper"], 1))));
+		Check("the Cutter is half a block tall and its saw blade spins (frame 1, then frame 2, then frame 1)", Blocks.B[Blocks.Cutter].Shape == "half" && Atlas.SawSpins());
 		Check("crafting it works", s.Craft(axe) == true && s.CountOf(Blocks.CrudeAxe) == 1 && s.CountOf(Blocks.Rock) == 0 && s.CountOf(Blocks.Stick) == 0);
 		s.Give(Blocks.Log);
 		var planks = Inventory.Recipes.First(r => r.Out == Blocks.Planks && r.Needs[0].id == Blocks.Log);
@@ -760,6 +766,7 @@ public partial class Main : Node3D
 		world.SetBlock(cx + 1, cy + 1, cz, Blocks.TorchVariant(0, 1, 2));                        // burnt
 		world.SetBlock(cx + 2, cy + 1, cz, Blocks.TorchVariant(0, 2, 3));                        // 2 ever
 		world.SetBlock(cx + 4, cy + 1, cz, Blocks.Furnace);                                      // kiln
+		world.SetBlock(cx + 3, cy + 1, cz + 1, Blocks.Cutter);                                   // the Cutter (half a block tall, its saw blade standing up)
 		for (int k = 0; k < 12; k++)
 		{   // along the back: every colour's bricks, terracotta and chiseled terracotta, bottom to top
 			world.SetBlock(cx - 6 + k, cy + 1, cz - 3, Blocks.ColourBricks[k]); world.SetBlock(cx - 6 + k, cy + 2, cz - 3, Blocks.ColourTerracotta[k]);

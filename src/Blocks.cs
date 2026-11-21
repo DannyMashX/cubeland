@@ -10,7 +10,7 @@ public class BlockDef
 	public string Name;
 	public int[] T;
 	public bool Transparent, NoCollide, Liquid, Item, Lit;
-	public string Shape;            // null (a cube), "torch", "flat", "plant", "pieces"
+	public string Shape;            // null (a cube), "torch", "flat", "plant", "pieces", "half" (the bottom half of the block space)
 	public float[] Box;             // the part you can aim at, inside the block space: [x0, y0, z0, x1, y1, z1]
 	public int Drop;                // what breaking it gives you (0 = itself)
 	public int Places;              // an item that puts down a block (a Rock puts down a rock lying on the ground)
@@ -69,7 +69,7 @@ public static class Blocks
 	public static BlockDef Get(int id) => id > 0 && id < MaxId ? B[id] : null;
 
 	public const int Grass = 1, Dirt = 2, Stone = 3, Log = 4, Leaves = 5, Sand = 6, Planks = 7, Cobblestone = 8,
-		StoneBricks = 9, Glass = 10, Gravel = 11, CraftingBench = 60, StrippedLog = 61, RockBlock = 62, Clay = 63,
+		StoneBricks = 9, Glass = 10, Gravel = 11, CraftingBench = 60, Cutter = 159, StrippedLog = 61, RockBlock = 62, Clay = 63,
 		BricksBlock = 64, Terracotta = 65, Pieces = 70, ClayBallBlock = 71, BrickBlock = 72, Furnace = 73;
 	public const int Torch = 22, SmolderingTorch = 81, BurntTorch = 170, EverTorch = 182, Water = 50;
 	public const int Chocolate = 200, Stick = 201, Rock = 212, CrudeAxe = 213, ClayBall = 215, Brick = 216, FireEssence = 217;
@@ -140,7 +140,7 @@ public static class Blocks
 	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).Concat(DeepBlocks)
 		.Concat(Ores).Concat(FireclayBlocks).Concat(FoundryIds).ToArray();
 	// Every block you can pick from the creative inventory
-	public static readonly int[] Items = new[] { new[] { 1, 2, 3 }, DeepShown(3), new[] { 8 }, DeepShown(8), new[] { 7, 60, 4, 61, 5, 6, 9 }, DeepShown(9),
+	public static readonly int[] Items = new[] { new[] { 1, 2, 3 }, DeepShown(3), new[] { 8 }, DeepShown(8), new[] { 7, 60, Cutter, 4, 61, 5, 6, 9 }, DeepShown(9),
 		new[] { 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }, DeepShown(69) }.SelectMany(a => a).Concat(NewColourBlocks).Concat(Flowers)
 		.Concat(new[] { Furnace, 22, Water, Bedrock }).Concat(Ores).Append(Fireclay).Concat(FireclayBlocks).Append(Foundry).ToArray();
 	public const int StackMax = 64;
@@ -191,6 +191,9 @@ public static class Blocks
 		Def(11, "Gravel", 12, 12, 12);
 		for (int k = 0; k < 4; k++) Def(12 + k, "Red Bricks", 13 + k, 13 + k, 13 + k);   // 4 looks, picked at random when placed
 		Def(60, "Crafting Bench", 28, 29, 8);
+		// the Cutter: cuts blocks into pieces, slabs and stairs. Half a block tall, with a saw blade standing up out of it
+		// (pictures: cutter_base on the sides, the stripped log top on top, cutter_bottom underneath, cutter_saw for the blade)
+		var cutter = Def(Cutter, "Cutter", 241, 31, 242); cutter.Shape = "half"; cutter.Transparent = true; cutter.Box = new[] { 0f, 0, 0, 1, 0.5f, 1 };
 		Def(61, "Stripped Log", 30, 31, 31);
 		var rock = Def(62, "Rock", 33, 33, 33); rock.Transparent = true; rock.NoCollide = true; rock.Shape = "flat"; rock.Box = new[] { 0.1f, 0, 0.1f, 0.9f, 0.12f, 0.9f };
 		Def(63, "Clay", 17, 17, 17);
@@ -308,8 +311,8 @@ public static class Blocks
 		Def(ChiseledFireclay, "Chiseled Fireclay", 161, 161, 161);
 		for (int k = 0; k < 4; k++)
 		{
-			B[Foundry + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 160, 164, 162 }, Front = FurnaceFronts[k], Facing = k, Drop = Foundry };
-			B[Foundry + 4 + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 160, 164, 163 }, Front = FurnaceFronts[k], Facing = k, Lit = true, Drop = Foundry };
+			B[Foundry + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 159, 164, 162 }, Front = FurnaceFronts[k], Facing = k, Drop = Foundry };
+			B[Foundry + 4 + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 159, 164, 163 }, Front = FurnaceFronts[k], Facing = k, Lit = true, Drop = Foundry };
 		}
 		B[Foundry].Icon = 162;
 		string[] soilNames = { "Tilled Dirt", "Wet Tilled Dirt", "Fertilized Dirt", "Wet Fertilized Dirt" };

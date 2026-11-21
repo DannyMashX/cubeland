@@ -100,6 +100,7 @@ public partial class World
 	public int SubBlock(int X, int Y, int Z)
 	{
 		int x = FloorDiv(X, 2), y = FloorDiv(Y, 2), z = FloorDiv(Z, 2), b = GetBlock(x, y, z);
+		if (b != 0 && Cubeland.Blocks.B[b]?.Shape == "half") return Y - 2 * y != 0 ? 0 : b;   // (a half-tall block fills only the bottom half)
 		if (b != Cubeland.Blocks.Pieces) return b;
 		return PieceMap.TryGetValue(Idx(x, y, z), out var a) ? a[(X - 2 * x) + (Y - 2 * y) * 2 + (Z - 2 * z) * 4] : 0;
 	}

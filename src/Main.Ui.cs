@@ -128,7 +128,7 @@ public partial class Main
 	static readonly (string name, int[] ids)[] InvTabs =
 	{
 		("Building Blocks", new[] { 7, 61, 8 }.Concat(Blocks.DeepShown(8)).Append(9).Concat(Blocks.DeepShown(9)).Append(64).Concat(Blocks.ColourBricks).Append(65).Concat(Blocks.ColourTerracotta).Append(67).Concat(Blocks.ColourChiseled)
-			.Append(69).Concat(Blocks.DeepShown(69)).Concat(new[] { 10, 22, Blocks.CraftingBench, Blocks.Furnace }).Concat(Blocks.FireclayBlocks).Append(Blocks.Foundry).ToArray()),
+			.Append(69).Concat(Blocks.DeepShown(69)).Concat(new[] { 10, 22, Blocks.CraftingBench, Blocks.Cutter, Blocks.Furnace }).Concat(Blocks.FireclayBlocks).Append(Blocks.Foundry).ToArray()),
 		("Natural Blocks", new[] { 1, 2, 3 }.Concat(Blocks.DeepShown(3)).Concat(Blocks.Ores).Concat(new[] { 4, 5, 6, 11, 63, Blocks.Fireclay }).Concat(Blocks.Flowers).Append(Blocks.Water).Concat(Blocks.Soils).ToArray()),
 		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireclayBall, Blocks.FireclayBrick, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, Blocks.SteelScrap, Blocks.SteelBrick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }.Concat(Blocks.Dye).Append(Blocks.CrudeAxe).Concat(Blocks.Tools).Concat(Blocks.GearItems).ToArray()),
 	};
@@ -252,15 +252,18 @@ public partial class Main
 
 	// ===================== Crafting Bench =====================
 	// Pick a block to put on the bench and what to cut it into; click what comes out to take it into your hotbar.
-	Label benchName, benchCount; Slot benchIn, benchOut; VBoxContainer benchRecipes; int benchBlock, benchMode;
+	Label benchName, benchCount, benchTitle; Slot benchIn, benchOut; VBoxContainer benchRecipes; int benchBlock, benchMode;
+	// the same screen is the Crafting Bench (its recipes) or the Cutter (cutting blocks into pieces, slabs and stairs)
+	bool benchIsCutter; Control[] cutterParts, benchParts;
 	readonly List<Button> benchModeButtons = new();
 	Control BuildBench()
 	{
 		var scr = Screen("Crafting Bench", out var body);
+		benchTitle = FindTitle(body);
 		var row = new HBoxContainer(); row.AddThemeConstantOverride("separation", 18); body.AddChild(row);
 		var grid = new GridContainer { Columns = 7 }; grid.AddThemeConstantOverride("h_separation", 4); grid.AddThemeConstantOverride("v_separation", 4);
 		row.AddChild(grid);
-		foreach (int id in Blocks.Splittable)
+		foreach (int id in Blocks.Splittable.Where(b => World.TallWorlds || Array.IndexOf(Blocks.DeepBlocks, b) < 0))   // (the deep layers' stone only while tall worlds are on)
 		{
 			var s = new Slot(); s.Show(id);
 			s.Clicked = _ => { benchBlock = id; DrawBench(); };
@@ -288,11 +291,25 @@ public partial class Main
 			b.Pressed += () => { benchMode = kk; DrawBench(); };
 			modes.AddChild(b); benchModeButtons.Add(b);
 		}
-		if (inv.Survival) { body.AddChild(Text("Crafting", 15)); body.AddChild(RecipeList(out benchRecipes)); }
+		var parts = new List<Control>();
+		if (inv.Survival) { var h = Text("Crafting", 15); body.AddChild(h); var list = RecipeList(out benchRecipes); body.AddChild(list); parts.Add(h); parts.Add(list); }
 		benchName = Text(""); benchName.CustomMinimumSize = new Vector2(0, 18); body.AddChild(benchName);
-		body.AddChild(Text("Pick a block, pick what to cut it into, then click what it makes to take it · Shift + right-click to build against the bench · E to close", 12, 0.65f));
+		var cutHint = Text("Pick a block, pick what to cut it into, then click what it makes to take it · Shift + right-click to build against the Cutter · E to close", 12, 0.65f);
+		var craftHint = Text("Click a recipe to craft it · Shift + right-click to build against the bench · E to close", 12, 0.65f);
+		body.AddChild(cutHint); body.AddChild(craftHint); parts.Add(craftHint);
+		cutterParts = new Control[] { row, modes, cutHint }; benchParts = parts.ToArray();
 		return scr;
 	}
+	void OpenBench(bool cutter)
+	{
+		benchIsCutter = cutter;
+		if (benchTitle != null) benchTitle.Text = cutter ? "Cutter" : "Crafting Bench";
+		foreach (var c in cutterParts) c.Visible = cutter;
+		foreach (var c in benchParts) c.Visible = !cutter;
+		OpenPanel(benchPanel);
+	}
+	// a screen's title (the first label in it)
+	static Label FindTitle(Node body) { foreach (var c in body.GetChildren()) if (c is Label l) return l; return null; }
 	void DrawBench()
 	{
 		var m = Inventory.BenchModes[benchMode];
@@ -419,7 +436,7 @@ public partial class Main
 	{
 		if (!invOpen) return;
 		if (invPanel.Visible && inv.Survival) DrawRecipes(invRecipes, false, invName);
-		if (benchPanel.Visible) { DrawBench(); if (inv.Survival) DrawRecipes(benchRecipes, true, benchName); }
+		if (benchPanel.Visible) { DrawBench(); if (inv.Survival && !benchIsCutter) DrawRecipes(benchRecipes, true, benchName); }
 		if (kilnPanel.Visible) DrawKiln();
 	}
 

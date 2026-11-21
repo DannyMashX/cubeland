@@ -210,6 +210,7 @@ public class Inventory
 		new() { Out = Blocks.Planks, N = 4, Needs = new[] { (Blocks.StrippedLog, 1) }, Axe = true },
 		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.Planks, 2) }, At = "bench", Axe = true },
 		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.Planks, 4), (Blocks.Log, 1) } },
+		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.Planks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },   // 3 Planks + a Copper Brick (its blade)
 		new() { Out = Blocks.Torch, N = 2, Needs = new[] { (Blocks.Stick, 1), (Blocks.Torch, 1) } },
 		new() { Out = Blocks.EverTorch, N = 1, Needs = new[] { (Blocks.Torch, 1), (Blocks.FireEssence, 1) } },
 		new() { Out = Blocks.ClayBall, N = 4, Needs = new[] { (Blocks.Clay, 1) } },

@@ -185,8 +185,8 @@ public partial class Main
 		if (player.Raycast() is not { } h) return;
 		lastAim = h;
 		int hb = h.Id, id = inv.Held;
-		// right-click a Crafting Bench to use it (hold Shift to build against it instead)
-		if (hb == Blocks.CraftingBench && !ShiftDown) { OpenPanel(benchPanel); return; }
+		// right-click a Crafting Bench (survival: its recipes) or a Cutter to use it (hold Shift to build against it instead)
+		if ((hb == Blocks.Cutter || hb == Blocks.CraftingBench && inv.Survival) && !ShiftDown) { OpenBench(hb == Blocks.Cutter); return; }
 		// right-click a lit (burning) kiln holding a Stick: the stick catches fire and becomes a Torch
 		if (Blocks.IsFurnace(hb) && Blocks.B[hb].Lit && id == Blocks.Stick) { LightStick(); return; }
 		if (Blocks.IsFurnace(hb) && !ShiftDown) { kilnAt = World.Idx(h.X, h.Y, h.Z); OpenPanel(kilnPanel); return; }
