@@ -30,7 +30,8 @@ void fragment() {
 	vec4 t = texture(atlas, UV);
 	if (t.a < 0.5) discard;
 	float held = held_light > 0.0 ? min(1.2, pow(max(0.0, held_light - length(v_eye)) / 14.0, 1.4)) : 0.0;   // (the same curve as World.LightCurve)
-	vec3 c = t.rgb * COLOR.rgb * max(day_tint * v_sky, max(v_torch, held) * torch_color);
+	vec3 shade = t.g > t.r && t.g > t.b ? COLOR.rgb : vec3(COLOR.a);   // the biome tint (in COLOR) only colours green pixels: grass, not the dirt under it
+	vec3 c = t.rgb * shade * max(day_tint * v_sky, max(v_torch, held) * torch_color);
 	float haze = (1.0 - exp(-fog_thickness * v_depth)) * fog_max;
 	if (fog_edge > 0.0) haze = max(haze, smoothstep(fog_edge * 0.6, fog_edge, length(v_eye)));   // the render distance: fully hazed at its edge, so nothing pops in or out
 	ALBEDO = mix(c, fog_color, haze);   // (the Compatibility renderer shows this as-is, like the web version did)

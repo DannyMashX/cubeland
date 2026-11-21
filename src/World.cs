@@ -6,7 +6,10 @@ namespace Cubeland;
 // The world: every block, plus the light (sky and torches) worked out from them.
 public partial class World
 {
-	public const int WX = 640, WZ = 640, CS = 16;
+	// the width and depth: new worlds are 1280 x 1280; worlds made before that (and tall worlds) are 640 x 640. Set by the World being made.
+	public static int WX { get; private set; } = 640;
+	public static int WZ => WX;
+	public const int CS = 16;
 	// Tall worlds (640 blocks) and the strata (deep stone layers and their stone sets) are saved for a later update: until
 	// this is turned on, new worlds are 192 tall and the deep blocks aren't in the inventory or recipes. (A world already made
 	// 640 tall still loads and plays as one.) Bedrock is in now: it lines the bottom of every world.
@@ -15,14 +18,17 @@ public partial class World
 	// A tall world is the same land lifted up by Lift, with solid rock below it (the same ~130 blocks of air above the sea).
 	public static int WY { get; private set; } = 192;
 	public static int Lift => WY - 192;
-	public const int NCX = WX / CS, NCZ = WZ / CS;   // chunks are 16x16x16 cubes: 40 across, 40 deep, 12 or 40 high
+	public static int NCX => WX / CS;   // chunks are 16x16x16 cubes: 40 or 80 across and deep, 12 or 40 high
+	public static int NCZ => WZ / CS;
 	public static int NCY => WY / CS;
 	public static int NChunks => NCX * NCY * NCZ;
 	public static int ChunkKey(int cx, int cy, int cz) => (cy * NCZ + cz) * NCX + cx;
 	public static (int cx, int cy, int cz) FromChunkKey(int k) => (k % NCX, k / (NCX * NCZ), (k / NCX) % NCZ);
 	// chunks are BUILT as 16x16x16 cubes (a changed block only rebuilds the small cubes around it), but DRAWN glued
 	// together in 32x32x32 groups (2x2x2 chunks, one mesh each), because every separate mesh costs time to draw
-	public const int GS = 2, NGX = NCX / GS, NGZ = NCZ / GS;
+	public const int GS = 2;
+	public static int NGX => NCX / GS;
+	public static int NGZ => NCZ / GS;
 	public static int NGY => NCY / GS;
 	public static int NGroups => NGX * NGY * NGZ;
 	public static int GroupOf(int k) { var (cx, cy, cz) = FromChunkKey(k); return (cy / GS * NGZ + cz / GS) * NGX + cx / GS; }
@@ -31,9 +37,9 @@ public partial class World
 	public static (int x, int y, int z) FromIdx(int i) => (i % WX, i / (WX * WZ), (i / WX) % WZ);
 
 	public readonly byte[] Blocks;
-	public readonly int[] Heights = new int[WX * WZ];
-	public readonly int[] ChunkTop = new int[NCX * NCZ];   // highest block +1 in each 16x16 column of chunks
-	public readonly short[] SkyTop = new short[WX * WZ];
+	public readonly int[] Heights;
+	public readonly int[] ChunkTop;   // highest block +1 in each 16x16 column of chunks
+	public readonly short[] SkyTop;
 	public readonly Dictionary<int, byte[]> PieceMap = new();   // world index -> which block fills each of its 8 piece spots
 	public readonly Dictionary<int, int> Edits = new();          // every block you've changed (what gets saved)
 	public readonly HashSet<int> Torches = new();
@@ -46,11 +52,13 @@ public partial class World
 	public Action<int, int, int> NearbyRebuild;   // (x, z): chunks around here need their sky light redone soon
 	public Action<int, int, int, int> BlockChanged;   // (index, old, new, ...) for the game's own bookkeeping
 
-	// height: 640 for new worlds, 192 for ones made before tall worlds
-	public World(long seed, int gen, int height = 192)
+	// height: 640 for tall worlds, 192 otherwise; size: 1280 for new worlds, 640 for ones made before (a tall world is always 640 across)
+	public World(long seed, int gen, int height = 192, int size = 640)
 	{
 		WY = height == 640 ? 640 : 192;
+		WX = size == 1280 && WY == 192 ? 1280 : 640;
 		Blocks = new byte[WX * WY * WZ];
+		Heights = new int[WX * WZ]; ChunkTop = new int[NCX * NCZ]; SkyTop = new short[WX * WZ];
 		Gen = new WorldGen(this, seed, gen);
 	}
 
@@ -58,6 +66,11 @@ public partial class World
 	{
 		Gen.Progress = progress;
 		Gen.Generate();
+		if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--worldhash") >= 0)   // (testing: a fingerprint of the new world, to check the web version grows the same one)
+		{
+			uint h = 2166136261; foreach (byte b in Blocks) h = (h ^ b) * 16777619;
+			Godot.GD.Print($"WORLDHASH {h:x8}");
+		}
 		RecomputeHeights();
 		Array.Clear(ChunkTop);
 		for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)

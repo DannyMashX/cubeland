@@ -14,7 +14,7 @@ public static class Worlds
 {
 	public class Info
 	{
-		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall)
+		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192, S = 640; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall. S: its width and depth; worlds made before 1280 are 640)
 		[JsonIgnore] public bool Survival => Mode == "survival";
 	}
 	public class PlayerSave { public float X, Y, Z, Yaw, Pitch, DarkTime, LightTime; public bool Fly; public int Health, Gloom; }
@@ -64,13 +64,13 @@ public static class Worlds
 		return h;
 	}
 	// gen = terrain style: 2 = rolling hills (default), 1 = plateaus. mode = "creative" or "survival".
-	public static Info Create(string name, string seedText, int gen = 2, string mode = "creative")
+	public static Info Create(string name, string seedText, int gen = 3, string mode = "creative")
 	{
 		Load();
 		name = (name ?? "").Trim(); if (name.Length > 32) name = name[..32];
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		var w = new Info { Id = Convert.ToString(now, 16) + Random.Shared.Next(0x1000, 0xffff).ToString("x"), Name = name == "" ? $"World {list.Count + 1}" : name,
-			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192 };
+			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.TallWorlds ? 640 : 1280 };
 		list.Add(w); SaveList();
 		return w;
 	}

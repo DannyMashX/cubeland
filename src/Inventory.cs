@@ -211,6 +211,23 @@ public class Inventory
 		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.Planks, 2) }, At = "bench", Axe = true },
 		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.Planks, 4), (Blocks.Log, 1) } },
 		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.Planks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },   // 3 Planks + a Copper Brick (its blade)
+		// the same from Fir wood
+		new() { Out = Blocks.FirPlanks, N = 4, Needs = new[] { (Blocks.FirLog, 1) }, Axe = true },
+		new() { Out = Blocks.FirPlanks, N = 4, Needs = new[] { (Blocks.StrippedFirLog, 1) }, Axe = true },
+		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.FirPlanks, 2) }, At = "bench", Axe = true },
+		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.FirPlanks, 4), (Blocks.FirLog, 1) } },
+		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.FirPlanks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },
+		// ... and from Palm and Willow wood
+		new() { Out = Blocks.PalmPlanks, N = 4, Needs = new[] { (Blocks.PalmLog, 1) }, Axe = true },
+		new() { Out = Blocks.PalmPlanks, N = 4, Needs = new[] { (Blocks.StrippedPalmLog, 1) }, Axe = true },
+		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.PalmPlanks, 2) }, At = "bench", Axe = true },
+		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.PalmPlanks, 4), (Blocks.PalmLog, 1) } },
+		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.PalmPlanks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },
+		new() { Out = Blocks.WillowPlanks, N = 4, Needs = new[] { (Blocks.WillowLog, 1) }, Axe = true },
+		new() { Out = Blocks.WillowPlanks, N = 4, Needs = new[] { (Blocks.StrippedWillowLog, 1) }, Axe = true },
+		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.WillowPlanks, 2) }, At = "bench", Axe = true },
+		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.WillowPlanks, 4), (Blocks.WillowLog, 1) } },
+		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.WillowPlanks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },
 		new() { Out = Blocks.Torch, N = 2, Needs = new[] { (Blocks.Stick, 1), (Blocks.Torch, 1) } },
 		new() { Out = Blocks.EverTorch, N = 1, Needs = new[] { (Blocks.Torch, 1), (Blocks.FireEssence, 1) } },
 		new() { Out = Blocks.ClayBall, N = 4, Needs = new[] { (Blocks.Clay, 1) } },
@@ -221,6 +238,8 @@ public class Inventory
 		new() { Out = 67, N = 1, Needs = new[] { (65, 1) }, At = "bench", Tool = "pickaxe" },
 		new() { Out = 68, N = 1, Needs = new[] { (66, 1) }, At = "bench", Tool = "pickaxe" },
 		new() { Out = 69, N = 1, Needs = new[] { (3, 1) }, At = "bench", Tool = "pickaxe" },
+		new() { Out = Blocks.SandstoneBricks, N = 1, Needs = new[] { (Blocks.Sandstone, 1) }, At = "bench", Tool = "pickaxe" },     // Sandstone, cut into bricks
+		new() { Out = Blocks.ChiseledSandstone, N = 1, Needs = new[] { (Blocks.Sandstone, 1) }, At = "bench", Tool = "pickaxe" },   // Sandstone, carved
 		new() { Out = Blocks.Flour, N = 1, Needs = new[] { (Blocks.Grain, 1) } },   // Grain, mashed by hand -> Flour
 		// Fireclay, like Clay; and the Foundry's blocks
 		new() { Out = Blocks.FireclayBall, N = 4, Needs = new[] { (Blocks.Fireclay, 1) } },                     // Fireclay -> 4 Fireclay Balls

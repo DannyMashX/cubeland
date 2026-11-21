@@ -12,7 +12,7 @@ public partial class World
 {
 	public const float StageTime = 40, DryRate = 0.5f, FertRate = 1.6f, RevertTime = 180;
 	public const int WetReach = 5, FertHarvests = 2;
-	const int Up = WX * WZ;
+	static int Up => WX * WZ;   // (one block up, in world index steps)
 	public readonly Dictionary<int, float> Crops = new();      // growing crop spot -> lucky ticks it has had in this stage (see StageChance)
 	public readonly HashSet<int> Soils = new();
 	public readonly Dictionary<int, int> FertLeft = new();     // fertilized soil -> harvests left

@@ -67,13 +67,13 @@ public partial class Main
 		if (sa != null)
 		{   // testing: a throwaway world that isn't in your list and never saves
 			tempWorld = true;
-			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, Mode = HasArg("--survival") ? "survival" : "creative" };
+			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : 1280, Mode = HasArg("--survival") ? "survival" : "creative" };
 			menuOpen = HasArg("--menu");
 			return;
 		}
 		if (joinInfo != null && openWorldId == "join-" + joinInfo.Code)
 		{   // a friend's world you're joining: it isn't one of your worlds and isn't saved here
-			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
+			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, S = joinInfo.S, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
 			menuOpen = false; wantPlay = true; playOnLoad = false;
 			return;
 		}
@@ -113,7 +113,7 @@ public partial class Main
 	{
 		menuLayer = new CanvasLayer { Layer = 5 }; AddChild(menuLayer);
 		// main menu
-		mainMenu = Backdrop(0.35f);
+		mainMenu = Backdrop(0.15f);   // (only lightly dimmed: the world turns slowly behind it, see Panorama)
 		var mm = Centered(mainMenu, false);
 		var title = Centre(Text("CUBELAND", 64)); title.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.6f)); title.AddThemeConstantOverride("shadow_offset_y", 4); mm.AddChild(title);
 		mm.AddChild(Centre(Text(Version.Split(' ')[0], 18, 0.8f)));   // (the stage: Alpha, Beta, ...)
@@ -219,7 +219,7 @@ public partial class Main
 		var row = new HBoxContainer(); row.AddThemeConstantOverride("separation", 8); b.AddChild(row);
 		var name = new LineEdit { PlaceholderText = "Name", MaxLength = 32, CustomMinimumSize = new Vector2(150, 34) };
 		var seed = new LineEdit { PlaceholderText = "Seed (blank = random)", MaxLength = 24, CustomMinimumSize = new Vector2(170, 34) };
-		var gen = new OptionButton { TooltipText = "Terrain style" }; gen.AddItem("Rolling hills", 2); gen.AddItem("Plateaus", 1);
+		var gen = new OptionButton { TooltipText = "Terrain style" }; gen.AddItem("Biomes", 3); gen.AddItem("Rolling hills", 2); gen.AddItem("Plateaus", 1);
 		var mode = new OptionButton { TooltipText = "Game mode" }; mode.AddItem("Creative"); mode.AddItem("Survival");
 		row.AddChild(name); row.AddChild(seed); row.AddChild(gen); row.AddChild(mode);
 		row.AddChild(Btn("Create & play", () =>
@@ -240,7 +240,7 @@ public partial class Main
 			var info = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 			info.AddChild(Text(w.Name + (w.Id == current.Id ? "  (open now)" : ""), 16));
 			string played = DateTimeOffset.FromUnixTimeMilliseconds(w.Played).ToLocalTime().ToString("g");
-			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {(w.H == 640 ? 640 : 192)} tall · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
+			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 3 ? "Biomes" : w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {(w.S == 1280 && w.H != 640 ? 1280 : 640)} wide · {(w.H == 640 ? 640 : 192)} tall · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
 			row.AddChild(info);
 			var id = w.Id;
 			row.AddChild(Btn("Play", () =>

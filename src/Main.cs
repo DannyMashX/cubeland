@@ -73,7 +73,7 @@ public partial class Main : Node3D
 		BuildMenus();
 		ApplySettings();
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
-		world = new World(current.Seed, current.Gen, current.H);
+		world = new World(current.Seed, current.Gen, current.H, current.S);
 		genTask = Task.Run(() => { world.Generate(p => genProgress = p); LoadSaveBlocks(); });
 	}
 
@@ -187,6 +187,7 @@ public partial class Main : Node3D
 		}
 		cam.Position = player.EyePos;
 		cam.Rotation = new Vector3(player.Pitch, player.Yaw, 0);
+		Panorama(dt);
 		if (!cam.IsInsideTree()) return;   // (the scene is being swapped for another world)
 		sky.Tick(dt, cam);
 		UpdateSkyAndWater(dt);
@@ -210,6 +211,77 @@ public partial class Main : Node3D
 		TestShot(dt);
 		var p = player.Pos;
 		info.Text = $"{Title} {Version}\n{Engine.GetFramesPerSecond()} fps\nx {p.X:0.0}  y {p.Y:0.0}  z {p.Z:0.0}" + (player.Flying ? "\nflying" : "") + (settings.Muted ? "\nSound off (M)" : "") + NetInfoLine();
+	}
+
+	// The main menu's panorama: behind the title, the camera slowly turns all the way round.
+	// It shows the update's own panorama: six pictures (panorama/0.jpg .. 5.jpg, a cube around one spot) of somewhere that shows
+	// off what the update adds, taken with make-panorama.ps1. Without them it looks out over your own world instead, from a little
+	// above where you are (above the ground, even in a cave or a house). Leaving the menu puts the camera back.
+	const float PanoTurn = 0.05f;   // how fast it turns (radians a second: once round in about 2 minutes)
+	float panoYaw = float.NaN;
+	Node3D panoBox; bool panoTried;
+	// the cube's six sides: which way each picture looks, and which way is up in it (the same in the web version)
+	public static readonly Vector3[] PanoDirs = { new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1) };
+	public static readonly Vector3[] PanoUps = { new(0, 1, 0), new(0, 1, 0), new(0, 0, 1), new(0, 0, -1), new(0, 1, 0), new(0, 1, 0) };
+	void Panorama(float dt)
+	{
+		if (!panoTried) { panoTried = true; panoBox = MakePanoBox(); }
+		if (panoBox != null) panoBox.Visible = menuOpen;
+		if (!menuOpen) { panoYaw = float.NaN; return; }
+		if (float.IsNaN(panoYaw)) panoYaw = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--panoyaw=")) is { } py ? float.Parse(py[10..], System.Globalization.CultureInfo.InvariantCulture)   // (test: start turned this far)
+			: panoBox != null ? 0 : player.Yaw;
+		panoYaw += dt * PanoTurn;
+		var e = player.EyePos;
+		int x = Math.Clamp((int)MathF.Floor(e.X), 0, World.WX - 1), z = Math.Clamp((int)MathF.Floor(e.Z), 0, World.WZ - 1);
+		cam.Position = new Vector3(e.X, Math.Max(e.Y, world.Heights[z * World.WX + x] + 3.5f), e.Z);
+		cam.Rotation = new Vector3(-0.1f, panoYaw, 0);
+		if (panoBox != null) panoBox.GlobalPosition = cam.GlobalPosition;   // (it goes wherever the camera is, so it's all you see)
+	}
+	// the panorama's cube: six pictures on the inside of a small cube around the camera, drawn over everything else
+	Node3D MakePanoBox()
+	{
+		var tex = new Texture2D[6];
+		for (int k = 0; k < 6; k++)
+		{
+			string p = $"res://panorama/{k}.jpg";
+			if (!ResourceLoader.Exists(p)) return null;
+			tex[k] = GD.Load<Texture2D>(p);
+		}
+		var box = new Node3D { Visible = false }; AddChild(box);
+		for (int k = 0; k < 6; k++)
+		{
+			Vector3 d = PanoDirs[k], u = PanoUps[k], r = d.Cross(u);   // (a picture's right, as the camera that took it saw it)
+			var st = new SurfaceTool(); st.Begin(Mesh.PrimitiveType.Triangles);
+			void V(Vector3 at, float tu, float tv) { st.SetUV(new Vector2(tu, tv)); st.AddVertex(at); }
+			V(d - r + u, 0, 0); V(d + r + u, 1, 0); V(d + r - u, 1, 1);
+			V(d - r + u, 0, 0); V(d + r - u, 1, 1); V(d - r - u, 0, 1);
+			var mat = new StandardMaterial3D { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoTexture = tex[k], NoDepthTest = true, DisableFog = true,
+				CullMode = BaseMaterial3D.CullModeEnum.Disabled, Transparency = BaseMaterial3D.TransparencyEnum.Alpha, RenderPriority = 127,
+				TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear };
+			box.AddChild(new MeshInstance3D { Mesh = st.Commit(), MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off });
+		}
+		return box;
+	}
+	// (make-panorama.ps1: `--panorama=<folder>` takes the six pictures from where you are, then quits)
+	bool panoCapturing;
+	async void CapturePanorama(string dir)
+	{
+		panoCapturing = true;
+		if (handRoot != null) handRoot.Visible = false;
+		if (outline != null) outline.Visible = false;
+		var vp = new SubViewport { Size = new Vector2I(1024, 1024), RenderTargetUpdateMode = SubViewport.UpdateMode.Always };
+		var c = new Camera3D { Fov = 90, Near = 0.05f, Far = 1000 };
+		vp.AddChild(c); AddChild(vp);
+		DirAccess.MakeDirRecursiveAbsolute(dir);
+		var at = cam.GlobalPosition;
+		for (int k = 0; k < 6; k++)
+		{
+			c.LookAtFromPosition(at, at + PanoDirs[k], PanoUps[k]);
+			for (int f = 0; f < 4; f++) await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			vp.GetTexture().GetImage().SaveJpg($"{dir}/{k}.jpg", 0.9f);
+		}
+		GD.Print($"panorama saved to {dir} from {at}");
+		GetTree().Quit();
 	}
 
 	// footsteps, jumps, landings and splashes; a hard landing hurts (survival)
@@ -609,6 +681,7 @@ public partial class Main : Node3D
 		shotTimer += dt;
 		var stay = args.FirstOrDefault(a => a.StartsWith("--stay="));
 		if (shotTimer < (stay != null ? float.Parse(stay[7..]) : sceneBuilt ? 4f : 1.5f)) return;
+		if (args.FirstOrDefault(a => a.StartsWith("--panorama=")) is { } panoArg) { if (!panoCapturing) CapturePanorama(panoArg[11..]); return; }
 		GetViewport().GetTexture().GetImage().SavePng(arg[7..]);
 		GD.Print($"shot saved, {chunkParts.Count} chunks in {groupNodes.Count} groups");
 		foreach (var m in mobList) GD.Print($"mob {m.Type}: layer {m.Layer}, health {m.Health}{(m.Burning ? ", burning" : "")}{(m.Fade > 0 ? ", fading" : "")} at y {m.Y:0.0}");
@@ -709,6 +782,17 @@ public partial class Main : Node3D
 		Check("log -> 4 planks with an axe", s.Craft(planks) == true && s.CountOf(Blocks.Planks) == 4);
 		Check("bench: planks need 3 for stairs", s.BenchCut(Blocks.Planks, 3).StartsWith("Made 4") && s.CountOf(1200 + Blocks.Planks) == 4 && s.CountOf(Blocks.Planks) == 1);
 		Check("bench: 1 plank -> 8 pieces", s.BenchCut(Blocks.Planks, 0).StartsWith("Took 8") && s.CountOf(Blocks.PieceItem + Blocks.Planks) == 8);
+		s.Give(Blocks.FirLog);
+		var firPlanks = Inventory.Recipes.First(r => r.Out == Blocks.FirPlanks && r.Needs[0].id == Blocks.FirLog);
+		Check("Fir: the original wood is now Oak, and a Fir Log -> 4 Fir Planks (which cut into Fir Planks Stairs)", Blocks.B[Blocks.Log].Name == "Oak Log" && s.Craft(firPlanks) == true
+			&& s.CountOf(Blocks.FirPlanks) == 4 && s.BenchCut(Blocks.FirPlanks, 3).StartsWith("Made 4") && Blocks.Get(1200 + Blocks.FirPlanks)?.Name == "Fir Planks Stairs");
+		s.Give(Blocks.PalmLog);
+		var palmPlanks = Inventory.Recipes.First(r => r.Out == Blocks.PalmPlanks && r.Needs[0].id == Blocks.PalmLog);
+		Check("desert and swamp: a Palm Log -> 4 Palm Planks (which cut into stairs); Mud fires into Mud Bricks; Peat is fuel; Dates are food",
+			s.Craft(palmPlanks) == true && s.CountOf(Blocks.PalmPlanks) == 4 && s.BenchCut(Blocks.PalmPlanks, 3).StartsWith("Made 4")
+			&& s.CountOf(Blocks.FormItem("stairs", Blocks.PalmPlanks)) == 4 && Blocks.Get(Blocks.FormItem("stairs", Blocks.PalmPlanks))?.Name == "Palm Planks Stairs"
+			&& Kilns.Smelts.Any(m => m.Out == Blocks.MudBricks && m.From == Blocks.Mud) && Kilns.Fuel[Blocks.Peat] == 8 && Blocks.B[Blocks.Dates].Food > 0
+			&& Blocks.LeafTint(Blocks.WillowLeaves) != null && Blocks.TakesBiomeTint(Blocks.PalmLeaves));
 		// deep stone sets: every piece / slab / stairs item has its own number, and each layer's stone gives its own cobblestone
 		var forms = Blocks.Splittable.SelectMany(b => Blocks.Forms.Select(f => (b, f, id: Blocks.FormItem(f, b)))).ToArray();
 		Check("deep sets: all piece and shape items are different", forms.Select(x => x.id).Distinct().Count() == forms.Length

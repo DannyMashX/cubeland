@@ -508,7 +508,8 @@ public partial class Main
 				// each face: its picture, its shade (lit from above, like the world's blocks), and its corners (bottom-left, bottom-right, top-right, top-left seen from outside)
 				void Face(int tile, float shade, Vector3 o, Vector3 r, Vector3 u)
 				{
-					var c = new Color(shade, shade, shade);
+					var e = Blocks.LeafTint(id) ?? new[] { 1f, 1f, 1f };   // (Fir, Palm and Willow Leaves: the leaves picture in their own colour)
+					var c = new Color(shade * e[0], shade * e[1], shade * e[2]);
 					Vector3[] p = { o, o + r, o + r + u, o + u }; Vector2[] uv = { new(0, 0), new(1, 0), new(1, 1), new(0, 1) };
 					foreach (int k in new[] { 0, 2, 1, 0, 3, 2 }) { st.SetColor(c); st.SetUV(Atlas.UV(tile, uv[k].X, uv[k].Y)); st.AddVertex(p[k] * h * 2 - Vector3.One * h); }
 				}
@@ -562,7 +563,7 @@ public partial class Main
 			if (arm?.Lower != null) { arm.Pivot.GetParent().RemoveChild(arm.Pivot); arm.Pivot.Position = -arm.Lower.Position; arm.Pivot.Rotation = Vector3.Zero; handArm.AddChild(arm.Pivot); }
 			handBody.Root.QueueFree(); handBody.Root = null;   // (only the arm is kept)
 		}
-		handRoot.Visible = !dead;
+		handRoot.Visible = !dead && !menuOpen && !panoCapturing;   // (no hand in the main menu's panorama)
 		int id = inv.Held;
 		if (id != handId)
 		{

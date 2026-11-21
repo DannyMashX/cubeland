@@ -27,6 +27,8 @@ public class Kilns
 	{
 		S(Blocks.FireclayBrick, Blocks.FireclayBall),        // Fireclay Ball -> Fireclay Brick
 		S(Blocks.FireclayTerracotta, Blocks.Fireclay),       // Fireclay -> Fireclay Terracotta
+		S(Blocks.SmoothSandstone, Blocks.Sandstone),         // Sandstone -> Smooth Sandstone
+		S(Blocks.MudBricks, Blocks.Mud),                     // Mud -> Mud Bricks
 	})
 	// the Foundry: a Chunk -> its Brick; two metals' Bricks -> an alloy; an Iron Brick -> Steel Scrap, 4 Steel Scrap -> a Steel Brick
 	.Concat(Blocks.Metals.Select(m => S(Blocks.MetalBrick[m], Blocks.Chunk[m], "foundry")))
@@ -37,8 +39,10 @@ public class Kilns
 		S(Blocks.SteelScrap, Blocks.MetalBrick["iron"], "foundry"),
 		new Smelt(Blocks.SteelBrick, new[] { (Blocks.SteelScrap, 4) }, "foundry"),
 	}).ToArray();
-	// how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1
-	public static readonly Dictionary<int, int> Fuel = new() { [Blocks.Log] = 4, [Blocks.StrippedLog] = 4, [Blocks.Planks] = 2, [Blocks.Stick] = 1 };
+	// how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1; Peat (from the swamp) 8
+	public static readonly Dictionary<int, int> Fuel = new() { [Blocks.Log] = 4, [Blocks.StrippedLog] = 4, [Blocks.Planks] = 2, [Blocks.Stick] = 1,
+		[Blocks.FirLog] = 4, [Blocks.StrippedFirLog] = 4, [Blocks.FirPlanks] = 2, [Blocks.PalmLog] = 4, [Blocks.StrippedPalmLog] = 4, [Blocks.PalmPlanks] = 2,
+		[Blocks.WillowLog] = 4, [Blocks.StrippedWillowLog] = 4, [Blocks.WillowPlanks] = 2, [Blocks.Peat] = 8 };
 
 	public class Kiln
 	{

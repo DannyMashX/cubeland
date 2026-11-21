@@ -23,6 +23,11 @@ public partial class Sound : Node
 		[1] = "grass", [2] = "stone", [3] = "rock", [4] = "wood", [5] = "grass", [6] = "sand", [7] = "wood", [8] = "cobble", [9] = "rock", [10] = "glass", [11] = "dirt",
 		[12] = "brick", [13] = "brick", [14] = "brick", [15] = "brick", [60] = "wood", [61] = "wood", [63] = "dirt", [64] = "brick", [65] = "brick", [66] = "brick",
 		[67] = "brick", [68] = "brick", [69] = "rock",
+		[Blocks.FirLog] = "wood", [Blocks.FirPlanks] = "wood", [Blocks.StrippedFirLog] = "wood", [Blocks.FirLeaves] = "grass",
+		[Blocks.PalmLog] = "wood", [Blocks.PalmPlanks] = "wood", [Blocks.StrippedPalmLog] = "wood", [Blocks.PalmLeaves] = "grass",
+		[Blocks.WillowLog] = "wood", [Blocks.WillowPlanks] = "wood", [Blocks.StrippedWillowLog] = "wood", [Blocks.WillowLeaves] = "grass",
+		[Blocks.SandstoneBricks] = "rock", [Blocks.ChiseledSandstone] = "rock", [Blocks.SmoothSandstone] = "rock",
+		[Blocks.Mud] = "dirt", [Blocks.MudBricks] = "brick", [Blocks.Peat] = "dirt",
 	};
 	static Sound()
 	{

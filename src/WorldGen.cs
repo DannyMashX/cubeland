@@ -59,7 +59,7 @@ public class WorldGen
 
 	byte[] world => W.Blocks;
 	static int Idx(int x, int y, int z) => World.Idx(x, y, z);
-	const int WX = World.WX, WZ = World.WZ;
+	static int WX => World.WX; static int WZ => World.WZ;
 	static int WY => World.WY;
 	void Put(int x, int y, int z, int id, bool onlyAir = false)
 	{
@@ -71,8 +71,46 @@ public class WorldGen
 
 	public Action<float> Progress;
 
+	// --- Biome worlds (gen 3): two slow climate maps, warmth and wetness, pick each spot's biome ---
+	public const int Woods = 0, Plains = 1, Desert = 2, Snowy = 3, Swamp = 4, Taiga = 5, Meadow = 6, Badlands = 7;
+	// the climate borders (as the web version). Warmth: below COLD snowy, then up to COOL taiga, above HOT hot lands (desert where
+	// wetness is below ARID, badlands up to BADLANDS, then woods). In between: swamp above WET, plains below DRY, meadow up to MEADOW, then woods.
+	const double COLD = 0.33, COOL = 0.38, HOT = 0.54, ARID = 0.48, BADLANDS = 0.58, DRY = 0.38, MEADOW = 0.45, WET = 0.53;
+	double WarmthAt(double x, double z) => Fbm(x / 180 + 300, z / 180 + 300, 3, 1100);
+	double WetnessAt(double x, double z) => Fbm(x / 150 + 600, z / 150 + 600, 3, 1110);
+	public int BiomeAt(int x, int z)
+	{
+		double t = WarmthAt(x, z), w = WetnessAt(x, z);
+		if (t < COLD) return Snowy;
+		if (t < COOL) return Taiga;
+		if (t > HOT) return w < ARID ? Desert : w < BADLANDS ? Badlands : Woods;
+		return w > WET ? Swamp : w < DRY ? Plains : w < MEADOW ? Meadow : Woods;
+	}
+	// how much each biome holds a spot (0-1), fading over a short way (edge e) at the borders, so the land's shape and colours change smoothly
+	(double snowy, double taiga, double desert, double badlands, double swamp, double plains, double meadow) Climate(double x, double z, double e)
+	{
+		double t = WarmthAt(x, z), w = WetnessAt(x, z);
+		double cold = 1 - Smoothstep(COLD - e, COLD + e, t), cool = 1 - Smoothstep(COOL - e, COOL + e, t), hot = Smoothstep(HOT - e, HOT + e, t);
+		double arid = 1 - Smoothstep(ARID - e, ARID + e, w), bad = 1 - Smoothstep(BADLANDS - e, BADLANDS + e, w);
+		double dry = 1 - Smoothstep(DRY - e, DRY + e, w), mead = 1 - Smoothstep(MEADOW - e, MEADOW + e, w), wet = Smoothstep(WET - e, WET + e, w);
+		double mild = 1 - cool;   // (warmer than the taiga)
+		return (cold, cool - cold, mild * hot * arid, mild * hot * (1 - arid) * bad, mild * (1 - hot) * wet, mild * (1 - hot) * dry, mild * (1 - hot) * (1 - dry) * mead);
+	}
+	// the colour grass and leaves take on here (multiplies their green pixels; 1,1,1 = as drawn). Fades over a wider way than
+	// the land's shape so colours blend between biomes. Only in Biome worlds.
+	public Godot.Color GrassTint(double x, double z)
+	{
+		if (gen != 3) return new Godot.Color(1, 1, 1);
+		var c = Climate(x, z, 0.05);   // (snowy bluer, taiga blue-green, desert and badlands yellower, swamp murkier, plains brighter, meadow fresh green)
+		return new Godot.Color((float)(1 - 0.20 * c.snowy - 0.12 * c.taiga + 0.30 * c.desert + 0.24 * c.badlands - 0.10 * c.swamp + 0.08 * c.plains - 0.02 * c.meadow),
+		                 (float)(1 - 0.08 * c.snowy - 0.02 * c.taiga + 0.02 * c.desert + 0.00 * c.badlands - 0.10 * c.swamp + 0.06 * c.plains + 0.08 * c.meadow),
+		                 (float)(1 + 0.30 * c.snowy + 0.10 * c.taiga - 0.30 * c.desert - 0.30 * c.badlands - 0.25 * c.swamp - 0.15 * c.plains - 0.06 * c.meadow));
+	}
+	byte[] biomeMap = new byte[WX * WZ];
+
 	public void Generate()
 	{
+		if (gen == 3) System.Threading.Tasks.Parallel.For(0, WZ, z => { for (int x = 0; x < WX; x++) biomeMap[z * WX + x] = (byte)BiomeAt(x, z); });
 		if (gen == 1) for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
 		{
 			int h0 = GroundHeight(x, z);
@@ -86,11 +124,25 @@ public class WorldGen
 		W.RecomputeHeights();
 		Gravel();
 		Progress?.Invoke(0.55f);
+		// Biome worlds: swamps get pools, low spots dug out of the boggy ground (the water below fills them)
+		if (gen == 3) for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
+		{
+			if (biomeMap[z * WX + x] != Swamp || world[Idx(x, SeaLevel + 2, z)] != 0 || Fbm(x / 12.0 + 900, z / 12.0 + 900, 2, 1120) < 0.5) continue;
+			for (int y = SeaLevel; y <= SeaLevel + 1; y++) world[Idx(x, y, z)] = 0;
+			if (W.Heights[z * WX + x] > SeaLevel) W.Heights[z * WX + x] = SeaLevel;
+			if (Blocks.IsGrassy(world[Idx(x, SeaLevel - 1, z)])) world[Idx(x, SeaLevel - 1, z)] = Blocks.Mud;   // (a muddy bottom)
+		}
 		// Water: every low spot open to the sky fills up to sea level
 		for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
 			for (int y = SeaLevel; y > 0 && world[Idx(x, y, z)] == 0; y--) world[Idx(x, y, z)] = Blocks.Water;
 		PlaceOres();
-		if (gen == 2) CarveCaves();
+		if (gen >= 2) CarveCaves();
+		// Biome worlds: in snowy lands the top of open water (seas, lakes) freezes into Ice
+		if (gen == 3) for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
+		{
+			int i = Idx(x, SeaLevel, z);
+			if (biomeMap[z * WX + x] == Snowy && Blocks.IsWater(world[i]) && world[Idx(x, SeaLevel + 1, z)] == 0) world[i] = Blocks.Ice;
+		}
 		Strata();
 		Progress?.Invoke(0.75f);
 		Trees();
@@ -125,6 +177,13 @@ public class WorldGen
 				double bas = SeaLevel + 1 + (land - 0.44) * 120;
 				double rough = Smoothstep(0.38, 0.62, Fbm(x / 170.0 + 40, z / 170.0 + 40, 2, 910));
 				double amp = 5 + rough * 34;
+				if (gen == 3)   // biomes: plains flatten out, meadows roll gently, deserts rise out of the sea and roll gently, badlands rise
+				{               // higher into steep hills, swamps sit at sea level and go nearly flat
+					var b = Climate(x, z, 0.02);
+					amp *= 1 - 0.75 * b.plains - 0.45 * b.meadow - 0.55 * b.desert + 0.5 * b.badlands - 0.8 * b.swamp;
+					amp += 16 * b.badlands;   // (badlands are never flat: their striped sides show)
+					bas += (Math.Max(bas, SeaLevel + 5) - bas) * b.desert + (Math.Max(bas, SeaLevel + 10) - bas) * b.badlands + (SeaLevel + 0.3 - bas) * b.swamp;
+				}
 				for (int gy = 0; gy < ny; gy++)
 				{
 					int y = gy * GY, ny0 = y - Lift;   // (the same shapes as a short world, just lifted)
@@ -214,6 +273,9 @@ public class WorldGen
 		}
 	}
 
+	// the badlands' stripes, from the bottom up (they repeat): plain, orange, yellow, red, white and pink Terracotta
+	static readonly int[] BadlandsBands = { 65, 65, Blocks.ColourTerracotta[1], Blocks.ColourTerracotta[1], Blocks.ColourTerracotta[1], 65, Blocks.ColourTerracotta[2], 65, 65,
+		66, 66, 65, Blocks.ColourTerracotta[10], 65, Blocks.ColourTerracotta[1], 65, 65, Blocks.ColourTerracotta[9], 65 };
 	// --- Paint the land: grass on top, then dirt, then stone; sand, gravel and clay by the water ---
 	void Paint()
 	{
@@ -224,6 +286,7 @@ public class WorldGen
 				int depth = -1, surf = 1;
 				double beach = gen == 1 ? 0 : Fbm(x / 40.0, z / 40.0, 2, 950), gravelly = gen == 1 ? 0 : Fbm(x / 30.0 + 70, z / 30.0 + 70, 2, 960);
 				double clayey = gen == 1 ? 0 : Fbm(x / 14.0 + 140, z / 14.0 + 140, 2, 975);
+				int bandShift = biomeMap[z * WX + x] == Badlands ? (int)Math.Floor(Fbm(x / 40.0 + 77, z / 40.0 + 77, 2, 1130) * 8) : 0;   // (badlands: the stripes wave up and down a little)
 				for (int y = WY - 1; y >= 0; y--)
 				{
 					int i = Idx(x, y, z);
@@ -234,6 +297,34 @@ public class WorldGen
 					{
 						bool low = y <= SeaLevel;
 						world[i] = (byte)(depth == 0 ? (low ? 6 : 1) : depth <= 3 ? (low ? 6 : 2) : 3);
+						continue;
+					}
+					if (gen == 3)   // biome worlds: each biome its own ground
+					{
+						int bi = biomeMap[z * WX + x];
+						bool sandy = bi == Desert || bi == Badlands;
+						int grass = bi == Snowy ? Blocks.SnowyGrass : bi == Swamp ? Blocks.SwampGrass : sandy ? 6 : 1;
+						if (depth == 0)
+						{
+							if (y > SeaLevel + 1) surf = grass;
+							else if (y < SeaLevel && y >= SeaLevel - 8 && clayey > (bi == Swamp ? 0.5 : 0.62)) surf = 63;
+							else if (bi == Swamp && y >= SeaLevel - 4) surf = y >= SeaLevel ? Blocks.SwampGrass : 2;
+							else if (!sandy && gravelly > 0.6) surf = 11;
+							else if (y >= SeaLevel - 4) surf = sandy || beach > 0.4 ? 6 : y >= SeaLevel ? grass : 2;
+							else surf = 6;
+							if (bi == Swamp && surf == 2) surf = Blocks.Mud;   // (swamps: mud where other lands have dirt)
+						}
+						// badlands: the hills are stripes of coloured terracotta, 16 deep (sand only on the beaches)
+						if (bi == Badlands && surf == 6 && y >= SeaLevel - 3 && depth <= 16 && (depth > 0 || y > SeaLevel + 1))
+						{
+							int n = BadlandsBands.Length, k = (y + bandShift) % n;
+							world[i] = (byte)BadlandsBands[k < 0 ? k + n : k];
+							continue;
+						}
+						// under grass: dirt (in swamps: 3 of mud, then 2 of peat); under desert sand: 3 more sand, then 4 of sandstone; then stone
+						bool boggy = bi == Swamp && (surf == Blocks.SwampGrass || surf == Blocks.Mud);
+						world[i] = (byte)(depth == 0 ? surf : depth <= 3 ? (boggy ? Blocks.Mud : Blocks.IsGrassy(surf) ? 2 : surf) : boggy && depth <= 5 ? Blocks.Peat
+							: bi == Desert && surf == 6 && depth <= 7 ? Blocks.Sandstone : 3);
 						continue;
 					}
 					if (depth == 0)
@@ -359,13 +450,69 @@ public class WorldGen
 		for (int dy = -R; dy <= R; dy++) for (int dz = -R; dz <= R; dz++) for (int dx = -R; dx <= R; dx++)
 			if (dx * dx + dy * dy + dz * dz <= r * r) Put(cx + dx, cy + dy, cz + dz, 5, true);
 	}
-	void Trunk(int x, int y, int z, int h) { for (int yy = y + 1; yy <= y + h; yy++) Put(x, yy, z, 4, true); }
+	void Trunk(int x, int y, int z, int h, int log = Blocks.Log) { for (int yy = y + 1; yy <= y + h; yy++) Put(x, yy, z, log, true); }
 	double ForestAt(int x, int z) => Smoothstep(0.47, 0.6, Fbm(x / 110.0 + 20, z / 110.0 + 20, 2, 970));
+	// biome worlds: each biome's own trees (the Woods have the ones below)
+	static readonly int[][] PalmFronds = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 }, new[] { 1, 1 }, new[] { 1, -1 }, new[] { -1, 1 }, new[] { -1, -1 } };
+	void BiomeTree(int x, int h, int z, int bi)
+	{
+		int top = world[Idx(x, h, z)]; double v = Hash(x, z, 77), roll = Hash(x, z, 999);
+		if (bi == Plains || bi == Meadow)   // now and then a lone round tree (a few more in meadows)
+		{
+			if (top != 1 || roll > (bi == Meadow ? 0.0015 : 0.0008)) return;
+			int th = 5 + (int)(v * 3);
+			Trunk(x, h, z, th); LeafBall(x, h + th + 1, z, 2.3);
+		}
+		else if (bi == Snowy || bi == Taiga)   // Fir trees, pointed: rings of leaves, widest at the bottom, narrowing up to a point (taiga: thicker forests, no snow)
+		{
+			if (bi == Snowy ? top != Blocks.SnowyGrass || roll > 0.004 + ForestAt(x, z) * 0.03 : top != 1 || roll > 0.006 + ForestAt(x, z) * 0.045) return;
+			int th = 6 + (int)(v * 4), tip = h + th + 1;
+			Trunk(x, h, z, th, Blocks.FirLog);
+			for (int ly = h + 3; ly <= tip; ly++)
+			{
+				int r = Math.Min(3, (tip - ly + 1) >> 1);
+				for (int dz = -r; dz <= r; dz++) for (int dx = -r; dx <= r; dx++) if (dx * dx + dz * dz <= r * r + 1) Put(x + dx, ly, z + dz, Blocks.FirLeaves, true);
+			}
+		}
+		else if (bi == Desert)     // Palm trees, now and then: a tall bare trunk with a crown of long fronds drooping at the tips
+		{
+			if (top != 6 || h <= SeaLevel || roll > 0.002) return;
+			int th = 6 + (int)(v * 4), cy = h + th;
+			Trunk(x, h, z, th, Blocks.PalmLog);
+			Put(x, cy + 1, z, Blocks.PalmLeaves, true);
+			foreach (var d in PalmFronds)
+			{
+				int len = d[0] != 0 && d[1] != 0 ? 2 : 3;   // (shorter on the diagonals, so the crown looks round)
+				for (int k = 1; k <= len; k++) Put(x + d[0] * k, k < len ? cy + 1 : cy, z + d[1] * k, Blocks.PalmLeaves, true);
+				Put(x + d[0] * len, cy - 1, z + d[1] * len, Blocks.PalmLeaves, true);
+			}
+		}
+		else if (bi == Swamp)      // Willow trees: low and wide, with leaves drooping off the edges
+		{
+			if (top != Blocks.SwampGrass || roll > 0.012) return;
+			int th = 4 + (int)(v * 2), cy = h + th;
+			Trunk(x, h, z, th, Blocks.WillowLog);
+			for (int dz = -3; dz <= 3; dz++) for (int dx = -3; dx <= 3; dx++)
+			{
+				int d = dx * dx + dz * dz;
+				if (d > 10) continue;
+				Put(x + dx, cy, z + dz, Blocks.WillowLeaves, true);
+				if (d <= 5) Put(x + dx, cy + 1, z + dz, Blocks.WillowLeaves, true);
+				if (d >= 5)
+				{
+					double hang = Hash(x + dx, z + dz, 8080);
+					if (hang < 0.35) Put(x + dx, cy - 1, z + dz, Blocks.WillowLeaves, true);
+					if (hang < 0.12) Put(x + dx, cy - 2, z + dz, Blocks.WillowLeaves, true);
+				}
+			}
+		}
+	}
 	void Trees()
 	{
 		for (int z = 3; z < WZ - 3; z++) for (int x = 3; x < WX - 3; x++)
 		{
 			int h = W.Heights[z * WX + x];
+			if (gen == 3 && biomeMap[z * WX + x] != Woods) { BiomeTree(x, h, z, biomeMap[z * WX + x]); continue; }
 			if (world[Idx(x, h, z)] != 1 || Hash(x, z, 999) > (gen == 1 ? 0.011 : 0.003 + ForestAt(x, z) * 0.045)) continue;
 			double kind = gen == 1 ? Hash(x, z, 555) : Hash(x, z, 555) < 0.93 ? 0 : 0.95, v = Hash(x, z, 77);
 			if (kind < 0.45)
@@ -408,7 +555,8 @@ public class WorldGen
 		const double PATCH_CHANCE = 0.0012;   // out of every grass spot, how many are the middle of a patch
 		for (int z = 8; z < WZ - 8; z++) for (int x = 8; x < WX - 8; x++)
 		{
-			if (Hash(x, z, 5150) > PATCH_CHANCE) continue;
+			int bi = biomeMap[z * WX + x];
+			if (Hash(x, z, 5150) > (bi == Meadow ? PATCH_CHANCE * 15 : bi == Plains ? PATCH_CHANCE * 5 : PATCH_CHANCE)) continue;   // (plains: 5 times as many; meadows: 15 times)
 			int flower = Blocks.Flowers[(int)Math.Floor(Hash(x, z, 5151) * Blocks.Flowers.Length)];
 			int n = 5 + (int)Math.Floor(Hash(x, z, 5152) * 8);   // 5-12 tries at a flower, within 3 blocks of the middle
 			for (int k = 0; k < n; k++)

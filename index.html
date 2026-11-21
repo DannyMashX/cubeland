@@ -43,7 +43,8 @@
   #info { position: fixed; top: 8px; left: 8px; color: #fff; font-size: var(--f1); line-height: 1.5; text-shadow: 0 1px 2px #000; white-space: pre; }
   /* full-screen menus: the main menu (title screen) and the pause screen (#overlay) */
   .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; text-align: center; z-index: 15; }
-  #mainmenu { display: flex; background: rgba(0,0,0,.6); }
+  #mainmenu { display: flex; background: rgba(0,0,0,.15); }   /* (only lightly dimmed: the world turns slowly behind it, see panorama) */
+  body.title :is(#hotbar, #crosshair, #info, #hearts, #offhand-box, #blockname) { display: none !important; }   /* (no game screen behind the main menu) */
   .screen h1 { font-size: var(--f6); margin: 0 0 20px; letter-spacing: 2px; }
   .screen h2 { font-size: var(--f3); margin: 0 0 6px; letter-spacing: 1px; }
   .screen p { margin: 4px 0; }
@@ -443,6 +444,7 @@
       <input id="new-name" maxlength="32" placeholder="Name">
       <input id="new-seed" maxlength="24" placeholder="Seed (leave blank for random)">
       <span class="dropdown"><select id="new-gen" title="Terrain style">
+        <option value="3">Biomes</option>
         <option value="2">Rolling hills</option>
         <option value="1">Plateaus</option>
       </select></span>
@@ -478,7 +480,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=beta-0.1.0.1"></script>
+<script src="textures.js?v=beta-0.1.1.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -486,7 +488,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.0.1';
+const GAME_VERSION = 'Beta 0.1.1.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -526,9 +528,10 @@ const Worlds = (() => {
   // 2 = rolling hills (the default for new worlds)
   // mode = 'creative' or 'survival' (worlds made before survival existed have none and are creative)
   // h = the world's height: 192 (640 once TALL_WORLDS is on); worlds made before tall worlds have none and are 192
-  function create(name, seedText, gen = 2, mode = 'creative') {
+  // s = its width and depth: 1280 (a tall world 640); worlds made before 1280-wide worlds have none and are 640
+  function create(name, seedText, gen = 3, mode = 'creative') {
     const w = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name || '').trim().slice(0, 32) || `World ${list.length + 1}`,
-      seed: seedFrom(seedText), gen, h: TALL_WORLDS ? 640 : 192, mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
+      seed: seedFrom(seedText), gen, h: TALL_WORLDS ? 640 : 192, s: TALL_WORLDS ? 640 : 1280, mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
     list.push(w); saveList();
     return w;
   }
@@ -541,7 +544,7 @@ const Worlds = (() => {
   try { joined = JSON.parse(sessionStorage.getItem('cubeland-join')); } catch (e) {}
   let current;
   if (joinCode && joined && joined.code === joinCode && isFinite(joined.seed)) {
-    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, mode: joined.mode, temp: true, code: joinCode };
+    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, s: joined.s, mode: joined.mode, temp: true, code: joinCode };
   } else {
     let last = null;
     try { last = localStorage.getItem(LAST_KEY); } catch (e) {}
@@ -587,9 +590,10 @@ const Worlds = (() => {
 })();
 
 // ===================== World settings =====================
-// world size in blocks. New worlds are a 640 cube; worlds made before that (no h saved) stay 192 tall.
+// world size in blocks. New worlds are 1280 x 1280 (worlds made before that, with no s saved, and tall worlds are 640 x 640),
+// and 192 tall (640 tall once TALL_WORLDS is on; worlds made before that have no h saved and are 192 tall).
 // A tall world is the same land lifted up by LIFT, with solid rock below it (the same ~130 blocks of air above the sea).
-const WX = 640, WZ = 640, WY = Worlds.current.h === 640 ? 640 : 192;
+const WY = Worlds.current.h === 640 ? 640 : 192, WX = Worlds.current.s === 1280 && WY === 192 ? 1280 : 640, WZ = WX;
 const LIFT = WY - 192;
 const CS = 16;                        // chunk size: chunks are 16x16x16 cubes
 const NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;
@@ -597,56 +601,111 @@ const chunkKey = (cx, cy, cz) => (cy * NCZ + cz) * NCX + cx;
 const world = new Uint8Array(WX * WY * WZ);
 const idx = (x, y, z) => (y * WZ + z) * WX + x;
 
+// ===================== Pictures =====================
+// Pictures are known by NAME: the file's name in textures/blocks or textures/items, without .png (e.g. 'log_side').
+// Blocks and items say which pictures they use by name, and each name gets its own place in the texture atlas
+// the first time it's asked for, so a new picture never needs a number: just use its file name.
+const TILE_NAMES = [], TILE_OF = {};
+let atlasMade = false;
+// the place in the atlas of picture `name` (it gets one the first time it's asked for)
+function tile(name) {
+  if (name in TILE_OF) return TILE_OF[name];
+  if (atlasMade) throw new Error(`the picture "${name}" was asked for after the atlas was made`);
+  TILE_NAMES.push(name);
+  return (TILE_OF[name] = TILE_NAMES.length - 1);
+}
+const P = (...names) => names.map(tile);   // a block's pictures: side, top, bottom (and front)
+const P3 = name => P(name, name, name);    // the same picture on every side
+
 // ===================== Blocks =====================
-// t = [side tile, top tile, bottom tile] in the texture atlas
+// t = [side, top, bottom] pictures (their places in the texture atlas: see tile)
+// Fir: the snowy biome's wood (Oak is the original wood: 4, 5, 7 and 61)
+const FIR_LOG = 251, FIR_LEAVES = 252, FIR_PLANKS = 253, STRIPPED_FIR_LOG = 254;
+// Palm: the desert's trees (their leaves sometimes drop Dates). Willow: the swamp's trees
+const PALM_LOG = 16, PALM_LEAVES = 17, PALM_PLANKS = 18, STRIPPED_PALM_LOG = 19;
+const WILLOW_LOG = 20, WILLOW_LEAVES = 21, WILLOW_PLANKS = 59, STRIPPED_WILLOW_LOG = 160;
+// the desert's building stone (made from Sandstone), and the swamp's ground: Mud (fired into Mud Bricks) and Peat (a long-burning fuel)
+const SANDSTONE_BRICKS = 162, CHISELED_SANDSTONE = 199, SMOOTH_SANDSTONE = 202, MUD = 203, MUD_BRICKS = 204, PEAT = 205;
+const DATES = 705;   // food, from Palm Leaves
+// These blocks are numbered where 100 + b and 1000 + b would clash with other things (and Sandstone too): their piece, slab, stairs...
+// items are 2000 + 7 x (the block's place in this list) + the form, like the deep stone sets (see formItem). (Only ever add to the end of this list.)
+const EXTRA_FORM_ITEM = 2000, EXTRA_FORM_BLOCKS = [97, PALM_LOG, PALM_LEAVES, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_LOG, WILLOW_LEAVES, WILLOW_PLANKS, STRIPPED_WILLOW_LOG,
+  SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT];
+const isLeaves = b => b === 5 || b === FIR_LEAVES || b === PALM_LEAVES || b === WILLOW_LEAVES;
 const BLOCKS = {
-  1:  { name: 'Grass',       t: [1, 0, 2] },
-  2:  { name: 'Dirt',        t: [2, 2, 2] },
-  3:  { name: 'Stone',       t: [3, 3, 3] },
-  4:  { name: 'Log',         t: [4, 5, 5] },
-  5:  { name: 'Leaves',      t: [6, 6, 6], transparent: true },
-  6:  { name: 'Sand',        t: [7, 7, 7] },
-  7:  { name: 'Planks',      t: [8, 8, 8] },
-  8:  { name: 'Cobblestone', t: [9, 9, 9] },
-  9:  { name: 'Stone Bricks', t: [10, 10, 10] },
-  10: { name: 'Glass',       t: [11, 11, 11], transparent: true },
-  11: { name: 'Gravel',      t: [12, 12, 12] },
+  1:  { name: 'Grass',       t: P('grass_side', 'grass', 'dirt') },
+  2:  { name: 'Dirt',        t: P3('dirt') },
+  3:  { name: 'Stone',       t: P3('stone') },
+  4:  { name: 'Oak Log',     t: P('log_side', 'log_top', 'log_top') },
+  5:  { name: 'Oak Leaves',  t: P3('leaves'), transparent: true },
+  6:  { name: 'Sand',        t: P3('sand') },
+  7:  { name: 'Oak Planks',  t: P3('planks') },
+  8:  { name: 'Cobblestone', t: P3('cobblestone') },
+  9:  { name: 'Stone Bricks', t: P3('stone_bricks') },
+  10: { name: 'Glass',       t: P3('glass'), transparent: true },
+  11: { name: 'Gravel',      t: P3('gravel') },
   // Red Bricks: one block in the hotbar, but each placed brick is a random one of these 4 looks
-  12: { name: 'Red Bricks',  t: [13, 13, 13] },
-  13: { name: 'Red Bricks',  t: [14, 14, 14] },
-  14: { name: 'Red Bricks',  t: [15, 15, 15] },
-  15: { name: 'Red Bricks',  t: [16, 16, 16] },
+  12: { name: 'Red Bricks',  t: P3('bricks_a') },
+  13: { name: 'Red Bricks',  t: P3('bricks_b') },
+  14: { name: 'Red Bricks',  t: P3('bricks_c') },
+  15: { name: 'Red Bricks',  t: P3('bricks_d') },
   // (16-21 were ores, now removed from the game; those numbers are left unused)
   // (22-41 are torches and 50-57 water, see below)
-  60: { name: 'Crafting Bench', t: [28, 29, 8] },   // bottom is planks
+  // Biomes: Sandstone (under desert sand), Snowy Grass (snowy lands), Ice (their frozen seas and lakes), Swamp Grass (swamps)
+  97: { name: 'Sandstone',   t: P3('sandstone') },
+  98: { name: 'Snowy Grass', t: P('snowy_grass_side', 'snow', 'dirt') },
+  99: { name: 'Ice',         t: P3('ice'), transparent: true },
+  58: { name: 'Swamp Grass', t: P('swamp_grass_side', 'swamp_grass', 'dirt') },
+  60: { name: 'Crafting Bench', t: P('crafting_bench_side', 'crafting_bench_top', 'planks') },   // bottom is planks
   // the Cutter: cuts blocks into pieces, slabs and stairs. Half a block tall (shape 'half': drawn, walked on and aimed at like a bottom slab).
   // Pictures: cutter_base on the sides (its bottom half), the stripped log top on top, cutter_bottom underneath, and cutter_saw for its blade.
-  159: { name: 'Cutter', t: [241, 31, 242], shape: 'half', transparent: true, box: [0, 0, 0, 1, 0.5, 1] },
-  61: { name: 'Stripped Log',  t: [30, 31, 31] },
+  159: { name: 'Cutter', t: P('cutter_base', 'stripped_log_top', 'cutter_bottom'), shape: 'half', transparent: true, box: [0, 0, 0, 1, 0.5, 1] },
+  61: { name: 'Stripped Oak Log',  t: P('stripped_log_side', 'stripped_log_top', 'stripped_log_top') },
+  // Fir (the snowy biome's trees)
+  [FIR_LOG]:          { name: 'Fir Log',          t: P('fir_log_side', 'fir_log_top', 'fir_log_top') },
+  [FIR_LEAVES]:       { name: 'Fir Leaves',       t: P3('leaves'), transparent: true },   // (the Oak Leaves picture, tinted: see LEAF_TINT)
+  [FIR_PLANKS]:       { name: 'Fir Planks',       t: P3('fir_planks') },
+  [STRIPPED_FIR_LOG]: { name: 'Stripped Fir Log', t: P('stripped_fir_log_side', 'stripped_fir_log_top', 'stripped_fir_log_top') },
+  // Palm (the desert's trees) and Willow (the swamp's)
+  [PALM_LOG]:            { name: 'Palm Log',            t: P('palm_log_side', 'palm_log_top', 'palm_log_top') },
+  [PALM_LEAVES]:         { name: 'Palm Leaves',         t: P3('leaves'), transparent: true },   // (the Oak Leaves picture, tinted: see LEAF_TINT)
+  [PALM_PLANKS]:         { name: 'Palm Planks',         t: P3('palm_planks') },
+  [STRIPPED_PALM_LOG]:   { name: 'Stripped Palm Log',   t: P('stripped_palm_log_side', 'stripped_palm_log_top', 'stripped_palm_log_top') },
+  [WILLOW_LOG]:          { name: 'Willow Log',          t: P('willow_log_side', 'willow_log_top', 'willow_log_top') },
+  [WILLOW_LEAVES]:       { name: 'Willow Leaves',       t: P3('leaves'), transparent: true },
+  [WILLOW_PLANKS]:       { name: 'Willow Planks',       t: P3('willow_planks') },
+  [STRIPPED_WILLOW_LOG]: { name: 'Stripped Willow Log', t: P('stripped_willow_log_side', 'stripped_willow_log_top', 'stripped_willow_log_top') },
+  // the desert's building stone and the swamp's ground
+  [SANDSTONE_BRICKS]:    { name: 'Sandstone Bricks',    t: P3('sandstone_bricks') },
+  [CHISELED_SANDSTONE]:  { name: 'Chiseled Sandstone',  t: P3('chiseled_sandstone') },
+  [SMOOTH_SANDSTONE]:    { name: 'Smooth Sandstone',    t: P3('smooth_sandstone') },
+  [MUD]:                 { name: 'Mud',                 t: P3('mud') },
+  [MUD_BRICKS]:          { name: 'Mud Bricks',          t: P3('mud_bricks') },
+  [PEAT]:                { name: 'Peat',                t: P3('peat') },
   // a rock lying flat on the ground (your rock picture, turned a random way); breaking it gives you a Rock to carry
   // box: the part you can aim at and hit (inside the block space)
-  62: { name: 'Rock', t: [33, 33, 33], transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
+  62: { name: 'Rock', t: P3('rock'), transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
   // clay and what it's made into
-  63: { name: 'Clay',                    t: [17, 17, 17] },   // soil family (with Dirt, Gravel and Sand)
-  64: { name: 'Bricks',                  t: [18, 18, 18] },   // made from Brick items
-  65: { name: 'Terracotta',              t: [19, 19, 19] },
-  66: { name: 'Red Terracotta',          t: [20, 20, 20] },
-  67: { name: 'Chiseled Terracotta',     t: [21, 21, 21] },
-  68: { name: 'Chiseled Red Terracotta', t: [22, 22, 22] },
-  69: { name: 'Chiseled Stone',          t: [35, 35, 35] },
+  63: { name: 'Clay',                    t: P3('clay') },   // soil family (with Dirt, Gravel and Sand)
+  64: { name: 'Bricks',                  t: P3('bricks') },   // made from Brick items
+  65: { name: 'Terracotta',              t: P3('terracotta') },
+  66: { name: 'Red Terracotta',          t: P3('red_terracotta') },
+  67: { name: 'Chiseled Terracotta',     t: P3('chiseled_terracotta') },
+  68: { name: 'Chiseled Red Terracotta', t: P3('chiseled_red_terracotta') },
+  69: { name: 'Chiseled Stone',          t: P3('chiseled_stone') },
   // (70 is pieces, see below)
   // a Clay Ball lying on the ground, drying; after DRY_TIME it turns into a Brick lying there
-  71: { name: 'Clay Ball', t: [45, 45, 45], transparent: true, noCollide: true, shape: 'flat', box: [0.15, 0, 0.15, 0.85, 0.12, 0.85] },
-  72: { name: 'Brick',     t: [46, 46, 46], transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
+  71: { name: 'Clay Ball', t: P3('clay_ball'), transparent: true, noCollide: true, shape: 'flat', box: [0.15, 0, 0.15, 0.85, 0.12, 0.85] },
+  72: { name: 'Brick',     t: P3('brick'), transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
 };
 // Kiln (called FURNACE / furnace in the code; the player sees "Kiln"): 73-76 unlit, 77-80 lit (burning). Each faces one way: its front picture is on the side that faced you
 // when you put it down. t = [side, top (the Bricks picture), bottom, front]
 const FURNACE = 73, FURNACE_FRONTS = [[0, 1], [1, 0], [0, -1], [-1, 0]];   // [x, z] direction the front faces
 FURNACE_FRONTS.forEach((front, k) => {
-  BLOCKS[FURNACE + k] = { name: 'Kiln', t: [43, 18, 44, 36], front, facing: k, drop: FURNACE };
-  BLOCKS[FURNACE + 4 + k] = { name: 'Kiln', t: [43, 18, 44, 37], front, facing: k, lit: true, drop: FURNACE };
+  BLOCKS[FURNACE + k] = { name: 'Kiln', t: P('kiln_side', 'bricks', 'kiln_bottom', 'kiln_front'), front, facing: k, drop: FURNACE };
+  BLOCKS[FURNACE + 4 + k] = { name: 'Kiln', t: P('kiln_side', 'bricks', 'kiln_bottom', 'kiln_front_on'), front, facing: k, lit: true, drop: FURNACE };
 });
-BLOCKS[FURNACE].icon = 36;   // its hotbar picture: the front
+BLOCKS[FURNACE].icon = tile('kiln_front');   // its hotbar picture: the front
 const isFurnace = id => (id >= FURNACE && id < FURNACE + 8) || isFoundry(id);   // a Kiln or the Foundry's Furnace (they work the same way)
 const furnaceBase = id => isFoundry(id) ? FOUNDRY : FURNACE;   // its first (unlit, facing 0) id
 const drying = new Map();     // world index of a Clay Ball on the ground -> seconds until it's a Brick
@@ -662,17 +721,17 @@ const TORCH = 22;
 const TORCH_WALLS = [null, [-1, 0], [1, 0], [0, -1], [0, 1]];   // null = standing; otherwise the direction of the wall
 const TORCH_IDS = {};
 const TORCH_STATES = [
-  { name: 'Torch', t: [23, 24, 25] },
-  { name: 'Smoldering Torch', t: [48, 49, 25] },
-  { name: 'Burnt Torch', t: [50, 51, 25] },
-  { name: 'Ever Torch', t: [23, 24, 25] },   // burn 3: a Torch + Fire Essence; stays lit forever, with fire essence sparks rising off it
+  { name: 'Torch', t: P('torch_side', 'torch_top', 'torch_bottom') },
+  { name: 'Smoldering Torch', t: P('smoldering_torch_side', 'smoldering_torch_top', 'torch_bottom') },
+  { name: 'Burnt Torch', t: P('burnt_torch_side', 'burnt_torch_top', 'torch_bottom') },
+  { name: 'Ever Torch', t: P('torch_side', 'torch_top', 'torch_bottom') },   // burn 3: a Torch + Fire Essence; stays lit forever, with fire essence sparks rising off it
 ];
 {
   let next = 27;
   TORCH_WALLS.forEach((wall, wi) => {
     for (let n = 1; n <= 4; n++) {
       const id = n === 1 ? 22 + wi : next++;
-      BLOCKS[id] = { name: 'Torch', t: [23, 24, 25], transparent: true, shape: 'torch', noCollide: true, wall, wi, count: n, burn: 0 };
+      BLOCKS[id] = { name: 'Torch', t: TORCH_STATES[0].t, transparent: true, shape: 'torch', noCollide: true, wall, wi, count: n, burn: 0 };
       TORCH_IDS['0:' + wi + ':' + n] = id;
     }
   });
@@ -704,7 +763,7 @@ const isTorch = id => !!(BLOCKS[id] && BLOCKS[id].shape === 'torch');
 // Water: see-through, you swim in it, and it flows. 50 = still water (lakes and seas, or water you place);
 // 51-57 = flowing water, one step weaker for each block it runs from the still water (it stops after 7).
 const WATER = 50;
-for (let l = 0; l <= 7; l++) BLOCKS[WATER + l] = { name: 'Water', t: [27, 27, 27], transparent: true, noCollide: true, liquid: true, level: l };
+for (let l = 0; l <= 7; l++) BLOCKS[WATER + l] = { name: 'Water', t: P3('water'), transparent: true, noCollide: true, liquid: true, level: l };
 const isWater = id => id >= WATER && id <= WATER + 7;
 // how high the water's surface sits in its block (water with more water on top fills the whole block)
 const waterHeight = (id, above) => isWater(above) ? 1 : id === WATER ? 0.875 : Math.max(0.15, 0.875 * (8 - (id - WATER)) / 8);
@@ -714,21 +773,21 @@ const wallIndex = (dx, dz) => TORCH_WALLS.findIndex(w => w && w[0] === dx && w[1
 // Items: things you carry but can't place (ids 200+). They share the block list so icons and names work the same way.
 // They aren't in the inventory: you get them from drops, and they stack in the hotbar.
 const CHOCOLATE = 200;
-BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: [26, 26, 26], item: true, food: 4 };   // food: eating it heals 1 heart (survival; in quarter hearts)
+BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: P3('chocolate'), item: true, food: 4 };   // food: eating it heals 1 heart (survival; in quarter hearts)
 const isItem = id => !!(BLOCKS[id] && BLOCKS[id].item);
 // Stick and tools, from your pictures in textures/items. Tools don't stack.
 // damage = how much a hit takes off a mob (a hand or any other item does 1)
 // Ids: stick 201, stone tools 207-211. (202-206 were the wooden tools, now removed; those numbers stay unused
 // so saved worlds still have the right tools.)
 const STICK = 201;
-BLOCKS[STICK] = { name: 'Stick', t: [32, 32, 32], item: true };
+BLOCKS[STICK] = { name: 'Stick', t: P3('stick'), item: true };
 const TOOLS = [];
-// Metal tools (Pack & Plate): ids 644-668 (copper, iron, bronite, rosium, steel), 5 each in the same order; pictures 179-203.
-[['stone', 'Stone', 38, 3, 207], ['copper', 'Copper', 179, 4, 644], ['iron', 'Iron', 184, 5, 649], ['bronite', 'Bronite', 189, 6, 654],
- ['rosium', 'Rosium', 194, 7, 659], ['steel', 'Steel', 199, 8, 664]].forEach(([key, label, tile, swordDamage, firstId]) => {
+// Metal tools (Pack & Plate): ids 644-668 (copper, iron, bronite, rosium, steel), 5 each in the same order; pictures <metal>_axe, <metal>_pickaxe...
+[['stone', 'Stone', 3, 207], ['copper', 'Copper', 4, 644], ['iron', 'Iron', 5, 649], ['bronite', 'Bronite', 6, 654],
+ ['rosium', 'Rosium', 7, 659], ['steel', 'Steel', 8, 664]].forEach(([key, label, swordDamage, firstId]) => {
   ['Axe', 'Pickaxe', 'Shovel', 'Sword', 'Hoe'].forEach((kind, k) => {
     const id = firstId + k;
-    BLOCKS[id] = { name: `${label} ${kind}`, t: [tile + k, tile + k, tile + k], item: true, tool: kind.toLowerCase(), material: key,
+    BLOCKS[id] = { name: `${label} ${kind}`, t: P3(key + '_' + kind.toLowerCase()), item: true, tool: kind.toLowerCase(), material: key,
       damage: kind === 'Sword' ? swordDamage : kind === 'Axe' ? swordDamage - 1 : 1 };
     TOOLS.push(id);
   });
@@ -736,7 +795,7 @@ const TOOLS = [];
 // Rock (212): picked up from the ground near beaches; can be put back down (places: the block it puts down).
 // Crude Axe (213): 2 Rocks + a Stick, made in the inventory. (214 was the Crude Pickaxe, now removed; the number stays unused.)
 const ROCK = 212, ROCK_BLOCK = 62, CRUDE_AXE = 213;
-BLOCKS[ROCK] = { name: 'Rock', t: [33, 33, 33], item: true, places: ROCK_BLOCK };
+BLOCKS[ROCK] = { name: 'Rock', t: P3('rock'), item: true, places: ROCK_BLOCK };
 BLOCKS[ROCK_BLOCK].drop = ROCK;
 BLOCKS[3].drop = 8;   // mining Stone gives Cobblestone
 // Strata (640-tall worlds): from sea level down, a new layer of stone every 64 blocks, down to bedrock at the very bottom.
@@ -752,35 +811,36 @@ const deepRow = b => Array.from({ length: STRATA_LAYERS - 1 }, (_, k) => DEEP_SE
 const deepShown = b => TALL_WORLDS ? deepRow(b) : [];   // the same, but only while tall worlds are on (for the inventory and recipes)
 for (let n = 2; n <= STRATA_LAYERS; n++) {
   const k = n - 2;
-  BLOCKS[STRATA + k] = { name: 'Stone', t: [122 + n, 122 + n, 122 + n], drop: DEEP_COBBLE + k, layer: n };
-  BLOCKS[DEEP_COBBLE + k] = { name: 'Cobblestone', t: [130 + n, 130 + n, 130 + n], layer: n };
-  BLOCKS[DEEP_BRICKS + k] = { name: 'Stone Bricks', t: [137 + n, 137 + n, 137 + n], layer: n };
-  BLOCKS[DEEP_CHISELED + k] = { name: 'Chiseled Stone', t: [144 + n, 144 + n, 144 + n], layer: n };
+  BLOCKS[STRATA + k] = { name: 'Stone', t: P3('stone_layer_' + n), drop: DEEP_COBBLE + k, layer: n };
+  BLOCKS[DEEP_COBBLE + k] = { name: 'Cobblestone', t: P3('cobblestone_layer_' + n), layer: n };
+  BLOCKS[DEEP_BRICKS + k] = { name: 'Stone Bricks', t: P3('stone_bricks_layer_' + n), layer: n };
+  BLOCKS[DEEP_CHISELED + k] = { name: 'Chiseled Stone', t: P3('chiseled_stone_layer_' + n), layer: n };
 }
 const DEEP_BLOCKS = [3, 8, 9, 69].flatMap(deepRow);
 // what a piece, slab or stairs of this block gives when broken (Stone, deep or not, gives its Cobblestone)
 const stoneDropOf = b => b === 3 || (b >= STRATA && b < BEDROCK) ? BLOCKS[b].drop : b;
-BLOCKS[BEDROCK] = { name: 'Bedrock', t: [131, 131, 131] };
+BLOCKS[BEDROCK] = { name: 'Bedrock', t: P3('bedrock') };
 const stoneLayer = b => b === 3 ? 1 : (BLOCKS[b] && BLOCKS[b].layer) || 0;
 // the deepest layer each pickaxe can mine, by what it's made of (copper and up are still to come)
 const STRATA_PICKAXE = { stone: 2, copper: 3, iron: 4, bronite: 6, rosium: 7, steel: 8 };
 BLOCKS[1].drop = 2;   // digging up Grass gives Dirt
-BLOCKS[CRUDE_AXE] = { name: 'Crude Axe', t: [34, 34, 34], item: true, tool: 'axe', material: 'crude', damage: 1 };
+BLOCKS[98].drop = BLOCKS[58].drop = 2;   // and Snowy Grass and Swamp Grass give Dirt too
+BLOCKS[CRUDE_AXE] = { name: 'Crude Axe', t: P3('crude_axe'), item: true, tool: 'axe', material: 'crude', damage: 1 };
 // Clay Ball (215): put it down on the ground and it dries into a Brick (216) in DRY_TIME seconds, which you pick up.
 const CLAY_BALL = 215, BRICK = 216, CLAY_BALL_BLOCK = 71, BRICK_BLOCK = 72, DRY_TIME = 120;
-BLOCKS[CLAY_BALL] = { name: 'Clay Ball', t: [45, 45, 45], item: true, places: CLAY_BALL_BLOCK };
-BLOCKS[BRICK] = { name: 'Brick', t: [46, 46, 46], item: true };
+BLOCKS[CLAY_BALL] = { name: 'Clay Ball', t: P3('clay_ball'), item: true, places: CLAY_BALL_BLOCK };
+BLOCKS[BRICK] = { name: 'Brick', t: P3('brick'), item: true };
 // Fire Essence: 1 in 20 Grrs drop one. Right-click while holding it to lift all your gloom at once (see Gloom)
 const FIRE_ESSENCE = 217;
-BLOCKS[FIRE_ESSENCE] = { name: 'Fire Essence', t: [47, 47, 47], item: true };
+BLOCKS[FIRE_ESSENCE] = { name: 'Fire Essence', t: P3('fire_essence'), item: true };
 BLOCKS[CLAY_BALL_BLOCK].drop = CLAY_BALL;
 BLOCKS[BRICK_BLOCK].drop = BRICK;
 // Fear & Foes: a Skeleton drops Bones (burn one in the Kiln for Bone Ash, which makes White Dye); a Gloomling beaten in the
 // dark leaves a Gloom Wisp (which makes Black Dye). Items 620+ (600-611 are the dyes).
 const BONE = 620, BONE_ASH = 621, GLOOM_WISP = 622;
-BLOCKS[BONE] = { name: 'Bone', t: [102, 102, 102], item: true };
-BLOCKS[BONE_ASH] = { name: 'Bone Ash', t: [103, 103, 103], item: true };
-BLOCKS[GLOOM_WISP] = { name: 'Gloom Wisp', t: [104, 104, 104], item: true };
+BLOCKS[BONE] = { name: 'Bone', t: P3('bone'), item: true };
+BLOCKS[BONE_ASH] = { name: 'Bone Ash', t: P3('bone_ash'), item: true };
+BLOCKS[GLOOM_WISP] = { name: 'Gloom Wisp', t: P3('gloom_wisp'), item: true };
 // ---- Till & Tend: farming Grain ----
 // Use a Hoe on Grass or Dirt (with nothing on top) to till it. Tilling Grass sometimes turns up Grain Seeds.
 // Plant Grain Seeds on tilled soil; the Grain grows through 8 stages (42-49), and the last one is ripe: break it for
@@ -793,20 +853,21 @@ const GRAIN_SEEDS = 623, GRAIN = 624, FLOUR = 625, BREAD = 626;
 const TILLED = 93, WET_TILLED = 94, FERTILIZED = 95, WET_FERTILIZED = 96;
 const GRAIN_STAGES = [42, 43, 44, 45, 46, 47, 48, 49], GRAIN_RIPE = 49;
 const FARM = { stageTime: 40, stageHits: 3, dryRate: 0.5, fertRate: 1.6, wetReach: 5, fertHarvests: 2, revertTime: 180, seedChance: 1 / 6 };
-BLOCKS[GRAIN_SEEDS] = { name: 'Grain Seeds', t: [105, 105, 105], item: true };
-BLOCKS[GRAIN] = { name: 'Grain', t: [106, 106, 106], item: true };
-BLOCKS[FLOUR] = { name: 'Flour', t: [107, 107, 107], item: true };
-BLOCKS[BREAD] = { name: 'Bread', t: [108, 108, 108], item: true, food: 6 };
+BLOCKS[GRAIN_SEEDS] = { name: 'Grain Seeds', t: P3('grain_seeds'), item: true };
+BLOCKS[GRAIN] = { name: 'Grain', t: P3('grain'), item: true };
+BLOCKS[FLOUR] = { name: 'Flour', t: P3('flour'), item: true };
+BLOCKS[BREAD] = { name: 'Bread', t: P3('bread'), item: true, food: 6 };
+BLOCKS[DATES] = { name: 'Dates', t: P3('dates'), item: true, food: 3 };
 // cows: Leather (more from a cow with room to roam), Raw Meat (more from a well-fed cow) -> Cooked Meat in the Kiln
 const LEATHER = 627, RAW_MEAT = 628, COOKED_MEAT = 629;
-BLOCKS[LEATHER] = { name: 'Leather', t: [121, 121, 121], item: true };
-BLOCKS[RAW_MEAT] = { name: 'Raw Meat', t: [122, 122, 122], item: true, food: 2 };
-BLOCKS[COOKED_MEAT] = { name: 'Cooked Meat', t: [123, 123, 123], item: true, food: 8 };
-[['Tilled Dirt', 109], ['Wet Tilled Dirt', 110], ['Fertilized Dirt', 111], ['Wet Fertilized Dirt', 112]].forEach(([name, top], k) => {
-  BLOCKS[TILLED + k] = { name, t: [2, top, 2], drop: 2, soil: true, wet: k % 2 === 1, fert: k >= 2 };   // (t: side, top, bottom)
+BLOCKS[LEATHER] = { name: 'Leather', t: P3('leather'), item: true };
+BLOCKS[RAW_MEAT] = { name: 'Raw Meat', t: P3('raw_meat'), item: true, food: 2 };
+BLOCKS[COOKED_MEAT] = { name: 'Cooked Meat', t: P3('cooked_meat'), item: true, food: 8 };
+[['Tilled Dirt', 'tilled_dirt'], ['Wet Tilled Dirt', 'wet_tilled_dirt'], ['Fertilized Dirt', 'fertilized_dirt'], ['Wet Fertilized Dirt', 'wet_fertilized_dirt']].forEach(([name, top], k) => {
+  BLOCKS[TILLED + k] = { name, t: P('dirt', top, 'dirt'), drop: 2, soil: true, wet: k % 2 === 1, fert: k >= 2 };   // (t: side, top, bottom)
 });
 GRAIN_STAGES.forEach((id, k) => {
-  BLOCKS[id] = { name: 'Grain', t: [113 + k, 113 + k, 113 + k], transparent: true, noCollide: true, shape: 'plant',
+  BLOCKS[id] = { name: 'Grain', t: P3('grain_stage_' + k), transparent: true, noCollide: true, shape: 'plant',
     box: [0.15, 0, 0.15, 0.85, 0.15 + k * 0.12, 0.85], drop: k === 7 ? GRAIN : GRAIN_SEEDS, stage: k };
 });
 const isSoil = id => !!(BLOCKS[id] && BLOCKS[id].soil);
@@ -825,14 +886,13 @@ const COLOUR_CHISELED = COLOURS.map((c, k) => k ? 228 + k : 68);
 const COLOUR_BRICKS = COLOURS.map((c, k) => k ? 239 + k : 12);
 const DYE = COLOURS.map((c, k) => 600 + k);
 const dyeOf = c => DYE[COLOURS.indexOf(c)];
-// atlas pictures: terracotta 52-62, chiseled 63-73, bricks 74-84 (orange..black), flowers 85-89, dyes 90-101 (red..black)
 COLOURS.forEach((c, k) => {
   const C = colourName(c);
-  BLOCKS[DYE[k]] = { name: `${C} Dye`, t: [90 + k, 90 + k, 90 + k], item: true };
+  BLOCKS[DYE[k]] = { name: `${C} Dye`, t: P3(c + '_dye'), item: true };
   if (!k) return;   // (red's blocks are above)
-  BLOCKS[COLOUR_TERRACOTTA[k]] = { name: `${C} Terracotta`, t: [51 + k, 51 + k, 51 + k] };
-  BLOCKS[COLOUR_CHISELED[k]] = { name: `Chiseled ${C} Terracotta`, t: [62 + k, 62 + k, 62 + k] };
-  BLOCKS[COLOUR_BRICKS[k]] = { name: `${C} Bricks`, t: [73 + k, 73 + k, 73 + k] };
+  BLOCKS[COLOUR_TERRACOTTA[k]] = { name: `${C} Terracotta`, t: P3(c + '_terracotta') };
+  BLOCKS[COLOUR_CHISELED[k]] = { name: `Chiseled ${C} Terracotta`, t: P3(c + '_chiseled_terracotta') };
+  BLOCKS[COLOUR_BRICKS[k]] = { name: `${C} Bricks`, t: P3(c + '_bricks') };
 });
 const NEW_COLOUR_BLOCKS = [...COLOUR_TERRACOTTA.slice(1), ...COLOUR_CHISELED.slice(1), ...COLOUR_BRICKS.slice(1)];
 // ---- Pack & Plate: ores, Fireclay and the Foundry ----
@@ -852,27 +912,27 @@ const STEEL_SCRAP = 640, STEEL_BRICK = 641, FIRECLAY_BALL = 642, FIRECLAY_BRICK 
 const PICK_TIER = { stone: 1, copper: 2, iron: 3, bronite: 4, rosium: 5, steel: 6 };   // how good each pickaxe is
 METALS.forEach((m, k) => {
   const M = colourName(m);
-  BLOCKS[ORES[k]] = { name: `${M} Ore`, t: [153 + k, 153 + k, 153 + k], drop: CHUNK[m], pick: [1, 2, 3, 3][k] };
-  BLOCKS[CHUNK[m]] = { name: `${M} Chunk`, t: [165 + k, 165 + k, 165 + k], item: true };
-  BLOCKS[METAL_BRICK[m]] = { name: `${M} Brick`, t: [169 + k, 169 + k, 169 + k], item: true };
+  BLOCKS[ORES[k]] = { name: `${M} Ore`, t: P3(m + '_ore'), drop: CHUNK[m], pick: [1, 2, 3, 3][k] };
+  BLOCKS[CHUNK[m]] = { name: `${M} Chunk`, t: P3(m + '_chunk'), item: true };
+  BLOCKS[METAL_BRICK[m]] = { name: `${M} Brick`, t: P3(m + '_brick'), item: true };
 });
-BLOCKS[METAL_BRICK.bronite] = { name: 'Bronite Brick', t: [173, 173, 173], item: true };
-BLOCKS[METAL_BRICK.rosium] = { name: 'Rosium Brick', t: [174, 174, 174], item: true };
-BLOCKS[STEEL_SCRAP] = { name: 'Steel Scrap', t: [175, 175, 175], item: true };
-BLOCKS[STEEL_BRICK] = { name: 'Steel Brick', t: [176, 176, 176], item: true };
-BLOCKS[FIRECLAY_BALL] = { name: 'Fireclay Ball', t: [177, 177, 177], item: true };
-BLOCKS[FIRECLAY_BRICK] = { name: 'Fireclay Brick', t: [178, 178, 178], item: true };
+BLOCKS[METAL_BRICK.bronite] = { name: 'Bronite Brick', t: P3('bronite_brick'), item: true };
+BLOCKS[METAL_BRICK.rosium] = { name: 'Rosium Brick', t: P3('rosium_brick'), item: true };
+BLOCKS[STEEL_SCRAP] = { name: 'Steel Scrap', t: P3('steel_scrap'), item: true };
+BLOCKS[STEEL_BRICK] = { name: 'Steel Brick', t: P3('steel_brick'), item: true };
+BLOCKS[FIRECLAY_BALL] = { name: 'Fireclay Ball', t: P3('fireclay_ball'), item: true };
+BLOCKS[FIRECLAY_BRICK] = { name: 'Fireclay Brick', t: P3('fireclay_brick'), item: true };
 // handDrop: dug without a shovel it gives [item, fewest, most] of that instead of the block
-BLOCKS[FIRECLAY] = { name: 'Fireclay', t: [157, 157, 157], handDrop: [FIRECLAY_BALL, 1, 4] };
-BLOCKS[FIRECLAY_TERRACOTTA] = { name: 'Fireclay Terracotta', t: [158, 158, 158] };
-BLOCKS[FIRECLAY_BRICKS] = { name: 'Fireclay Bricks', t: [159, 159, 159] };
-BLOCKS[FIRECLAY_CASING] = { name: 'Fireclay Casing', t: [160, 160, 160] };
-BLOCKS[CHISELED_FIRECLAY] = { name: 'Chiseled Fireclay', t: [161, 161, 161] };
+BLOCKS[FIRECLAY] = { name: 'Fireclay', t: P3('fireclay'), handDrop: [FIRECLAY_BALL, 1, 4] };
+BLOCKS[FIRECLAY_TERRACOTTA] = { name: 'Fireclay Terracotta', t: P3('fireclay_terracotta') };
+BLOCKS[FIRECLAY_BRICKS] = { name: 'Fireclay Bricks', t: P3('fireclay_bricks') };
+BLOCKS[FIRECLAY_CASING] = { name: 'Fireclay Casing', t: P3('fireclay_casing') };
+BLOCKS[CHISELED_FIRECLAY] = { name: 'Chiseled Fireclay', t: P3('chiseled_fireclay') };
 FURNACE_FRONTS.forEach((front, k) => {
-  BLOCKS[FOUNDRY + k] = { name: 'Furnace', t: [160, 159, 164, 162], front, facing: k, drop: FOUNDRY };
-  BLOCKS[FOUNDRY + 4 + k] = { name: 'Furnace', t: [160, 159, 164, 163], front, facing: k, lit: true, drop: FOUNDRY };
+  BLOCKS[FOUNDRY + k] = { name: 'Furnace', t: P('fireclay_casing', 'fireclay_bricks', 'furnace_bottom', 'furnace_front'), front, facing: k, drop: FOUNDRY };
+  BLOCKS[FOUNDRY + 4 + k] = { name: 'Furnace', t: P('fireclay_casing', 'fireclay_bricks', 'furnace_bottom', 'furnace_front_on'), front, facing: k, lit: true, drop: FOUNDRY };
 });
-BLOCKS[FOUNDRY].icon = 162;
+BLOCKS[FOUNDRY].icon = tile('furnace_front');
 const isFoundry = id => id >= FOUNDRY && id < FOUNDRY + 8;
 const FIRECLAY_BLOCKS = [FIRECLAY_TERRACOTTA, FIRECLAY_BRICKS, FIRECLAY_CASING, CHISELED_FIRECLAY];
 // Armor (helmet, chestplate, leggings, boots), Backpacks and Utility Belts, one of each per material.
@@ -887,12 +947,11 @@ const ARMOR_ITEMS = [];
 GEAR_TIERS.forEach((m, t) => {
   const M = colourName(m);
   ARMOR_PIECES.forEach((piece, k) => {
-    const tile = 204 + t * 4 + k;
-    BLOCKS[ARMOR_ITEM(t, k)] = { name: `${M} ${colourName(piece)}`, t: [tile, tile, tile], item: true, armor: k, material: m };
+    BLOCKS[ARMOR_ITEM(t, k)] = { name: `${M} ${colourName(piece)}`, t: P3(m + '_' + piece), item: true, armor: k, material: m };
     ARMOR_ITEMS.push(ARMOR_ITEM(t, k));
   });
-  BLOCKS[BACKPACKS[t]] = { name: `${M} Backpack`, t: [228 + t, 228 + t, 228 + t], item: true, pack: PACK_SLOTS[t], material: m };
-  BLOCKS[BELTS[t]] = { name: `${M} Utility Belt`, t: [234 + t, 234 + t, 234 + t], item: true, belt: BELT_SLOTS[t], tools: t + 2, material: m };
+  BLOCKS[BACKPACKS[t]] = { name: `${M} Backpack`, t: P3(m + '_backpack'), item: true, pack: PACK_SLOTS[t], material: m };
+  BLOCKS[BELTS[t]] = { name: `${M} Utility Belt`, t: P3(m + '_utility_belt'), item: true, belt: BELT_SLOTS[t], tools: t + 2, material: m };
 });
 const GEAR_ITEMS = [...ARMOR_ITEMS, ...BACKPACKS, ...BELTS];
 const isGear = id => !!(BLOCKS[id] && (BLOCKS[id].armor !== undefined || BLOCKS[id].pack || BLOCKS[id].belt));
@@ -902,7 +961,7 @@ const PACK_ITEMS = [...Object.values(CHUNK), 634, 635, 636, 637, 638, 639, STEEL
 const FLOWER_COLOURS = ['red', 'yellow', 'aqua', 'indigo', 'magenta'];
 const FLOWERS = FLOWER_COLOURS.map((c, k) => 194 + k);
 FLOWER_COLOURS.forEach((c, k) => {
-  BLOCKS[FLOWERS[k]] = { name: `${colourName(c)} Flower`, t: [85 + k, 85 + k, 85 + k], transparent: true, noCollide: true, shape: 'plant',
+  BLOCKS[FLOWERS[k]] = { name: `${colourName(c)} Flower`, t: P3(c + '_flower'), transparent: true, noCollide: true, shape: 'plant',
     box: [0.25, 0, 0.25, 0.75, 0.7, 0.75], dye: dyeOf(c) };
 });
 const isFlower = id => FLOWERS.includes(id);
@@ -913,9 +972,10 @@ const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // The soil family (Dirt, Grass, Sand, Gravel and Clay) can be dug by hand, but then gives 1-8 pieces instead of
 // the whole block (a shovel gets you the whole block). Grass gives Dirt.
 // Bricks, Terracotta, the chiseled blocks and the Furnace count as stone-type too.
-const NEEDS_AXE = [4, 7, 61], DIGGABLE = [1, 2, 6, 11, 63, FIRECLAY, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED];
+const NEEDS_AXE = [4, 7, 61, FIR_LOG, FIR_PLANKS, STRIPPED_FIR_LOG, PALM_LOG, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_LOG, WILLOW_PLANKS, STRIPPED_WILLOW_LOG],
+  DIGGABLE = [1, 2, 6, 11, 63, FIRECLAY, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, MUD, PEAT];
 const NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, FURNACE, FURNACE + 1, FURNACE + 2, FURNACE + 3, FURNACE + 4, FURNACE + 5, FURNACE + 6, FURNACE + 7, ...NEW_COLOUR_BLOCKS, ...DEEP_BLOCKS,
-  ...ORES, ...FIRECLAY_BLOCKS, ...Array.from({ length: 8 }, (_, k) => FOUNDRY + k)];
+  ...ORES, ...FIRECLAY_BLOCKS, ...Array.from({ length: 8 }, (_, k) => FOUNDRY + k), 97, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS];
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
 const holding = kind => !!(BLOCKS[HOTBAR[act]] && BLOCKS[HOTBAR[act]].tool === kind);
 const stackMax = id => isTool(id) || isGear(id) ? 1 : STACK_MAX;
@@ -925,19 +985,21 @@ const BRICK_VARIANTS = [12, 13, 14, 15];
 // A space holding pieces is block 70 in the world; which block fills each of its 8 spots is kept in pieceMap.
 // Spot number = x + y*2 + z*4, where x, y and z are 0 (low half) or 1 (high half) of the block space.
 const PIECES = 70, CRAFTING_BENCH = 60, CUTTER = 159;
-BLOCKS[PIECES] = { name: 'Pieces', t: [3, 3, 3], transparent: true, shape: 'pieces' };
+BLOCKS[PIECES] = { name: 'Pieces', t: P3('stone'), transparent: true, shape: 'pieces' };
 const pieceMap = new Map();     // world index -> Uint8Array(8) of block ids (0 = empty spot)
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
 const PIECE_ITEM = 100;
 // cube blocks that can be cut into pieces, slabs and stairs (not torches, water, the Crafting Bench or the Furnace)
-const SPLITTABLE = [1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...NEW_COLOUR_BLOCKS, ...DEEP_BLOCKS];
+const SPLITTABLE = [1, 2, 3, 8, 7, 4, 61, 5, FIR_PLANKS, FIR_LOG, STRIPPED_FIR_LOG, FIR_LEAVES, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...NEW_COLOUR_BLOCKS, ...DEEP_BLOCKS, ...EXTRA_FORM_BLOCKS];
 // The deep stone sets' piece, slab, stairs... items can't use 100 + b and 1000 + b (those numbers clash with other blocks'),
 // so theirs are 1800 + 7 x (the block's place in DEEP_BLOCKS) + (piece 0, slab 1, vslab 2, stairs 3, quarter 4, vstairs 5, vquarter 6).
 const FORMS = ['piece', 'slab', 'vslab', 'stairs', 'quarter', 'vstairs', 'vquarter'], DEEP_FORM_ITEM = 1800;
 // the item for a piece / slab / stairs... of block b
 function formItem(form, b) {
   const i = DEEP_BLOCKS.indexOf(b);
-  return i >= 0 ? DEEP_FORM_ITEM + 7 * i + FORMS.indexOf(form) : (form === 'piece' ? PIECE_ITEM : SHAPE_ITEM[form]) + b;
+  const e = EXTRA_FORM_BLOCKS.indexOf(b);
+  return i >= 0 ? DEEP_FORM_ITEM + 7 * i + FORMS.indexOf(form) : e >= 0 ? EXTRA_FORM_ITEM + 7 * e + FORMS.indexOf(form)
+    : (form === 'piece' ? PIECE_ITEM : SHAPE_ITEM[form]) + b;
 }
 for (const b of SPLITTABLE) BLOCKS[formItem('piece', b)] = { name: BLOCKS[b].name + ' Piece', t: BLOCKS[b].t, item: true, piece: b };
 const isPiece = id => !!(BLOCKS[id] && BLOCKS[id].piece);
@@ -992,8 +1054,9 @@ function setSpots(x, y, z, mask, id) {
   return true;
 }
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
-const ITEMS = [1, 2, 3, ...deepShown(3), 8, ...deepShown(8), 7, 60, CUTTER, 4, 61, 5, 6, 9, ...deepShown(9), 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...deepShown(69), ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER, BEDROCK,
-  ...ORES, FIRECLAY, ...FIRECLAY_BLOCKS, FOUNDRY];
+const ITEMS = [1, 2, 3, ...deepShown(3), 8, ...deepShown(8), 7, 60, CUTTER, 4, 61, 5, FIR_PLANKS, FIR_LOG, STRIPPED_FIR_LOG, FIR_LEAVES, 6, 9, ...deepShown(9), 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...deepShown(69), ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER, BEDROCK,
+  ...ORES, FIRECLAY, ...FIRECLAY_BLOCKS, FOUNDRY,
+  PALM_PLANKS, PALM_LOG, STRIPPED_PALM_LOG, PALM_LEAVES, WILLOW_PLANKS, WILLOW_LOG, STRIPPED_WILLOW_LOG, WILLOW_LEAVES, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 // Survival also has more slots, kept in the same arrays (by number):
 //   0-9 the hotbar, 10-19 Pockets, 20-59 the Backpack's slots (as many as the backpack you wear gives),
@@ -1037,7 +1100,12 @@ let selected = 0;
 let act = 0, offSel = 0, clicking = false;
 
 // ===================== Procedural textures =====================
-const TILE = 16, NT = 246;   // the texture atlas holds 246 pictures side by side (240-245 are the Cutter and its spinning saw blade) (204+ are armor, backpacks and belts) (153+ are Pack & Plate's ores, Fireclay, Foundry, metals and metal tools) (32+ are the stick and tools, 52+ the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows, 124+ the deep stone layers and bedrock, 132+ the deep cobblestone, stone bricks and chiseled stone)
+const TILE = 16;
+// the Cutter's saw blade spins: its two frames (cutter_saw_frame_0, cutter_saw_1) take turns being copied into the picture it's drawn with (cutter_saw; see spinSaw)
+const SAW_TILE = tile('cutter_saw'), SAW_FRAMES = [tile('cutter_saw_frame_0'), tile('cutter_saw_1')];
+// the atlas holds one picture for every name the blocks and items asked for (see tile)
+const NT = TILE_NAMES.length;
+atlasMade = true;
 const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
@@ -1051,127 +1119,98 @@ function px(t, x, y, c, a = 1) {
 const vary = (c, v) => { const k = 1 + (rnd() - 0.5) * v; return [c[0] * k, c[1] * k, c[2] * k]; };
 function noisy(t, c, v) { for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) px(t, x, y, vary(c, v)); }
 
-noisy(0, [95, 159, 53], 0.3);                       // grass top
-noisy(1, [134, 96, 67], 0.3);                       // grass side
-for (let x = 0; x < TILE; x++) { const d = 3 + (rnd() * 2 | 0); for (let y = 0; y < d; y++) px(1, x, y, vary([95, 159, 53], 0.3)); }
-noisy(2, [134, 96, 67], 0.3);                       // dirt
-noisy(3, [125, 125, 125], 0.25);                    // stone
+noisy(tile('grass'), [95, 159, 53], 0.3);                       // grass top
+noisy(tile('grass_side'), [134, 96, 67], 0.3);                       // grass side
+for (let x = 0; x < TILE; x++) { const d = 3 + (rnd() * 2 | 0); for (let y = 0; y < d; y++) px(tile('grass_side'), x, y, vary([95, 159, 53], 0.3)); }
+noisy(tile('dirt'), [134, 96, 67], 0.3);                       // dirt
+noisy(tile('stone'), [125, 125, 125], 0.25);                    // stone
 for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // log side
-  const k = (x % 4 === 0) ? 0.75 : 1; px(4, x, y, vary([102 * k, 81 * k, 51 * k], 0.15));
+  const k = (x % 4 === 0) ? 0.75 : 1; px(tile('log_side'), x, y, vary([102 * k, 81 * k, 51 * k], 0.15));
 }
 for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // log top (rings)
   const d = Math.hypot(x - 7.5, y - 7.5);
-  if (d > 6.5) px(5, x, y, vary([102, 81, 51], 0.15));
-  else px(5, x, y, vary((d | 0) % 2 ? [170, 138, 86] : [190, 156, 100], 0.08));
+  if (d > 6.5) px(tile('log_top'), x, y, vary([102, 81, 51], 0.15));
+  else px(tile('log_top'), x, y, vary((d | 0) % 2 ? [170, 138, 86] : [190, 156, 100], 0.08));
 }
 for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // leaves (with holes)
-  if (rnd() > 0.16) px(6, x, y, vary([58, 128, 38], 0.45));
+  if (rnd() > 0.16) px(tile('leaves'), x, y, vary([58, 128, 38], 0.45));
 }
-noisy(7, [219, 207, 163], 0.1);                     // sand
+noisy(tile('sand'), [219, 207, 163], 0.1);                     // sand
 for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // planks
   const row = y >> 2, seam = (x + row * 5) % 16 === 0;
   const c = (y % 4 === 3 || seam) ? [110, 85, 50] : [162, 130, 78];
-  px(8, x, y, vary(c, 0.1));
+  px(tile('planks'), x, y, vary(c, 0.1));
 }
-noisy(9, [100, 100, 100], 0.2);                     // cobblestone
+noisy(tile('cobblestone'), [100, 100, 100], 0.2);                     // cobblestone
 for (let i = 0; i < 9; i++) {
   const sx = rnd() * 13 | 0, sy = rnd() * 13 | 0, w = 3 + (rnd() * 3 | 0), h = 3 + (rnd() * 2 | 0);
-  for (let y = sy; y < Math.min(TILE, sy + h); y++) for (let x = sx; x < Math.min(TILE, sx + w); x++) px(9, x, y, vary([140, 140, 140], 0.15));
+  for (let y = sy; y < Math.min(TILE, sy + h); y++) for (let x = sx; x < Math.min(TILE, sx + w); x++) px(tile('cobblestone'), x, y, vary([140, 140, 140], 0.15));
 }
 for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // brick
   const off = ((y >> 2) % 2) * 4;
   const mortar = y % 4 === 3 || (x + off) % 8 === 7;
-  px(10, x, y, mortar ? vary([190, 185, 175], 0.05) : vary([150, 70, 55], 0.15));
+  px(tile('stone_bricks'), x, y, mortar ? vary([190, 185, 175], 0.05) : vary([150, 70, 55], 0.15));
 }
 for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // glass
   const edge = x === 0 || y === 0 || x === 15 || y === 15;
   const glint = (x - y === 3 || x - y === 5) && x > 4 && x < 12;
-  if (edge) px(11, x, y, [205, 230, 240]); else if (glint) px(11, x, y, [235, 248, 255]);
+  if (edge) px(tile('glass'), x, y, [205, 230, 240]); else if (glint) px(tile('glass'), x, y, [235, 248, 255]);
 }
-noisy(12, [130, 125, 120], 0.45);                   // gravel
-for (let t = 13; t <= 16; t++) for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // red bricks (4 variants)
+noisy(tile('gravel'), [130, 125, 120], 0.45);                   // gravel
+for (const t of P('bricks_a', 'bricks_b', 'bricks_c', 'bricks_d')) for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {   // red bricks (4 variants)
   const off = ((y >> 2) % 2) * 4;
   const mortar = y % 4 === 3 || (x + off) % 8 === 7;
   px(t, x, y, mortar ? vary([190, 185, 175], 0.05) : vary([170, 60, 45], 0.15));
 }
 
 // torch placeholders (your tortch_side / tortch_top / tortch_bottom files replace these)
-for (let y = 0; y < TILE; y++) for (let x = 6; x < 10; x++) px(23, x, y, y < 4 ? [255, 190, 60] : [110, 80, 45]);
-for (let y = 6; y < 10; y++) for (let x = 6; x < 10; x++) { px(24, x, y, [255, 200, 70]); px(25, x, y, [90, 65, 35]); }
+for (let y = 0; y < TILE; y++) for (let x = 6; x < 10; x++) px(tile('torch_side'), x, y, y < 4 ? [255, 190, 60] : [110, 80, 45]);
+for (let y = 6; y < 10; y++) for (let x = 6; x < 10; x++) { px(tile('torch_top'), x, y, [255, 200, 70]); px(tile('torch_bottom'), x, y, [90, 65, 35]); }
 // chocolate placeholder (your items/chocolate.png replaces it)
-for (let y = 3; y < 13; y++) for (let x = 4; x < 12; x++) px(26, x, y, (x % 4 === 3 || y % 5 === 2) ? [70, 40, 22] : [110, 66, 38]);
+for (let y = 3; y < 13; y++) for (let x = 4; x < 12; x++) px(tile('chocolate'), x, y, (x % 4 === 3 || y % 5 === 2) ? [70, 40, 22] : [110, 66, 38]);
 // water placeholder (your blocks/water.png replaces it)
-for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) px(27, x, y, [40, 105, 215], 0.6);
+for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) px(tile('water'), x, y, [40, 105, 215], 0.6);
 
 // ===================== Your textures (from textures.js) =====================
-// Which atlas slot each texture file fills. Files not listed here are ignored;
-// slots with no file keep the generated placeholder above.
-const TEXTURE_SLOTS = {
-  grass: 0, grass_top: 0, grass_side: 1, dirt: 2, stone: 3, log_side: 4, log_top: 5,
-  leaves: 6, sand: 7, planks: 8, cobblestone: 9, stone_bricks: 10, glass: 11, gravel: 12,
-  clay: 17, bricks: 18, terracotta: 19, red_terracotta: 20,
-  chiseled_terracotta: 21, chisled_terracota: 21, chiseled_red_terracotta: 22, red_chiseled_terracotta: 22, chiseled_stone: 35,
-  kiln_front: 36, kiln_front_on: 37, kiln_side: 43, kiln_bottom: 44, clay_ball: 45, brick: 46,
-  // red bricks: one picture fills all 4 brick looks; bricks_a.._d would give each look its own picture
-  red_bricks: [13, 14, 15, 16], bricks_a: 13, bricks_b: 14, bricks_c: 15, bricks_d: 16,
-  torch_side: 23, torch_top: 24, torch_bottom: 25, tortch_side: 23, tortch_top: 24, tortch_bottom: 25,
-  smoldering_torch_side: 48, smoldering_torch_top: 49, burnt_torch_side: 50, burnt_torch_top: 51,
-  chocolate: 26, water: 27,
-  crafting_bench_side: 28, crafting_bench_top: 29, stripped_log_side: 30, stripped_log_top: 31,
-  stick: 32, rock: 33, crude_axe: 34, fire_essence: 47,
-  stone_axe: 38, stone_pickaxe: 39, stone_shovel: 40, stone_sword: 41, stone_hoe: 42,
-  bone: 102, bone_ash: 103, gloom_wisp: 104,
-  grain_seeds: 105, grain: 106, flour: 107, bread: 108, tilled_dirt: 109, wet_tilled_dirt: 110, fertilized_dirt: 111, wet_fertilized_dirt: 112, leather: 121, raw_meat: 122, cooked_meat: 123,
+// Each picture uses the file with its name. A picture with no file keeps the stand-in drawn above (or stays empty).
+// other spellings of a picture's file name
+const TEXTURE_SPELLINGS = {
+  grass_top: 'grass', tortch_side: 'torch_side', tortch_top: 'torch_top', tortch_bottom: 'torch_bottom',
+  chisled_terracota: 'chiseled_terracotta', red_chiseled_terracotta: 'chiseled_red_terracotta',
 };
-// the colours: <colour>_terracotta, <colour>_chiseled_terracotta, <colour>_bricks, <colour>_dye, <colour>_flower
-COLOURS.forEach((c, k) => {
-  TEXTURE_SLOTS[c + '_dye'] = 90 + k;
-  if (k) Object.assign(TEXTURE_SLOTS, { [c + '_terracotta']: 51 + k, [c + '_chiseled_terracotta']: 62 + k, [c + '_bricks']: 73 + k });
-});
-FLOWER_COLOURS.forEach((c, k) => { TEXTURE_SLOTS[c + '_flower'] = 85 + k; });
-for (let k = 0; k < 8; k++) TEXTURE_SLOTS['grain_stage_' + k] = 113 + k;
-for (let n = 2; n <= STRATA_LAYERS; n++) TEXTURE_SLOTS['stone_layer_' + n] = 122 + n;   // stone_layer_2 .. _8: pictures 124-130
-TEXTURE_SLOTS.bedrock = 131;
-// the Cutter: pictures 241-243 (243: the saw blade standing up out of it; 240 is spare: its top is the stripped log top). Until there is a cutter_base/_bottom picture, it borrows one
-// (the Crafting Bench's side, and planks underneath)
-// The blade spins: 243 is the one drawn, and every so often it gets the next frame copied into it (244: cutter_saw, 245: cutter_saw_1; see spinSaw)
-Object.assign(TEXTURE_SLOTS, { cutter_base: 241, cutter_bottom: 242, cutter_saw: [243, 244], cutter_saw_1: 245 });   // (cutter_base: its sides)
-for (const [mine, borrow] of [['cutter_base', 'crafting_bench_side'], ['cutter_bottom', 'planks'], ['cutter_saw_1', 'cutter_saw']])
-  if (!(window.TEXTURES || {})[mine] && (window.TEXTURES || {})[borrow]) TEXTURE_SLOTS[borrow] = [].concat(TEXTURE_SLOTS[borrow], TEXTURE_SLOTS[mine]);
-// Pack & Plate: ores 153-156, Fireclay blocks 157-161, the Foundry's Furnace 162-164, chunks 165-168, bricks 169-176, fireclay items 177-178,
-// metal tools 179-203
-['copper_ore', 'iron_ore', 'gold_ore', 'tin_ore', 'fireclay', 'fireclay_terracotta', 'fireclay_bricks', 'fireclay_casing', 'chiseled_fireclay',
- 'furnace_front', 'furnace_front_on', 'furnace_bottom', 'copper_chunk', 'iron_chunk', 'gold_chunk', 'tin_chunk',
- 'copper_brick', 'iron_brick', 'gold_brick', 'tin_brick', 'bronite_brick', 'rosium_brick', 'steel_scrap', 'steel_brick', 'fireclay_ball', 'fireclay_brick',
-].forEach((name, k) => { TEXTURE_SLOTS[name] = 153 + k; });
-['copper', 'iron', 'bronite', 'rosium', 'steel'].forEach((m, j) =>
-  ['axe', 'pickaxe', 'shovel', 'sword', 'hoe'].forEach((kind, k) => { TEXTURE_SLOTS[`${m}_${kind}`] = 179 + j * 5 + k; }));
-// armor 204-227, backpacks 228-233, utility belts 234-239
-['leather', 'copper', 'iron', 'bronite', 'rosium', 'steel'].forEach((m, t) => {
-  ['helmet', 'chestplate', 'leggings', 'boots'].forEach((piece, k) => { TEXTURE_SLOTS[`${m}_${piece}`] = 204 + t * 4 + k; });
-  TEXTURE_SLOTS[`${m}_backpack`] = 228 + t; TEXTURE_SLOTS[`${m}_utility_belt`] = 234 + t;
-});
-for (let n = 2; n <= STRATA_LAYERS; n++) {   // the deep stone sets: pictures 132-138, 139-145, 146-152
-  TEXTURE_SLOTS['cobblestone_layer_' + n] = 130 + n;
-  TEXTURE_SLOTS['stone_bricks_layer_' + n] = 137 + n;
-  TEXTURE_SLOTS['chiseled_stone_layer_' + n] = 144 + n;
-}
+// a picture whose file you haven't made (yet) borrows another one
+const TEXTURE_BORROWS = {
+  // the 4 looks of Red Bricks
+  bricks_a: 'red_bricks', bricks_b: 'red_bricks', bricks_c: 'red_bricks', bricks_d: 'red_bricks',
+  // the Cutter: the Crafting Bench's side, planks underneath; with no second saw frame the blade just stands still
+  cutter_base: 'crafting_bench_side', cutter_bottom: 'planks', cutter_saw_frame_0: 'cutter_saw', cutter_saw_1: 'cutter_saw',
+  // biome blocks: White Terracotta (snow), the Grass pictures, or Glass (ice)
+  snow: 'white_terracotta', snowy_grass_side: 'grass_side', ice: 'glass', swamp_grass: 'grass', swamp_grass_side: 'grass_side',
+};
 function loadCustomTextures(onDone) {
-  const entries = Object.entries(window.TEXTURES || {}).filter(([name]) => name in TEXTURE_SLOTS);
+  const files = {};   // picture name -> its file
+  for (const [file, src] of Object.entries(window.TEXTURES || {})) { const name = TEXTURE_SPELLINGS[file] || file; if (!(name in files)) files[name] = src; }
+  const fills = {};   // file -> the atlas places it fills (its own picture, and the ones borrowing it)
+  TILE_NAMES.forEach((name, t) => {
+    let n = name;
+    while (n && !(n in files)) n = TEXTURE_BORROWS[n];
+    if (n) (fills[n] = fills[n] || []).push(t);
+  });
+  const entries = Object.entries(fills);
   let pending = entries.length;
   if (!pending) return;
-  for (const [name, src] of entries) {
+  for (const [name, places] of entries) {
     const img = new Image();
     img.onload = () => {
       g.imageSmoothingEnabled = false;
-      for (const t of [].concat(TEXTURE_SLOTS[name])) {   // a texture can fill more than one slot
+      for (const t of places) {
         g.clearRect(t * TILE, 0, TILE, TILE);
         g.drawImage(img, t * TILE, 0, TILE, TILE);
       }
       if (--pending === 0) onDone();
     };
     img.onerror = () => { console.warn('Could not load texture', name); if (--pending === 0) onDone(); };
-    img.src = src;
+    img.src = files[name];
   }
 }
 
@@ -1469,6 +1508,55 @@ function groundHeight(x, z) {
 // Water fills everything up to this height.
 // Plateaus: the lowest plateaus (about a fifth of the land) become lakes and seas, the next one up is a grassy bank.
 const SEA_LEVEL = LIFT + (GEN === 1 ? 38 : 63);
+
+// --- Biomes (biome worlds: GEN 3) ---
+// Each spot has a climate from two big, slow noises: how warm it is and how wet. That picks its biome:
+//   cold: Snowy (snowy grass, frozen water, Fir trees)    cool: Taiga (Fir forests on grass)
+//   hot and dry: Desert (sand over sandstone, palm trees)    hot, a bit less dry: Badlands (steep hills striped with coloured terracotta)
+//   wet (not hot): Swamp (low and boggy, swamp grass, willows)    dry: Plains (flat, flowers, few trees)    a bit less dry: Meadow (packed with flowers)
+//   anywhere else: Woods (rolling hills and forests, like a rolling-hills world)
+// (The desktop edition does exactly the same, so both grow the same world from a seed.)
+const WOODS = 0, PLAINS = 1, DESERT = 2, SNOWY = 3, SWAMP = 4, TAIGA = 5, MEADOW = 6, BADLANDS = 7;
+const SANDSTONE = 97, SNOWY_GRASS = 98, ICE = 99, SWAMP_GRASS = 58;
+// the climate borders. Warmth: below COLD snowy, then up to COOL taiga, above HOT hot lands (desert where wetness is below ARID,
+// badlands up to BADLANDS_WET, then woods). In between: swamp above WET, plains below DRY, meadow up to MEADOW_WET, then woods.
+const COLD = 0.33, COOL = 0.38, HOT = 0.54, ARID = 0.48, BADLANDS_WET = 0.58, DRY = 0.38, MEADOW_WET = 0.45, WET = 0.53;
+function warmthAt(x, z) { return fbm(x / 180 + 300, z / 180 + 300, 3, 1100); }
+function wetnessAt(x, z) { return fbm(x / 150 + 600, z / 150 + 600, 3, 1110); }
+function biomeAt(x, z) {
+  const t = warmthAt(x, z), w = wetnessAt(x, z);
+  if (t < COLD) return SNOWY;
+  if (t < COOL) return TAIGA;
+  if (t > HOT) return w < ARID ? DESERT : w < BADLANDS_WET ? BADLANDS : WOODS;
+  return w > WET ? SWAMP : w < DRY ? PLAINS : w < MEADOW_WET ? MEADOW : WOODS;
+}
+// how much each biome holds a spot (0-1), fading over a short way (edge e) at the borders, so the land's shape and colours change smoothly
+function climate(x, z, e) {
+  const t = warmthAt(x, z), w = wetnessAt(x, z);
+  const cold = 1 - smoothstep(COLD - e, COLD + e, t), cool = 1 - smoothstep(COOL - e, COOL + e, t), hot = smoothstep(HOT - e, HOT + e, t);
+  const arid = 1 - smoothstep(ARID - e, ARID + e, w), bad = 1 - smoothstep(BADLANDS_WET - e, BADLANDS_WET + e, w);
+  const dry = 1 - smoothstep(DRY - e, DRY + e, w), mead = 1 - smoothstep(MEADOW_WET - e, MEADOW_WET + e, w), wet = smoothstep(WET - e, WET + e, w);
+  const mild = 1 - cool;   // (warmer than the taiga)
+  return { snowy: cold, taiga: cool - cold, desert: mild * hot * arid, badlands: mild * hot * (1 - arid) * bad, swamp: mild * (1 - hot) * wet,
+    plains: mild * (1 - hot) * dry, meadow: mild * (1 - hot) * (1 - dry) * mead };
+}
+const biomeMap = new Uint8Array(WX * WZ);   // every column's biome (biome worlds; all Woods otherwise)
+if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) biomeMap[z * WX + x] = biomeAt(x, z);
+const grassy = b => b === 1 || b === SNOWY_GRASS || b === SWAMP_GRASS;   // grass of any biome (dirt underneath; flowers and hoes)
+const takesBiomeTint = b => b === 1 || b === SWAMP_GRASS || isLeaves(b);    // grass and leaves: coloured by the climate where they are
+// Fir, Palm and Willow Leaves use the Oak Leaves picture, with their own colour on top of the climate colour
+// (Fir: darker blue-green; Palm: brighter yellow-green; Willow: a softer olive green)
+const LEAF_TINT = { [FIR_LEAVES]: [0.78, 0.85, 1.05], [PALM_LEAVES]: [1.06, 1.1, 0.72], [WILLOW_LEAVES]: [0.92, 1, 0.78] };
+// the colour grass and leaves take on here, as [r, g, b] multipliers for their green pixels (1 = as drawn). It fades over a wider
+// way than the land's shape so colours blend between biomes. Only in Biome worlds.
+function grassTint(x, z) {
+  if (GEN !== 3) return [1, 1, 1];
+  const c = climate(x, z, 0.05);   // (snowy bluer, taiga blue-green, desert and badlands yellower, swamp murkier, plains brighter, meadow fresh green)
+  return [1 - 0.20 * c.snowy - 0.12 * c.taiga + 0.30 * c.desert + 0.24 * c.badlands - 0.10 * c.swamp + 0.08 * c.plains - 0.02 * c.meadow,
+    1 - 0.08 * c.snowy - 0.02 * c.taiga + 0.02 * c.desert + 0.00 * c.badlands - 0.10 * c.swamp + 0.06 * c.plains + 0.08 * c.meadow,
+    1 + 0.30 * c.snowy + 0.10 * c.taiga - 0.30 * c.desert - 0.30 * c.badlands - 0.25 * c.swamp - 0.15 * c.plains - 0.06 * c.meadow];
+}
+
 if (GEN === 1) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   const h0 = groundHeight(x, z);
   for (let y = 0; y < h0; y++) world[idx(x, y, z)] = RAW;
@@ -1487,9 +1575,15 @@ function generateHills() {
   for (let gz = 0; gz < nz; gz++) for (let gx = 0; gx < nx; gx++) {
     const x = gx * GX, z = gz * GX;
     const land = fbm(x / 280, z / 280, 3, 900);                                   // big-scale: continents and seas
-    const base = SEA_LEVEL + 1 + (land - 0.44) * 120;                           // ground height before hills
+    let base = SEA_LEVEL + 1 + (land - 0.44) * 120;                             // ground height before hills
     const rough = smoothstep(0.38, 0.62, fbm(x / 170 + 40, z / 170 + 40, 2, 910)); // 0 = flat plains, 1 = wild hills
-    const amp = 5 + rough * 34;
+    let amp = 5 + rough * 34;
+    if (GEN === 3) {   // biomes: plains flatten out, meadows roll gently, deserts rise out of the sea and roll gently, badlands rise higher into
+      const b = climate(x, z, 0.02);   // steep hills, swamps sit at sea level and go nearly flat (so shallow pools form)
+      amp *= 1 - 0.75 * b.plains - 0.45 * b.meadow - 0.55 * b.desert + 0.5 * b.badlands - 0.8 * b.swamp;
+      amp += 16 * b.badlands;   // (badlands are never flat: their striped sides show)
+      base += (Math.max(base, SEA_LEVEL + 5) - base) * b.desert + (Math.max(base, SEA_LEVEL + 10) - base) * b.badlands + (SEA_LEVEL + 0.3 - base) * b.swamp;
+    }
     for (let gy = 0; gy < ny; gy++) {
       const y = gy * GY;
       const ny0 = y - LIFT;   // (the same shapes as a short world, just lifted)
@@ -1593,10 +1687,14 @@ if (GEN === 1) for (let cz = 0; cz < WZ; cz += CELL) for (let cx = 0; cx < WX; c
 // --- 5. Paint the land: grass on top, then dirt, then stone ---
 // Plateaus: sand in low spots (which end up underwater).
 // Hills: sandy (or now and then gravelly) beaches along the shore, sand and gravel on the sea floor.
+// the badlands' stripes, from the bottom up (they repeat): plain, orange, yellow, red, white and pink Terracotta
+const BADLANDS_BANDS = [65, 65, COLOUR_TERRACOTTA[1], COLOUR_TERRACOTTA[1], COLOUR_TERRACOTTA[1], 65, COLOUR_TERRACOTTA[2], 65, 65,
+  66, 66, 65, COLOUR_TERRACOTTA[10], 65, COLOUR_TERRACOTTA[1], 65, 65, COLOUR_TERRACOTTA[9], 65];
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   let depth = -1, surf = 1;
   const beach = GEN === 1 ? 0 : fbm(x / 40, z / 40, 2, 950), gravelly = GEN === 1 ? 0 : fbm(x / 30 + 70, z / 30 + 70, 2, 960);
   const clayey = GEN === 1 ? 0 : fbm(x / 14 + 140, z / 14 + 140, 2, 975);
+  const bandShift = biomeMap[z * WX + x] === BADLANDS ? Math.floor(fbm(x / 40 + 77, z / 40 + 77, 2, 1130) * 8) : 0;   // (badlands: the stripes wave up and down a little)
   for (let y = WY - 1; y >= 0; y--) {
     const i = idx(x, y, z);
     if (!world[i]) { depth = -1; continue; }
@@ -1605,6 +1703,30 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
     if (GEN === 1) {
       const low = y <= SEA_LEVEL;
       world[i] = depth === 0 ? (low ? 6 : 1) : depth <= 3 ? (low ? 6 : 2) : 3;
+      continue;
+    }
+    if (GEN === 3) {   // biome worlds: each biome its own ground
+      const bi = biomeMap[z * WX + x], sandy = bi === DESERT || bi === BADLANDS;
+      const grass = bi === SNOWY ? SNOWY_GRASS : bi === SWAMP ? SWAMP_GRASS : sandy ? 6 : 1;
+      if (depth === 0) {
+        if (y > SEA_LEVEL + 1) surf = grass;                                                          // dry land (a desert's is sand)
+        else if (y < SEA_LEVEL && y >= SEA_LEVEL - 8 && clayey > (bi === SWAMP ? 0.5 : 0.62)) surf = 63;  // clay (lots in swamps)
+        else if (bi === SWAMP && y >= SEA_LEVEL - 4) surf = y >= SEA_LEVEL ? SWAMP_GRASS : 2;        // swamp: muddy pools, grass to the edge
+        else if (!sandy && gravelly > 0.6) surf = 11;                                                 // gravel beach / sea floor
+        else if (y >= SEA_LEVEL - 4) surf = sandy || beach > 0.4 ? 6 : y >= SEA_LEVEL ? grass : 2;   // shore
+        else surf = 6;                                                                                // sea floor: sand
+        if (bi === SWAMP && surf === 2) surf = MUD;                                                   // (swamps: mud where other lands have dirt)
+      }
+      // badlands: the hills are stripes of coloured terracotta, 16 deep (sand only on the beaches)
+      if (bi === BADLANDS && surf === 6 && y >= SEA_LEVEL - 3 && depth <= 16 && (depth > 0 || y > SEA_LEVEL + 1)) {
+        const n = BADLANDS_BANDS.length, k = (y + bandShift) % n;
+        world[i] = BADLANDS_BANDS[k < 0 ? k + n : k];
+        continue;
+      }
+      // under grass: dirt (in swamps: 3 of mud, then 2 of peat); under desert sand: 3 more sand, then 4 of sandstone; then stone
+      const boggy = bi === SWAMP && (surf === SWAMP_GRASS || surf === MUD);
+      world[i] = depth === 0 ? surf : depth <= 3 ? (boggy ? MUD : grassy(surf) ? 2 : surf) : boggy && depth <= 5 ? PEAT
+        : bi === DESERT && surf === 6 && depth <= 7 ? SANDSTONE : 3;
       continue;
     }
     if (depth === 0) {
@@ -1638,6 +1760,14 @@ for (let i = 0, tries = 0; i < GRAVEL_PATCHES && tries < GRAVEL_PATCHES * 20; tr
 
 // the six blocks touching a block (up, down and the four sides)
 const ORE_STEPS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+
+// --- Biome worlds: swamps get pools, low spots dug out of the boggy ground (the water below fills them) ---
+if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
+  if (biomeMap[z * WX + x] !== SWAMP || world[idx(x, SEA_LEVEL + 2, z)] || fbm(x / 12 + 900, z / 12 + 900, 2, 1120) < 0.5) continue;
+  for (let y = SEA_LEVEL; y <= SEA_LEVEL + 1; y++) world[idx(x, y, z)] = 0;
+  if (heights[z * WX + x] > SEA_LEVEL) heights[z * WX + x] = SEA_LEVEL;
+  if (grassy(world[idx(x, SEA_LEVEL - 1, z)])) world[idx(x, SEA_LEVEL - 1, z)] = MUD;   // (a muddy bottom)
+}
 
 // --- Water: every low spot open to the sky fills up to sea level (the sandy lowlands become lakes and seas) ---
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++)
@@ -1699,7 +1829,12 @@ function carveCaves() {
     }
   }
 }
-if (GEN === 2) carveCaves();
+if (GEN >= 2) carveCaves();
+// --- Biome worlds: in snowy lands the top of open water (seas, lakes) freezes into Ice ---
+if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
+  const i = idx(x, SEA_LEVEL, z);
+  if (biomeMap[z * WX + x] === SNOWY && isWater(world[i]) && !world[idx(x, SEA_LEVEL + 1, z)]) world[i] = ICE;
+}
 
 // --- Bedrock along the bottom of every world; and strata (640-tall worlds): the stone gets a new layer every 64 blocks down from sea level ---
 world.fill(BEDROCK, 0, WX * WZ);
@@ -1717,11 +1852,55 @@ function leafBall(cx, cy, cz, r) {
   for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++)
     if (dx * dx + dy * dy + dz * dz <= r * r) put(cx + dx, cy + dy, cz + dz, 5, true);
 }
-function trunk(x, y, z, h) { for (let yy = y + 1; yy <= y + h; yy++) put(x, yy, z, 4, true); }
+function trunk(x, y, z, h, log = 4) { for (let yy = y + 1; yy <= y + h; yy++) put(x, yy, z, log, true); }
 // hills worlds: plain round-topped trees, scattered on open grass and packed close together in forests
 const forestAt = (x, z) => smoothstep(0.47, 0.6, fbm(x / 110 + 20, z / 110 + 20, 2, 970));
+// biome worlds: each biome's own trees (the Woods have the ones below)
+const PALM_FRONDS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+function biomeTree(x, h, z, bi) {
+  const top = world[idx(x, h, z)], v = hash(x, z, 77), roll = hash(x, z, 999);
+  if (bi === PLAINS || bi === MEADOW) {   // now and then a lone round tree (a few more in meadows)
+    if (top !== 1 || roll > (bi === MEADOW ? 0.0015 : 0.0008)) return;
+    const th = 5 + (v * 3 | 0);
+    trunk(x, h, z, th); leafBall(x, h + th + 1, z, 2.3);
+  } else if (bi === SNOWY || bi === TAIGA) {   // Fir trees, pointed: rings of leaves, widest at the bottom, narrowing up to a point (taiga: thicker forests, no snow)
+    if (bi === SNOWY ? top !== SNOWY_GRASS || roll > 0.004 + forestAt(x, z) * 0.03 : top !== 1 || roll > 0.006 + forestAt(x, z) * 0.045) return;
+    const th = 6 + (v * 4 | 0), tip = h + th + 1;
+    trunk(x, h, z, th, FIR_LOG);
+    for (let ly = h + 3; ly <= tip; ly++) {
+      const r = Math.min(3, (tip - ly + 1) >> 1);
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dz * dz <= r * r + 1) put(x + dx, ly, z + dz, FIR_LEAVES, true);
+    }
+  } else if (bi === DESERT) {   // Palm trees, now and then: a tall bare trunk with a crown of long fronds drooping at the tips
+    if (top !== 6 || h <= SEA_LEVEL || roll > 0.002) return;
+    const th = 6 + (v * 4 | 0), cy = h + th;
+    trunk(x, h, z, th, PALM_LOG);
+    put(x, cy + 1, z, PALM_LEAVES, true);
+    for (const [fx, fz] of PALM_FRONDS) {
+      const len = fx && fz ? 2 : 3;   // (shorter on the diagonals, so the crown looks round)
+      for (let k = 1; k <= len; k++) put(x + fx * k, k < len ? cy + 1 : cy, z + fz * k, PALM_LEAVES, true);
+      put(x + fx * len, cy - 1, z + fz * len, PALM_LEAVES, true);
+    }
+  } else if (bi === SWAMP) {    // Willow trees: low and wide, with leaves drooping off the edges
+    if (top !== SWAMP_GRASS || roll > 0.012) return;
+    const th = 4 + (v * 2 | 0), cy = h + th;
+    trunk(x, h, z, th, WILLOW_LOG);
+    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+      const d = dx * dx + dz * dz;
+      if (d > 10) continue;
+      put(x + dx, cy, z + dz, WILLOW_LEAVES, true);
+      if (d <= 5) put(x + dx, cy + 1, z + dz, WILLOW_LEAVES, true);
+      if (d >= 5) {
+        const hang = hash(x + dx, z + dz, 8080);
+        if (hang < 0.35) put(x + dx, cy - 1, z + dz, WILLOW_LEAVES, true);
+        if (hang < 0.12) put(x + dx, cy - 2, z + dz, WILLOW_LEAVES, true);
+      }
+    }
+  }
+}
 for (let z = 3; z < WZ - 3; z++) for (let x = 3; x < WX - 3; x++) {
   const h = heights[z * WX + x];
+  if (GEN === 3 && biomeMap[z * WX + x] !== WOODS) { biomeTree(x, h, z, biomeMap[z * WX + x]); continue; }
   if (world[idx(x, h, z)] !== 1 || hash(x, z, 999) > (GEN === 1 ? 0.011 : 0.003 + forestAt(x, z) * 0.045)) continue;
   const kind = GEN === 1 ? hash(x, z, 555) : hash(x, z, 555) < 0.93 ? 0 : 0.95, v = hash(x, z, 77);
   if (kind < 0.45) {                    // normal
@@ -1763,7 +1942,8 @@ for (let z = 6; z < WZ - 6; z++) for (let x = 6; x < WX - 6; x++) {
 // --- 8. Flowers: small patches of one colour on grass ---
 const FLOWER_PATCH_CHANCE = 0.0012;   // out of every grass spot, how many are the middle of a patch (more = more patches)
 for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
-  if (hash(x, z, 5150) > FLOWER_PATCH_CHANCE) continue;
+  const bi = biomeMap[z * WX + x];
+  if (hash(x, z, 5150) > (bi === MEADOW ? FLOWER_PATCH_CHANCE * 15 : bi === PLAINS ? FLOWER_PATCH_CHANCE * 5 : FLOWER_PATCH_CHANCE)) continue;   // (plains: 5 times as many; meadows: 15 times)
   const flower = FLOWERS[Math.floor(hash(x, z, 5151) * FLOWERS.length)];
   const n = 5 + Math.floor(hash(x, z, 5152) * 8);   // 5-12 tries at a flower, within 3 blocks of the middle
   for (let k = 0; k < n; k++) {
@@ -1823,8 +2003,7 @@ function rebuildGpuAtlas() {
 }
 rebuildGpuAtlas();
 const tex = new THREE.CanvasTexture(gpuAtlas);
-// the Cutter's saw blade spins: its two frames (pictures 244 and 245) take turns being copied into the picture it's drawn with (243)
-const SAW_FRAMES = [244, 245], SAW_FPS = 10;
+const SAW_FPS = 10;   // (the saw blade's frames: see SAW_TILE)
 let sawTime = 0, sawFrame = 0;
 function spinSaw(dt) {
   sawTime += dt;
@@ -1832,7 +2011,7 @@ function spinSaw(dt) {
   if (f === sawFrame) return;
   sawFrame = f;
   const gctx = gpuAtlas.getContext('2d');
-  gctx.putImageData(gctx.getImageData(SAW_FRAMES[f] * PW, 0, PW, PW), 243 * PW, 0);
+  gctx.putImageData(gctx.getImageData(SAW_FRAMES[f] * PW, 0, PW, PW), SAW_TILE * PW, 0);
   tex.needsUpdate = true;
 }
 tex.generateMipmaps = false;
@@ -1864,12 +2043,13 @@ material.onBeforeCompile = shader => {
   shader.uniforms.torchColor = { value: TORCH_COLOR };
   shader.uniforms.heldLight = HELD_LIGHT;
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute float torch;\nattribute float sky;\nvarying float vTorch;\nvarying float vSky;\nvarying vec3 vEye;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTorch = torch;\nvSky = sky;')
+    .replace('#include <common>', '#include <common>\nattribute float torch;\nattribute float sky;\nattribute vec3 tintOff;\nvarying float vTorch;\nvarying float vSky;\nvarying vec3 vTintOff;\nvarying vec3 vEye;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTorch = torch;\nvSky = sky;\nvTintOff = tintOff;')
     .replace('#include <project_vertex>', '#include <project_vertex>\nvEye = mvPosition.xyz;');
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying float vTorch;\nvarying float vSky;\nvarying vec3 vEye;\nuniform vec3 dayTint;\nuniform vec3 torchColor;\nuniform float heldLight;')
+    .replace('#include <common>', '#include <common>\nvarying float vTorch;\nvarying float vSky;\nvarying vec3 vTintOff;\nvarying vec3 vEye;\nuniform vec3 dayTint;\nuniform vec3 torchColor;\nuniform float heldLight;')
     .replace('#include <color_fragment>', `#include <color_fragment>
+      if (diffuseColor.g > diffuseColor.r && diffuseColor.g > diffuseColor.b) diffuseColor.rgb *= 1.0 + vTintOff;   // the biome tint: only green pixels (grass, not the dirt under it)
       float held = heldLight > 0.0 ? min(1.2, pow(max(0.0, heldLight - length(vEye)) / ${TORCH_LIGHT.toFixed(1)}, 1.4)) : 0.0;   // (the same curve as LIGHT_CURVE)
       diffuseColor.rgb *= max(dayTint * vSky, max(vTorch, held) * torchColor);`)
     .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nuniform float fogThickness;\nuniform float fogMax;\nuniform float fogEdge;')
@@ -2243,7 +2423,6 @@ function addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
 }
 // the Cutter's saw blade: the top half of the cutter_saw picture, standing up across the middle of the block above its half-tall base,
 // seen from both sides
-const SAW_TILE = 243;
 function addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
   const light = anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, sky = skyExposure(x, y, z, skyCache), base = pos.length / 3;
   for (const [u, v] of [[0, 0.5], [1, 0.5], [0, 1], [1, 1]]) {
@@ -2271,6 +2450,8 @@ function addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
 }
 function buildChunk(cx, cy, cz) {
   const pos = [], uv = [], col = [], ind = [], lt = [], sk = [];
+  const tn = [], tints = new Map();   // grass and leaves: how far the biome colour at each corner is from as-drawn (see grassTint)
+  const tintAt = (x, z) => { const k = x * 65536 + z; let t = tints.get(k); if (!t) tints.set(k, t = grassTint(x, z)); return t; };
   const wpos = [], wuv = [], wcol = [], wind = [], wlt = [], wsk = [];   // water goes in its own see-through mesh
   const p = [0, 0, 0], ao = [0, 0, 0, 0];
   const y0 = cy * CS, top = Math.min(y0 + CS, chunkTop[cz * NCX + cx]);   // (nothing above the column's highest block)
@@ -2296,6 +2477,8 @@ function buildChunk(cx, cy, cz) {
       const ta = na === 0 ? 1 : 0, tb = na === 2 ? 1 : 2;
       // darken a bit with depth for a cheap "cave" feel
       const depth = 0.75 + 0.25 * Math.min(1, y / 20);
+      const tinted = takesBiomeTint(id);
+      if (tinted) while (tn.length < base * 3) tn.push(0, 0, 0);
       f.c.forEach((c, i) => {
         pos.push(x + c[0], y + c[1], z + c[2]);
         uv.push((tile * PW + 1 + c[3] * TILE) / (PW * NT), (1 + c[4] * TILE) / PW);
@@ -2308,6 +2491,7 @@ function buildChunk(cx, cy, cz) {
         ao[i] = s1 && s2 ? 0 : 3 - (s1 + s2 + s3);
         const s = f.shade * depth * AO_LEVELS[ao[i]];
         col.push(s, s, s);
+        if (tinted) { const t = tintAt(x + c[0], z + c[2]), e = LEAF_TINT[id] || [1, 1, 1]; tn.push(t[0] * e[0] - 1, t[1] * e[1] - 1, t[2] * e[2] - 1); }
         // torch light and sky light: average of the open cells around this corner, in front of the face (smooth falloff)
         const fx = x + f.dir[0], fy = y + f.dir[1], fz = z + f.dir[2];
         let sum = anyLight ? lightAt(fx, fy, fz) : 0, skySum = skyExposure(fx, fy, fz, skyCache), n = 1;
@@ -2324,9 +2508,10 @@ function buildChunk(cx, cy, cz) {
     }
   }
   const k = chunkKey(cx, cy, cz);
-  const pack = (pos, uv, col, lt, sk, ind) => ind.length ? { pos: new Float32Array(pos), uv: new Float32Array(uv), col: new Float32Array(col), lt: new Float32Array(lt), sk: new Float32Array(sk), ind: new Uint32Array(ind) } : null;
+  if (tn.length) while (tn.length < pos.length) tn.push(0);
+  const pack = (pos, uv, col, lt, sk, ind, tn) => ind.length ? { pos: new Float32Array(pos), uv: new Float32Array(uv), col: new Float32Array(col), lt: new Float32Array(lt), sk: new Float32Array(sk), ind: new Uint32Array(ind), tn: tn && tn.length ? new Float32Array(tn) : null } : null;
   chunkBuilt[k] = 1;
-  chunkParts[k] = ind.length || wind.length ? [pack(pos, uv, col, lt, sk, ind), pack(wpos, wuv, wcol, wlt, wsk, wind)] : null;
+  chunkParts[k] = ind.length || wind.length ? [pack(pos, uv, col, lt, sk, ind, tn), pack(wpos, wuv, wcol, wlt, wsk, wind)] : null;
   groupsDirty.add(groupOf(k));
 }
 // glue a group's chunks into one mesh for the solid blocks and one for the water
@@ -2343,11 +2528,11 @@ function mergeGroup(g) {
     if (!parts.length) continue;
     let nv = 0, ni = 0;
     for (const p of parts) { nv += p.lt.length; ni += p.ind.length; }
-    const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3), lt = new Float32Array(nv), sk = new Float32Array(nv);
+    const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3), lt = new Float32Array(nv), sk = new Float32Array(nv), tn = new Float32Array(nv * 3);
     const ind = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
     let v = 0, i = 0;
     for (const p of parts) {
-      pos.set(p.pos, v * 3); uv.set(p.uv, v * 2); col.set(p.col, v * 3); lt.set(p.lt, v); sk.set(p.sk, v);
+      pos.set(p.pos, v * 3); uv.set(p.uv, v * 2); col.set(p.col, v * 3); lt.set(p.lt, v); sk.set(p.sk, v); if (p.tn) tn.set(p.tn, v * 3);
       const pi = p.ind; for (let j = 0; j < pi.length; j++) ind[i + j] = pi[j] + v;
       v += p.lt.length; i += pi.length;
     }
@@ -2357,6 +2542,7 @@ function mergeGroup(g) {
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.setAttribute('torch', new THREE.BufferAttribute(lt, 1));
     geo.setAttribute('sky', new THREE.BufferAttribute(sk, 1));
+    geo.setAttribute('tintOff', new THREE.BufferAttribute(tn, 3));
     geo.setIndex(new THREE.BufferAttribute(ind, 1));
     geo.computeBoundingSphere(); geo.computeBoundingBox();
     for (const name in geo.attributes) geo.attributes[name].onUpload(releaseArray);
@@ -2832,7 +3018,11 @@ const Sound = (() => {
   // which sound recipe each block uses (block id: recipe). Recipe names describe the sound, not the block:
   // stone-type blocks use 'rock' (deep bm / crk), dirt (and tilled soil) uses the sharp 'stone' chk, gravel the crumbly 'dirt' crunch.
   const MATERIAL = { 1: 'grass', 2: 'stone', 3: 'rock', 4: 'wood', 5: 'grass', 6: 'sand', 7: 'wood', 8: 'cobble', 9: 'rock', 10: 'glass', 11: 'dirt', 12: 'brick', 13: 'brick', 14: 'brick', 15: 'brick',
-    60: 'wood', 61: 'wood', 63: 'dirt', 64: 'brick', 65: 'brick', 66: 'brick', 67: 'brick', 68: 'brick', 69: 'rock' };
+    60: 'wood', 61: 'wood', 63: 'dirt', 64: 'brick', 65: 'brick', 66: 'brick', 67: 'brick', 68: 'brick', 69: 'rock',
+    [FIR_LOG]: 'wood', [FIR_PLANKS]: 'wood', [STRIPPED_FIR_LOG]: 'wood', [FIR_LEAVES]: 'grass',
+    [PALM_LOG]: 'wood', [PALM_PLANKS]: 'wood', [STRIPPED_PALM_LOG]: 'wood', [PALM_LEAVES]: 'grass',
+    [WILLOW_LOG]: 'wood', [WILLOW_PLANKS]: 'wood', [STRIPPED_WILLOW_LOG]: 'wood', [WILLOW_LEAVES]: 'grass',
+    [SANDSTONE_BRICKS]: 'rock', [CHISELED_SANDSTONE]: 'rock', [SMOOTH_SANDSTONE]: 'rock', [MUD]: 'dirt', [MUD_BRICKS]: 'brick', [PEAT]: 'dirt' };
   for (let k = 0; k < 8; k++) MATERIAL[FURNACE + k] = 'brick';   // torches use 'wood' (see mat below)
   for (const b of NEW_COLOUR_BLOCKS) MATERIAL[b] = 'brick';
   for (const b of FLOWERS) MATERIAL[b] = 'grass';
@@ -3434,10 +3624,12 @@ let locked = false;
 // and not in the main menu. The game keeps running behind both.
 const overlay = document.getElementById('overlay'), mainMenuEl = document.getElementById('mainmenu');
 let invOpen = false, mainMenuOpen = true;
+document.body.classList.add('title');
 addEventListener('pointerdown', () => Sound.init(), true);   // sound can only start after a click
 function showPause() { if (!invOpen && !mainMenuOpen && !locked && !player.dead) overlay.style.display = 'flex'; }
 function showMainMenu(open) {
   mainMenuOpen = open;
+  document.body.classList.toggle('title', open);
   mainMenuEl.style.display = open ? 'flex' : 'none';
   if (open) { overlay.style.display = 'none'; if (locked) document.exitPointerLock(); }
 }
@@ -3454,6 +3646,41 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked && !invOpen) autoSave();           // paused: save (if auto save is on)
 });
 document.addEventListener('pointerlockerror', showPause);
+// The main menu's panorama: behind the title, the camera slowly turns all the way round.
+// It shows the update's own panorama: six pictures (panorama/0.jpg .. 5.jpg, a cube around one spot) of somewhere that shows
+// off what the update adds, taken with make-panorama.ps1. Without them (say the page was opened straight from a file) it looks
+// out over your own world instead, from a little above where you are (above the ground, even in a cave or a house).
+// Leaving the menu puts the camera back.
+const PANO_TURN = 0.05;   // how fast it turns (radians a second: once round in about 2 minutes)
+let panoYaw = null;
+const pano = { ready: false, scene: new THREE.Scene(), cam: new THREE.PerspectiveCamera(75, 1, 0.05, 10) };
+pano.cam.rotation.order = 'YXZ';
+{
+  // the cube's six sides: which way each picture looks, and which way is up in it (the same in the desktop edition)
+  const dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], ups = [[0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, 1, 0]];
+  let loaded = 0;
+  dirs.forEach((dv, k) => {
+    const d = new THREE.Vector3(...dv), u = new THREE.Vector3(...ups[k]), r = d.clone().cross(u);   // (a picture's right, as the camera that took it saw it)
+    const pos = [], uv = [], corner = (sr, su, tu, tv) => { const p = d.clone().addScaledVector(r, sr).addScaledVector(u, su); pos.push(p.x, p.y, p.z); uv.push(tu, 1 - tv); };
+    corner(-1, 1, 0, 0); corner(1, 1, 1, 0); corner(1, -1, 1, 1); corner(-1, 1, 0, 0); corner(1, -1, 1, 1); corner(-1, -1, 0, 1);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    const map = new THREE.TextureLoader().load(`panorama/${k}.jpg?v=${encodeURIComponent(GAME_VERSION)}`,   // (?v=: a new update's panorama, not an old one the browser kept)
+       () => { if (++loaded === 6) pano.ready = true; }, undefined, () => {});
+    pano.scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map, side: THREE.DoubleSide, depthTest: false, depthWrite: false, fog: false })));
+  });
+}
+function panorama(dt) {
+  if (!mainMenuOpen) { panoYaw = null; return; }
+  if (panoYaw === null) panoYaw = pano.ready ? 0 : player.yaw;
+  panoYaw += dt * PANO_TURN;
+  const x = Math.min(WX - 1, Math.max(0, Math.floor(player.x))), z = Math.min(WZ - 1, Math.max(0, Math.floor(player.z)));
+  camera.position.y = Math.max(player.y + EYE, heights[z * WX + x] + 3.5);
+  camera.rotation.y = panoYaw;
+  camera.rotation.x = -0.1;
+  if (pano.cam.fov !== camera.fov || pano.cam.aspect !== camera.aspect) { pano.cam.fov = camera.fov; pano.cam.aspect = camera.aspect; pano.cam.updateProjectionMatrix(); }
+  pano.cam.rotation.set(-0.1, panoYaw, 0);
+}
 function lockPointer() {
   try { const p = renderer.domElement.requestPointerLock(); if (p && p.catch) p.catch(showPause); } catch (e) {}
 }
@@ -4224,14 +4451,14 @@ function heldModel(id) {
   }
   if (b && b.t && !isItem(id) && !b.shape && !b.liquid && !isPiece(id) && !formOf(id)) {
     const s = 0.3, geo = new THREE.BoxGeometry(s, s, s), uv = geo.attributes.uv;
-    const cols = [];
+    const cols = [], e = LEAF_TINT[id] || [1, 1, 1];   // (Fir, Palm and Willow Leaves: the leaves picture in their own colour)
     for (let f = 0; f < 6; f++) {   // faces: +x, -x, top, bottom, +z (the front, if it has one), -z
       const t = f === 2 ? b.t[1] : f === 3 ? b.t[2] : f === 4 && b.t[3] !== undefined ? b.t[3] : b.t[0];
       const u0 = (t * PW + 1) / (PW * NT), u1 = (t * PW + 1 + TILE) / (PW * NT), v0 = 1 / PW, v1 = (1 + TILE) / PW;
       const shade = f === 2 ? 1 : f === 3 ? 0.55 : f < 2 ? 0.8 : 0.9;   // (lit from above, like the world's blocks)
       for (let k = 0; k < 4; k++) {
         uv.setXY(f * 4 + k, u0 + uv.getX(f * 4 + k) * (u1 - u0), v0 + uv.getY(f * 4 + k) * (v1 - v0));
-        cols.push(shade, shade, shade);
+        cols.push(shade * e[0], shade * e[1], shade * e[2]);
       }
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
@@ -4311,7 +4538,7 @@ function updateHand(dt) {
     const a = hand.body.arms[1];
     if (a && a.lower) { a.pivot.position.set(-a.lower.position.x, -a.lower.position.y, -a.lower.position.z); a.pivot.rotation.set(0, 0, 0); hand.arm.add(a.pivot); }
   }
-  hand.root.visible = !player.dead;
+  hand.root.visible = !player.dead && !mainMenuOpen;   // (no hand in the main menu's panorama)
   const id = HOTBAR[selected] | 0;
   if (id !== hand.id) {
     if (hand.id !== -1) hand.dip = 1;
@@ -5509,8 +5736,9 @@ addEventListener('mousedown', e => {
     Sound.break(hb);
     const cost = breakWear(hb);   // (the tool wears after the block is broken, so its last use still counts as that tool)
     // leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
-    if (hb !== 5 || holding('hoe')) collectBlock(hb, hit.x, hit.y, hit.z);
-    if (hb === 5 && !holding('hoe') && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);
+    if (!isLeaves(hb) || holding('hoe')) collectBlock(hb, hit.x, hit.y, hit.z);
+    if (isLeaves(hb) && !holding('hoe') && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);
+    if (hb === PALM_LEAVES && !holding('hoe') && Math.random() < 0.25) collect(DATES, hit.x, hit.y, hit.z);   // Palm Leaves: a 1 in 4 chance of Dates
     if (hb === GRAIN_RIPE) for (let n = 1 + (Math.random() < 0.5 ? 1 : 0); n > 0; n--) collect(GRAIN_SEEDS, hit.x, hit.y, hit.z);   // ripe Grain: 1-2 Seeds too
     if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn)); // take one torch off
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
@@ -5555,7 +5783,7 @@ addEventListener('mousedown', e => {
     }
     if (BLOCKS[id].shape === 'plant') {   // a flower: planted on top of grass or dirt
       const under = getBlock(bx, by - 1, bz);
-      if (by !== hit.y + 1 || (under !== 1 && under !== 2) || there) return;
+      if (by !== hit.y + 1 || (!grassy(under) && under !== 2) || there) return;
       setBlock(bx, by, bz, id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;
     }
     const overlapsPlayer =
@@ -5678,7 +5906,20 @@ const nameEl = document.getElementById('blockname');
 let nameTimer = 0;
 const hotbarIcons = [], hotbarCounts = [], hotbarWears = [];
 // `flat`: always the flat picture (for what's held). Otherwise a block, slab, stairs, piece or torch is drawn in 3D.
+// Fir, Palm and Willow Leaves (and their pieces, slabs and stairs) share the Oak Leaves picture: their icons and drops get its green in their own colour
+const leafTintOf = id => { const b = BLOCKS[id]; return b ? LEAF_TINT[id] || LEAF_TINT[b.piece] || LEAF_TINT[b.of] : undefined; };
+function leafTint(canvas, id) {
+  const t = leafTintOf(id);
+  if (!t) return;
+  const ctx = canvas.getContext('2d'), img = ctx.getImageData(0, 0, canvas.width, canvas.height), d = img.data;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 1] > d[i] && d[i + 1] > d[i + 2]) { d[i] *= t[0]; d[i + 1] *= t[1]; d[i + 2] = Math.min(255, d[i + 2] * t[2]); }
+  ctx.putImageData(img, 0, 0);
+}
 function drawIcon(canvas, id, flat) {
+  drawIconPlain(canvas, id, flat);
+  leafTint(canvas, id);
+}
+function drawIconPlain(canvas, id, flat) {
   if (!flat && iconBoxes(id)) { drawBoxIcon(canvas, id); return; }
   if (canvas.width !== TILE) canvas.width = canvas.height = TILE;
   canvas.style.imageRendering = '';
@@ -5774,6 +6015,7 @@ function boxModel(id) {
   const c = document.createElement('canvas'); c.width = T * 4; c.height = T;
   const cx = c.getContext('2d');
   tiles.forEach((t, f) => cx.drawImage(atlas, t * T, 0, T, T, f * T, 0, T, T));
+  leafTint(c, id);
   const tex = new THREE.CanvasTexture(c);
   tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
   const pos = [], uv = [], col = [], ind = [];
@@ -6041,7 +6283,7 @@ function giveItem(id, wear = 0, data = null) {
 const maxWear = id => (isTool(id) && DURABILITY[BLOCKS[id].material]) || (BLOCKS[id] && BLOCKS[id].armor !== undefined && ARMOR_DURABILITY[BLOCKS[id].material]) || 0;
 // the tool each block is meant for (null: none in particular)
 const rightTool = b => NEEDS_AXE.includes(b) ? 'axe' : NEEDS_PICKAXE.includes(b) || (BLOCKS[b] && BLOCKS[b].pick) ? 'pickaxe'
-  : DIGGABLE.includes(b) ? 'shovel' : b === 5 ? 'hoe' : null;
+  : DIGGABLE.includes(b) ? 'shovel' : isLeaves(b) ? 'hoe' : null;
 // breaking block b with what you're holding: 1, or 2 with the wrong tool
 const breakWear = b => { const k = rightTool(b); return !k || holding(k) ? 1 : 2; };
 // use up some of the selected tool (survival); it breaks when it's used up
@@ -6060,7 +6302,7 @@ const invEl = document.getElementById('inventory'), invGrid = document.getElemen
 const invIcons = [];
 // Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
 // click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, ...TOOLS, ...PACK_ITEMS, ...GEAR_ITEMS]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, ...TOOLS, ...PACK_ITEMS, ...GEAR_ITEMS]);
 const variantsOf = b => SPLITTABLE.includes(b)
   ? ['piece', 'slab', 'stairs', 'quarter', 'vslab', 'vstairs', 'vquarter'].map(f => formItem(f, b))
   : b === TORCH ? [SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH] : [];   // (the Torch's + shows its other kinds)
@@ -6094,9 +6336,9 @@ function showVariants(b, plus) {
 }
 // the tabs along the top of the creative inventory (anything not listed goes in Building Blocks)
 const INV_TABS = [
-  ['Building Blocks', [7, 61, 8, ...deepShown(8), 9, ...deepShown(9), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, ...deepShown(69), 10, 22, CRAFTING_BENCH, CUTTER, FURNACE, ...FIRECLAY_BLOCKS, FOUNDRY]],
-  ['Natural Blocks', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, ...deepShown(3), ...ORES, 4, 5, 6, 11, 63, FIRECLAY, ...FLOWERS, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...PACK_ITEMS.slice(0, 12), FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
+  ['Building Blocks', [7, 61, FIR_PLANKS, STRIPPED_FIR_LOG, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_PLANKS, STRIPPED_WILLOW_LOG, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS, 8, ...deepShown(8), 9, ...deepShown(9), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, ...deepShown(69), 10, 22, CRAFTING_BENCH, CUTTER, FURNACE, ...FIRECLAY_BLOCKS, FOUNDRY]],
+  ['Natural Blocks', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, ...deepShown(3), ...ORES, 4, 5, FIR_LOG, FIR_LEAVES, PALM_LOG, PALM_LEAVES, WILLOW_LOG, WILLOW_LEAVES, 6, 97, 98, 58, MUD, PEAT, 99, 11, 63, FIRECLAY, ...FLOWERS, WATER]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...PACK_ITEMS.slice(0, 12), FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
 ];
 const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
 let invTab = 0;
@@ -6238,6 +6480,8 @@ const SMELTS = [
   ...deepShown(8).map((c, k) => ({ out: STRATA + k, from: c })),   // a deep layer's Cobblestone -> that layer's Stone
   { out: FIRECLAY_BRICK, from: FIRECLAY_BALL },        // Fireclay Ball -> Fireclay Brick
   { out: FIRECLAY_TERRACOTTA, from: FIRECLAY },        // Fireclay -> Fireclay Terracotta
+  { out: SMOOTH_SANDSTONE, from: 97 },                 // Sandstone -> Smooth Sandstone
+  { out: MUD_BRICKS, from: MUD },                      // Mud -> Mud Bricks
   // the Foundry: a Chunk -> its Brick; two metals' Bricks -> an alloy; an Iron Brick -> Steel Scrap, 4 Steel Scrap -> a Steel Brick
   ...METALS.map(m => ({ out: METAL_BRICK[m], from: CHUNK[m], at: 'foundry' })),
   { out: METAL_BRICK.bronite, needs: [[METAL_BRICK.copper, 1], [METAL_BRICK.tin, 1]], at: 'foundry' },
@@ -6260,7 +6504,8 @@ function foundryBuilt(i) {
   }
   return true;
 }
-const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1 };   // how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1
+const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1, [FIR_LOG]: 4, [STRIPPED_FIR_LOG]: 4, [FIR_PLANKS]: 2, [PALM_LOG]: 4, [STRIPPED_PALM_LOG]: 4, [PALM_PLANKS]: 2,
+  [WILLOW_LOG]: 4, [STRIPPED_WILLOW_LOG]: 4, [WILLOW_PLANKS]: 2, [PEAT]: 8 };   // how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1; Peat (from the swamp) 8
 const furnaceEl = document.getElementById('furnace'), furnaceName = document.getElementById('furnace-name');
 const furnaceFuel = document.createElement('canvas'); furnaceFuel.width = furnaceFuel.height = TILE;
 document.getElementById('furnace-fuel').append(furnaceFuel);
@@ -6516,11 +6761,11 @@ function farmUse(hit, hb) {
   const held = HOTBAR[act], above = getBlock(hit.x, hit.y + 1, hit.z);
   const target = isCrop(hb) ? getBlock(hit.x, hit.y - 1, hit.z) : hb, ty = isCrop(hb) ? hit.y - 1 : hit.y;
   if (holding('hoe')) {
-    if ((hb !== 1 && hb !== 2) || (above && !isWater(above) && !isFlower(above))) return false;
+    if ((!grassy(hb) && hb !== 2) || (above && !isWater(above) && !isFlower(above))) return false;
     if (isFlower(above)) { collect(above, hit.x, hit.y + 1, hit.z); setBlock(hit.x, hit.y + 1, hit.z, 0); }
     setBlock(hit.x, hit.y, hit.z, TILLED);
     Sound.place(2); mobNoise(hit.x, hit.y, hit.z); wearTool(1);
-    if (hb === 1 && Math.random() < FARM.seedChance) collect(GRAIN_SEEDS, hit.x, hit.y + 1, hit.z);   // turned up some seeds
+    if (grassy(hb) && Math.random() < FARM.seedChance) collect(GRAIN_SEEDS, hit.x, hit.y + 1, hit.z);   // turned up some seeds
     return true;
   }
   if (held === GRAIN_SEEDS) {
@@ -6595,6 +6840,23 @@ const RECIPES = [
   { out: STICK, n: 4, needs: [[7, 2]], at: 'bench', axe: true }, // 2 Planks -> 4 Sticks (sticks also sometimes drop from leaves)
   { out: CRAFTING_BENCH, n: 1, needs: [[7, 4], [4, 1]], at: 'hand' },   // 4 Planks + a Log -> Crafting Bench
   { out: CUTTER, n: 1, needs: [[7, 3], [METAL_BRICK.copper, 1]], at: 'bench' },   // 3 Planks + a Copper Brick (its blade) -> Cutter
+  // the same from Fir wood
+  { out: FIR_PLANKS, n: 4, needs: [[FIR_LOG, 1]], at: 'hand', axe: true },
+  { out: FIR_PLANKS, n: 4, needs: [[STRIPPED_FIR_LOG, 1]], at: 'hand', axe: true },
+  { out: STICK, n: 4, needs: [[FIR_PLANKS, 2]], at: 'bench', axe: true },
+  { out: CRAFTING_BENCH, n: 1, needs: [[FIR_PLANKS, 4], [FIR_LOG, 1]], at: 'hand' },
+  { out: CUTTER, n: 1, needs: [[FIR_PLANKS, 3], [METAL_BRICK.copper, 1]], at: 'bench' },
+  // ... and from Palm and Willow wood
+  { out: PALM_PLANKS, n: 4, needs: [[PALM_LOG, 1]], at: 'hand', axe: true },
+  { out: PALM_PLANKS, n: 4, needs: [[STRIPPED_PALM_LOG, 1]], at: 'hand', axe: true },
+  { out: STICK, n: 4, needs: [[PALM_PLANKS, 2]], at: 'bench', axe: true },
+  { out: CRAFTING_BENCH, n: 1, needs: [[PALM_PLANKS, 4], [PALM_LOG, 1]], at: 'hand' },
+  { out: CUTTER, n: 1, needs: [[PALM_PLANKS, 3], [METAL_BRICK.copper, 1]], at: 'bench' },
+  { out: WILLOW_PLANKS, n: 4, needs: [[WILLOW_LOG, 1]], at: 'hand', axe: true },
+  { out: WILLOW_PLANKS, n: 4, needs: [[STRIPPED_WILLOW_LOG, 1]], at: 'hand', axe: true },
+  { out: STICK, n: 4, needs: [[WILLOW_PLANKS, 2]], at: 'bench', axe: true },
+  { out: CRAFTING_BENCH, n: 1, needs: [[WILLOW_PLANKS, 4], [WILLOW_LOG, 1]], at: 'hand' },
+  { out: CUTTER, n: 1, needs: [[WILLOW_PLANKS, 3], [METAL_BRICK.copper, 1]], at: 'bench' },
   { out: TORCH, n: 2, needs: [[STICK, 1], [TORCH, 1]], at: 'hand' },     // a Stick + a Torch -> 2 Torches (light the first one at a lit furnace)
   { out: EVER_TORCH, n: 1, needs: [[TORCH, 1], [FIRE_ESSENCE, 1]], at: 'hand' },   // a Torch + Fire Essence -> an Ever Torch (never burns out)
   { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
@@ -6606,6 +6868,8 @@ const RECIPES = [
   { out: 67, n: 1, needs: [[65, 1]], at: 'bench', tool: 'pickaxe' },     // Terracotta -> Chiseled Terracotta
   { out: 68, n: 1, needs: [[66, 1]], at: 'bench', tool: 'pickaxe' },     // Red Terracotta -> Chiseled Red Terracotta
   { out: 69, n: 1, needs: [[3, 1]], at: 'bench', tool: 'pickaxe' },      // Stone -> Chiseled Stone
+  { out: SANDSTONE_BRICKS, n: 1, needs: [[97, 1]], at: 'bench', tool: 'pickaxe' },     // Sandstone, cut into bricks
+  { out: CHISELED_SANDSTONE, n: 1, needs: [[97, 1]], at: 'bench', tool: 'pickaxe' },   // Sandstone, carved
   // Fireclay, like Clay; and the Foundry's blocks
   { out: FIRECLAY_BALL, n: 4, needs: [[FIRECLAY, 1]], at: 'hand' },                           // Fireclay -> 4 Fireclay Balls
   { out: FIRECLAY, n: 1, needs: [[FIRECLAY_BALL, 4]], at: 'hand' },                           // 4 Fireclay Balls packed back into Fireclay
@@ -7034,7 +7298,7 @@ addEventListener('pagehide', () => autoSave());
     const f = friends.get(conn.peer);
     if (f) f.seen = performance.now();
     if (d.t === 'hello') {          // someone checking which world this is, before they load it
-      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, mode: gameMode, host: myName });
+      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, s: WX, mode: gameMode, host: myName });
     } else if (d.t === 'join') {
       if (d.ver !== GAME_VERSION) { conn.send({ t: 'refuse', why: `You need the same version of the game. They have ${GAME_VERSION}, you have ${d.ver}.` }); return; }
       const used = new Set([HUES[0], ...[...friends.values()].map(x => x.hue)]);
@@ -7116,7 +7380,7 @@ addEventListener('pagehide', () => autoSave());
         if (d.ver !== GAME_VERSION) return fail(`${d.host} is playing version ${d.ver}, and you have ${GAME_VERSION}. You both need the same version.`);
         clearTimeout(joinTimeout); done = true;
         status('Joining...');
-        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, mode: d.mode, host: d.host })); } catch (e) {}
+        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, s: d.s, mode: d.mode, host: d.host })); } catch (e) {}
         p.destroy();
         await saveBeforeLeaving();
         location.hash = 'join=' + code;
@@ -7379,7 +7643,7 @@ function showWorlds(open) {
     const row = document.createElement('div'); row.className = 'world-row';
     const info = document.createElement('div');
     const nm = document.createElement('div'); nm.className = 'wname'; nm.textContent = w.name + (w.id === Worlds.current.id ? '  (open now)' : '');
-    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 2 ? 'Rolling hills' : 'Plateaus'} · ${w.h === 640 ? 640 : 192} tall · ${w.mode === 'survival' ? 'Survival' : 'Creative'}${w.ver ? ` · v${w.ver}` : ''}`;
+    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 3 ? 'Biomes' : w.gen === 2 ? 'Rolling hills' : 'Plateaus'} · ${w.s === 1280 && w.h !== 640 ? 1280 : 640} wide · ${w.h === 640 ? 640 : 192} tall · ${w.mode === 'survival' ? 'Survival' : 'Creative'}${w.ver ? ` · v${w.ver}` : ''}`;
     info.append(nm, sub);
     const playBtn = document.createElement('button'); playBtn.textContent = 'Play';
     playBtn.onclick = async () => {
@@ -7497,6 +7761,7 @@ function frame(now) {
   camera.position.set(player.x, player.y + EYE, player.z);
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
+  panorama(dt);
   updateSky(dt);
   updateMobs(worldLoaded && (locked || invOpen || Net.hosting) || Net.client ? dt : 0);   // (mobs wait while you're paused, like the rest of the world; a joined game follows the host)
   updateDrops(dt);
@@ -7561,7 +7826,8 @@ function frame(now) {
   infoEl.textContent = `${fps} fps\nX ${player.x.toFixed(1)}  Y ${player.y.toFixed(1)}  Z ${player.z.toFixed(1)}${player.fly ? '\nFlying' : ''}${Sound.muted ? '\nSound off (M)' : ''}${Net.infoLine()}${!buildQueue ? (Net.client ? '\nJoining...' : '\nLoading save...') : !firstBuildDone ? `\nLoading world ${Math.floor(100 * buildDone / buildQueue.length)}%` : ''}`;
 
   flushGroups();   // glue changed chunks back into their groups' meshes
-  renderer.render(scene, camera);
+  if (mainMenuOpen && pano.ready) renderer.render(pano.scene, pano.cam);   // (the main menu's panorama, see panorama)
+  else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 </script>

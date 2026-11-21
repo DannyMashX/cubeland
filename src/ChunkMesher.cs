@@ -28,9 +28,11 @@ public class ChunkMesher
 		public readonly List<Vector2> Uv = new(), Uv2 = new();
 		public readonly List<Color> Col = new();
 		public readonly List<int> Ind = new();
-		public void V(float x, float y, float z, Vector2 uv, float shade, float torch, float sky)
+		// (COLOR: the shading times the biome tint; its alpha holds the plain shading, which the shader uses for every pixel that isn't green)
+		public void V(float x, float y, float z, Vector2 uv, float shade, float torch, float sky) => V(x, y, z, uv, shade, torch, sky, new Color(1, 1, 1));
+		public void V(float x, float y, float z, Vector2 uv, float shade, float torch, float sky, Color tint)
 		{
-			Pos.Add(new Vector3(x, y, z)); Uv.Add(uv); Col.Add(new Color(shade, shade, shade)); Uv2.Add(new Vector2(torch, sky));
+			Pos.Add(new Vector3(x, y, z)); Uv.Add(uv); Col.Add(new Color(shade * tint.R, shade * tint.G, shade * tint.B, shade)); Uv2.Add(new Vector2(torch, sky));
 		}
 		// (the web version's triangles, wound the other way round for Godot)
 		public void Quad(int b) { Ind.Add(b); Ind.Add(b + 2); Ind.Add(b + 1); Ind.Add(b + 2); Ind.Add(b + 3); Ind.Add(b + 1); }
@@ -69,6 +71,9 @@ public class ChunkMesher
 		bool anyLight = W.LightMap.Count > 0;
 		var sky = new Dictionary<int, float>();
 		var p = new int[3]; var q = new int[3]; var ao = new int[4];
+		var tints = new Dictionary<int, Color>();   // grass and leaves: the biome colour at each corner (x, z)
+		Color TintAt(int x, int z) { int k = x * 65536 + z; if (!tints.TryGetValue(k, out var c)) tints[k] = c = W.Gen.GrassTint(x, z); return c; }
+		var white = new Color(1, 1, 1);
 		for (int y = y0; y < top; y++) for (int z = cz * World.CS; z < cz * World.CS + World.CS; z++) for (int x = cx * World.CS; x < cx * World.CS + World.CS; x++)
 		{
 			int id = W.Blocks[World.Idx(x, y, z)];
@@ -86,6 +91,8 @@ public class ChunkMesher
 				continue;
 			}
 			float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);   // a little darker deep down
+			bool tinted = Blocks.TakesBiomeTint(id);
+			var lt = Blocks.LeafTint(id); var extra = lt != null ? new Color(lt[0], lt[1], lt[2]) : white;
 			foreach (var f in Faces)
 			{
 				int n = W.GetBlock(x + f.Dir[0], y + f.Dir[1], z + f.Dir[2]);
@@ -112,7 +119,7 @@ public class ChunkMesher
 					q[ta] += sa; if (s1 == 0) { if (anyLight) sum += W.LightAt(q[0], q[1], q[2]); skySum += W.SkyExposure(q[0], q[1], q[2], sky); cnt++; }
 					q[tb] += sb; if (s3 == 0 && !(s1 == 1 && s2 == 1)) { if (anyLight) sum += W.LightAt(q[0], q[1], q[2]); skySum += W.SkyExposure(q[0], q[1], q[2], sky); cnt++; }
 					q[ta] -= sa; if (s2 == 0) { if (anyLight) sum += W.LightAt(q[0], q[1], q[2]); skySum += W.SkyExposure(q[0], q[1], q[2], sky); cnt++; }
-					P.V(x + c[0], y + c[1], z + c[2], Atlas.UV(tile, c[3], c[4]), shade, anyLight ? World.LightCurve(sum / cnt) : 0, skySum / cnt);
+					P.V(x + c[0], y + c[1], z + c[2], Atlas.UV(tile, c[3], c[4]), shade, anyLight ? World.LightCurve(sum / cnt) : 0, skySum / cnt, tinted ? TintAt(x + c[0], z + c[2]) * extra : white);
 				}
 				// pick the quad diagonal that keeps the shading smooth
 				if (ao[0] + ao[3] > ao[1] + ao[2]) P.QuadFlipped(bas); else P.Quad(bas);
@@ -211,13 +218,12 @@ public class ChunkMesher
 	}
 	// the Cutter's saw blade: the top half of the cutter_saw picture, standing up across the middle of the block above its half-tall base,
 	// seen from both sides
-	const int SawTile = 243;
 	void AddSaw(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky)
 	{
 		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, s = W.SkyExposure(x, y, z, sky);
 		int bas = P.Pos.Count;
 		foreach (var (u, v) in new[] { (0f, 0.5f), (1f, 0.5f), (0f, 1f), (1f, 1f) })
-			P.V(x + 0.5f, y + v, z + u, Atlas.UV(SawTile, u, v), 1, light, s);
+			P.V(x + 0.5f, y + v, z + u, Atlas.UV(Atlas.SawTile, u, v), 1, light, s);
 		P.Quad(bas); P.Ind.Add(bas); P.Ind.Add(bas + 1); P.Ind.Add(bas + 2); P.Ind.Add(bas + 2); P.Ind.Add(bas + 1); P.Ind.Add(bas + 3);   // both sides
 	}
 	// a plant (a flower): its picture twice, standing up and crossed like an X, seen from both sides.

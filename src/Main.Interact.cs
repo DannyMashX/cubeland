@@ -52,7 +52,7 @@ public partial class Main
 	}
 	// the tool each block is meant for (null: none in particular)
 	static string RightTool(int b) => Array.IndexOf(Blocks.NeedsAxe, b) >= 0 ? "axe" : Array.IndexOf(Blocks.NeedsPickaxe, b) >= 0 || Blocks.Get(b)?.Pick > 0 ? "pickaxe"
-		: Array.IndexOf(Blocks.Diggable, b) >= 0 ? "shovel" : b == Blocks.Leaves ? "hoe" : null;
+		: Array.IndexOf(Blocks.Diggable, b) >= 0 ? "shovel" : Blocks.IsLeaves(b) ? "hoe" : null;
 	// breaking block b with what you're holding: 1, or 2 with the wrong tool
 	int BreakWear(int b) { string k = RightTool(b); return k == null || inv.Holding(k) ? 1 : 2; }
 	// use up some of the selected tool; it breaks when it's used up
@@ -135,9 +135,10 @@ public partial class Main
 		if (NeedTool(hb)) return;
 		int cost = BreakWear(hb);   // (the tool wears after the block is broken, so its last use still counts as that tool)
 		// leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
-		if (hb != Blocks.Leaves || inv.Holding("hoe")) CollectBlock(hb, h.X, h.Y, h.Z);
+		if (!Blocks.IsLeaves(hb) || inv.Holding("hoe")) CollectBlock(hb, h.X, h.Y, h.Z);
 		Sound.I?.Break(hb);
-		if (hb == Blocks.Leaves && !inv.Holding("hoe") && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);
+		if (Blocks.IsLeaves(hb) && !inv.Holding("hoe") && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);
+		if (hb == Blocks.PalmLeaves && !inv.Holding("hoe") && rnd.NextDouble() < 0.25) Collect(Blocks.Dates, h.X, h.Y, h.Z);   // Palm Leaves: a 1 in 4 chance of Dates
 		if (hb == Blocks.GrainRipe) for (int n = 1 + rnd.Next(2); n > 0; n--) Collect(Blocks.GrainSeeds, h.X, h.Y, h.Z);   // ripe Grain: 1-2 seeds too
 		var b = Blocks.B[hb];
 		if (Blocks.IsTorch(hb) && b.Count > 1) world.SetBlock(h.X, h.Y, h.Z, Blocks.TorchVariant(b.Wi, b.Count - 1, b.Burn));   // take one torch off
@@ -154,11 +155,11 @@ public partial class Main
 		int ty = onCrop ? y - 1 : y, target = onCrop ? world.GetBlock(x, ty, z) : hb;
 		if (inv.Holding("hoe"))
 		{
-			if ((hb != Blocks.Grass && hb != Blocks.Dirt) || (above != 0 && !Blocks.IsWater(above) && !Blocks.IsFlower(above))) return false;
+			if ((!Blocks.IsGrassy(hb) && hb != Blocks.Dirt) || (above != 0 && !Blocks.IsWater(above) && !Blocks.IsFlower(above))) return false;
 			if (Blocks.IsFlower(above)) { Collect(above, x, y + 1, z); world.SetBlock(x, y + 1, z, 0); }
 			world.SetBlock(x, y, z, Blocks.Tilled);
 			Sound.I?.Place(Blocks.Dirt); MobNoise(x, y, z); WearTool(1);
-			if (hb == Blocks.Grass && rnd.NextDouble() < 1.0 / 6) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
+			if (Blocks.IsGrassy(hb) && rnd.NextDouble() < 1.0 / 6) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
 			return true;
 		}
 		if (held == Blocks.GrainSeeds)
@@ -242,7 +243,7 @@ public partial class Main
 			if (Blocks.B[pid].Shape == "plant")
 			{   // a flower: planted on top of grass or dirt
 				int under = world.GetBlock(bx, by - 1, bz);
-				if (by != h.Y + 1 || (under != Blocks.Grass && under != Blocks.Dirt) || there != 0) return;
+				if (by != h.Y + 1 || (!Blocks.IsGrassy(under) && under != Blocks.Dirt) || there != 0) return;
 				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
 			}
 			if (pid == Blocks.Furnace || pid == Blocks.Foundry)

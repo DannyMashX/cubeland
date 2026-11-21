@@ -26,7 +26,7 @@ public partial class Main
 	static List<(string[] urls, string user, string pass)> relayServers;
 
 	// a friend's game you're joining (kept while the game restarts into their world)
-	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host, int H);
+	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host, int H, int S);
 	static JoinInfo joinInfo;
 	bool netClient => joinInfo != null && current?.Id == "join-" + joinInfo.Code;
 
@@ -211,7 +211,7 @@ public partial class Main
 		if (known) friends[conn.PeerId] = f with { seen = Now };
 		string t = d.S("t");
 		if (t == "hello")   // someone checking which world this is, before they load it
-			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["h"] = current.H, ["mode"] = current.Mode, ["host"] = settings.Name });
+			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["h"] = current.H, ["s"] = current.S, ["mode"] = current.Mode, ["host"] = settings.Name });
 		else if (t == "join")
 		{
 			if (d.S("ver") != NetVersion) { conn.Send(new Dictionary<string, object> { ["t"] = "refuse", ["why"] = $"You need the same version of the game. They have {NetVersion}, you have {d.S("ver")}." }); return; }
@@ -307,7 +307,7 @@ public partial class Main
 				done = true; joinTimer = 0;
 				NetStatus("Joining...");
 				p.Destroy(); peer = null;
-				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192);
+				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192, d.I("s") == 1280 ? 1280 : 640);
 				SwitchWorld("join-" + code, true);
 			};
 		};

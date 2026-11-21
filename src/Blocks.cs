@@ -36,7 +36,7 @@ public class BlockDef
 // Every block and item in the game (the same numbers as the web version, so saved worlds line up).
 public static class Blocks
 {
-	public const int MaxId = 2000;
+	public const int MaxId = 2200;
 	// Strata (640-tall worlds): from sea level down, a new layer of stone every 64 blocks, down to bedrock at the very bottom.
 	// Layer 1 is the normal Stone (and everything above sea level); layers 2-8 are blocks 113-119, each darker and
 	// harder: past a few layers, only a better pickaxe can mine it (see StrataPickaxe). All of them are called Stone.
@@ -59,9 +59,15 @@ public static class Blocks
 	public static int BenchOut(string mode, int b) => FormItem(mode == "pieces" ? "piece" : mode, b);   // what a bench mode makes from block b
 	public static int FormItem(string form, int b)
 	{
-		int i = Array.IndexOf(DeepBlocks, b);
-		return i >= 0 ? DeepFormItem + 7 * i + Array.IndexOf(Forms, form) : (form == "piece" ? PieceItem : ShapeItem[form]) + b;
+		int i = Array.IndexOf(DeepBlocks, b), e = Array.IndexOf(ExtraFormBlocks, b);
+		return i >= 0 ? DeepFormItem + 7 * i + Array.IndexOf(Forms, form) : e >= 0 ? ExtraFormItem + 7 * e + Array.IndexOf(Forms, form)
+			: (form == "piece" ? PieceItem : ShapeItem[form]) + b;
 	}
+	// Blocks numbered where 100 + b and 1000 + b would clash too (the desert and swamp blocks, and Sandstone): their piece, slab, stairs...
+	// items are 2000 + 7 x (the block's place in this list) + the form, like the deep stone sets. (Only ever add to the end of this list.)
+	public const int ExtraFormItem = 2000;
+	public static readonly int[] ExtraFormBlocks = { Sandstone, PalmLog, PalmLeaves, PalmPlanks, StrippedPalmLog, WillowLog, WillowLeaves, WillowPlanks, StrippedWillowLog,
+		SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat };
 	public static int StoneLayer(int b) => b == 3 ? 1 : Get(b)?.Layer ?? 0;
 	// the deepest layer each pickaxe can mine, by what it's made of (copper and up are still to come)
 	public static readonly Dictionary<string, int> StrataPickaxe = new() { ["stone"] = 2, ["copper"] = 3, ["iron"] = 4, ["bronite"] = 6, ["rosium"] = 7, ["steel"] = 8 };
@@ -72,6 +78,23 @@ public static class Blocks
 		StoneBricks = 9, Glass = 10, Gravel = 11, CraftingBench = 60, Cutter = 159, StrippedLog = 61, RockBlock = 62, Clay = 63,
 		BricksBlock = 64, Terracotta = 65, Pieces = 70, ClayBallBlock = 71, BrickBlock = 72, Furnace = 73;
 	public const int Torch = 22, SmolderingTorch = 81, BurntTorch = 170, EverTorch = 182, Water = 50;
+	// Biomes (gen 3 worlds): Sandstone under desert sand, Snowy Grass in snowy lands, Ice on their frozen water, Swamp Grass in swamps
+	public const int Sandstone = 97, SnowyGrass = 98, Ice = 99, SwampGrass = 58;
+	public static bool IsGrassy(int b) => b == Grass || b == SnowyGrass || b == SwampGrass;   // grass of any biome (dirt underneath; flowers and hoes)
+	public static bool TakesBiomeTint(int b) => b == Grass || b == SwampGrass || IsLeaves(b);   // coloured by the climate where they are (Biome worlds)
+	// Fir: the snowy biome's wood (Oak is the original wood: Log, Leaves, Planks and Stripped Log above)
+	public const int FirLog = 251, FirLeaves = 252, FirPlanks = 253, StrippedFirLog = 254;
+	// Palm: the desert's trees (their leaves sometimes drop Dates). Willow: the swamp's trees
+	public const int PalmLog = 16, PalmLeaves = 17, PalmPlanks = 18, StrippedPalmLog = 19;
+	public const int WillowLog = 20, WillowLeaves = 21, WillowPlanks = 59, StrippedWillowLog = 160;
+	// the desert's building stone (made from Sandstone), and the swamp's ground: Mud (fired into Mud Bricks) and Peat (a long-burning fuel)
+	public const int SandstoneBricks = 162, ChiseledSandstone = 199, SmoothSandstone = 202, Mud = 203, MudBricks = 204, Peat = 205;
+	public const int Dates = 705;   // food, from Palm Leaves
+	public static bool IsLeaves(int b) => b == Leaves || b == FirLeaves || b == PalmLeaves || b == WillowLeaves;
+	// Fir, Palm and Willow Leaves use the Oak Leaves picture, with their own colour on top of the climate colour
+	// (Fir: darker blue-green; Palm: brighter yellow-green; Willow: a softer olive green). null: none (Oak Leaves)
+	public static float[] LeafTint(int b) => b == FirLeaves ? FirLeafTint : b == PalmLeaves ? PalmLeafTint : b == WillowLeaves ? WillowLeafTint : null;
+	static readonly float[] FirLeafTint = { 0.78f, 0.85f, 1.05f }, PalmLeafTint = { 1.06f, 1.1f, 0.72f }, WillowLeafTint = { 0.92f, 1f, 0.78f };
 	public const int Chocolate = 200, Stick = 201, Rock = 212, CrudeAxe = 213, ClayBall = 215, Brick = 216, FireEssence = 217;
 	public const int Bone = 620, BoneAsh = 621, GloomWisp = 622;   // Fear & Foes (items 620+; 600-611 are the dyes)
 	// Till & Tend (farming Grain; see Farm.cs): items 623-626, soil blocks 93-96, Grain growing 42-49 (49 = ripe)
@@ -135,14 +158,16 @@ public static class Blocks
 	public static readonly string[] FlowerColours = { "red", "yellow", "aqua", "indigo", "magenta" };
 	public static readonly int[] Flowers = { 194, 195, 196, 197, 198 };
 	public static bool IsFlower(int id) => id >= 194 && id <= 198;
-	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(DeepBlocks).ToArray();
-	public static readonly int[] NeedsAxe = { 4, 7, 61 }, Diggable = { 1, 2, 6, 11, 63, Fireclay, 93, 94, 95, 96 };
+	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, FirPlanks, FirLog, StrippedFirLog, FirLeaves, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(DeepBlocks).Concat(ExtraFormBlocks).ToArray();
+	public static readonly int[] NeedsAxe = { 4, 7, 61, FirLog, FirPlanks, StrippedFirLog, PalmLog, PalmPlanks, StrippedPalmLog, WillowLog, WillowPlanks, StrippedWillowLog },
+		Diggable = { 1, 2, 6, 11, 63, Fireclay, 93, 94, 95, 96, Mud, Peat };
 	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).Concat(DeepBlocks)
-		.Concat(Ores).Concat(FireclayBlocks).Concat(FoundryIds).ToArray();
+		.Concat(Ores).Concat(FireclayBlocks).Concat(FoundryIds).Concat(new[] { Sandstone, SandstoneBricks, ChiseledSandstone, SmoothSandstone, MudBricks }).ToArray();
 	// Every block you can pick from the creative inventory
-	public static readonly int[] Items = new[] { new[] { 1, 2, 3 }, DeepShown(3), new[] { 8 }, DeepShown(8), new[] { 7, 60, Cutter, 4, 61, 5, 6, 9 }, DeepShown(9),
+	public static readonly int[] Items = new[] { new[] { 1, 2, 3 }, DeepShown(3), new[] { 8 }, DeepShown(8), new[] { 7, 60, Cutter, 4, 61, 5, FirPlanks, FirLog, StrippedFirLog, FirLeaves, 6, 9 }, DeepShown(9),
 		new[] { 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }, DeepShown(69) }.SelectMany(a => a).Concat(NewColourBlocks).Concat(Flowers)
-		.Concat(new[] { Furnace, 22, Water, Bedrock }).Concat(Ores).Append(Fireclay).Concat(FireclayBlocks).Append(Foundry).ToArray();
+		.Concat(new[] { Furnace, 22, Water, Bedrock }).Concat(Ores).Append(Fireclay).Concat(FireclayBlocks).Append(Foundry)
+		.Concat(new[] { PalmPlanks, PalmLog, StrippedPalmLog, PalmLeaves, WillowPlanks, WillowLog, StrippedWillowLog, WillowLeaves, SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat }).ToArray();
 	public const int StackMax = 64;
 
 	// shapes made of pieces: bit masks of the 8 spots (spot number = x + y*2 + z*4)
@@ -160,61 +185,93 @@ public static class Blocks
 	static readonly Dictionary<string, string> shapeName = new()
 	{ ["slab"] = "Slab", ["vslab"] = "Vertical Slab", ["stairs"] = "Stairs", ["quarter"] = "Quarter", ["vstairs"] = "Vertical Stairs", ["vquarter"] = "Vertical Quarter" };
 
-	static BlockDef Def(int id, string name, int side, int top, int bottom)
+	// pictures are named by their file (textures/blocks or textures/items, without .png): side, top, bottom
+	static BlockDef Def(int id, string name, string side, string top, string bottom)
 	{
-		var b = new BlockDef { Name = name, T = new[] { side, top, bottom } };
+		var b = new BlockDef { Name = name, T = P(side, top, bottom) };
 		B[id] = b;
 		return b;
 	}
 
+	// the atlas places of some pictures (named by their file)
+	static int[] P(params string[] names) => Atlas.Tiles(names);
+	static int[] P3(string name) => Atlas.Tiles(name, name, name);   // one picture on every side
+
 	static Blocks()
 	{
-		Def(1, "Grass", 1, 0, 2).Drop = 2;   // digging up Grass gives Dirt
-		Def(2, "Dirt", 2, 2, 2);
-		Def(3, "Stone", 3, 3, 3).Drop = 8;   // mining Stone gives Cobblestone
-		for (int n = 2; n <= StrataLayers; n++)   // the deep stone sets: pictures 124-130 (stone), 132-138, 139-145, 146-152
+		Def(1, "Grass", "grass_side", "grass", "dirt").Drop = 2;   // digging up Grass gives Dirt
+		Def(2, "Dirt", "dirt", "dirt", "dirt");
+		Def(3, "Stone", "stone", "stone", "stone").Drop = 8;   // mining Stone gives Cobblestone
+		for (int n = 2; n <= StrataLayers; n++)   // the deep stone sets (pictures stone_layer_2, cobblestone_layer_2, ... up to _8)
 		{
 			int k = n - 2;
-			var d = Def(Strata + k, "Stone", 122 + n, 122 + n, 122 + n); d.Drop = DeepCobble + k; d.Layer = n;
-			Def(DeepCobble + k, "Cobblestone", 130 + n, 130 + n, 130 + n).Layer = n;
-			Def(DeepBricks + k, "Stone Bricks", 137 + n, 137 + n, 137 + n).Layer = n;
-			Def(DeepChiseled + k, "Chiseled Stone", 144 + n, 144 + n, 144 + n).Layer = n;
+			var d = Def(Strata + k, "Stone", $"stone_layer_{n}", $"stone_layer_{n}", $"stone_layer_{n}"); d.Drop = DeepCobble + k; d.Layer = n;
+			Def(DeepCobble + k, "Cobblestone", $"cobblestone_layer_{n}", $"cobblestone_layer_{n}", $"cobblestone_layer_{n}").Layer = n;
+			Def(DeepBricks + k, "Stone Bricks", $"stone_bricks_layer_{n}", $"stone_bricks_layer_{n}", $"stone_bricks_layer_{n}").Layer = n;
+			Def(DeepChiseled + k, "Chiseled Stone", $"chiseled_stone_layer_{n}", $"chiseled_stone_layer_{n}", $"chiseled_stone_layer_{n}").Layer = n;
 		}
-		Def(Bedrock, "Bedrock", 131, 131, 131);
-		Def(4, "Log", 4, 5, 5);
-		Def(5, "Leaves", 6, 6, 6).Transparent = true;
-		Def(6, "Sand", 7, 7, 7);
-		Def(7, "Planks", 8, 8, 8);
-		Def(8, "Cobblestone", 9, 9, 9);
-		Def(9, "Stone Bricks", 10, 10, 10);
-		Def(10, "Glass", 11, 11, 11).Transparent = true;
-		Def(11, "Gravel", 12, 12, 12);
-		for (int k = 0; k < 4; k++) Def(12 + k, "Red Bricks", 13 + k, 13 + k, 13 + k);   // 4 looks, picked at random when placed
-		Def(60, "Crafting Bench", 28, 29, 8);
+		Def(Bedrock, "Bedrock", "bedrock", "bedrock", "bedrock");
+		Def(4, "Oak Log", "log_side", "log_top", "log_top");
+		Def(5, "Oak Leaves", "leaves", "leaves", "leaves").Transparent = true;
+		Def(6, "Sand", "sand", "sand", "sand");
+		Def(7, "Oak Planks", "planks", "planks", "planks");
+		Def(8, "Cobblestone", "cobblestone", "cobblestone", "cobblestone");
+		Def(9, "Stone Bricks", "stone_bricks", "stone_bricks", "stone_bricks");
+		Def(10, "Glass", "glass", "glass", "glass").Transparent = true;
+		Def(11, "Gravel", "gravel", "gravel", "gravel");
+		for (int k = 0; k < 4; k++) { string look = "bricks_" + "abcd"[k]; Def(12 + k, "Red Bricks", look, look, look); }   // 4 looks, picked at random when placed (each is red_bricks until you make its own picture)
+		Def(60, "Crafting Bench", "crafting_bench_side", "crafting_bench_top", "planks");
 		// the Cutter: cuts blocks into pieces, slabs and stairs. Half a block tall, with a saw blade standing up out of it
 		// (pictures: cutter_base on the sides, the stripped log top on top, cutter_bottom underneath, cutter_saw for the blade)
-		var cutter = Def(Cutter, "Cutter", 241, 31, 242); cutter.Shape = "half"; cutter.Transparent = true; cutter.Box = new[] { 0f, 0, 0, 1, 0.5f, 1 };
-		Def(61, "Stripped Log", 30, 31, 31);
-		var rock = Def(62, "Rock", 33, 33, 33); rock.Transparent = true; rock.NoCollide = true; rock.Shape = "flat"; rock.Box = new[] { 0.1f, 0, 0.1f, 0.9f, 0.12f, 0.9f };
-		Def(63, "Clay", 17, 17, 17);
-		Def(64, "Bricks", 18, 18, 18);
-		Def(65, "Terracotta", 19, 19, 19);
-		Def(66, "Red Terracotta", 20, 20, 20);
-		Def(67, "Chiseled Terracotta", 21, 21, 21);
-		Def(68, "Chiseled Red Terracotta", 22, 22, 22);
-		Def(69, "Chiseled Stone", 35, 35, 35);
-		var cb = Def(71, "Clay Ball", 45, 45, 45); cb.Transparent = true; cb.NoCollide = true; cb.Shape = "flat"; cb.Box = new[] { 0.15f, 0, 0.15f, 0.85f, 0.12f, 0.85f };
-		var br = Def(72, "Brick", 46, 46, 46); br.Transparent = true; br.NoCollide = true; br.Shape = "flat"; br.Box = new[] { 0.1f, 0, 0.1f, 0.9f, 0.12f, 0.9f };
+		var cutter = Def(Cutter, "Cutter", "cutter_base", "stripped_log_top", "cutter_bottom"); cutter.Shape = "half"; cutter.Transparent = true; cutter.Box = new[] { 0f, 0, 0, 1, 0.5f, 1 };
+		Def(Sandstone, "Sandstone", "sandstone", "sandstone", "sandstone");
+		Def(SnowyGrass, "Snowy Grass", "snowy_grass_side", "snow", "dirt").Drop = 2;   // (digging up any grass gives Dirt)
+		Def(Ice, "Ice", "ice", "ice", "ice").Transparent = true;
+		Def(SwampGrass, "Swamp Grass", "swamp_grass_side", "swamp_grass", "dirt").Drop = 2;
+		Def(61, "Stripped Oak Log", "stripped_log_side", "stripped_log_top", "stripped_log_top");
+		// Fir (the snowy biome's trees)
+		Def(FirLog, "Fir Log", "fir_log_side", "fir_log_top", "fir_log_top");
+		Def(FirLeaves, "Fir Leaves", "leaves", "leaves", "leaves").Transparent = true;   // (the Oak Leaves picture, tinted: see FirLeafTint)
+		Def(FirPlanks, "Fir Planks", "fir_planks", "fir_planks", "fir_planks");
+		Def(StrippedFirLog, "Stripped Fir Log", "stripped_fir_log_side", "stripped_fir_log_top", "stripped_fir_log_top");
+		// Palm (the desert's trees) and Willow (the swamp's)
+		Def(PalmLog, "Palm Log", "palm_log_side", "palm_log_top", "palm_log_top");
+		Def(PalmLeaves, "Palm Leaves", "leaves", "leaves", "leaves").Transparent = true;   // (the Oak Leaves picture, tinted: see LeafTint)
+		Def(PalmPlanks, "Palm Planks", "palm_planks", "palm_planks", "palm_planks");
+		Def(StrippedPalmLog, "Stripped Palm Log", "stripped_palm_log_side", "stripped_palm_log_top", "stripped_palm_log_top");
+		Def(WillowLog, "Willow Log", "willow_log_side", "willow_log_top", "willow_log_top");
+		Def(WillowLeaves, "Willow Leaves", "leaves", "leaves", "leaves").Transparent = true;
+		Def(WillowPlanks, "Willow Planks", "willow_planks", "willow_planks", "willow_planks");
+		Def(StrippedWillowLog, "Stripped Willow Log", "stripped_willow_log_side", "stripped_willow_log_top", "stripped_willow_log_top");
+		// the desert's building stone and the swamp's ground
+		Def(SandstoneBricks, "Sandstone Bricks", "sandstone_bricks", "sandstone_bricks", "sandstone_bricks");
+		Def(ChiseledSandstone, "Chiseled Sandstone", "chiseled_sandstone", "chiseled_sandstone", "chiseled_sandstone");
+		Def(SmoothSandstone, "Smooth Sandstone", "smooth_sandstone", "smooth_sandstone", "smooth_sandstone");
+		Def(Mud, "Mud", "mud", "mud", "mud");
+		Def(MudBricks, "Mud Bricks", "mud_bricks", "mud_bricks", "mud_bricks");
+		Def(Peat, "Peat", "peat", "peat", "peat");
+		B[Dates] = new BlockDef { Name = "Dates", T = P3("dates"), Item = true, Food = 3 };
+		var rock = Def(62, "Rock", "rock", "rock", "rock"); rock.Transparent = true; rock.NoCollide = true; rock.Shape = "flat"; rock.Box = new[] { 0.1f, 0, 0.1f, 0.9f, 0.12f, 0.9f };
+		Def(63, "Clay", "clay", "clay", "clay");
+		Def(64, "Bricks", "bricks", "bricks", "bricks");
+		Def(65, "Terracotta", "terracotta", "terracotta", "terracotta");
+		Def(66, "Red Terracotta", "red_terracotta", "red_terracotta", "red_terracotta");
+		Def(67, "Chiseled Terracotta", "chiseled_terracotta", "chiseled_terracotta", "chiseled_terracotta");
+		Def(68, "Chiseled Red Terracotta", "chiseled_red_terracotta", "chiseled_red_terracotta", "chiseled_red_terracotta");
+		Def(69, "Chiseled Stone", "chiseled_stone", "chiseled_stone", "chiseled_stone");
+		var cb = Def(71, "Clay Ball", "clay_ball", "clay_ball", "clay_ball"); cb.Transparent = true; cb.NoCollide = true; cb.Shape = "flat"; cb.Box = new[] { 0.15f, 0, 0.15f, 0.85f, 0.12f, 0.85f };
+		var br = Def(72, "Brick", "brick", "brick", "brick"); br.Transparent = true; br.NoCollide = true; br.Shape = "flat"; br.Box = new[] { 0.1f, 0, 0.1f, 0.9f, 0.12f, 0.9f };
 		// Kiln: 73-76 unlit, 77-80 lit; each faces one way. t = [side, top (Bricks), bottom, front]
 		for (int k = 0; k < 4; k++)
 		{
-			B[Furnace + k] = new BlockDef { Name = "Kiln", T = new[] { 43, 18, 44, 36 }, Front = FurnaceFronts[k], Facing = k, Drop = Furnace };
-			B[Furnace + 4 + k] = new BlockDef { Name = "Kiln", T = new[] { 43, 18, 44, 37 }, Front = FurnaceFronts[k], Facing = k, Lit = true, Drop = Furnace };
+			B[Furnace + k] = new BlockDef { Name = "Kiln", T = P("kiln_side", "bricks", "kiln_bottom", "kiln_front"), Front = FurnaceFronts[k], Facing = k, Drop = Furnace };
+			B[Furnace + 4 + k] = new BlockDef { Name = "Kiln", T = P("kiln_side", "bricks", "kiln_bottom", "kiln_front_on"), Front = FurnaceFronts[k], Facing = k, Lit = true, Drop = Furnace };
 		}
-		B[Furnace].Icon = 36;
+		B[Furnace].Icon = Atlas.Tile("kiln_front");
 		// Torches: (wall, count) combos. Lit = 22-41, smoldering = 81-92, burnt = 170-181, ever = 182-193
 		string[] tName = { "Torch", "Smoldering Torch", "Burnt Torch", "Ever Torch" };
-		int[][] tTiles = { new[] { 23, 24, 25 }, new[] { 48, 49, 25 }, new[] { 50, 51, 25 }, new[] { 23, 24, 25 } };
+		int[][] tTiles = { P("torch_side", "torch_top", "torch_bottom"), P("smoldering_torch_side", "smoldering_torch_top", "torch_bottom"),
+			P("burnt_torch_side", "burnt_torch_top", "torch_bottom"), P("torch_side", "torch_top", "torch_bottom") };
 		int next = 27;
 		for (int wi = 0; wi < 5; wi++)
 			for (int n = 1; n <= 4; n++)
@@ -235,113 +292,111 @@ public static class Blocks
 				}
 		}
 		// Water: 50 = still, 51-57 = flowing
-		for (int l = 0; l <= 7; l++) B[Water + l] = new BlockDef { Name = "Water", T = new[] { 27, 27, 27 }, Transparent = true, NoCollide = true, Liquid = true, Level = l };
+		for (int l = 0; l <= 7; l++) B[Water + l] = new BlockDef { Name = "Water", T = P3("water"), Transparent = true, NoCollide = true, Liquid = true, Level = l };
 		// Items (they share the block list so icons and names work the same way)
-		B[Chocolate] = new BlockDef { Name = "Chocolate", T = new[] { 26, 26, 26 }, Item = true, Food = 4 };
-		B[Stick] = new BlockDef { Name = "Stick", T = new[] { 32, 32, 32 }, Item = true };
+		B[Chocolate] = new BlockDef { Name = "Chocolate", T = P3("chocolate"), Item = true, Food = 4 };
+		B[Stick] = new BlockDef { Name = "Stick", T = P3("stick"), Item = true };
 		string[] kinds = { "Axe", "Pickaxe", "Shovel", "Sword", "Hoe" };
-		// stone tools 207-211; metal tools (Pack & Plate) 644-668: copper, iron, bronite, rosium, steel, 5 each in the same order (pictures 179-203)
-		foreach (var (key, label, firstTile, sword, firstId) in new[] { ("stone", "Stone", 38, 3, 207), ("copper", "Copper", 179, 4, 644), ("iron", "Iron", 184, 5, 649),
-			("bronite", "Bronite", 189, 6, 654), ("rosium", "Rosium", 194, 7, 659), ("steel", "Steel", 199, 8, 664) })
+		// stone tools 207-211; metal tools (Pack & Plate) 644-668: copper, iron, bronite, rosium, steel, 5 each in the same order (pictures <metal>_axe, ...)
+		foreach (var (key, label, sword, firstId) in new[] { ("stone", "Stone", 3, 207), ("copper", "Copper", 4, 644), ("iron", "Iron", 5, 649),
+			("bronite", "Bronite", 6, 654), ("rosium", "Rosium", 7, 659), ("steel", "Steel", 8, 664) })
 			for (int k = 0; k < 5; k++)
 			{
-				int id = firstId + k, tile = firstTile + k;
-				B[id] = new BlockDef { Name = label + " " + kinds[k], T = new[] { tile, tile, tile }, Item = true, Tool = kinds[k].ToLower(), Material = key,
+				int id = firstId + k;
+				B[id] = new BlockDef { Name = label + " " + kinds[k], T = P3($"{key}_{kinds[k].ToLower()}"), Item = true, Tool = kinds[k].ToLower(), Material = key,
 					Damage = kinds[k] == "Sword" ? sword : kinds[k] == "Axe" ? sword - 1 : 1 };
 				Tools.Add(id);
 			}
-		B[Rock] = new BlockDef { Name = "Rock", T = new[] { 33, 33, 33 }, Item = true, Places = RockBlock };
+		B[Rock] = new BlockDef { Name = "Rock", T = P3("rock"), Item = true, Places = RockBlock };
 		B[RockBlock].Drop = Rock;
-		B[CrudeAxe] = new BlockDef { Name = "Crude Axe", T = new[] { 34, 34, 34 }, Item = true, Tool = "axe", Material = "crude", Damage = 1 };
-		B[ClayBall] = new BlockDef { Name = "Clay Ball", T = new[] { 45, 45, 45 }, Item = true, Places = ClayBallBlock };
-		B[Brick] = new BlockDef { Name = "Brick", T = new[] { 46, 46, 46 }, Item = true };
-		B[FireEssence] = new BlockDef { Name = "Fire Essence", T = new[] { 47, 47, 47 }, Item = true };
+		B[CrudeAxe] = new BlockDef { Name = "Crude Axe", T = P3("crude_axe"), Item = true, Tool = "axe", Material = "crude", Damage = 1 };
+		B[ClayBall] = new BlockDef { Name = "Clay Ball", T = P3("clay_ball"), Item = true, Places = ClayBallBlock };
+		B[Brick] = new BlockDef { Name = "Brick", T = P3("brick"), Item = true };
+		B[FireEssence] = new BlockDef { Name = "Fire Essence", T = P3("fire_essence"), Item = true };
 		B[ClayBallBlock].Drop = ClayBall;
 		B[BrickBlock].Drop = Brick;
 		// Fear & Foes: Skeletons drop Bones (Kiln -> Bone Ash -> White Dye); a Gloomling beaten in the dark leaves a Gloom Wisp (-> Black Dye)
-		B[Bone] = new BlockDef { Name = "Bone", T = new[] { 102, 102, 102 }, Item = true };
-		B[BoneAsh] = new BlockDef { Name = "Bone Ash", T = new[] { 103, 103, 103 }, Item = true };
-		B[GloomWisp] = new BlockDef { Name = "Gloom Wisp", T = new[] { 104, 104, 104 }, Item = true };
+		B[Bone] = new BlockDef { Name = "Bone", T = P3("bone"), Item = true };
+		B[BoneAsh] = new BlockDef { Name = "Bone Ash", T = P3("bone_ash"), Item = true };
+		B[GloomWisp] = new BlockDef { Name = "Gloom Wisp", T = P3("gloom_wisp"), Item = true };
 		// Till & Tend: Grain Seeds, Grain (-> Flour by hand -> Bread in the Kiln), tilled soil, and Grain growing in 8 stages
-		B[GrainSeeds] = new BlockDef { Name = "Grain Seeds", T = new[] { 105, 105, 105 }, Item = true };
-		B[Grain] = new BlockDef { Name = "Grain", T = new[] { 106, 106, 106 }, Item = true };
-		B[Flour] = new BlockDef { Name = "Flour", T = new[] { 107, 107, 107 }, Item = true };
-		B[Bread] = new BlockDef { Name = "Bread", T = new[] { 108, 108, 108 }, Item = true, Food = 6 };
+		B[GrainSeeds] = new BlockDef { Name = "Grain Seeds", T = P3("grain_seeds"), Item = true };
+		B[Grain] = new BlockDef { Name = "Grain", T = P3("grain"), Item = true };
+		B[Flour] = new BlockDef { Name = "Flour", T = P3("flour"), Item = true };
+		B[Bread] = new BlockDef { Name = "Bread", T = P3("bread"), Item = true, Food = 6 };
 		// cows: Leather (more from a cow with room to roam), Raw Meat (more from a well-fed cow) -> Cooked Meat in the Kiln
-		B[Leather] = new BlockDef { Name = "Leather", T = new[] { 121, 121, 121 }, Item = true };
-		B[RawMeat] = new BlockDef { Name = "Raw Meat", T = new[] { 122, 122, 122 }, Item = true, Food = 2 };
-		B[CookedMeat] = new BlockDef { Name = "Cooked Meat", T = new[] { 123, 123, 123 }, Item = true, Food = 8 };
-		// Pack & Plate: ores 153-156, Fireclay blocks 157-161, the Foundry's Furnace 162-164, chunks 165-168, bricks 169-176, fireclay items 177-178
+		B[Leather] = new BlockDef { Name = "Leather", T = P3("leather"), Item = true };
+		B[RawMeat] = new BlockDef { Name = "Raw Meat", T = P3("raw_meat"), Item = true, Food = 2 };
+		B[CookedMeat] = new BlockDef { Name = "Cooked Meat", T = P3("cooked_meat"), Item = true, Food = 8 };
 		for (int k = 0; k < 4; k++)
 		{
 			string m = Metals[k], M = char.ToUpper(m[0]) + m[1..];
-			Def(Ores[k], M + " Ore", 153 + k, 153 + k, 153 + k).Drop = Chunk[m];
+			Def(Ores[k], M + " Ore", m + "_ore", m + "_ore", m + "_ore").Drop = Chunk[m];
 			B[Ores[k]].Pick = new[] { 1, 2, 3, 3 }[k];
-			B[Chunk[m]] = new BlockDef { Name = M + " Chunk", T = new[] { 165 + k, 165 + k, 165 + k }, Item = true };
-			B[MetalBrick[m]] = new BlockDef { Name = M + " Brick", T = new[] { 169 + k, 169 + k, 169 + k }, Item = true };
+			B[Chunk[m]] = new BlockDef { Name = M + " Chunk", T = P3(m + "_chunk"), Item = true };
+			B[MetalBrick[m]] = new BlockDef { Name = M + " Brick", T = P3(m + "_brick"), Item = true };
 		}
-		B[MetalBrick["bronite"]] = new BlockDef { Name = "Bronite Brick", T = new[] { 173, 173, 173 }, Item = true };
-		B[MetalBrick["rosium"]] = new BlockDef { Name = "Rosium Brick", T = new[] { 174, 174, 174 }, Item = true };
-		B[SteelScrap] = new BlockDef { Name = "Steel Scrap", T = new[] { 175, 175, 175 }, Item = true };
-		B[SteelBrick] = new BlockDef { Name = "Steel Brick", T = new[] { 176, 176, 176 }, Item = true };
-		B[FireclayBall] = new BlockDef { Name = "Fireclay Ball", T = new[] { 177, 177, 177 }, Item = true };
-		B[FireclayBrick] = new BlockDef { Name = "Fireclay Brick", T = new[] { 178, 178, 178 }, Item = true };
-		// gear: armor pictures 204-227, backpacks 228-233, belts 234-239
+		B[MetalBrick["bronite"]] = new BlockDef { Name = "Bronite Brick", T = P3("bronite_brick"), Item = true };
+		B[MetalBrick["rosium"]] = new BlockDef { Name = "Rosium Brick", T = P3("rosium_brick"), Item = true };
+		B[SteelScrap] = new BlockDef { Name = "Steel Scrap", T = P3("steel_scrap"), Item = true };
+		B[SteelBrick] = new BlockDef { Name = "Steel Brick", T = P3("steel_brick"), Item = true };
+		B[FireclayBall] = new BlockDef { Name = "Fireclay Ball", T = P3("fireclay_ball"), Item = true };
+		B[FireclayBrick] = new BlockDef { Name = "Fireclay Brick", T = P3("fireclay_brick"), Item = true };
+		// gear: armor pictures <tier>_helmet, _chestplate, _leggings, _boots; <tier>_backpack; <tier>_utility_belt
 		for (int t = 0; t < GearTiers.Length; t++)
 		{
 			string m = GearTiers[t], M = char.ToUpper(m[0]) + m[1..];
 			for (int k = 0; k < 4; k++)
 			{
-				int tile = 204 + t * 4 + k;
-				B[ArmorItem(t, k)] = new BlockDef { Name = $"{M} {char.ToUpper(ArmorPieces[k][0]) + ArmorPieces[k][1..]}", T = new[] { tile, tile, tile }, Item = true, Armor = k, Material = m };
+				B[ArmorItem(t, k)] = new BlockDef { Name = $"{M} {char.ToUpper(ArmorPieces[k][0]) + ArmorPieces[k][1..]}", T = P3($"{m}_{ArmorPieces[k]}"), Item = true, Armor = k, Material = m };
 				GearItems.Add(ArmorItem(t, k));
 			}
 		}
 		for (int t = 0; t < GearTiers.Length; t++)
 		{
 			string m = GearTiers[t], M = char.ToUpper(m[0]) + m[1..];
-			B[Backpacks[t]] = new BlockDef { Name = M + " Backpack", T = new[] { 228 + t, 228 + t, 228 + t }, Item = true, Pack = PackSlots[t], Material = m };
-			B[Belts[t]] = new BlockDef { Name = M + " Utility Belt", T = new[] { 234 + t, 234 + t, 234 + t }, Item = true, Belt = BeltSlots[t], BeltTools = t + 2, Material = m };
+			B[Backpacks[t]] = new BlockDef { Name = M + " Backpack", T = P3(m + "_backpack"), Item = true, Pack = PackSlots[t], Material = m };
+			B[Belts[t]] = new BlockDef { Name = M + " Utility Belt", T = P3(m + "_utility_belt"), Item = true, Belt = BeltSlots[t], BeltTools = t + 2, Material = m };
 		}
 		GearItems.AddRange(Backpacks); GearItems.AddRange(Belts);
-		Def(Fireclay, "Fireclay", 157, 157, 157).HandDrop = new[] { FireclayBall, 1, 4 };
-		Def(FireclayTerracotta, "Fireclay Terracotta", 158, 158, 158);
-		Def(FireclayBricks, "Fireclay Bricks", 159, 159, 159);
-		Def(FireclayCasing, "Fireclay Casing", 160, 160, 160);
-		Def(ChiseledFireclay, "Chiseled Fireclay", 161, 161, 161);
+		Def(Fireclay, "Fireclay", "fireclay", "fireclay", "fireclay").HandDrop = new[] { FireclayBall, 1, 4 };
+		Def(FireclayTerracotta, "Fireclay Terracotta", "fireclay_terracotta", "fireclay_terracotta", "fireclay_terracotta");
+		Def(FireclayBricks, "Fireclay Bricks", "fireclay_bricks", "fireclay_bricks", "fireclay_bricks");
+		Def(FireclayCasing, "Fireclay Casing", "fireclay_casing", "fireclay_casing", "fireclay_casing");
+		Def(ChiseledFireclay, "Chiseled Fireclay", "chiseled_fireclay", "chiseled_fireclay", "chiseled_fireclay");
 		for (int k = 0; k < 4; k++)
 		{
-			B[Foundry + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 159, 164, 162 }, Front = FurnaceFronts[k], Facing = k, Drop = Foundry };
-			B[Foundry + 4 + k] = new BlockDef { Name = "Furnace", T = new[] { 160, 159, 164, 163 }, Front = FurnaceFronts[k], Facing = k, Lit = true, Drop = Foundry };
+			B[Foundry + k] = new BlockDef { Name = "Furnace", T = P("fireclay_casing", "fireclay_bricks", "furnace_bottom", "furnace_front"), Front = FurnaceFronts[k], Facing = k, Drop = Foundry };
+			B[Foundry + 4 + k] = new BlockDef { Name = "Furnace", T = P("fireclay_casing", "fireclay_bricks", "furnace_bottom", "furnace_front_on"), Front = FurnaceFronts[k], Facing = k, Lit = true, Drop = Foundry };
 		}
-		B[Foundry].Icon = 162;
+		B[Foundry].Icon = Atlas.Tile("furnace_front");
 		string[] soilNames = { "Tilled Dirt", "Wet Tilled Dirt", "Fertilized Dirt", "Wet Fertilized Dirt" };
-		for (int k = 0; k < 4; k++) Def(Tilled + k, soilNames[k], 2, 109 + k, 2).Drop = Dirt;
+		for (int k = 0; k < 4; k++) Def(Tilled + k, soilNames[k], "dirt", soilNames[k].ToLower().Replace(' ', '_'), "dirt").Drop = Dirt;
 		for (int k = 0; k < 8; k++)
 		{
-			var g = Def(GrainStages[k], "Grain", 113 + k, 113 + k, 113 + k);
+			var g = Def(GrainStages[k], "Grain", $"grain_stage_{k}", $"grain_stage_{k}", $"grain_stage_{k}");
 			g.Transparent = true; g.NoCollide = true; g.Shape = "plant"; g.Box = new[] { 0.15f, 0, 0.15f, 0.85f, 0.15f + k * 0.12f, 0.85f };
 			g.Drop = k == 7 ? Grain : GrainSeeds;
 		}
-		// the colours (red's blocks are above). Pictures: terracotta 52-62, chiseled 63-73, bricks 74-84, flowers 85-89, dyes 90-101
+		// the colours (red's blocks are above). Pictures: <colour>_terracotta, <colour>_chiseled_terracotta, <colour>_bricks, <colour>_dye, <colour>_flower
 		for (int k = 0; k < Colours.Length; k++)
 		{
 			string C = char.ToUpper(Colours[k][0]) + Colours[k][1..];
-			B[Dye[k]] = new BlockDef { Name = $"{C} Dye", T = new[] { 90 + k, 90 + k, 90 + k }, Item = true };
+			B[Dye[k]] = new BlockDef { Name = $"{C} Dye", T = P3(Colours[k] + "_dye"), Item = true };
 			if (k == 0) continue;
-			Def(ColourTerracotta[k], $"{C} Terracotta", 51 + k, 51 + k, 51 + k);
-			Def(ColourChiseled[k], $"Chiseled {C} Terracotta", 62 + k, 62 + k, 62 + k);
-			Def(ColourBricks[k], $"{C} Bricks", 73 + k, 73 + k, 73 + k);
+			Def(ColourTerracotta[k], $"{C} Terracotta", Colours[k] + "_terracotta", Colours[k] + "_terracotta", Colours[k] + "_terracotta");
+			Def(ColourChiseled[k], $"Chiseled {C} Terracotta", Colours[k] + "_chiseled_terracotta", Colours[k] + "_chiseled_terracotta", Colours[k] + "_chiseled_terracotta");
+			Def(ColourBricks[k], $"{C} Bricks", Colours[k] + "_bricks", Colours[k] + "_bricks", Colours[k] + "_bricks");
 		}
 		// flowers: shape "plant" = the picture twice, standing up and crossed like an X
 		for (int k = 0; k < Flowers.Length; k++)
 		{
 			string c = FlowerColours[k];
-			var f = Def(Flowers[k], char.ToUpper(c[0]) + c[1..] + " Flower", 85 + k, 85 + k, 85 + k);
+			var f = Def(Flowers[k], char.ToUpper(c[0]) + c[1..] + " Flower", c + "_flower", c + "_flower", c + "_flower");
 			f.Transparent = true; f.NoCollide = true; f.Shape = "plant"; f.Box = new[] { 0.25f, 0, 0.25f, 0.75f, 0.7f, 0.75f }; f.Dye = DyeOf(c);
 		}
 		// Pieces: a space holding pieces is block 70; which block fills each of its 8 spots is kept separately
-		B[Pieces] = new BlockDef { Name = "Pieces", T = new[] { 3, 3, 3 }, Transparent = true, Shape = "pieces" };
+		B[Pieces] = new BlockDef { Name = "Pieces", T = P3("stone"), Transparent = true, Shape = "pieces" };
 		foreach (int b in Splittable) B[FormItem("piece", b)] = new BlockDef { Name = B[b].Name + " Piece", T = B[b].T, Item = true, Piece = b };
 		foreach (int b in Splittable)
 			foreach (var k in ShapeItem.Keys)

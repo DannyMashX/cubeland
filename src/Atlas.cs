@@ -5,79 +5,47 @@ using Godot;
 namespace Cubeland;
 
 // The texture atlas: every 16x16 block/item picture side by side in one strip.
-// Your pictures in textures/blocks and textures/items fill the slots below (by file name).
+// Pictures are known by NAME: the file's name in textures/blocks or textures/items, without .png (e.g. "log_side").
+// Blocks and items say which pictures they use by name (see Blocks.Def), and each name gets its own place in the
+// atlas the first time it's asked for, so a new picture never needs a number: just use its file name.
 public static class Atlas
 {
-	public const int TILE = 16, NT = 246;   // 246 pictures (241-245 are the Cutter and its spinning saw blade; 240 is spare) (204+ are armor, backpacks and belts) side by side (153+ are Pack & Plate's ores, Fireclay, Foundry, metals and metal tools, 52+ are the colours, 102+ Fear & Foes, 105+ Till & Tend, 121+ cows, 124+ the deep stone layers and bedrock, 132+ the deep cobblestone, stone bricks and chiseled stone)
+	public const int TILE = 16;
 	public const int PW = TILE + 2;        // the GPU copy pads each picture with a 1px copy of its edge (no colour bleeding)
 
-	// Which atlas slot each texture file fills (a file can fill more than one)
-	static readonly Dictionary<string, int[]> Slots = new()
+	static readonly Dictionary<string, int> slotOf = new();
+	static readonly List<string> names = new();
+	// the place in the atlas of picture `name` (it gets one the first time it's asked for)
+	public static int Tile(string name)
 	{
-		["grass"] = new[] { 0 }, ["grass_top"] = new[] { 0 }, ["grass_side"] = new[] { 1 }, ["dirt"] = new[] { 2 }, ["stone"] = new[] { 3 },
-		["log_side"] = new[] { 4 }, ["log_top"] = new[] { 5 }, ["leaves"] = new[] { 6 }, ["sand"] = new[] { 7 }, ["planks"] = new[] { 8 },
-		["cobblestone"] = new[] { 9 }, ["stone_bricks"] = new[] { 10 }, ["glass"] = new[] { 11 }, ["gravel"] = new[] { 12 },
-		["clay"] = new[] { 17 }, ["bricks"] = new[] { 18 }, ["terracotta"] = new[] { 19 }, ["red_terracotta"] = new[] { 20 },
-		["chiseled_terracotta"] = new[] { 21 }, ["chisled_terracota"] = new[] { 21 }, ["chiseled_red_terracotta"] = new[] { 22 },
-		["red_chiseled_terracotta"] = new[] { 22 }, ["chiseled_stone"] = new[] { 35 },
-		["kiln_front"] = new[] { 36 }, ["kiln_front_on"] = new[] { 37 }, ["kiln_side"] = new[] { 43 }, ["kiln_bottom"] = new[] { 44 },
-		["clay_ball"] = new[] { 45 }, ["brick"] = new[] { 46 },
-		["red_bricks"] = new[] { 13, 14, 15, 16 }, ["bricks_a"] = new[] { 13 }, ["bricks_b"] = new[] { 14 }, ["bricks_c"] = new[] { 15 }, ["bricks_d"] = new[] { 16 },
-		["torch_side"] = new[] { 23 }, ["torch_top"] = new[] { 24 }, ["torch_bottom"] = new[] { 25 },
-		["tortch_side"] = new[] { 23 }, ["tortch_top"] = new[] { 24 }, ["tortch_bottom"] = new[] { 25 },
-		["smoldering_torch_side"] = new[] { 48 }, ["smoldering_torch_top"] = new[] { 49 }, ["burnt_torch_side"] = new[] { 50 }, ["burnt_torch_top"] = new[] { 51 },
-		["chocolate"] = new[] { 26 }, ["water"] = new[] { 27 },
-		["crafting_bench_side"] = new[] { 28 }, ["crafting_bench_top"] = new[] { 29 }, ["stripped_log_side"] = new[] { 30 }, ["stripped_log_top"] = new[] { 31 },
-		["stick"] = new[] { 32 }, ["rock"] = new[] { 33 }, ["crude_axe"] = new[] { 34 }, ["fire_essence"] = new[] { 47 },
-		["stone_axe"] = new[] { 38 }, ["stone_pickaxe"] = new[] { 39 }, ["stone_shovel"] = new[] { 40 }, ["stone_sword"] = new[] { 41 }, ["stone_hoe"] = new[] { 42 },
-		["bone"] = new[] { 102 }, ["bone_ash"] = new[] { 103 }, ["gloom_wisp"] = new[] { 104 },
-		["grain_seeds"] = new[] { 105 }, ["grain"] = new[] { 106 }, ["flour"] = new[] { 107 }, ["bread"] = new[] { 108 },
-		["tilled_dirt"] = new[] { 109 }, ["wet_tilled_dirt"] = new[] { 110 }, ["fertilized_dirt"] = new[] { 111 }, ["wet_fertilized_dirt"] = new[] { 112 },
-		["leather"] = new[] { 121 }, ["raw_meat"] = new[] { 122 }, ["cooked_meat"] = new[] { 123 },
+		if (slotOf.TryGetValue(name, out int t)) return t;
+		if (Image != null) throw new InvalidOperationException($"the picture \"{name}\" was asked for after the atlas was made");
+		slotOf[name] = t = names.Count; names.Add(name);
+		return t;
+	}
+	public static int[] Tiles(params string[] n) => Array.ConvertAll(n, Tile);
+	public static int NT => names.Count;   // how many pictures the atlas holds
+
+	// other spellings of a picture's file name
+	static readonly Dictionary<string, string> Spellings = new()
+	{
+		["grass_top"] = "grass", ["tortch_side"] = "torch_side", ["tortch_top"] = "torch_top", ["tortch_bottom"] = "torch_bottom",
+		["chisled_terracota"] = "chiseled_terracotta", ["red_chiseled_terracotta"] = "chiseled_red_terracotta",
+	};
+	// a picture whose file you haven't made (yet) borrows another one
+	static readonly Dictionary<string, string> Borrows = new()
+	{
+		// the 4 looks of Red Bricks
+		["bricks_a"] = "red_bricks", ["bricks_b"] = "red_bricks", ["bricks_c"] = "red_bricks", ["bricks_d"] = "red_bricks",
+		// the Cutter: the Crafting Bench's side, planks underneath; with no second saw frame the blade just stands still
+		["cutter_base"] = "crafting_bench_side", ["cutter_bottom"] = "planks", ["cutter_saw_frame_0"] = "cutter_saw", ["cutter_saw_1"] = "cutter_saw",
+		// biome blocks: White Terracotta (snow), the Grass pictures, or Glass (ice)
+		["snow"] = "white_terracotta", ["snowy_grass_side"] = "grass_side", ["ice"] = "glass", ["swamp_grass"] = "grass", ["swamp_grass_side"] = "grass_side",
 	};
 
-	// the colours: <colour>_terracotta 52-62, <colour>_chiseled_terracotta 63-73, <colour>_bricks 74-84 (orange..black),
-	// <colour>_flower 85-89, <colour>_dye 90-101 (red..black)
-	static Atlas()
-	{
-		for (int k = 0; k < Blocks.Colours.Length; k++)
-		{
-			string c = Blocks.Colours[k];
-			Slots[c + "_dye"] = new[] { 90 + k };
-			if (k == 0) continue;
-			Slots[c + "_terracotta"] = new[] { 51 + k }; Slots[c + "_chiseled_terracotta"] = new[] { 62 + k }; Slots[c + "_bricks"] = new[] { 73 + k };
-		}
-		for (int k = 0; k < Blocks.FlowerColours.Length; k++) Slots[Blocks.FlowerColours[k] + "_flower"] = new[] { 85 + k };
-		for (int k = 0; k < 8; k++) Slots["grain_stage_" + k] = new[] { 113 + k };
-		for (int n = 2; n <= Blocks.StrataLayers; n++) Slots["stone_layer_" + n] = new[] { 122 + n };   // stone_layer_2 .. _8: pictures 124-130
-		Slots["bedrock"] = new[] { 131 };
-		for (int n = 2; n <= Blocks.StrataLayers; n++)   // the deep stone sets: pictures 132-138, 139-145, 146-152
-		{
-			Slots["cobblestone_layer_" + n] = new[] { 130 + n };
-			Slots["stone_bricks_layer_" + n] = new[] { 137 + n };
-			Slots["chiseled_stone_layer_" + n] = new[] { 144 + n };
-		}
-		// Pack & Plate: ores 153-156, Fireclay blocks 157-161, the Foundry's Furnace 162-164, chunks 165-168, bricks 169-176, fireclay items 177-178,
-		// metal tools 179-203
-		string[] pack = { "copper_ore", "iron_ore", "gold_ore", "tin_ore", "fireclay", "fireclay_terracotta", "fireclay_bricks", "fireclay_casing", "chiseled_fireclay",
-			"furnace_front", "furnace_front_on", "furnace_bottom", "copper_chunk", "iron_chunk", "gold_chunk", "tin_chunk",
-			"copper_brick", "iron_brick", "gold_brick", "tin_brick", "bronite_brick", "rosium_brick", "steel_scrap", "steel_brick", "fireclay_ball", "fireclay_brick" };
-		for (int k = 0; k < pack.Length; k++) Slots[pack[k]] = new[] { 153 + k };
-		string[] metals = { "copper", "iron", "bronite", "rosium", "steel" }, kinds = { "axe", "pickaxe", "shovel", "sword", "hoe" };
-		for (int j = 0; j < 5; j++) for (int k = 0; k < 5; k++) Slots[$"{metals[j]}_{kinds[k]}"] = new[] { 179 + j * 5 + k };
-		// gear: armor 204-227, backpacks 228-233, utility belts 234-239
-		string[] tiers = { "leather", "copper", "iron", "bronite", "rosium", "steel" }, pieces = { "helmet", "chestplate", "leggings", "boots" };
-		for (int t = 0; t < 6; t++)
-		{
-			for (int k = 0; k < 4; k++) Slots[$"{tiers[t]}_{pieces[k]}"] = new[] { 204 + t * 4 + k };
-			Slots[tiers[t] + "_backpack"] = new[] { 228 + t };
-			Slots[tiers[t] + "_utility_belt"] = new[] { 234 + t };
-		}
-		// the Cutter: 241-243 (its top is the stripped log top; until you make its pictures it borrows the Crafting Bench side, with planks underneath: see Build)
-		// its saw blade spins: 243 is the one drawn, and the frames (244: cutter_saw, 245: cutter_saw_1) take turns being copied into it (see SpinSaw)
-		Slots["cutter_saw"] = new[] { 243, 244 }; Slots["cutter_saw_1"] = new[] { 245 }; Slots["cutter_base"] = new[] { 241 }; Slots["cutter_bottom"] = new[] { 242 };   // (cutter_base: its sides)
-	}
-
+	// the Cutter's saw blade spins: its two frames (cutter_saw, cutter_saw_1) take turns being copied into the picture it's drawn with
+	public static readonly int SawTile = Tile("cutter_saw");
+	static readonly int[] SawFrames = { Tile("cutter_saw_frame_0"), Tile("cutter_saw_1") };
 	public static Image Image;          // TILE*NT x TILE, the plain strip (used to draw icons)
 	public static ImageTexture Texture; // the padded GPU copy, used by the world's blocks
 
@@ -86,25 +54,31 @@ public static class Atlas
 
 	public static void Build()
 	{
-		Image = Image.CreateEmpty(TILE * NT, TILE, false, Image.Format.Rgba8);
-		// placeholder for any slot with no picture: a plain grey-pink check, so a missing file is easy to spot
-		for (int t = 0; t < NT; t++) for (int y = 0; y < TILE; y++) for (int x = 0; x < TILE; x++)
-			Image.SetPixel(t * TILE + x, y, ((x / 4 + y / 4) & 1) == 0 ? new Color(0.8f, 0.4f, 0.7f) : new Color(0.3f, 0.3f, 0.3f));
-		var loaded = new HashSet<string>();
+		System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(Blocks).TypeHandle);   // (every block has asked for its pictures)
+		// the picture files, by name
+		var files = new Dictionary<string, Image>();
 		foreach (string folder in new[] { "res://textures/blocks", "res://textures/items" })
-			foreach (var (name, path) in Pictures(folder))
+			foreach (var (file, path) in Pictures(folder))
 			{
-				if (!Slots.TryGetValue(name, out var slots)) continue;
+				string name = Spellings.TryGetValue(file, out var s) ? s : file;
+				if (files.ContainsKey(name)) continue;
 				var img = LoadImage(path);
 				if (img == null) continue;
-				loaded.Add(name);
 				if (img.GetWidth() != TILE || img.GetHeight() != TILE) img.Resize(TILE, TILE, Image.Interpolation.Nearest);
-				foreach (int t in slots) Image.BlitRect(img, new Rect2I(0, 0, TILE, TILE), new Vector2I(t * TILE, 0));
+				img.Convert(Image.Format.Rgba8);
+				files[name] = img;
 			}
-		// a Cutter picture you haven't made yet: the Crafting Bench's side or planks (bottom) for now
-		// (and no second saw frame: the blade just stands still)
-		foreach (var (mine, borrow) in new[] { ("cutter_base", 28), ("cutter_bottom", 8), ("cutter_saw_1", 244) })
-			if (!loaded.Contains(mine)) Image.BlitRect(Image.GetRegion(new Rect2I(borrow * TILE, 0, TILE, TILE)), new Rect2I(0, 0, TILE, TILE), new Vector2I(Slots[mine][0] * TILE, 0));
+		Image = Image.CreateEmpty(TILE * NT, TILE, false, Image.Format.Rgba8);
+		for (int t = 0; t < NT; t++)
+		{
+			// its own file, or the one it borrows until you make it
+			Image img = null;
+			for (string n = names[t]; n != null && img == null; n = Borrows.TryGetValue(n, out var b) ? b : null) files.TryGetValue(n, out img);
+			if (img != null) { Image.BlitRect(img, new Rect2I(0, 0, TILE, TILE), new Vector2I(t * TILE, 0)); continue; }
+			// no picture: a plain grey-pink check, so a missing file is easy to spot
+			for (int y = 0; y < TILE; y++) for (int x = 0; x < TILE; x++)
+				Image.SetPixel(t * TILE + x, y, ((x / 4 + y / 4) & 1) == 0 ? new Color(0.8f, 0.4f, 0.7f) : new Color(0.3f, 0.3f, 0.3f));
+		}
 		gpu = Image.CreateEmpty(PW * NT, PW, false, Image.Format.Rgba8);
 		for (int t = 0; t < NT; t++) for (int y = 0; y < PW; y++) for (int x = 0; x < PW; x++)
 		{
@@ -114,9 +88,7 @@ public static class Atlas
 		Texture = ImageTexture.CreateFromImage(gpu);
 	}
 	static Image gpu;
-	// the Cutter's saw blade spins: its two frames (pictures 244 and 245) take turns being copied into the picture it's drawn with (243)
-	const int SawFps = 10;
-	static readonly int[] SawFrames = { 244, 245 };
+	const int SawFps = 10;   // (the saw blade's frames: see SawTile)
 	static double sawTime; static int sawFrame;
 	public static void SpinSaw(double dt)
 	{
@@ -125,15 +97,15 @@ public static class Atlas
 		int f = (int)(sawTime * SawFps) % SawFrames.Length;
 		if (f == sawFrame) return;
 		sawFrame = f;
-		gpu.BlitRect(gpu, new Rect2I(SawFrames[f] * PW, 0, PW, PW), new Vector2I(243 * PW, 0));
+		gpu.BlitRect(gpu, new Rect2I(SawFrames[f] * PW, 0, PW, PW), new Vector2I(SawTile * PW, 0));
 		Texture.Update(gpu);
 	}
 	// (self-test: stepping on by one frame's time shows the other frame, then the first again)
 	public static bool SawSpins()
 	{
-		byte[] Tile(int t) => gpu.GetRegion(new Rect2I(t * PW, 0, PW, PW)).GetData();
-		bool Shows(int t) => Tile(243).AsSpan().SequenceEqual(Tile(t));
-		if (gpu == null || Tile(244).AsSpan().SequenceEqual(Tile(245))) return false;   // (two different pictures needed)
+		byte[] Px(int t) => gpu.GetRegion(new Rect2I(t * PW, 0, PW, PW)).GetData();
+		bool Shows(int t) => Px(SawTile).AsSpan().SequenceEqual(Px(t));
+		if (gpu == null || Px(SawFrames[0]).AsSpan().SequenceEqual(Px(SawFrames[1]))) return false;   // (two different pictures needed)
 		int a = SawFrames[sawFrame], b = SawFrames[1 - sawFrame];
 		bool ok = Shows(a) || sawTime == 0;
 		SpinSaw(1.0 / SawFps); ok &= Shows(b);
@@ -223,6 +195,19 @@ public static class Atlas
 				}
 				if (col != null) img.SetPixel(x, y, col.Value);
 			}
+		return LeafTint(id, img);
+	}
+	// Fir, Palm and Willow Leaves (and their pieces, slabs and stairs) share the Oak Leaves picture: their icons and drops get its green in their own colour
+	static Image LeafTint(int id, Image img)
+	{
+		var b = Blocks.Get(id);
+		var t = b == null ? null : Blocks.LeafTint(id) ?? Blocks.LeafTint(b.Piece) ?? Blocks.LeafTint(b.Of);
+		if (t == null) return img;
+		for (int y = 0; y < img.GetHeight(); y++) for (int x = 0; x < img.GetWidth(); x++)
+		{
+			var c = img.GetPixel(x, y);
+			if (c.G > c.R && c.G > c.B) img.SetPixel(x, y, new Color(c.R * t[0], c.G * t[1], Mathf.Min(1, c.B * t[2]), c.A));
+		}
 		return img;
 	}
 	// the same boxes as a little 3D model, 1 unit for a whole block, centred, with each face's picture (for drops).
@@ -235,6 +220,7 @@ public static class Atlas
 		int T = TILE; var tiles = IconTiles(Blocks.Get(id));
 		var strip = Image.CreateEmpty(T * 4, T, false, Image.Format.Rgba8);
 		for (int f = 0; f < 4; f++) strip.BlitRect(Image, new Rect2I(tiles[f] * T, 0, T, T), new Vector2I(f * T, 0));
+		strip = LeafTint(id, strip);
 		var st = new SurfaceTool(); st.Begin(Mesh.PrimitiveType.Triangles);
 		// one face: corners p ({A, h, B}), their texture pixels q ({u, v}, v down from the picture's top), tile f, shade
 		void Face(float[][] p, float[][] q, int f, float s)
@@ -295,6 +281,6 @@ public static class Atlas
 			int tile = b.Icon >= 0 ? b.Icon : b.T[0];
 			icon.BlitRect(Image, new Rect2I(tile * TILE, 0, TILE, TILE), Vector2I.Zero);
 		}
-		return icon;
+		return LeafTint(id, icon);
 	}
 }
