@@ -25,7 +25,7 @@ public class Player
 	{
 		if (x < 0 || z < 0 || x >= World.WX || z >= World.WZ || y < 0) { into.Add(new Aabb(new Vector3(x, y, z), Vector3.One)); return; }   // the world's edge
 		if (y >= World.WY) return;
-		int id = W.Blocks[World.Idx(x, y, z)];
+		int id = W.Blocks.Get(x, y, z);
 		if (id == 0) return;
 		if (id == Blocks.Pieces)
 		{
@@ -190,7 +190,7 @@ public class Player
 	Hit? HitInCell(int x, int y, int z, Vector3 o, Vector3 d, float maxDist)
 	{
 		if (!World.Inside(x, y, z)) return null;
-		int id = W.Blocks[World.Idx(x, y, z)];
+		int id = W.Blocks.Get(x, y, z);
 		if (id == 0 || Blocks.B[id].Liquid) return null;
 		var b = Blocks.B[id];
 		Hit? best = null; float bestT = maxDist;

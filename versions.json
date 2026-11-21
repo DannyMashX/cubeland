@@ -1,5 +1,14 @@
 [
     {
+        "version":  "Beta 0.1.1.1",
+        "folder":  "beta-0.1.1.1",
+        "date":  "2026-11-21",
+        "notes":  "Worlds take much less memory: blocks are now stored chunk by chunk, so a new 1280 x 1280 world needs about 120 MB instead of 300 MB, and there\u0027s no longer a limit of 256 kinds of block",
+        "changes":  [
+                        "Worlds take much less memory: blocks are now stored chunk by chunk, so a new 1280 x 1280 world needs about 120 MB instead of 300 MB, and there\u0027s no longer a limit of 256 kinds of block"
+                    ]
+    },
+    {
         "version":  "Beta 0.1.1.0",
         "title":  "Wide World",
         "folder":  "beta-0.1.1.0",

@@ -76,7 +76,7 @@ public class ChunkMesher
 		var white = new Color(1, 1, 1);
 		for (int y = y0; y < top; y++) for (int z = cz * World.CS; z < cz * World.CS + World.CS; z++) for (int x = cx * World.CS; x < cx * World.CS + World.CS; x++)
 		{
-			int id = W.Blocks[World.Idx(x, y, z)];
+			int id = W.Blocks.Get(x, y, z);
 			if (id == 0) continue;
 			var b = Blocks.B[id];
 			if (b.Shape == "torch") { AddTorch(x, y, z, id, P, anyLight, sky); continue; }
@@ -86,7 +86,7 @@ public class ChunkMesher
 			if (id == Blocks.Pieces) { AddPieces(x, y, z, P, anyLight, sky); continue; }
 			if (b.Shape == "half")   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
 			{
-				AddPieces(x, y, z, P, anyLight, sky, new byte[] { (byte)id, (byte)id, 0, 0, (byte)id, (byte)id, 0, 0 });
+				AddPieces(x, y, z, P, anyLight, sky, new[] { id, id, 0, 0, id, id, 0, 0 });
 				if (id == Blocks.Cutter) AddSaw(x, y, z, P, anyLight, sky);
 				continue;
 			}
@@ -267,7 +267,7 @@ public class ChunkMesher
 		}
 		return r;
 	}
-	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky, byte[] a = null)
+	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky, int[] a = null)
 	{
 		if (a == null && !W.PieceMap.TryGetValue(World.Idx(x, y, z), out a)) return;
 		float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);

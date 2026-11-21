@@ -696,6 +696,16 @@ public partial class Main : Node3D
 		void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
 		Check($"bedrock along the bottom of the world ({World.WY} tall)", world.GetBlock(100, 0, 100) == Blocks.Bedrock && world.GetBlock(500, 0, 37) == Blocks.Bedrock
 			&& Blocks.Items.Contains(Blocks.Bedrock) && Blocks.Items.Contains(Blocks.Strata) == World.TallWorlds);
+		// the chunk palette: block ids past 255, and a chunk holding more than 256 kinds of block (2-byte places)
+		{
+			var bs = new BlockStore(32, 32, 32);
+			bs.Set(1, 2, 3, 70000); bs.Set(17, 2, 3, 300);
+			for (int n = 0; n < 600; n++) bs.Set(n % 16, n / 256, (n / 16) % 16, 1000 + n);
+			bool ok = bs.Get(17, 2, 3) == 300 && bs.Get(0, 0, 0) == 1000 && bs.Get(599 % 16, 599 / 256, (599 / 16) % 16) == 1599 && bs.Get(20, 20, 20) == 0;
+			for (int n = 0; n < 600 && ok; n++) ok = bs[World.Idx(0, 0, 0) + 0] == 1000 && bs.Get(n % 16, n / 256, (n / 16) % 16) == 1000 + n;
+			bs.Set(17, 2, 3, 0);
+			Check("chunk palette: ids past 255 and chunks with more than 256 kinds of block", ok && bs.Get(17, 2, 3) == 0 && bs.Usage().bytes > 8192);
+		}
 		// Pack & Plate: ores in the ground (gold only deep), and the counts to compare with the web version
 		var oreCount = new int[5]; int goldShallow = 0;
 		for (int q = 0; q < world.Blocks.Length; q++)

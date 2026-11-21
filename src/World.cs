@@ -36,11 +36,12 @@ public partial class World
 	public static int Idx(int x, int y, int z) => (y * WZ + z) * WX + x;
 	public static (int x, int y, int z) FromIdx(int i) => (i % WX, i / (WX * WZ), (i / WX) % WZ);
 
-	public readonly byte[] Blocks;
+	public readonly BlockStore Blocks;   // every block, chunk by chunk (see BlockStore)
+	public byte[] Raw;                   // (while the world grows: one byte per block, packed into Blocks when it's done)
 	public readonly int[] Heights;
 	public readonly int[] ChunkTop;   // highest block +1 in each 16x16 column of chunks
 	public readonly short[] SkyTop;
-	public readonly Dictionary<int, byte[]> PieceMap = new();   // world index -> which block fills each of its 8 piece spots
+	public readonly Dictionary<int, int[]> PieceMap = new();   // world index -> which block fills each of its 8 piece spots
 	public readonly Dictionary<int, int> Edits = new();          // every block you've changed (what gets saved)
 	public readonly HashSet<int> Torches = new();
 	public Dictionary<int, int> LightMap = new();               // world index -> torch light level (only lit cells)
@@ -57,7 +58,7 @@ public partial class World
 	{
 		WY = height == 640 ? 640 : 192;
 		WX = size == 1280 && WY == 192 ? 1280 : 640;
-		Blocks = new byte[WX * WY * WZ];
+		Blocks = new BlockStore(WX, WY, WZ);
 		Heights = new int[WX * WZ]; ChunkTop = new int[NCX * NCZ]; SkyTop = new short[WX * WZ];
 		Gen = new WorldGen(this, seed, gen);
 	}
@@ -65,11 +66,21 @@ public partial class World
 	public void Generate(Action<float> progress)
 	{
 		Gen.Progress = progress;
+		Raw = new byte[WX * WY * WZ];
 		Gen.Generate();
 		if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--worldhash") >= 0)   // (testing: a fingerprint of the new world, to check the web version grows the same one)
 		{
-			uint h = 2166136261; foreach (byte b in Blocks) h = (h ^ b) * 16777619;
+			uint h = 2166136261; foreach (byte b in Raw) h = (h ^ b) * 16777619;
 			Godot.GD.Print($"WORLDHASH {h:x8}");
+		}
+		var packTime = System.Diagnostics.Stopwatch.StartNew();
+		Blocks.Load(Raw); Raw = null;
+		if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--worldhash") >= 0)   // (testing: how much the packed blocks take)
+		{
+			var (bytes, uniform) = Blocks.Usage();
+			Godot.GD.Print($"BLOCKSTORE {bytes / 1048576.0:0.0} MB (was {Blocks.Length / 1048576.0:0.0} MB), {uniform} chunks all one block, packed in {packTime.ElapsedMilliseconds} ms");
+			uint h2 = 2166136261; for (int i = 0; i < Blocks.Length; i++) h2 = (h2 ^ (byte)Blocks[i]) * 16777619;
+			Godot.GD.Print($"PACKEDHASH {h2:x8}");
 		}
 		RecomputeHeights();
 		Array.Clear(ChunkTop);
@@ -89,7 +100,8 @@ public partial class World
 			for (int x = 0; x < WX; x++)
 			{
 				int y = WY - 1;
-				while (y > 0 && Blocks[Idx(x, y, z)] == 0) y--;
+				if (Raw != null) while (y > 0 && Raw[Idx(x, y, z)] == 0) y--;   // (while the world grows)
+				else while (y > 0 && Blocks.Get(x, y, z) == 0) y--;
 				Heights[z * WX + x] = y;
 			}
 		});
@@ -100,13 +112,13 @@ public partial class World
 	{
 		if (y < 0) return 3;
 		if (x < 0 || z < 0 || x >= WX || z >= WZ || y >= WY) return 0;
-		return Blocks[Idx(x, y, z)];
+		return Blocks.Get(x, y, z);
 	}
 	public bool Solid(int x, int y, int z)
 	{
 		if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0) return true;   // invisible walls at the world's edge
 		if (y >= WY) return false;
-		int b = Blocks[Idx(x, y, z)];
+		int b = Blocks.Get(x, y, z);
 		return b != 0 && !Cubeland.Blocks.B[b].NoCollide;
 	}
 	// the block at a spot on the half-block grid (2x the world position): a piece, or the whole block there
@@ -120,7 +132,7 @@ public partial class World
 	public static int FloorDiv(int a, int b) => (int)Math.Floor(a / (double)b);
 
 	// ---- Sky light: how much open sky a spot can see. Tunnels and caves fade to dark the deeper you go. ----
-	public bool OpaqueAt(int x, int y, int z) { int b = Blocks[Idx(x, y, z)]; return b != 0 && !Cubeland.Blocks.B[b].Transparent; }
+	public bool OpaqueAt(int x, int y, int z) { int b = Blocks.Get(x, y, z); return b != 0 && !Cubeland.Blocks.B[b].Transparent; }
 	public int ComputeSkyTop(int x, int z, int from = -1)
 	{
 		if (from < 0) from = Heights[z * WX + x];
@@ -171,7 +183,7 @@ public partial class World
 	// ---- Torch light: flood-fills out from every torch, losing one level per block, blocked by solid blocks ----
 	public const int TorchLight = 14, TorchExtra = 3, MaxLight = TorchLight + 3 * TorchExtra;
 	public static float LightCurve(float l) => MathF.Min(1.2f, MathF.Pow(l / TorchLight, 1.4f));
-	bool LightPasses(int x, int y, int z) { if (!Inside(x, y, z)) return false; int b = Blocks[Idx(x, y, z)]; return b == 0 || Cubeland.Blocks.B[b].Transparent; }
+	bool LightPasses(int x, int y, int z) { if (!Inside(x, y, z)) return false; int b = Blocks.Get(x, y, z); return b == 0 || Cubeland.Blocks.B[b].Transparent; }
 	public int LightAt(int x, int y, int z) => !Inside(x, y, z) ? 0 : LightMap.TryGetValue(Idx(x, y, z), out var l) ? l : 0;
 	public bool NearTorch(int x, int y, int z)
 	{
@@ -219,8 +231,8 @@ public partial class World
 	public void SetBlock(int x, int y, int z, int id)
 	{
 		if (!Inside(x, y, z)) return;
-		int i = Idx(x, y, z), old = Blocks[i];
-		Blocks[i] = (byte)id;
+		int i = Idx(x, y, z), old = Blocks.Get(x, y, z);
+		Blocks.Set(x, y, z, id);
 		Edits[i] = id;
 		if (id != Cubeland.Blocks.Pieces) PieceMap.Remove(i);
 		if (Cubeland.Blocks.IsTorch(old)) Torches.Remove(i);
@@ -260,8 +272,8 @@ public partial class World
 			if (i < 0 || i >= Blocks.Length || (id != 0 && Cubeland.Blocks.Get(id) == null)) continue;
 			if (id == Cubeland.Blocks.Pieces && !PieceMap.ContainsKey(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
 			if (id != Cubeland.Blocks.Pieces) PieceMap.Remove(i);
-			Blocks[i] = (byte)id; Edits[i] = id;
 			var (x, y, z) = FromIdx(i);
+			Blocks.Set(x, y, z, id); Edits[i] = id;
 			if (Cubeland.Blocks.IsTorch(id)) Torches.Add(i); else Torches.Remove(i);
 			if (BurnsDown(id)) TorchBurn[i] = BurnTime(Cubeland.Blocks.B[id].Burn); else TorchBurn.Remove(i);   // (then the save puts back how long each has left)
 			if (id == Cubeland.Blocks.ClayBallBlock) Drying[i] = DryTime; else Drying.Remove(i);
@@ -274,7 +286,7 @@ public partial class World
 		{
 			int x = c % WX, z = c / WX;
 			SkyTop[c] = (short)ComputeSkyTop(x, z);
-			int y = WY - 1; while (y > 0 && Blocks[Idx(x, y, z)] == 0) y--; Heights[c] = y;
+			int y = WY - 1; while (y > 0 && Blocks.Get(x, y, z) == 0) y--; Heights[c] = y;
 		}
 		if (Torches.Count > 0) Relight(new HashSet<int>());
 	}
@@ -375,7 +387,7 @@ public partial class World
 				for (int k = Cubeland.Blocks.B[Blocks[i]].Count; k > 0; k--) Drop?.Invoke(Cubeland.Blocks.TorchDrop(Blocks[i]), x, y, z);
 				SetBlock(x, y, z, id); continue;
 			}
-			Blocks[i] = (byte)id; Edits[i] = id;
+			Blocks.Set(x, y, z, id); Edits[i] = id;
 			int c = (z / CS) * NCX + x / CS;
 			if (id != 0) ChunkTop[c] = Math.Max(ChunkTop[c], y + 1);
 			MarkDirty(x, y, z, dirty);
@@ -404,34 +416,34 @@ public partial class World
 	public bool SetSpots(int x, int y, int z, int mask, int id)
 	{
 		if (!Inside(x, y, z)) return false;
-		int i = Idx(x, y, z), cur = Blocks[i];
-		byte[] a = cur == Cubeland.Blocks.Pieces && PieceMap.TryGetValue(i, out var have) ? have : null;
+		int i = Idx(x, y, z), cur = Blocks.Get(x, y, z);
+		int[] a = cur == Cubeland.Blocks.Pieces && PieceMap.TryGetValue(i, out var have) ? have : null;
 		if (a == null)
 		{
 			if (id == 0 || (cur != 0 && !Cubeland.Blocks.IsWater(cur))) return false;
-			a = new byte[8];
+			a = new int[8];
 		}
-		a = (byte[])a.Clone();
-		for (int s = 0; s < 8; s++) if ((mask & (1 << s)) != 0) { if (id != 0 && a[s] != 0) return false; a[s] = (byte)id; }
+		a = (int[])a.Clone();
+		for (int s = 0; s < 8; s++) if ((mask & (1 << s)) != 0) { if (id != 0 && a[s] != 0) return false; a[s] = id; }
 		ApplyPieces(x, y, z, a);
 		return true;
 	}
 	public bool SetPiece(int x, int y, int z, int s, int id)
 	{
 		if (!Inside(x, y, z)) return false;
-		int i = Idx(x, y, z), cur = Blocks[i];
-		byte[] a = cur == Cubeland.Blocks.Pieces && PieceMap.TryGetValue(i, out var have) ? have : null;
+		int i = Idx(x, y, z), cur = Blocks.Get(x, y, z);
+		int[] a = cur == Cubeland.Blocks.Pieces && PieceMap.TryGetValue(i, out var have) ? have : null;
 		if (a == null)
 		{
 			if (id == 0 || (cur != 0 && !Cubeland.Blocks.IsWater(cur))) return false;
-			a = new byte[8];
+			a = new int[8];
 		}
 		if (id != 0 && a[s] != 0) return false;
-		a = (byte[])a.Clone(); a[s] = (byte)id;
+		a = (int[])a.Clone(); a[s] = id;
 		ApplyPieces(x, y, z, a);
 		return true;
 	}
-	void ApplyPieces(int x, int y, int z, byte[] a)
+	void ApplyPieces(int x, int y, int z, int[] a)
 	{
 		bool all = a[0] != 0, any = false;
 		for (int s = 0; s < 8; s++) { if (a[s] != a[0]) all = false; if (a[s] != 0) any = true; }
@@ -440,7 +452,7 @@ public partial class World
 		else SetBlock(x, y, z, 0);
 	}
 	// the shape the piece in spot s belongs to (its block's pieces in this space), or null if it's a loose piece
-	public static (string shape, int mask, int block)? ShapeAt(byte[] a, int s)
+	public static (string shape, int mask, int block)? ShapeAt(int[] a, int s)
 	{
 		int b = a[s];
 		if (b == 0) return null;

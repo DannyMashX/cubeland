@@ -57,7 +57,7 @@ public class WorldGen
 			fz);
 	}
 
-	byte[] world => W.Blocks;
+	byte[] world => W.Raw;   // (the world grows one byte per block; World packs it into chunks afterwards)
 	static int Idx(int x, int y, int z) => World.Idx(x, y, z);
 	static int WX => World.WX; static int WZ => World.WZ;
 	static int WY => World.WY;

@@ -375,8 +375,8 @@ public partial class Main
 			if (s == null || s.Seed != current.Seed) return;
 			for (int k = 0; k + 8 < s.Pieces.Length; k += 9)
 			{
-				var a = new byte[8];
-				for (int j = 0; j < 8; j++) { int id = s.Pieces[k + 1 + j]; var d = Blocks.Get(id); a[j] = (byte)(d != null && !d.Item && id != Blocks.Pieces ? id : 0); }
+				var a = new int[8];
+				for (int j = 0; j < 8; j++) { int id = s.Pieces[k + 1 + j]; var d = Blocks.Get(id); a[j] = d != null && !d.Item && id != Blocks.Pieces ? id : 0; }
 				if (a.Any(v => v != 0)) world.PieceMap[s.Pieces[k]] = a;
 			}
 			world.ApplyEdits(s.Idxs, s.Ids);

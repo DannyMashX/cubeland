@@ -134,8 +134,8 @@ public partial class Main
 	{
 		for (int k = 0; k + 8 < list.Count; k += 9)
 		{
-			var a = new byte[8];
-			for (int j = 0; j < 8; j++) { int id = list[k + 1 + j]; var d = Blocks.Get(id); a[j] = (byte)(d != null && !d.Item && id != Blocks.Pieces ? id : 0); }
+			var a = new int[8];
+			for (int j = 0; j < 8; j++) { int id = list[k + 1 + j]; var d = Blocks.Get(id); a[j] = d != null && !d.Item && id != Blocks.Pieces ? id : 0; }
 			if (a.Any(v => v != 0)) world.PieceMap[list[k]] = a;
 		}
 	}
@@ -143,7 +143,7 @@ public partial class Main
 	void ApplySets(List<int> list, List<int> pcs)
 	{
 		applying = true;
-		var before = new Dictionary<int, byte[]>(world.PieceMap);
+		var before = new Dictionary<int, int[]>(world.PieceMap);
 		ApplyNetPieces(pcs);
 		for (int k = 0; k + 1 < list.Count; k += 2)
 		{
@@ -161,7 +161,7 @@ public partial class Main
 		if (pending.Count == 0) return;
 		var p = new List<object>();
 		for (int k = 0; k < pending.Count; k += 2)
-			if (pending[k + 1] == Blocks.Pieces && world.PieceMap.TryGetValue(pending[k], out var a)) { p.Add(pending[k]); foreach (var v in a) p.Add((int)v); }
+			if (pending[k + 1] == Blocks.Pieces && world.PieceMap.TryGetValue(pending[k], out var a)) { p.Add(pending[k]); foreach (var v in a) p.Add(v); }
 		var msg = new Dictionary<string, object> { ["t"] = "sets", ["l"] = pending.Cast<object>().ToList(), ["p"] = p };
 		pending.Clear();
 		if (hosting) foreach (var f in friends.Values) f.conn.Send(msg);
@@ -221,10 +221,17 @@ public partial class Main
 			friends[conn.PeerId] = (conn, name, hue, Now);
 			GD.Print($"net: {name} joined");
 			SetOther(conn.PeerId, name, hue, player.Pos.X + 1, player.Pos.Y, player.Pos.Z, 0);
-			var idxs = new byte[world.Edits.Count * 4]; var ids = new byte[world.Edits.Count]; int k = 0;
-			foreach (var (i, id) in world.Edits) { BitConverter.TryWriteBytes(idxs.AsSpan(k * 4), (uint)i); ids[k++] = (byte)id; }
-			var pcs = new List<object>(); foreach (var (i, a) in world.PieceMap) { pcs.Add(i); foreach (var v in a) pcs.Add((int)v); }
-			conn.Send(new Dictionary<string, object> { ["t"] = "welcome", ["id"] = conn.PeerId, ["idxs"] = idxs, ["ids"] = ids, ["pieces"] = pcs, ["time"] = sky.TimeOfDay,
+			// the blocks you've changed: 4 bytes for each index, and 1 byte for each block id ("ids"), or 4 if any id is past 255 ("idw")
+			bool wide = world.Edits.Values.Any(id => id > 255);
+			var idxs = new byte[world.Edits.Count * 4]; var ids = new byte[world.Edits.Count * (wide ? 4 : 1)]; int k = 0;
+			foreach (var (i, id) in world.Edits)
+			{
+				BitConverter.TryWriteBytes(idxs.AsSpan(k * 4), (uint)i);
+				if (wide) BitConverter.TryWriteBytes(ids.AsSpan(k * 4), (uint)id); else ids[k] = (byte)id;
+				k++;
+			}
+			var pcs = new List<object>(); foreach (var (i, a) in world.PieceMap) { pcs.Add(i); foreach (var v in a) pcs.Add(v); }
+			conn.Send(new Dictionary<string, object> { ["t"] = "welcome", ["id"] = conn.PeerId, ["idxs"] = idxs, [wide ? "idw" : "ids"] = ids, ["pieces"] = pcs, ["time"] = sky.TimeOfDay,
 				["x"] = player.Pos.X + 1, ["y"] = player.Pos.Y, ["z"] = player.Pos.Z, ["yaw"] = player.Yaw });
 			// everyone's skins: yours, and the other friends'
 			if (PlayerSkin.DataUrl != null) conn.Send(SkinMsg("host", PlayerSkin.DataUrl));
@@ -433,9 +440,10 @@ public partial class Main
 	{
 		myId = d.S("id") ?? myId;
 		ApplyNetPieces(Ints(d.L("pieces")));
-		var ib = d.B("idxs") ?? Array.Empty<byte>(); var idb = d.B("ids") ?? Array.Empty<byte>();
+		var ib = d.B("idxs") ?? Array.Empty<byte>(); var idw = d.B("idw"); var idb = idw ?? d.B("ids") ?? Array.Empty<byte>();
+		int n = idw != null ? idb.Length / 4 : idb.Length;   // (4-byte ids when the world has blocks past 255)
 		var idxs = new List<int>(); var ids = new List<int>();
-		for (int k = 0; k < idb.Length && k * 4 + 3 < ib.Length; k++) { idxs.Add((int)BitConverter.ToUInt32(ib, k * 4)); ids.Add(idb[k]); }
+		for (int k = 0; k < n && k * 4 + 3 < ib.Length; k++) { idxs.Add((int)BitConverter.ToUInt32(ib, k * 4)); ids.Add(idw != null ? (int)BitConverter.ToUInt32(idb, k * 4) : idb[k]); }
 		world.ApplyEdits(idxs, ids);
 		var dirtyNow = new HashSet<int>();
 		foreach (int i in idxs) { var (x, y, z) = World.FromIdx(i); World.MarkDirty(x, y, z, dirtyNow); }

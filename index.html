@@ -480,7 +480,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=beta-0.1.1.0"></script>
+<script src="textures.js?v=beta-0.1.1.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -488,7 +488,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.1.0';
+const GAME_VERSION = 'Beta 0.1.1.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -598,8 +598,71 @@ const LIFT = WY - 192;
 const CS = 16;                        // chunk size: chunks are 16x16x16 cubes
 const NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;
 const chunkKey = (cx, cy, cz) => (cy * NCZ + cz) * NCX + cx;
-const world = new Uint8Array(WX * WY * WZ);
 const idx = (x, y, z) => (y * WZ + z) * WX + x;
+// The world's blocks, kept chunk by chunk (16x16x16 cubes). Each chunk has a palette: the list of the block ids in it, as
+// full numbers (so there's no limit of 256 kinds of block), and each of its 4096 blocks stores only its place in that
+// list: 1 byte, or 2 bytes once a chunk has held more than 256 kinds of block. A chunk that's all one block (open sky,
+// solid rock) shares one list of places with every other such chunk until something in it changes, so it costs almost
+// nothing. world.get(i) / world.set(i, id) use the world index (idx); world.at(x, y, z) / world.put(x, y, z, id) use x, y, z.
+// The world grows in `raw` (one byte per block, the same as the desktop version), which is packed in here once it's grown.
+let raw = new Uint8Array(WX * WY * WZ);
+const world = (() => {
+  const NCY = WY / CS, N = NCX * NCY * NCZ, SHARED = new Uint8Array(4096), WIDE = 256;
+  const pal = new Array(N), pn = new Int32Array(N), place = new Array(N);
+  for (let k = 0; k < N; k++) { pal[k] = new Int32Array(1); pn[k] = 1; place[k] = SHARED; }
+  const chunkOf = (x, y, z) => ((y >> 4) * NCZ + (z >> 4)) * NCX + (x >> 4);
+  const local = (x, y, z) => ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
+  function at(x, y, z) {   // (written out in full: it's called millions of times)
+    const k = ((y >> 4) * NCZ + (z >> 4)) * NCX + (x >> 4);
+    return pal[k][place[k][((y & 15) << 8) | ((z & 15) << 4) | (x & 15)]];
+  }
+  function put(x, y, z, id) {
+    const k = chunkOf(x, y, z), a = pal[k], n = pn[k];
+    let p = -1;
+    for (let j = 0; j < n; j++) if (a[j] === id) { p = j; break; }
+    if (place[k] === SHARED) {
+      if (p === 0) return;   // (already that block)
+      place[k] = new Uint8Array(4096);
+    }
+    if (p < 0) {
+      if (n === WIDE && place[k] instanceof Uint8Array) place[k] = Uint16Array.from(place[k]);   // (more than 256 kinds: 2-byte places)
+      if (n === a.length) { const b = new Int32Array(n * 2); b.set(a); pal[k] = b; }
+      pal[k][n] = id; pn[k] = n + 1; p = n;
+    }
+    place[k][local(x, y, z)] = p;
+  }
+  // by world index: (y * WZ + z) * WX + x
+  function get(i) { const r = (i / WX) | 0, x = i - r * WX, y = (r / WZ) | 0; return at(x, y, r - y * WZ); }
+  function set(i, id) { const r = (i / WX) | 0, x = i - r * WX, y = (r / WZ) | 0; put(x, y, r - y * WZ, id); }
+  // fills every chunk from the freshly grown world (one byte per block, in world-index order)
+  function load(src) {
+    const map = new Int16Array(256);
+    for (let k = 0; k < N; k++) {
+      const cx = k % NCX, cz = Math.floor(k / NCX) % NCZ, cy = Math.floor(k / (NCX * NCZ));
+      map.fill(-1);
+      let a = new Int32Array(8), n = 0;
+      const b = new Uint8Array(4096);
+      for (let ly = 0; ly < CS; ly++) for (let lz = 0; lz < CS; lz++) {
+        const row = ((cy * CS + ly) * WZ + cz * CS + lz) * WX + cx * CS, l = (ly << 8) | (lz << 4);
+        for (let lx = 0; lx < CS; lx++) {
+          const id = src[row + lx];
+          let p = map[id];
+          if (p < 0) { if (n === a.length) { const g = new Int32Array(n * 2); g.set(a); a = g; } a[n] = id; map[id] = p = n++; }
+          b[l | lx] = p;
+        }
+      }
+      if (n === 1) { pal[k] = Int32Array.of(a[0]); pn[k] = 1; place[k] = SHARED; }
+      else { pal[k] = a; pn[k] = n; place[k] = b; }
+    }
+  }
+  // (for testing) how much memory the blocks take, in bytes, and how many chunks are all one block
+  function usage() {
+    let bytes = 0, uniform = 0;
+    for (let k = 0; k < N; k++) { bytes += 48 + pal[k].length * 4; if (place[k] === SHARED) uniform++; else bytes += place[k].byteLength; }
+    return { bytes, uniform };
+  }
+  return { at, put, get, set, load, usage, length: WX * WY * WZ };
+})();
 
 // ===================== Pictures =====================
 // Pictures are known by NAME: the file's name in textures/blocks or textures/items, without .png (e.g. 'log_side').
@@ -986,7 +1049,7 @@ const BRICK_VARIANTS = [12, 13, 14, 15];
 // Spot number = x + y*2 + z*4, where x, y and z are 0 (low half) or 1 (high half) of the block space.
 const PIECES = 70, CRAFTING_BENCH = 60, CUTTER = 159;
 BLOCKS[PIECES] = { name: 'Pieces', t: P3('stone'), transparent: true, shape: 'pieces' };
-const pieceMap = new Map();     // world index -> Uint8Array(8) of block ids (0 = empty spot)
+const pieceMap = new Map();     // world index -> Int32Array(8) of block ids (0 = empty spot)
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
 const PIECE_ITEM = 100;
 // cube blocks that can be cut into pieces, slabs and stairs (not torches, water, the Crafting Bench or the Furnace)
@@ -1040,11 +1103,11 @@ function shapeAt(a, s) {
 // 8 pieces of the same block turn into that whole block.
 function setSpots(x, y, z, mask, id) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false;
-  const i = idx(x, y, z), cur = world[i];
+  const i = idx(x, y, z), cur = world.get(i);
   let a = cur === PIECES ? pieceMap.get(i) : null;
   if (!a) {
     if (!id || (cur && !isWater(cur))) return false;
-    a = new Uint8Array(8);
+    a = new Int32Array(8);
   }
   a = a.slice();
   for (let s = 0; s < 8; s++) if (mask & (1 << s)) { if (id && a[s]) return false; a[s] = id; }
@@ -1491,8 +1554,8 @@ const RAW = 255; // "land, decide grass/dirt/stone later"
 function put(x, y, z, id, onlyAir) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
   const i = idx(x, y, z);
-  if (onlyAir && world[i]) return;
-  world[i] = id;
+  if (onlyAir && raw[i]) return;
+  raw[i] = id;
 }
 
 // --- 1. Ground: flat plateaus at many different heights, with curvy swirled edges ---
@@ -1559,7 +1622,7 @@ function grassTint(x, z) {
 
 if (GEN === 1) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   const h0 = groundHeight(x, z);
-  for (let y = 0; y < h0; y++) world[idx(x, y, z)] = RAW;
+  for (let y = 0; y < h0; y++) raw[idx(x, y, z)] = RAW;
 }
 else generateHills();
 
@@ -1604,7 +1667,7 @@ function generateHills() {
       }
       for (let y = 0; y < WY - 2; y++) {
         const gy = (y / GY) | 0, fy = (y % GY) / GY;
-        if (col[gy] + (col[gy + 1] - col[gy]) * fy > 0 || y === 0) world[idx(x, y, z)] = RAW;
+        if (col[gy] + (col[gy + 1] - col[gy]) * fy > 0 || y === 0) raw[idx(x, y, z)] = RAW;
       }
     }
   }
@@ -1622,7 +1685,7 @@ function generateFloatingIslands() {
     const ISLAND_HEIGHT = 135;
     const top = Math.min(WY - 22, Math.floor(ISLAND_HEIGHT + fbm(x / 130, z / 130, 2, 500) * 30 + s * 2));
     const bottom = Math.max(1, top - 2 - Math.floor(s * s * 14 * (0.5 + valueNoise(x / 4, z / 4, 600))));
-    for (let y = bottom; y <= top; y++) world[idx(x, y, z)] = RAW;
+    for (let y = bottom; y <= top; y++) raw[idx(x, y, z)] = RAW;
   }
 }
 
@@ -1630,7 +1693,8 @@ const heights = new Int32Array(WX * WZ);
 function recomputeHeights() {
   for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
     let y = WY - 1;
-    while (y > 0 && !world[idx(x, y, z)]) y--;
+    if (raw) while (y > 0 && !raw[idx(x, y, z)]) y--;   // (while the world grows)
+    else while (y > 0 && !world.at(x, y, z)) y--;
     heights[z * WX + x] = y;
   }
 }
@@ -1697,12 +1761,12 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   const bandShift = biomeMap[z * WX + x] === BADLANDS ? Math.floor(fbm(x / 40 + 77, z / 40 + 77, 2, 1130) * 8) : 0;   // (badlands: the stripes wave up and down a little)
   for (let y = WY - 1; y >= 0; y--) {
     const i = idx(x, y, z);
-    if (!world[i]) { depth = -1; continue; }
+    if (!raw[i]) { depth = -1; continue; }
     depth++;
-    if (world[i] !== RAW) continue;
+    if (raw[i] !== RAW) continue;
     if (GEN === 1) {
       const low = y <= SEA_LEVEL;
-      world[i] = depth === 0 ? (low ? 6 : 1) : depth <= 3 ? (low ? 6 : 2) : 3;
+      raw[i] = depth === 0 ? (low ? 6 : 1) : depth <= 3 ? (low ? 6 : 2) : 3;
       continue;
     }
     if (GEN === 3) {   // biome worlds: each biome its own ground
@@ -1720,12 +1784,12 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
       // badlands: the hills are stripes of coloured terracotta, 16 deep (sand only on the beaches)
       if (bi === BADLANDS && surf === 6 && y >= SEA_LEVEL - 3 && depth <= 16 && (depth > 0 || y > SEA_LEVEL + 1)) {
         const n = BADLANDS_BANDS.length, k = (y + bandShift) % n;
-        world[i] = BADLANDS_BANDS[k < 0 ? k + n : k];
+        raw[i] = BADLANDS_BANDS[k < 0 ? k + n : k];
         continue;
       }
       // under grass: dirt (in swamps: 3 of mud, then 2 of peat); under desert sand: 3 more sand, then 4 of sandstone; then stone
       const boggy = bi === SWAMP && (surf === SWAMP_GRASS || surf === MUD);
-      world[i] = depth === 0 ? surf : depth <= 3 ? (boggy ? MUD : grassy(surf) ? 2 : surf) : boggy && depth <= 5 ? PEAT
+      raw[i] = depth === 0 ? surf : depth <= 3 ? (boggy ? MUD : grassy(surf) ? 2 : surf) : boggy && depth <= 5 ? PEAT
         : bi === DESERT && surf === 6 && depth <= 7 ? SANDSTONE : 3;
       continue;
     }
@@ -1736,7 +1800,7 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
       else if (y >= SEA_LEVEL - 4) surf = beach > 0.4 ? 6 : y >= SEA_LEVEL ? 1 : 2;   // shore: sand, or grass down to the water
       else surf = 6;                                                           // sea floor: sand
     }
-    world[i] = depth === 0 ? surf : depth <= 3 ? (surf === 1 ? 2 : surf) : 3;
+    raw[i] = depth === 0 ? surf : depth <= 3 ? (surf === 1 ? 2 : surf) : 3;
   }
 }
 recomputeHeights();
@@ -1745,7 +1809,7 @@ const GRAVEL_PATCHES = Math.floor(10000 * WY / 192); // more = gravel is more co
 for (let i = 0, tries = 0; i < GRAVEL_PATCHES && tries < GRAVEL_PATCHES * 20; tries++) {
   const x = Math.floor(hash(tries, 1, 7001) * WX), z = Math.floor(hash(tries, 2, 7002) * WZ);
   const y = 1 + Math.floor(hash(tries, 3, 7003) * (WY - 2));
-  if (world[idx(x, y, z)] !== 3) continue; // only start a patch inside stone
+  if (raw[idx(x, y, z)] !== 3) continue; // only start a patch inside stone
   i++;
   const rx = 1.5 + hash(tries, 4, 7004) * 2.5, ry = 1 + hash(tries, 5, 7005) * 1.5, rz = 1.5 + hash(tries, 6, 7006) * 2.5;
   for (let dy = -Math.ceil(ry); dy <= Math.ceil(ry); dy++)
@@ -1754,7 +1818,7 @@ for (let i = 0, tries = 0; i < GRAVEL_PATCHES && tries < GRAVEL_PATCHES * 20; tr
         if ((dx / rx) ** 2 + (dy / ry) ** 2 + (dz / rz) ** 2 > 1) continue;
         const gx = x + dx, gy = y + dy, gz = z + dz;
         if (gx < 0 || gz < 0 || gx >= WX || gz >= WZ || gy < 1 || gy >= WY) continue;
-        if (world[idx(gx, gy, gz)] === 3) world[idx(gx, gy, gz)] = 11;
+        if (raw[idx(gx, gy, gz)] === 3) raw[idx(gx, gy, gz)] = 11;
       }
 }
 
@@ -1763,15 +1827,15 @@ const ORE_STEPS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 
 
 // --- Biome worlds: swamps get pools, low spots dug out of the boggy ground (the water below fills them) ---
 if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
-  if (biomeMap[z * WX + x] !== SWAMP || world[idx(x, SEA_LEVEL + 2, z)] || fbm(x / 12 + 900, z / 12 + 900, 2, 1120) < 0.5) continue;
-  for (let y = SEA_LEVEL; y <= SEA_LEVEL + 1; y++) world[idx(x, y, z)] = 0;
+  if (biomeMap[z * WX + x] !== SWAMP || raw[idx(x, SEA_LEVEL + 2, z)] || fbm(x / 12 + 900, z / 12 + 900, 2, 1120) < 0.5) continue;
+  for (let y = SEA_LEVEL; y <= SEA_LEVEL + 1; y++) raw[idx(x, y, z)] = 0;
   if (heights[z * WX + x] > SEA_LEVEL) heights[z * WX + x] = SEA_LEVEL;
-  if (grassy(world[idx(x, SEA_LEVEL - 1, z)])) world[idx(x, SEA_LEVEL - 1, z)] = MUD;   // (a muddy bottom)
+  if (grassy(raw[idx(x, SEA_LEVEL - 1, z)])) raw[idx(x, SEA_LEVEL - 1, z)] = MUD;   // (a muddy bottom)
 }
 
 // --- Water: every low spot open to the sky fills up to sea level (the sandy lowlands become lakes and seas) ---
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++)
-  for (let y = SEA_LEVEL; y > 0 && !world[idx(x, y, z)]; y--) world[idx(x, y, z)] = WATER;
+  for (let y = SEA_LEVEL; y > 0 && !raw[idx(x, y, z)]; y--) raw[idx(x, y, z)] = WATER;
 
 // --- Ores and Fireclay: veins in the ground, by depth below the surface (before the caves, which cut through them) ---
 // [block, veins per 10,000 columns, blocks per vein, shallowest, deepest (blocks below the surface)]. A vein is a short
@@ -1788,8 +1852,8 @@ function placeOres() {
       if (hi < lo) continue;
       let y = lo + Math.floor(hash(k, 3, s) * (hi - lo + 1));
       for (let j = 0; j < size; j++) {
-        const i = idx(x, y, z), b = world[i];
-        if (b === 3 || (ore === FIRECLAY && b === 2)) world[i] = ore;
+        const i = idx(x, y, z), b = raw[i];
+        if (b === 3 || (ore === FIRECLAY && b === 2)) raw[i] = ore;
         const [dx, dy, dz] = ORE_STEPS[Math.floor(hash3(k, j, o, s + 5) * 6)];
         x += dx; y += dy; z += dz;
         if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 2 || y >= WY) break;
@@ -1810,11 +1874,11 @@ function carveCaves() {
       if (dx * dx + dy * dy * 1.6 + dz * dz > r * r) continue;              // a bit squashed: wider than tall
       const x = Math.floor(cx) + dx, y = Math.floor(cy) + dy, z = Math.floor(cz) + dz;
       if (x < 1 || z < 1 || x >= WX - 1 || z >= WZ - 1 || y < 2 || y >= WY - 1) continue;
-      const i = idx(x, y, z), b = world[i];
+      const i = idx(x, y, z), b = raw[i];
       if (!b || isWater(b)) continue;
-      if (isWater(world[i + 1]) || isWater(world[i - 1]) || isWater(world[i + WX]) || isWater(world[i - WX]) ||
-          isWater(world[idx(x, y + 1, z)]) || isWater(world[idx(x, y - 1, z)])) continue;
-      world[i] = 0;
+      if (isWater(raw[i + 1]) || isWater(raw[i - 1]) || isWater(raw[i + WX]) || isWater(raw[i - WX]) ||
+          isWater(raw[idx(x, y + 1, z)]) || isWater(raw[idx(x, y - 1, z)])) continue;
+      raw[i] = 0;
     }
   };
   for (let k = 0; k < n; k++) {
@@ -1833,16 +1897,16 @@ if (GEN >= 2) carveCaves();
 // --- Biome worlds: in snowy lands the top of open water (seas, lakes) freezes into Ice ---
 if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   const i = idx(x, SEA_LEVEL, z);
-  if (biomeMap[z * WX + x] === SNOWY && isWater(world[i]) && !world[idx(x, SEA_LEVEL + 1, z)]) world[i] = ICE;
+  if (biomeMap[z * WX + x] === SNOWY && isWater(raw[i]) && !raw[idx(x, SEA_LEVEL + 1, z)]) raw[i] = ICE;
 }
 
 // --- Bedrock along the bottom of every world; and strata (640-tall worlds): the stone gets a new layer every 64 blocks down from sea level ---
-world.fill(BEDROCK, 0, WX * WZ);
+raw.fill(BEDROCK, 0, WX * WZ);
 if (WY === 640) {
   const slab = WX * WZ;
   for (let y = 1; y <= SEA_LEVEL - STRATA_THICK; y++) {
     const id = STRATA + Math.min(STRATA_LAYERS, 1 + Math.floor((SEA_LEVEL - y) / STRATA_THICK)) - 2;
-    for (let i = y * slab, end = i + slab; i < end; i++) if (world[i] === 3) world[i] = id;
+    for (let i = y * slab, end = i + slab; i < end; i++) if (raw[i] === 3) raw[i] = id;
   }
 }
 
@@ -1858,7 +1922,7 @@ const forestAt = (x, z) => smoothstep(0.47, 0.6, fbm(x / 110 + 20, z / 110 + 20,
 // biome worlds: each biome's own trees (the Woods have the ones below)
 const PALM_FRONDS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 function biomeTree(x, h, z, bi) {
-  const top = world[idx(x, h, z)], v = hash(x, z, 77), roll = hash(x, z, 999);
+  const top = raw[idx(x, h, z)], v = hash(x, z, 77), roll = hash(x, z, 999);
   if (bi === PLAINS || bi === MEADOW) {   // now and then a lone round tree (a few more in meadows)
     if (top !== 1 || roll > (bi === MEADOW ? 0.0015 : 0.0008)) return;
     const th = 5 + (v * 3 | 0);
@@ -1901,7 +1965,7 @@ function biomeTree(x, h, z, bi) {
 for (let z = 3; z < WZ - 3; z++) for (let x = 3; x < WX - 3; x++) {
   const h = heights[z * WX + x];
   if (GEN === 3 && biomeMap[z * WX + x] !== WOODS) { biomeTree(x, h, z, biomeMap[z * WX + x]); continue; }
-  if (world[idx(x, h, z)] !== 1 || hash(x, z, 999) > (GEN === 1 ? 0.011 : 0.003 + forestAt(x, z) * 0.045)) continue;
+  if (raw[idx(x, h, z)] !== 1 || hash(x, z, 999) > (GEN === 1 ? 0.011 : 0.003 + forestAt(x, z) * 0.045)) continue;
   const kind = GEN === 1 ? hash(x, z, 555) : hash(x, z, 555) < 0.93 ? 0 : 0.95, v = hash(x, z, 77);
   if (kind < 0.45) {                    // normal
     const th = 4 + (v * 3 | 0);
@@ -1932,11 +1996,11 @@ for (let z = 3; z < WZ - 3; z++) for (let x = 3; x < WX - 3; x++) {
 const ROCK_CHANCE = 0.06;   // out of every beach spot near water (more = more rocks)
 for (let z = 6; z < WZ - 6; z++) for (let x = 6; x < WX - 6; x++) {
   if (hash(x, z, 4321) > ROCK_CHANCE) continue;
-  const h = heights[z * WX + x], top = world[idx(x, h, z)];
-  if ((top !== 6 && top !== 11) || h < SEA_LEVEL || world[idx(x, h + 1, z)]) continue;
+  const h = heights[z * WX + x], top = raw[idx(x, h, z)];
+  if ((top !== 6 && top !== 11) || h < SEA_LEVEL || raw[idx(x, h + 1, z)]) continue;
   let wet = false;   // water within 5 blocks, at sea level
-  for (let dz = -5; dz <= 5 && !wet; dz++) for (let dx = -5; dx <= 5; dx++) if (isWater(world[idx(x + dx, SEA_LEVEL, z + dz)])) { wet = true; break; }
-  if (wet) { world[idx(x, h + 1, z)] = ROCK_BLOCK; heights[z * WX + x] = h + 1; }
+  for (let dz = -5; dz <= 5 && !wet; dz++) for (let dx = -5; dx <= 5; dx++) if (isWater(raw[idx(x + dx, SEA_LEVEL, z + dz)])) { wet = true; break; }
+  if (wet) { raw[idx(x, h + 1, z)] = ROCK_BLOCK; heights[z * WX + x] = h + 1; }
 }
 
 // --- 8. Flowers: small patches of one colour on grass ---
@@ -1949,15 +2013,15 @@ for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
   for (let k = 0; k < n; k++) {
     const fx = x + Math.floor((hash(x + k, z, 5153) - 0.5) * 6 + 0.5), fz = z + Math.floor((hash(x, z + k, 5154) - 0.5) * 6 + 0.5);
     const h = heights[fz * WX + fx];
-    if (world[idx(fx, h, fz)] !== 1 || world[idx(fx, h + 1, fz)]) continue;   // on grass, with nothing there yet
-    world[idx(fx, h + 1, fz)] = flower; heights[fz * WX + fx] = h + 1;
+    if (raw[idx(fx, h, fz)] !== 1 || raw[idx(fx, h + 1, fz)]) continue;   // on grass, with nothing there yet
+    raw[idx(fx, h + 1, fz)] = flower; heights[fz * WX + fx] = h + 1;
   }
 }
 
 function getBlock(x, y, z) {
   if (y < 0) return 3;
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y >= WY) return 0;
-  return world[idx(x, y, z)];
+  return world.at(x, y, z);
 }
 // the block at a spot on the half-block grid (X, Y, Z = 2x the world position): a piece, or the whole block there
 function subBlock(X, Y, Z) {
@@ -2242,6 +2306,12 @@ waterMat.onBeforeCompile = material.onBeforeCompile;
 // Highest y that holds a block in each 16x16 column of chunks, so meshing skips the empty sky.
 // Measured after everything (including trees that spill into neighbouring chunks) is placed.
 recomputeHeights();
+// the world has grown: pack it into chunks (see `world`), and let go of the one-byte-per-block copy
+if (/[?&]worldhash\b/.test(location.search)) {   // (testing: a fingerprint of the new world, to compare with the desktop version's)
+  let h = 2166136261; for (let i = 0; i < raw.length; i++) h = Math.imul(h ^ raw[i], 16777619) >>> 0;
+  window.WORLDHASH = h.toString(16).padStart(8, '0');
+}
+world.load(raw); raw = null;
 const chunkTop = new Int32Array(NCX * NCZ);
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   const k = Math.floor(z / CS) * NCX + Math.floor(x / CS);
@@ -2259,7 +2329,7 @@ const TORCH_EXTRA = 3;         // each extra torch in the same block reaches 3 b
 const MAX_LIGHT = TORCH_LIGHT + 3 * TORCH_EXTRA;
 const torches = new Set();     // world indices of every torch
 let lightMap = new Map();      // world index -> light level, only for lit cells
-const lightPasses = (x, y, z) => { if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false; const b = world[idx(x, y, z)]; return !b || BLOCKS[b].transparent; };
+const lightPasses = (x, y, z) => { if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false; const b = world.at(x, y, z); return !b || BLOCKS[b].transparent; };
 const lightAt = (x, y, z) => (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) ? 0 : (lightMap.get(idx(x, y, z)) || 0);
 // bright near the torch, gentle fade to dark; stacked torches go a bit past normal brightness (up to 1.2x)
 const LIGHT_CURVE = l => Math.min(1.2, Math.pow(l / TORCH_LIGHT, 1.4));
@@ -2273,7 +2343,7 @@ function nearTorch(x, y, z) {
 function relight(dirty) {      // recompute all torch light, mark chunks whose lighting changed
   const old = lightMap, nm = new Map();
   for (const ti of torches) {
-    const tb = BLOCKS[world[ti]];
+    const tb = BLOCKS[world.get(ti)];
     if (tb.burn === 2) continue;   // burnt: no light
     const full = TORCH_LIGHT + TORCH_EXTRA * (tb.count - 1);
     const q = [[ti % WX, Math.floor(ti / (WX * WZ)), Math.floor(ti / WX) % WZ, tb.burn === 1 ? Math.round(full / 2) : full]];   // smoldering: half
@@ -2290,7 +2360,7 @@ function relight(dirty) {      // recompute all torch light, mark chunks whose l
   lightMap = nm;
 }
 // ---- Sky light: how much open sky a spot can see. Tunnels and caves fade to dark the deeper you go. ----
-const opaqueAt = (x, y, z) => { const b = world[idx(x, y, z)]; return b !== 0 && !BLOCKS[b].transparent; };
+const opaqueAt = (x, y, z) => { const b = world.at(x, y, z); return b !== 0 && !BLOCKS[b].transparent; };
 const skyTop = new Int16Array(WX * WZ);   // highest see-through-blocking block in each column (-1 = none)
 function computeSkyTop(x, z, from = heights[z * WX + x]) {
   for (let y = Math.min(WY - 1, from); y >= 0; y--) if (opaqueAt(x, y, z)) return y;
@@ -2458,7 +2528,7 @@ function buildChunk(cx, cy, cz) {
   const anyLight = lightMap.size > 0;
   const skyCache = new Map();
   for (let y = y0; y < top; y++) for (let z = cz * CS; z < cz * CS + CS; z++) for (let x = cx * CS; x < cx * CS + CS; x++) {
-    const id = world[idx(x, y, z)];
+    const id = world.at(x, y, z);
     if (!id) continue;
     const b = BLOCKS[id];
     if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
@@ -2716,8 +2786,8 @@ function pumpChunkBuilds(budgetMs) {
 const edits = new Map();   // every block you've changed (world index -> block id): this is what gets saved
 function setBlock(x, y, z, id) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
-  const i = idx(x, y, z), old = world[i];
-  world[i] = id;
+  const i = idx(x, y, z), old = world.get(i);
+  world.set(i, id);
   edits.set(i, id);
   if (id !== PIECES) pieceMap.delete(i);
   if (isTorch(old)) torches.delete(i);
@@ -2749,11 +2819,11 @@ function setBlock(x, y, z, id) {
 // Pieces go into empty space or water, or into a free spot of a space that already holds pieces.
 function setPiece(x, y, z, s, id) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false;
-  const i = idx(x, y, z), cur = world[i];
+  const i = idx(x, y, z), cur = world.get(i);
   let a = cur === PIECES ? pieceMap.get(i) : null;
   if (!a) {
     if (!id || (cur && !isWater(cur))) return false;
-    a = new Uint8Array(8);
+    a = new Int32Array(8);
   }
   if (id && a[s]) return false;
   a = a.slice(); a[s] = id;
@@ -2801,7 +2871,7 @@ function updateWater(dt) {
   let n = 0;
   for (const i of waterQueue) {
     waterQueue.delete(i);
-    const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ)), cur = world[i];
+    const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ)), cur = world.get(i);
     const want = waterWants(x, y, z, cur);
     if (want !== cur) changes.push([x, y, z, want]);
     if (++n >= 6000) break;
@@ -2809,11 +2879,11 @@ function updateWater(dt) {
   const dirty = new Set();
   for (const [x, y, z, id] of changes) {
     const i = idx(x, y, z);
-    if (isTorch(world[i])) {   // water puts a torch out and washes it away (it drops as Burnt Torches); that also changes the light
-      for (let k = BLOCKS[world[i]].count; k > 0; k--) collect(torchDrop(world[i]), x, y, z);
+    if (isTorch(world.get(i))) {   // water puts a torch out and washes it away (it drops as Burnt Torches); that also changes the light
+      for (let k = BLOCKS[world.get(i)].count; k > 0; k--) collect(torchDrop(world.get(i)), x, y, z);
       setBlock(x, y, z, id); continue;
     }
-    world[i] = id; edits.set(i, id);
+    world.set(i, id); edits.set(i, id);
     const c = Math.floor(z / CS) * NCX + Math.floor(x / CS);
     if (id) chunkTop[c] = Math.max(chunkTop[c], y + 1);
     markDirty(x, y, z, dirty);
@@ -2888,8 +2958,8 @@ function updateFalls(dt) {
     for (const i of fallQueue) {
       fallQueue.delete(i);
       if (++n > 4000) break;
-      const id = world[i], y = Math.floor(i / (WX * WZ));
-      if (!FALLS.has(id) || y === 0 || !fallsThrough(world[i - WX * WZ])) continue;
+      const id = world.get(i), y = Math.floor(i / (WX * WZ));
+      if (!FALLS.has(id) || y === 0 || !fallsThrough(world.get(i - WX * WZ))) continue;
       const x = i % WX, z = Math.floor(i / WX) % WZ;
       setBlock(x, y, z, 0);
       dropTorchesAround(x, y, z);   // (torches stuck to its sides fall off)
@@ -2947,7 +3017,7 @@ const SPAWN = { x: player.x, y: player.y, z: player.z };   // where you come bac
 function solid(x, y, z) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0) return true; // invisible walls at world edge
   if (y >= WY) return false;
-  const b = world[idx(x, y, z)];
+  const b = world.at(x, y, z);
   return b !== 0 && !BLOCKS[b].noCollide;   // torches don't block movement
 }
 // every solid box touching the box from (x0, y0, z0) to (x1, y1, z1): whole blocks, or single pieces
@@ -2959,8 +3029,8 @@ function solidBoxes(x0, y0, z0, x1, y1, z1) {
       for (let x = Math.floor(x0); x <= Math.floor(x1 - 1e-6); x++) {
         if (!solid(x, y, z)) continue;
         const inside = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY;
-        const a = inside && world[idx(x, y, z)] === PIECES ? pieceMap.get(idx(x, y, z)) : null;
-        const half = inside && !a && BLOCKS[world[idx(x, y, z)]].shape === 'half';   // a half-tall block: just its bottom half
+        const a = inside && world.at(x, y, z) === PIECES ? pieceMap.get(idx(x, y, z)) : null;
+        const half = inside && !a && BLOCKS[world.at(x, y, z)].shape === 'half';   // a half-tall block: just its bottom half
         if (half) { if (y < y1 && y + 0.5 > y0) out.push([x, y, z, x + 1, y + 0.5, z + 1]); continue; }
         if (!a) { out.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
         for (let s = 0; s < 8; s++) {
@@ -3921,7 +3991,7 @@ function mobNoise(x, y, z) {
 function nearestTorchGoal(m, range) {
   let best = null, bd = range;
   for (const i of torches) {
-    if (BLOCKS[world[i]].burn === 2) continue;   // (a burnt torch gives no light)
+    if (BLOCKS[world.get(i)].burn === 2) continue;   // (a burnt torch gives no light)
     const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
     const d = Math.hypot(x + 0.5 - m.x, y - m.y, z + 0.5 - m.z);
     if (d < bd) { bd = d; best = { kind: 'light', x: x + 0.5, y, z: z + 0.5, time: 8 + Math.random() * 6 }; }
@@ -5495,7 +5565,7 @@ function snuffGoal(m, dt) {
   m.snuffCheck = 2;
   let bd = 20;
   for (const i of torches) {
-    if (!burnsDown(world[i])) continue;   // (lit or smoldering; not burnt, and not an Ever Torch)
+    if (!burnsDown(world.get(i))) continue;   // (lit or smoldering; not burnt, and not an Ever Torch)
     const [x, y, z] = fromIdx(i), d = Math.hypot(x + 0.5 - m.x, y - m.y, z + 0.5 - m.z);
     if (d < bd) { bd = d; m.snuff = { x, y, z, time: 25 }; }
   }
@@ -6490,12 +6560,12 @@ const SMELTS = [
   { out: STEEL_BRICK, needs: [[STEEL_SCRAP, 4]], at: 'foundry' },
 ];
 const smeltNeeds = r => r.needs || [[r.from, 1]];
-const stationOf = i => isFoundry(world[i]) ? 'foundry' : 'kiln';
-const stationName = i => isFoundry(world[i]) ? 'Foundry' : 'Kiln';
+const stationOf = i => isFoundry(world.get(i)) ? 'foundry' : 'kiln';
+const stationName = i => isFoundry(world.get(i)) ? 'Foundry' : 'Kiln';
 // The Foundry: a 3x3x3 with a hollow middle. Bottom: 9 Fireclay Terracotta; middle: the Furnace in the middle of one side
 // (its front facing out) and 7 Fireclay Casing around the empty centre; top: 9 Fireclay Bricks.
 function foundryBuilt(i) {
-  const [x, y, z] = fromIdx(i), [fx, fz] = BLOCKS[world[i]].front, cx = x - fx, cz = z - fz;
+  const [x, y, z] = fromIdx(i), [fx, fz] = BLOCKS[world.get(i)].front, cx = x - fx, cz = z - fz;
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
     const ax = cx + dx, az = cz + dz, mid = getBlock(ax, y, az);
     if (getBlock(ax, y - 1, az) !== FIRECLAY_TERRACOTTA || getBlock(ax, y + 1, az) !== FIRECLAY_BRICKS) return false;
@@ -6574,7 +6644,7 @@ function drawFurnace() {
 }
 function drawFurnaceStatus() {
   const f = furnaces.get(furnaceAt), el = document.getElementById('furnace-status');
-  if (isFoundry(world[furnaceAt]) && !foundryBuilt(furnaceAt)) { el.textContent = 'Build the rest of the Foundry around it'; return; }
+  if (isFoundry(world.get(furnaceAt)) && !foundryBuilt(furnaceAt)) { el.textContent = 'Build the rest of the Foundry around it'; return; }
   if (!f || !f.queue.length) { el.textContent = 'Pick something to smelt'; return; }
   const more = f.queue.length > 1 ? ` (${f.queue.length - 1} more waiting)` : '';
   el.textContent = f.burning ? `Making ${BLOCKS[f.queue[0]].name}: ${Math.max(1, Math.ceil(SMELT_TIME - f.t))} s${more}` : `Needs fuel${more}`;
@@ -6625,9 +6695,9 @@ function emptyFurnace(i) {
 let furnaceRedraw = 0;
 function tickFurnaces(dt) {
   for (const [i, f] of furnaces) {
-    if (!isFurnace(world[i])) { furnaces.delete(i); continue; }
+    if (!isFurnace(world.get(i))) { furnaces.delete(i); continue; }
     // the Foundry only works while it's all built: until then it waits (what's burning keeps its place)
-    const ready = !isFoundry(world[i]) || foundryBuilt(i);
+    const ready = !isFoundry(world.get(i)) || foundryBuilt(i);
     if (ready && f.queue.length && !f.burning) {   // start the next one: it needs fuel (one Log lasts for 4)
       if (!SURVIVAL) f.burning = true;
       else {
@@ -6644,8 +6714,8 @@ function tickFurnaces(dt) {
       if (furnaceAt === i) drawFurnace();
     }
     // the front glows while it's burning
-    const want = furnaceBase(world[i]) + BLOCKS[world[i]].facing + (f.burning && ready ? 4 : 0);
-    if (world[i] !== want) { const [x, y, z] = fromIdx(i); setBlock(x, y, z, want); }
+    const want = furnaceBase(world.get(i)) + BLOCKS[world.get(i)].facing + (f.burning && ready ? 4 : 0);
+    if (world.get(i) !== want) { const [x, y, z] = fromIdx(i); setBlock(x, y, z, want); }
   }
   if (furnaceAt >= 0 && invOpen && (furnaceRedraw -= dt) <= 0) { furnaceRedraw = 0.25; drawFurnaceStatus(); }
 }
@@ -6656,7 +6726,7 @@ function tickDrying(dt) {
     if (left - dt > 0) { drying.set(i, left - dt); continue; }
     drying.delete(i);
     const [x, y, z] = fromIdx(i);
-    if (world[i] === CLAY_BALL_BLOCK) setBlock(x, y, z, BRICK_BLOCK);
+    if (world.get(i) === CLAY_BALL_BLOCK) setBlock(x, y, z, BRICK_BLOCK);
   }
 }
 // Torches burn down a stage when their time runs out (lit -> smoldering -> burnt)
@@ -6665,8 +6735,8 @@ function tickTorches(dt) {
   const done = [];
   for (const [i, left] of torchBurn) { if (left - dt > 0) torchBurn.set(i, left - dt); else done.push(i); }
   for (const i of done) {
-    const b = BLOCKS[world[i]];
-    if (!burnsDown(world[i])) { torchBurn.delete(i); continue; }
+    const b = BLOCKS[world.get(i)];
+    if (!burnsDown(world.get(i))) { torchBurn.delete(i); continue; }
     const [x, y, z] = fromIdx(i);
     setBlock(x, y, z, torchVariant(b.wi, b.count, b.burn + 1));   // (starts the next stage's timer, or ends it once burnt)
   }
@@ -6683,7 +6753,7 @@ function farmChanged(i, old, id, loading) {
   if (!loading && old === GRAIN_RIPE && id !== GRAIN_RIPE && fertLeft.has(i - WX * WZ) && !Net.client) {
     const n = fertLeft.get(i - WX * WZ) - 1;
     if (n > 0) fertLeft.set(i - WX * WZ, n);
-    else { const [x, y, z] = fromIdx(i - WX * WZ); setBlock(x, y, z, soilId(BLOCKS[world[i - WX * WZ]].wet, false)); }
+    else { const [x, y, z] = fromIdx(i - WX * WZ); setBlock(x, y, z, soilId(BLOCKS[world.get(i - WX * WZ)].wet, false)); }
   }
 }
 // how fast Grain grows on this soil (0 = not on soil: it doesn't grow)
@@ -6703,9 +6773,9 @@ function tickFarm(dt) {
   const step = farmTimer; farmTimer = 0;
   // growing
   for (const [i, got] of [...crops]) {
-    const id = world[i];
+    const id = world.get(i);
     if (!isCrop(id) || id === GRAIN_RIPE) { crops.delete(i); continue; }
-    if (Math.random() >= stageChance(growRate(world[i - WX * WZ]), step)) continue;
+    if (Math.random() >= stageChance(growRate(world.get(i - WX * WZ)), step)) continue;
     const hits = got >= FARM.stageHits ? 1 : got + 1;   // (a save from before random growth held seconds left here)
     if (hits < FARM.stageHits) { crops.set(i, hits); continue; }
     const [x, y, z] = fromIdx(i);
@@ -6713,7 +6783,7 @@ function tickFarm(dt) {
   }
   // grass a cow ate grows back (if it's still Dirt with nothing on top)
   for (const [i, left] of [...grazed]) {
-    if (world[i] !== 2) { grazed.delete(i); continue; }
+    if (world.get(i) !== 2) { grazed.delete(i); continue; }
     if (left - step > 0) { grazed.set(i, left - step); continue; }
     grazed.delete(i);
     const [x, y, z] = fromIdx(i);
@@ -6721,7 +6791,7 @@ function tickFarm(dt) {
   }
   // dry tilled soil with nothing growing on it turns back into Dirt after a while
   for (const i of [...soils]) {
-    if (world[i] !== TILLED || world[i + WX * WZ]) { soilIdle.delete(i); continue; }
+    if (world.get(i) !== TILLED || world.get(i + WX * WZ)) { soilIdle.delete(i); continue; }
     const t = (soilIdle.get(i) || 0) + step;
     if (t < FARM.revertTime) { soilIdle.set(i, t); continue; }
     soilIdle.delete(i);
@@ -6751,8 +6821,8 @@ function updateWetSoil() {
     }
   }
   for (const i of [...soils]) {
-    const b = BLOCKS[world[i]], want = soilId(dist.has(i), b.fert);
-    if (world[i] !== want) { const [x, y, z] = fromIdx(i); setBlock(x, y, z, want); }
+    const b = BLOCKS[world.get(i)], want = soilId(dist.has(i), b.fert);
+    if (world.get(i) !== want) { const [x, y, z] = fromIdx(i); setBlock(x, y, z, want); }
   }
 }
 // right-click farming: a Hoe tills Grass or Dirt, Grain Seeds are planted in tilled soil, Bone Ash fertilizes it.
@@ -6793,7 +6863,7 @@ function tickEverSparks(dt) {
     everScan = 1;
     everNear = [];
     for (const i of torches) {
-      if (BLOCKS[world[i]].burn !== 3) continue;
+      if (BLOCKS[world.get(i)].burn !== 3) continue;
       const [x, y, z] = fromIdx(i);
       if (Math.abs(x - player.x) < EVER_SPARK.range && Math.abs(z - player.z) < EVER_SPARK.range && Math.abs(y - player.y) < EVER_SPARK.range) everNear.push({ i, x, y, z, t: Math.random() * EVER_SPARK.every });
     }
@@ -6806,10 +6876,10 @@ function tickEverSparks(dt) {
     everSparkMat = new THREE.SpriteMaterial({ map: everSparkTex, transparent: true, depthWrite: false });
   }
   for (const e of everNear) {
-    if (world[e.i] < 1 || BLOCKS[world[e.i]].burn !== 3) continue;   // (broken since the last look)
+    if (world.get(e.i) < 1 || BLOCKS[world.get(e.i)].burn !== 3) continue;   // (broken since the last look)
     if ((e.t -= dt) > 0 || everSparks.length >= EVER_SPARK.max) continue;
     e.t += EVER_SPARK.every * (0.6 + Math.random() * 0.8);
-    const box = torchGeo(world[e.i]).box;   // spark from the top of the torch(es)
+    const box = torchGeo(world.get(e.i)).box;   // spark from the top of the torch(es)
     const s = new THREE.Sprite(everSparkMat.clone());
     s.position.set(e.x + (box[0] + box[3]) / 2 + (Math.random() - 0.5) * 0.2, e.y + box[4], e.z + (box[2] + box[5]) / 2 + (Math.random() - 0.5) * 0.2);
     s.scale.setScalar(EVER_SPARK.size);
@@ -6989,12 +7059,14 @@ selectSlot(0);
 let worldLoaded = false, saving = false, lastSave = performance.now();
 function gatherSave() {
   settleFalls();
-  const idxs = new Uint32Array(edits.size), ids = new Uint8Array(edits.size);
+  // the blocks you've changed: 1 byte for each block id, or 4 (wide) if any id is past 255
+  let wide = false; for (const id of edits.values()) if (id > 255) { wide = true; break; }
+  const idxs = new Uint32Array(edits.size), ids = wide ? new Uint32Array(edits.size) : new Uint8Array(edits.size);
   let k = 0;
   for (const [i, id] of edits) { idxs[k] = i; ids[k++] = id; }
   return {
     version: 1, seed, savedAt: Date.now(),
-    idxs: idxs.buffer, ids: ids.buffer,
+    idxs: idxs.buffer, ids: ids.buffer, ...(wide ? { wide: true } : {}),
     pieces: gatherPieces(),
     player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health,
               gloom: player.gloom, darkTime: player.darkTime, lightTime: player.lightTime },
@@ -7039,19 +7111,19 @@ function gatherPieces() {
 function applyPieces(list) {
   if (!Array.isArray(list)) return;
   for (let k = 0; k + 8 < list.length; k += 9) {
-    const a = Uint8Array.from(list.slice(k + 1, k + 9), id => BLOCKS[id] && !BLOCKS[id].item && BLOCKS[id].shape !== 'pieces' ? id : 0);
+    const a = Int32Array.from(list.slice(k + 1, k + 9), id => BLOCKS[id] && !BLOCKS[id].item && BLOCKS[id].shape !== 'pieces' ? id : 0);
     if (a.some(v => v)) pieceMap.set(list[k], a);
   }
 }
 function applySave(s) {
   applyPieces(s.pieces);
-  applyEdits(new Uint32Array(s.idxs), new Uint8Array(s.ids));
+  applyEdits(new Uint32Array(s.idxs), s.wide ? new Uint32Array(s.ids) : new Uint8Array(s.ids));
   for (const [i, left] of s.drying || []) if (drying.has(i)) drying.set(i, Math.max(0, +left || 0));
   for (const [i, left] of s.torchBurn || []) if (torchBurn.has(i)) torchBurn.set(i, Math.max(0, +left || 0));
-  for (const [i, f] of s.furnaces || []) if (isFurnace(world[i]) && f) furnaces.set(i, f);
+  for (const [i, f] of s.furnaces || []) if (isFurnace(world.get(i)) && f) furnaces.set(i, f);
   for (const [i, left] of s.crops || []) if (crops.has(i)) crops.set(i, Math.max(0, +left || 0));
-  for (const [i, n] of s.fert || []) if (BLOCKS[world[i]] && BLOCKS[world[i]].fert) fertLeft.set(i, Math.max(1, n | 0));
-  for (const [i, left] of s.grazed || []) if (world[i] === 2) grazed.set(i, Math.max(0, +left || 0));
+  for (const [i, n] of s.fert || []) if (BLOCKS[world.get(i)] && BLOCKS[world.get(i)].fert) fertLeft.set(i, Math.max(1, n | 0));
+  for (const [i, left] of s.grazed || []) if (world.get(i) === 2) grazed.set(i, Math.max(0, +left || 0));
   applyPlayerSave(s);
 }
 // blocks you changed, put back on top of the freshly grown terrain (also used when joining a friend's game)
@@ -7062,7 +7134,7 @@ function applyEdits(idxs, ids) {
     if (i >= world.length || (id && !BLOCKS[id])) continue;
     if (id === PIECES && !pieceMap.has(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
     if (id !== PIECES) pieceMap.delete(i);
-    world[i] = id; edits.set(i, id);
+    world.set(i, id); edits.set(i, id);
     const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
     if (isTorch(id)) torches.add(i);
     if (burnsDown(id)) torchBurn.set(i, burnTime(BLOCKS[id].burn)); else torchBurn.delete(i);   // (applySave then puts back how long each has left)
@@ -7255,9 +7327,9 @@ addEventListener('pagehide', () => autoSave());
     applyPieces(pcs);
     for (let k = 0; k + 1 < list.length; k += 2) {
       const i = list[k], id = list[k + 1];
-      if (!(i >= 0 && i < world.length) || (id && !BLOCKS[id]) || (world[i] === id && id !== PIECES)) continue;
+      if (!(i >= 0 && i < world.length) || (id && !BLOCKS[id]) || (world.get(i) === id && id !== PIECES)) continue;
       if (id === PIECES && !pieceMap.has(i)) continue;
-      if (id === PIECES && world[i] === PIECES && before.get(i) && pieceMap.get(i).every((v, s) => v === before.get(i)[s])) continue;
+      if (id === PIECES && world.get(i) === PIECES && before.get(i) && pieceMap.get(i).every((v, s) => v === before.get(i)[s])) continue;
       setBlock(i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ, id);
     }
     Net.applying = false;
@@ -7307,7 +7379,7 @@ addEventListener('pagehide', () => autoSave());
       friends.set(conn.peer, { conn, name, hue, seen: performance.now() });
       setOther(conn.peer, { name, hue, x: player.x + 1, y: player.y, z: player.z, yaw: 0 });
       const save = gatherSave();
-      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ids: save.ids, pieces: save.pieces, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
+      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, [save.wide ? 'idw' : 'ids']: save.ids, pieces: save.pieces, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
       // everyone's skins: yours, and the other friends' here already
       if (PlayerSkin.url) conn.send(skinMsg('host', PlayerSkin.url));
       for (const [id, s] of skins) if (id !== conn.peer && friends.has(id)) conn.send(skinMsg(id, s));
@@ -7423,7 +7495,7 @@ addEventListener('pagehide', () => autoSave());
     else if (d.t === 'welcome') {
       myId = d.id;
       applyPieces(d.pieces);
-      applyEdits(new Uint32Array(toBuf(d.idxs)), new Uint8Array(toBuf(d.ids)));
+      applyEdits(new Uint32Array(toBuf(d.idxs)), d.idw ? new Uint32Array(toBuf(d.idw)) : new Uint8Array(toBuf(d.ids)));   // (idw: 4-byte ids, when the world has blocks past 255)
       Object.assign(player, { x: d.x, y: d.y, z: d.z, yaw: d.yaw || 0, vx: 0, vy: 0, vz: 0 });
       timeOfDay = d.time;
       worldLoaded = true;
