@@ -1,5 +1,19 @@
 [
     {
+        "version": "Beta 0.1.0.1",
+        "folder": "beta-0.1.0.1",
+        "date": "2026-11-20",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-beta-0.1.0.1/CubeLand-Beta-0.1.0.1-windows.zip",
+        "size": 76113076,
+        "exe": "CubeLand-Beta-0.1.0.1-windows/CubeLand.exe",
+        "changes": [
+            "Fixed Zombies and Grr Angry hitting you through walls, floors and ceilings (from a cave under you, say)",
+            "The Foundry's Furnace has a Fireclay Bricks top and a new brown front",
+            "The Crafting Bench no longer lists the deep stone blocks, which aren't in the game yet",
+            "New block: the Cutter (3 Planks + a Copper Brick at the Crafting Bench), half a block tall with a spinning saw blade on top, cuts blocks into pieces, slabs and stairs; the Crafting Bench is just for crafting now"
+        ]
+    },
+    {
         "version": "Beta 0.1.0.0",
         "title": "Pack & Plate",
         "folder": "beta-0.1.0.0",
