@@ -159,6 +159,11 @@
   .world-row .wsub { font-size: var(--f1); opacity: .6; }
   .new-world { display: flex; flex-wrap: wrap; gap: 6px; }
   .new-world .dropdown { flex: 1 1 140px; }
+  .new-sliders { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; font-size: var(--f1); }
+  .new-sliders label { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; }
+  .new-sliders input { flex: 1; min-width: 0; accent-color: #7fbfff; }
+  .new-sliders input:disabled { opacity: .4; }
+  .new-sliders b { font-weight: normal; min-width: 7em; text-align: left; }
   .new-world input, .new-world select { flex: 1 1 140px; font: inherit; font-size: var(--f1); padding: 5px 8px; border-radius: 5px; border: 2px solid rgba(255,255,255,.3); background: rgba(0,0,0,.35); color: #fff; }
   .new-world button { margin-left: 0 !important; }
   .new-world select option { color: #000; }
@@ -454,7 +459,11 @@
       </select></span>
       <button id="new-create">Create &amp; play</button>
     </div>
-    <div class="bottom"><button id="worlds-close">Back</button></div>
+    <div class="new-sliders">
+      <label>World size <input type="range" id="new-size" min="256" max="2048" step="128" value="1280"><b id="new-size-v"></b></label>
+      <label title="How big the biomes are (Biomes worlds)">Biome size <input type="range" id="new-biomes" min="0.5" max="4" step="0.25" value="1"><b id="new-biomes-v"></b></label>
+    </div>
+    <div class="bottom"><button id="worlds-import" title="Add a world from a .cubeland file">Import world</button><button id="worlds-close">Back</button></div>
   </div>
 </div>
 <div id="multi">
@@ -480,7 +489,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=beta-0.1.1.1"></script>
+<script src="textures.js?v=beta-0.1.1.2"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -488,7 +497,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.1.1';
+const GAME_VERSION = 'Beta 0.1.1.2';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -510,6 +519,13 @@ function compareVersions(a, b) {
 // this is turned on, new worlds are 192 tall and the deep blocks aren't in the inventory or recipes. (A world already made
 // 640 tall still loads and plays as one.) Bedrock is in now: it lines the bottom of every world.
 const TALL_WORLDS = false;
+// The sizes a world can be made (the slider when you make one): 256 to 2048 across, in steps of 128. Worlds made before you
+// could choose are 1280 (or, before that, 640, with no s saved). A tall world is always 640 across. (The same as the desktop version.)
+const WORLD_MIN = 256, WORLD_MAX = 2048, WORLD_STEP = 128, WORLD_DEFAULT = 1280;
+const validSize = (s, h) => h === 640 ? 640 : Number.isInteger(s) && s >= WORLD_MIN && s <= WORLD_MAX && s % WORLD_STEP === 0 ? s : 640;
+// How big the biomes are (Biomes worlds): 0.5 (half size) to 4 (4 times as big), in quarters; 1 (or none saved) is the usual size
+const BIOMES_MIN = 0.5, BIOMES_MAX = 4;
+const validBiomes = b => typeof b === "number" && b >= BIOMES_MIN && b <= BIOMES_MAX && Math.abs(b * 4 - Math.round(b * 4)) < 1e-9 ? Math.round(b * 4) / 4 : 1;
 const Worlds = (() => {
   const LIST_KEY = 'cubeland-worlds', LAST_KEY = 'cubeland-last-world';
   let list = [];
@@ -529,9 +545,9 @@ const Worlds = (() => {
   // mode = 'creative' or 'survival' (worlds made before survival existed have none and are creative)
   // h = the world's height: 192 (640 once TALL_WORLDS is on); worlds made before tall worlds have none and are 192
   // s = its width and depth: 1280 (a tall world 640); worlds made before 1280-wide worlds have none and are 640
-  function create(name, seedText, gen = 3, mode = 'creative') {
+  function create(name, seedText, gen = 3, mode = 'creative', size = WORLD_DEFAULT, biomes = 1) {
     const w = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name || '').trim().slice(0, 32) || `World ${list.length + 1}`,
-      seed: seedFrom(seedText), gen, h: TALL_WORLDS ? 640 : 192, s: TALL_WORLDS ? 640 : 1280, mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
+      seed: seedFrom(seedText), gen, h: TALL_WORLDS ? 640 : 192, s: TALL_WORLDS ? 640 : validSize(size, 192), b: validBiomes(biomes), mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
     list.push(w); saveList();
     return w;
   }
@@ -544,14 +560,15 @@ const Worlds = (() => {
   try { joined = JSON.parse(sessionStorage.getItem('cubeland-join')); } catch (e) {}
   let current;
   if (joinCode && joined && joined.code === joinCode && isFinite(joined.seed)) {
-    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, s: joined.s, mode: joined.mode, temp: true, code: joinCode };
-  } else {
-    let last = null;
-    try { last = localStorage.getItem(LAST_KEY); } catch (e) {}
-    current = list.find(w => w.id === want) || list.find(w => w.id === last) ||
-      list.slice().sort((a, b) => b.played - a.played)[0] || create('World 1');
+    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, s: joined.s, b: joined.b, mode: joined.mode, temp: true, code: joinCode };
+  } else if (list.some(w => w.id === want)) {
+    current = list.find(w => w.id === want);
     current.played = Date.now(); saveList();
     try { localStorage.setItem(LAST_KEY, current.id); } catch (e) {}
+  } else {
+    // no world named: the main menu, with no world at all. (A world only opens from Singleplayer, or by joining a friend,
+    // and quitting to the main menu closes it.) This stands in for one: nothing is grown, shown, saved or run.
+    current = { id: 'menu', name: '', seed: 0, gen: 2, menu: true };
   }
 
   let dbp = null;
@@ -575,6 +592,19 @@ const Worlds = (() => {
     create,
     load: id => tx('readonly', st => st.get(id)),
     save: (id, data) => tx('readwrite', st => st.put(data, id)),
+    // a world from an exported file: always added as a new world (its own id), so it never replaces one you have
+    async add(info, data) {
+      const w = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: String(info.name || '').trim().slice(0, 32) || `World ${list.length + 1}`, seed: info.seed | 0, gen: [1, 2, 3].includes(info.gen) ? info.gen : 1,
+        mode: info.mode === 'survival' ? 'survival' : 'creative', created: +info.created || Date.now(), played: Date.now() };
+      if (info.h === 640) w.h = 640; else if (info.h != null) w.h = 192;
+      if (info.s != null) w.s = validSize(info.s, w.h);
+      if (info.b != null) w.b = validBiomes(info.b);
+      if (typeof info.ver === 'string') w.ver = info.ver.slice(0, 32);
+      if (data) await tx('readwrite', st => st.put(data, w.id));
+      list.push(w); saveList();
+      return w;
+    },
     async remove(id) {
       list = list.filter(w => w.id !== id); saveList();
       try { await tx('readwrite', st => st.delete(id)); } catch (e) {}
@@ -585,7 +615,7 @@ const Worlds = (() => {
       location.reload();
     },
     // ver = the newest game version that has saved this world (so older versions can warn before opening it)
-    touch() { if (current.temp) return; current.played = Date.now(); if (compareVersions(GAME_VERSION, current.ver) > 0) current.ver = GAME_VERSION; saveList(); },
+    touch() { if (current.temp || current.menu) return; current.played = Date.now(); if (compareVersions(GAME_VERSION, current.ver) > 0) current.ver = GAME_VERSION; saveList(); },
   };
 })();
 
@@ -593,7 +623,9 @@ const Worlds = (() => {
 // world size in blocks. New worlds are 1280 x 1280 (worlds made before that, with no s saved, and tall worlds are 640 x 640),
 // and 192 tall (640 tall once TALL_WORLDS is on; worlds made before that have no h saved and are 192 tall).
 // A tall world is the same land lifted up by LIFT, with solid rock below it (the same ~130 blocks of air above the sea).
-const WY = Worlds.current.h === 640 ? 640 : 192, WX = Worlds.current.s === 1280 && WY === 192 ? 1280 : 640, WZ = WX;
+const WY = Worlds.current.h === 640 ? 640 : 192, WX = Worlds.current.menu ? 32 : validSize(Worlds.current.s, WY), WZ = WX;   // (no world in the main menu: see Worlds)
+const MENU_ONLY = !!Worlds.current.menu;
+const BIOME_SCALE = validBiomes(Worlds.current.b);   // how big the biomes are: the climate maps are stretched by this
 const LIFT = WY - 192;
 const CS = 16;                        // chunk size: chunks are 16x16x16 cubes
 const NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;
@@ -1503,7 +1535,7 @@ const fontReady = (() => {
 // Multiplayer (filled in further down, in "Multiplayer"). These do nothing when you're playing on your own.
 // client = you joined a friend's game (their game runs the mobs, water and items; yours shows them)
 const Net = { client: !!Worlds.current.temp, hosting: false, applying: false,
-  blockChanged() {}, hitMob() {}, pickup() {}, pickedUpByFriend() { return false; }, farthestPlayer() { return 0; }, torchBearerNear() { return false; }, update() {}, infoLine() { return ''; } };
+  blockChanged() {}, hitMob() {}, pickup() {}, toHost() {}, pickedUpByFriend() { return false; }, farthestPlayer() { return 0; }, torchBearerNear() { return false; }, update() {}, infoLine() { return ''; } };
 
 // ===================== Terrain generation =====================
 const seed = Worlds.current.seed;
@@ -1584,8 +1616,8 @@ const SANDSTONE = 97, SNOWY_GRASS = 98, ICE = 99, SWAMP_GRASS = 58;
 // the climate borders. Warmth: below COLD snowy, then up to COOL taiga, above HOT hot lands (desert where wetness is below ARID,
 // badlands up to BADLANDS_WET, then woods). In between: swamp above WET, plains below DRY, meadow up to MEADOW_WET, then woods.
 const COLD = 0.33, COOL = 0.38, HOT = 0.54, ARID = 0.48, BADLANDS_WET = 0.58, DRY = 0.38, MEADOW_WET = 0.45, WET = 0.53;
-function warmthAt(x, z) { return fbm(x / 180 + 300, z / 180 + 300, 3, 1100); }
-function wetnessAt(x, z) { return fbm(x / 150 + 600, z / 150 + 600, 3, 1110); }
+function warmthAt(x, z) { return fbm(x / (180 * BIOME_SCALE) + 300, z / (180 * BIOME_SCALE) + 300, 3, 1100); }
+function wetnessAt(x, z) { return fbm(x / (150 * BIOME_SCALE) + 600, z / (150 * BIOME_SCALE) + 600, 3, 1110); }
 function biomeAt(x, z) {
   const t = warmthAt(x, z), w = wetnessAt(x, z);
   if (t < COLD) return SNOWY;
@@ -2015,6 +2047,77 @@ for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
     const h = heights[fz * WX + fx];
     if (raw[idx(fx, h, fz)] !== 1 || raw[idx(fx, h + 1, fz)]) continue;   // on grass, with nothing there yet
     raw[idx(fx, h + 1, fz)] = flower; heights[fz * WX + fx] = h + 1;
+  }
+}
+
+// --- 9. Staircases: now and then, deep in a forest high up in the world, a short flight of stairs stands on its own ---
+// Spots are tried on a grid; the few that get a staircase are the highest, far apart. The rest are kept as places a
+// staircase could later turn up (see the staircases further down). Exactly as the desktop version, so both grow the same world.
+// The eerie update (these staircases, and the strange things further down) is held back for now: while EERIE_READY is false,
+// worlds grow without staircases and none of it happens. It must match EerieReady in the desktop version's WorldGen.cs,
+// or web and desktop grow different worlds. (Test: ?eerieon in the address turns it on anyway.)
+const EERIE_READY = false;
+const EERIE_ON = EERIE_READY || /[?&]eerieon\b/.test(location.search);
+const STAIR_MIN_UP = 6;   // how far above the sea the ground must be at least (they go on the highest forest ground there is)
+const STAIR_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const STAIR_MASKS = [0x33 | 0x88, 0x33 | 0x44, 0x33 | 0xC0, 0x33 | 0x0C];   // (the step's high half faces the way it climbs)
+const stairSpots = [];    // { x, y, z, dir, n, mat, order, placed }
+const stairForest = (x, z) => x >= 0 && z >= 0 && x < WX && z < WZ && (biomeMap[z * WX + x] === WOODS || biomeMap[z * WX + x] === TAIGA) && heights[z * WX + x] > SEA_LEVEL;
+const stairMat = (x, z) => hash(x, z, 7704) < 1 / 3 ? 8 : biomeMap[z * WX + x] === TAIGA ? FIR_PLANKS : 7;
+// can a staircase stand here? (ground from groundAt(column), blocks from get(x, y, z); also used on the grown world)
+function stairFits(s, groundAt, get) {
+  const [dx, dz] = STAIR_DIRS[s.dir];
+  for (let k = 0; k < s.n; k++) {
+    const cx = s.x + dx * k, cz = s.z + dz * k;
+    if (cx < 1 || cz < 1 || cx >= WX - 1 || cz >= WZ - 1) return false;
+    const gk = groundAt(cz * WX + cx), top = get(cx, gk, cz);
+    if (gk !== s.y - 1 && gk !== s.y - 2) return false;                          // (on level ground: a block lower at most)
+    if (top !== 1 && top !== 2 && top !== SNOWY_GRASS) return false;
+    for (let y = gk + 1; y <= s.y + k + 3; y++) if (get(cx, y, cz) !== 0) return false;   // (nothing in the way, and room above)
+  }
+  return true;
+}
+// the staircase itself: each step is a stairs piece, standing on a solid base of the same block down to the ground
+function buildStair(s, set, groundAt) {
+  const [dx, dz] = STAIR_DIRS[s.dir];
+  for (let k = 0; k < s.n; k++) {
+    const cx = s.x + dx * k, cz = s.z + dz * k, gk = groundAt(cz * WX + cx);
+    for (let y = gk + 1; y < s.y + k; y++) set(cx, y, cz, s.mat);
+    const a = new Int32Array(8);
+    for (let b = 0; b < 8; b++) if (STAIR_MASKS[s.dir] & (1 << b)) a[b] = s.mat;
+    pieceMap.set(idx(cx, s.y + k, cz), a);
+    set(cx, s.y + k, cz, PIECES);
+    heights[cz * WX + cx] = Math.max(heights[cz * WX + cx], s.y + k);
+  }
+}
+if (GEN === 3 && EERIE_ON) {
+  const CELL = 16;
+  for (let gz = 0; gz < Math.floor(WZ / CELL); gz++) for (let gx = 0; gx < Math.floor(WX / CELL); gx++) {
+    const x = gx * CELL + 2 + Math.floor(hash(gx, gz, 7700) * 12), z = gz * CELL + 2 + Math.floor(hash(gx, gz, 7701) * 12);
+    if (!stairForest(x, z)) continue;
+    const g = heights[z * WX + x];
+    if (g < SEA_LEVEL + STAIR_MIN_UP) continue;
+    if (PALM_FRONDS.some(([ex, ez]) => !stairForest(x + ex * 8, z + ez * 8))) continue;   // deep in the forest: 8 blocks out every way
+    let trunks = 0;   // and trees nearby
+    for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) {
+      const b = raw[idx(x + dx, heights[(z + dz) * WX + x + dx] + 1, z + dz)];
+      if (b === 4 || b === FIR_LOG) trunks++;
+    }
+    if (trunks < 2) continue;
+    const s = { x, y: g + 1, z, n: 5 + Math.floor(hash(x, z, 7702) * 4), order: hash(x, z, 7705), mat: stairMat(x, z), dir: 0, placed: false };
+    const d0 = Math.floor(hash(x, z, 7703) * 4); let fits = false;   // (a random way first, then the others)
+    for (let t = 0; t < 4 && !fits; t++) { s.dir = (d0 + t) % 4; fits = stairFits(s, c => heights[c], (a, b, c) => raw[idx(a, b, c)]); }
+    if (fits) stairSpots.push(s);
+  }
+  // the highest first (the staircases stand in the world's highest forests), then by hash
+  stairSpots.sort((a, b) => a.y !== b.y ? b.y - a.y : a.order !== b.order ? (a.order < b.order ? -1 : 1) : a.x !== b.x ? a.x - b.x : a.z - b.z);
+  const want = Math.floor(WX * WZ / 320000) + 1;   // (6 in a 1280 world, 2 in a 640 one)
+  const placed = [];
+  for (const s of stairSpots) {
+    if (placed.length >= want) break;
+    if (placed.some(p => Math.abs(p.x - s.x) + Math.abs(p.z - s.z) < WX / 5)) continue;   // (far apart)
+    buildStair(s, (x, y, z, id) => { raw[idx(x, y, z)] = id; }, c => heights[c]);
+    s.placed = true; placed.push(s);
   }
 }
 
@@ -3580,7 +3683,7 @@ const Sound = (() => {
     return (pianoCache[midi] = buf);
   }
   const parsedSongs = {};
-  let musicGain = null, current = null;   // current = { name, gain, sources, nextAt }
+  let musicGain = null, hushGain = null, hushed = false, current = null;   // current = { name, gain, sources, nextAt }
   function queuePass(run, t0) {     // schedules one full pass of the song starting at time t0
     const song = parsedSongs[run.name] || (parsedSongs[run.name] = parseSong(SONGS[run.name]));
     t0 = Math.max(t0, ctx.currentTime + 0.1);  // never schedule notes in the past (they'd all play at once)
@@ -3618,6 +3721,11 @@ const Sound = (() => {
   }
 
   return {
+    hush(on) {                      // (called every frame: true near a staircase)
+      if (!ctx || !hushGain || hushed === on) return;
+      hushed = on;
+      hushGain.gain.setTargetAtTime(on ? 0 : 1, ctx.currentTime, on ? 0.8 : 1.3);
+    },
     music(name) {                   // called every frame with 'day' or 'night'
       if (!ctx) return;
       if (!current) current = startSong(name, false);              // first song when the game starts
@@ -3639,13 +3747,22 @@ const Sound = (() => {
         master.connect(muffle).connect(ctx.destination);
         musicGain = ctx.createGain();
         musicGain.gain.value = musicLevel();
-        musicGain.connect(ctx.destination);
+        hushGain = ctx.createGain();             // (some places have no music: it fades away while you're there)
+        musicGain.connect(hushGain).connect(ctx.destination);
         buildBank();
       }
       if (ctx.state === 'suspended') ctx.resume();
     },
     // player sounds: footsteps, jumping, landing, splashing and swimming
     step(id) { play(mat(id), 'step', 0.45, 1, 0, 'player'); },
+    stepBehind(id, vol) { play(mat(id), 'step', vol, 0.94, 0, 'player'); },   // (someone else's step)
+    // the music plays a little out of tune for a moment
+    wobble(seconds) {
+      if (!ctx || !current || !current.sources) return;
+      const now = ctx.currentTime;
+      for (const s of current.sources) { try { s.detune.setValueAtTime(-60, now); s.detune.setValueAtTime(0, now + seconds); } catch (e) {} }
+    },
+    musicPlaying() { return !!(ctx && current && current.sources && !hushed && musicLevel() > 0 && ctx.state === 'running'); },
     growl(vol, pan, voice = 'growl') { if (vol > 0.01) play(voice, 'say', vol, 1, pan, 'mob'); },   // quieter the further away, panned left/right
     splash(speed) { play('water', 'splash', Math.min(1, 0.3 + speed / 14), speed > 12 ? 0.85 : 1, 0, 'player'); },   // harder falls = bigger, deeper splash
     swim() { play('water', 'swim', 0.55, 1, 0, 'player'); },   // (low sounds seem quieter, so this is turned up a little)
@@ -3704,6 +3821,7 @@ function showMainMenu(open) {
   if (open) { overlay.style.display = 'none'; if (locked) document.exitPointerLock(); }
 }
 function play() {                     // into the game (needs a click, so it's only called from buttons)
+  if (MENU_ONLY) return;   // (no world to go into: one opens from Singleplayer)
   showMainMenu(false);
   document.getElementById('pause-title').textContent = 'Paused';
   document.getElementById('pause-resume').textContent = 'Back to game';
@@ -3754,11 +3872,12 @@ function panorama(dt) {
 function lockPointer() {
   try { const p = renderer.domElement.requestPointerLock(); if (p && p.catch) p.catch(showPause); } catch (e) {}
 }
-// a world that was just opened from the Singleplayer menu (or a friend's game) skips the main menu
+// a world (opened from the Singleplayer menu, a friend's game, or the page reloaded while you were in one) skips the main
+// menu: the main menu only shows when there's no world (see Worlds)
 {
   const fromMenu = /[#&]play\b/.test(location.hash), joining = /join=/.test(location.hash);
   if (fromMenu) history.replaceState(null, '', location.pathname + location.search + location.hash.replace(/&play\b/, ''));
-  if (fromMenu || joining) {
+  if (!MENU_ONLY) {
     showMainMenu(false);
     document.getElementById('pause-title').textContent = joining ? 'Joining a friend' : 'Ready';
     document.getElementById('pause-resume').textContent = 'Play';
@@ -3766,7 +3885,16 @@ function lockPointer() {
   }
 }
 document.getElementById('pause-resume').addEventListener('click', play);
-document.getElementById('pause-quit').addEventListener('click', () => { autoSave(); showMainMenu(true); });
+// quitting to the main menu closes the world: save (or ask, with auto save off), then the page reloads with no world
+function toMainMenu() {
+  history.replaceState(null, '', location.pathname + location.search);
+  location.reload();
+}
+document.getElementById('pause-quit').addEventListener('click', async () => {
+  if (!Net.client) await saveBeforeLeaving();
+  discarding = true;   // (saved, or chosen not to: nothing more saves on the way out)
+  toMainMenu();
+});
 // Save button: saves right now, whether or not auto save is on
 document.getElementById('pause-save').addEventListener('click', async () => {
   const note = document.getElementById('saved-note');
@@ -3775,13 +3903,12 @@ document.getElementById('pause-save').addEventListener('click', async () => {
   note.textContent = unsaved ? 'Could not save the world.' : 'Saved!';
   setTimeout(updateSaveText, 2500);
 });
-// Quit without saving: throws away everything since the last save. The page reloads (back to the main menu)
+// Quit without saving: throws away everything since the last save. The page reloads (back to the main menu, no world)
 // and nothing saves on the way out.
 document.getElementById('pause-discard').addEventListener('click', () => {
   if (!confirm('Quit without saving?\n\nEverything you did since the last save will be lost.')) return;
   discarding = true;
-  history.replaceState(null, '', location.pathname + location.search + location.hash.replace(/(^#|&)play\b/, '$1').replace(/^#&/, '#'));
-  location.reload();
+  toMainMenu();
 });
 function updateSaveText() {
   const friends = Worlds.current.temp;   // a friend's world you joined: their game saves it
@@ -5387,6 +5514,12 @@ function updateMobs(dt) {
       const snuff = t.snuffer && !m.fade && m.flee <= 0 ? snuffGoal(m, dt) : null;
       if (m.fade) {
         m.state = 'idle';
+      } else if (m.stare > 0) {
+        // stands still and turns to look at you
+        m.stare -= dt; m.state = 'idle'; m.grazing = 0;
+        const toward = Math.atan2(m.x - player.x, m.z - player.z);
+        m.yaw += Math.atan2(Math.sin(toward - m.yaw), Math.cos(toward - m.yaw)) * Math.min(1, dt * 5);
+        m.turnTo = m.yaw;
       } else if (hunting && t.thrower) {
         // a Skeleton: faces you, keeps between `near` and `far` blocks away, and throws a Rock whenever it can see you
         const toward = Math.atan2(m.x - player.x, m.z - player.z);
@@ -5711,7 +5844,7 @@ function updateDrops(dt) {
         d.asked = true; Net.pickup(d);
       }
     } else {
-    if (d.age > 300) { removeDrop(d); continue; }           // gone after 5 minutes
+    if (d.age > 300 && !d.keep) { removeDrop(d); continue; }   // gone after 5 minutes (unless it must stay)
     // fall and slide to a stop, resting on top of blocks
     d.vy = Math.max(-30, d.vy - 22 * dt);
     const nx = d.x + d.vx * dt, nz = d.z + d.vz * dt, ny = d.y + d.vy * dt;
@@ -7055,6 +7188,251 @@ function selectSlot(i) {
 }
 selectSlot(0);
 
+// ===================== The staircases in the woods =====================
+// (stairSpots: grown with the terrain.) Reaching the top step of one now and then does something.
+const STAIR_ODDS = 500;   // 1 time in this many
+let stairOn = -1;         // the staircase whose top step you're on (-1: none)
+let stairFall = false;    // (the staircase just went from under you: no fall damage for that drop)
+const extraStairs = [];   // staircases that turned up somewhere the world didn't grow a spot for (kept in the save)
+const stairTopCell = s => { const [dx, dz] = STAIR_DIRS[s.dir]; return [s.x + dx * (s.n - 1), s.y + s.n - 1, s.z + dz * (s.n - 1)]; };
+function stairStanding(s) {   // is this staircase still standing (its top step as it grew)?
+  const [x, y, z] = stairTopCell(s);
+  const a = getBlock(x, y, z) === PIECES && pieceMap.get(idx(x, y, z));
+  if (!a) return false;
+  for (let b = 0; b < 8; b++) if (a[b] !== (STAIR_MASKS[s.dir] & (1 << b) ? s.mat : 0)) return false;
+  return true;
+}
+function stairUnder() {       // which staircase's top step you're standing on (-1: none)
+  for (let k = 0; k < stairSpots.length; k++) {
+    const [x, y, z] = stairTopCell(stairSpots[k]);
+    if (Math.floor(player.x) !== x || Math.floor(player.z) !== z || player.y < y + 0.45 || player.y > y + 1.1) continue;
+    return stairStanding(stairSpots[k]) ? k : -1;
+  }
+  return -1;
+}
+let stairNearAt = 0, stairNear = false;
+function nearStair() {        // no music near a staircase (within 32 blocks across, 24 up or down)
+  if (mainMenuOpen || !worldLoaded || !EERIE_ON) return false;
+  const now = performance.now();
+  if (now < stairNearAt) return stairNear;
+  stairNearAt = now + 500;
+  stairNear = stairSpots.some(s => Math.abs(s.x - player.x) < 32 && Math.abs(s.z - player.z) < 32 && Math.abs(s.y - player.y) < 24 && stairStanding(s));
+  return stairNear;
+}
+const STAIR_FORCE = (/[?&]stairevent=(\d)/.exec(location.search) || [])[1];   // (test: ?stairevent=N makes event N happen every time, 0-4)
+function updateStairs() {
+  if (!EERIE_ON || !stairSpots.length || player.dead) { stairOn = -1; return; }   // (held back for now: see EERIE_READY)
+  const on = player.onGround ? stairUnder() : -1;
+  if (on === stairOn) return;
+  stairOn = on;
+  if (on < 0) return;
+  const force = STAIR_FORCE !== undefined ? +STAIR_FORCE : -1;
+  if (force < 0 && Math.floor(Math.random() * STAIR_ODDS) !== 0) return;
+  stairEvent(force >= 0 ? force : Math.floor(Math.random() * 5), stairSpots[on]);
+}
+function stairEvent(which, s) {
+  if (which === 0) {          // the time of day jumps
+    const t = Math.random();
+    if (Net.client) Net.toHost({ t: 'stime', time: t }); else timeOfDay = t;
+  } else if (which === 1) {   // you're somewhere else
+    const to = randomDryGround();
+    if (to) { [player.x, player.y, player.z] = to; player.vx = player.vy = player.vz = 0; player.fly = false; stairOn = -1; }
+  } else if (which === 2) {   // the staircase is gone, and stands somewhere else
+    stairMove(s);
+  } else if (which === 3) {   // it hurts (never enough to kill you)
+    const most = player.health - player.gloom - 2;
+    if (most >= 1) hurtPlayer(Math.min(most, 2 + Math.floor(Math.random() * 7)));
+  } else if (which === 4) {   // something you carry turns up somewhere else in the world
+    stairTakeItem();
+  }
+}
+// the ground in a column, under any trees or plants
+function stairGround(c) {
+  const x = c % WX, z = Math.floor(c / WX);
+  let y = Math.min(WY - 1, heights[c] + 8);
+  while (y > 0) {
+    const b = getBlock(x, y, z);
+    if (b === 0 || isLeaves(b) || NEEDS_AXE.includes(b) || (BLOCKS[b] && (BLOCKS[b].shape === 'plant' || BLOCKS[b].shape === 'flat'))) y--; else break;
+  }
+  return y;
+}
+// a random spot on dry land (not water, ice or treetops), standing on top of it
+function randomDryGround() {
+  for (let t = 0; t < 400; t++) {
+    const x = 16 + Math.floor(Math.random() * (WX - 32)), z = 16 + Math.floor(Math.random() * (WZ - 32)), y = stairGround(z * WX + x), b = getBlock(x, y, z);
+    if (y <= SEA_LEVEL || !b || isWater(b) || b === ICE || BLOCKS[b].noCollide) continue;
+    if (getBlock(x, y + 1, z) || getBlock(x, y + 2, z)) continue;
+    return [x + 0.5, y + 1.01, z + 0.5];
+  }
+  return null;
+}
+function stairMove(s) {
+  // take it all away: the steps, and the base under them down to the ground
+  const [dx, dz] = STAIR_DIRS[s.dir];
+  for (let k = 0; k < s.n; k++) {
+    const cx = s.x + dx * k, cz = s.z + dz * k;
+    if (getBlock(cx, s.y + k, cz) === PIECES) setBlock(cx, s.y + k, cz, 0);
+    for (let y = s.y + k - 1; y >= s.y - 1; y--) if (getBlock(cx, y, cz) === s.mat) setBlock(cx, y, cz, 0);
+  }
+  stairFall = true; stairOn = -1;
+  const put = (x, y, z, id) => setBlock(x, y, z, id);
+  // and stand it up again in another high forest, somewhere it still fits: one of the spots the world kept for it...
+  const spare = stairSpots.filter(o => o !== s && Math.abs(o.x - s.x) + Math.abs(o.z - s.z) > WX / 10)
+    .map(o => [Math.random(), o]).sort((a, b) => a[0] - b[0]).map(e => e[1]);
+  for (const o of spare) {
+    if (stairStanding(o) || !stairFits(o, stairGround, getBlock)) continue;
+    buildStair(o, put, stairGround);
+    return;
+  }
+  // ...or, if none fit any more, anywhere else in a forest high above the sea (kept in the save as an extra spot)
+  for (let t = 0; t < 4000; t++) {
+    const x = 16 + Math.floor(Math.random() * (WX - 32)), z = 16 + Math.floor(Math.random() * (WZ - 32));
+    if (Math.abs(x - s.x) + Math.abs(z - s.z) <= WX / 10 || !stairForest(x, z)) continue;
+    const g = stairGround(z * WX + x);
+    if (g < SEA_LEVEL + STAIR_MIN_UP) continue;
+    const o = { x, y: g + 1, z, n: 5 + Math.floor(Math.random() * 4), mat: stairMat(x, z), dir: 0, placed: true };
+    const d0 = Math.floor(Math.random() * 4); let fits = false;
+    for (let k = 0; k < 4 && !fits; k++) { o.dir = (d0 + k) % 4; fits = stairFits(o, stairGround, getBlock); }
+    if (!fits) continue;
+    buildStair(o, put, stairGround);
+    stairSpots.push(o); extraStairs.push(o);
+    return;
+  }
+}
+// one stack from your inventory (not what you're wearing) lands on the ground somewhere far away, and stays there
+function stairTakeItem() {
+  const full = [];
+  for (let i = 0; i < ARMOR0; i++) if (HOTBAR[i] && (!Net.client || !HOTBAR_DATA[i])) full.push(i);
+  const to = full.length ? randomDryGround() : null;
+  if (!to) return;
+  const i = full[Math.floor(Math.random() * full.length)], id = HOTBAR[i], n = Math.max(1, HOTBAR_COUNT[i] | 0), wear = HOTBAR_WEAR[i] | 0, data = HOTBAR_DATA[i] || null;
+  setSlot(i, 0, 0);
+  if (Net.client) { Net.toHost({ t: 'sdrop', id, n, w: wear, x: to[0], y: to[1], z: to[2] }); return; }
+  stairDrop(id, n, wear, data, to);
+}
+function stairDrop(id, n, wear, data, [x, y, z]) {
+  if (!BLOCKS[id]) return;
+  for (let k = 0; k < Math.min(64, Math.max(1, n | 0)); k++) Object.assign(dropItem(id, x, y, z), { vx: 0, vy: 0, vz: 0, wear, data, keep: true });
+}
+// ===================== Strange things =====================
+// Now and then, something strange: footsteps behind you, the cows all stopping to look at you, the music going a little
+// wrong, or a doorway standing on its own that's gone once you look away. Never explained.
+const EERIE_EVERY = 8;     // a roll every this many seconds of play...
+const EERIE_ODDS = 1000;   // ...that comes up 1 time in this many
+let eerieTimer = EERIE_EVERY, eerieForced = false;
+const EERIE_FORCE = (/[?&]eerie=(\d)/.exec(location.search) || [])[1];   // (test: ?eerie=N makes thing N happen 8 seconds in, 0-3)
+function updateEerie(dt) {
+  if (!EERIE_ON) return;   // (held back for now: see EERIE_READY)
+  tickSteps(dt); tickDoor(dt);
+  if (player.dead) return;
+  if ((eerieTimer -= dt) > 0) return;
+  eerieTimer = EERIE_EVERY;
+  if (EERIE_FORCE !== undefined) { if (!eerieForced) { eerieForced = true; eerie(+EERIE_FORCE); } return; }
+  if (Math.floor(Math.random() * EERIE_ODDS) !== 0) return;
+  // one of them, picked at random (if it can't happen right now, another that can)
+  for (const k of [0, 1, 2, 3].map(k => [Math.random(), k]).sort((a, b) => a[0] - b[0]).map(e => e[1])) if (eerie(k)) return;
+}
+const eerie = k => k === 0 ? startSteps() : k === 1 ? cowsStare() : k === 2 ? musicWrong() : k === 3 ? placeDoor() : false;
+const eerieAlone = () => !Net.client && !(Net.hosting && Net.friendCount && Net.friendCount() > 0);
+
+// ---- Footsteps behind you: alone, at night or underground. They stop if you turn around. ----
+let stepsLeft = 0, stepIn = 0, stepsYaw = 0;
+function startSteps() {
+  if (!eerieAlone() || stepsLeft > 0 || !(skyDay < 0.3 || camSky < 0.35) || player.fly || waterAt(player.x, player.y + 0.5, player.z)) return false;
+  stepsLeft = 6 + Math.floor(Math.random() * 5); stepIn = 0.4; stepsYaw = player.yaw;
+  return true;
+}
+function tickSteps(dt) {
+  if (stepsLeft <= 0) return;
+  const turned = Math.abs(Math.atan2(Math.sin(player.yaw - stepsYaw), Math.cos(player.yaw - stepsYaw)));
+  if (player.dead || turned > 1.3) { stepsLeft = 0; return; }   // (you turned round: nothing there)
+  if ((stepIn -= dt) > 0) return;
+  stepIn = 0.52 + Math.random() * 0.08;
+  stepsLeft--;
+  Sound.stepBehind(blockUnderPlayer() || 2, 0.16 + (10 - stepsLeft) * 0.015);   // (getting a little closer)
+}
+
+// ---- Every cow nearby stops and turns to look at you for a few seconds ----
+function cowsStare() {
+  if (Net.client) return false;
+  const near = mobs.filter(m => MOB_TYPES[m.type].cow && !m.dead && m.root.visible && Math.hypot(m.x - player.x, m.y - player.y, m.z - player.z) < 28);
+  if (!near.length) return false;
+  for (const m of near) m.stare = 5 + Math.random();
+  return true;
+}
+
+// ---- The music plays a few notes slightly out of tune, then carries on ----
+function musicWrong() {
+  if (!Sound.musicPlaying()) return false;
+  Sound.wobble(1.8);
+  return true;
+}
+
+// ---- A doorway standing on its own, somewhere behind you. Once you've seen it and look away, it's gone. ----
+// It's only in your game: not saved, and not sent to anyone you're playing with.
+const door = [];   // its blocks: [x, y, z], ...
+let doorSeen = false, doorAge = 0, doorLook = 0;
+const DOOR_BLOCK = 61;   // Stripped Oak Log
+// a change only for show: not saved, not one of your edits, not sent to anyone, nothing else told
+function setLooks(x, y, z, id) {
+  if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
+  world.put(x, y, z, id);
+  const c = Math.floor(z / CS) * NCX + Math.floor(x / CS);
+  if (id) chunkTop[c] = Math.max(chunkTop[c], y + 1);
+  const dirty = new Set();
+  markDirty(x, y, z, dirty);
+  for (const k of dirty) { buildChunkKey(k); rebuildSoon.delete(k); }
+}
+function placeDoor() {
+  if (door.length) return false;
+  const backA = Math.atan2(Math.sin(player.yaw), Math.cos(player.yaw));   // (you look along -sin, -cos)
+  for (let t = 0; t < 60; t++) {
+    const a = backA + (Math.random() - 0.5) * 1.6, d = 16 + Math.random() * 14;
+    const x = Math.floor(player.x + Math.sin(a) * d), z = Math.floor(player.z + Math.cos(a) * d);
+    if (x < 4 || z < 4 || x >= WX - 4 || z >= WZ - 4) continue;
+    // the frame runs across your line of sight: posts either side, a beam on top, an opening 1 wide and 2 tall
+    const alongX = Math.abs(Math.sin(a)) < Math.abs(Math.cos(a)), ax = alongX ? 1 : 0, az = alongX ? 0 : 1, g = stairGround(z * WX + x);
+    const cells = []; let ok = g > SEA_LEVEL;
+    for (let k = -1; k <= 1 && ok; k++) {
+      const cx = x + ax * k, cz = z + az * k, gk = stairGround(cz * WX + cx), top = getBlock(cx, gk, cz);
+      if (gk !== g || !(top === 1 || top === SNOWY_GRASS || top === 2 || top === SWAMP_GRASS)) { ok = false; break; }
+      for (let y = g + 1; y <= g + 4; y++) if (getBlock(cx, y, cz)) { ok = false; break; }
+      if (k) cells.push([cx, g + 1, cz], [cx, g + 2, cz]);
+      cells.push([cx, g + 3, cz]);
+    }
+    if (!ok) continue;
+    for (const [cx, cy, cz] of cells) setLooks(cx, cy, cz, DOOR_BLOCK);
+    door.push(...cells); doorSeen = false; doorAge = 0; doorLook = 0;
+    return true;
+  }
+  return false;
+}
+function tickDoor(dt) {
+  if (!door.length) return;
+  doorAge += dt;
+  const mx = door.reduce((s, c) => s + c[0], 0) / door.length + 0.5, mz = door.reduce((s, c) => s + c[2], 0) / door.length + 0.5, my = door[door.length - 1][1] - 0.5;
+  const dx = mx - camera.position.x, dy = my - camera.position.y, dz = mz - camera.position.z, dist = Math.hypot(dx, dy, dz) || 0.01;
+  const f = new THREE.Vector3(); camera.getWorldDirection(f);
+  const look = (f.x * dx + f.y * dy + f.z * dz) / dist;
+  if (look > 0.82 && dist < 90) doorLook += dt;   // (in front of you)
+  if (doorLook > 0.3) doorSeen = true;
+  // gone the moment it's out of sight after you've seen it (or, if you never turn round, after a while)
+  if ((doorSeen || doorAge > 240) && look < 0.4) clearDoor();
+}
+function clearDoor() {
+  for (const [x, y, z] of door) if (getBlock(x, y, z) === DOOR_BLOCK) setLooks(x, y, z, 0);
+  door.length = 0;
+}
+
+const saveExtraStairs = () => extraStairs.flatMap(o => [o.x, o.y, o.z, o.dir, o.n, o.mat]);
+function loadExtraStairs(a) {
+  if (!Array.isArray(a)) return;
+  for (let k = 0; k + 5 < a.length; k += 6) {
+    const o = { x: a[k] | 0, y: a[k + 1] | 0, z: a[k + 2] | 0, dir: Math.min(3, Math.max(0, a[k + 3] | 0)), n: Math.min(16, Math.max(1, a[k + 4] | 0)), mat: a[k + 5] | 0, placed: true };
+    extraStairs.push(o); stairSpots.push(o);
+  }
+}
+
 // ===================== Saving & loading =====================
 let worldLoaded = false, saving = false, lastSave = performance.now();
 function gatherSave() {
@@ -7068,13 +7446,14 @@ function gatherSave() {
     version: 1, seed, savedAt: Date.now(),
     idxs: idxs.buffer, ids: ids.buffer, ...(wide ? { wide: true } : {}),
     pieces: gatherPieces(),
+    stairs: saveExtraStairs(),
     player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health,
               gloom: player.gloom, darkTime: player.darkTime, lightTime: player.lightTime },
     time: timeOfDay,
     hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), wear: HOTBAR_WEAR.slice(), data: HOTBAR_DATA.slice(), offSel, selected,
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health, ...(m.layer > 1 ? { layer: m.layer } : {}),
       ...(MOB_TYPES[m.type].cow ? { baby: m.baby, fed: m.fed, happy: Math.round(m.happy), room: m.room, mateCool: Math.round(m.mateCool) } : {}) })),
-    drops: drops.map(d => ({ id: d.id, x: d.x, y: d.y, z: d.z, age: d.age, ...(d.wear ? { wear: d.wear } : {}), ...(d.data ? { data: d.data } : {}) })),
+    drops: drops.map(d => ({ id: d.id, x: d.x, y: d.y, z: d.z, age: d.age, ...(d.wear ? { wear: d.wear } : {}), ...(d.data ? { data: d.data } : {}), ...(d.keep ? { keep: true } : {}) })),
     drying: [...drying],                                   // [[index, seconds left], ...]
     torchBurn: [...torchBurn].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds until it burns down a stage], ...]
     furnaces: [...furnaces].map(([i, f]) => [i, f]),       // [[index, {fuel, fuelN, heat, queue, t}], ...]
@@ -7117,6 +7496,7 @@ function applyPieces(list) {
 }
 function applySave(s) {
   applyPieces(s.pieces);
+  loadExtraStairs(s.stairs);
   applyEdits(new Uint32Array(s.idxs), s.wide ? new Uint32Array(s.ids) : new Uint8Array(s.ids));
   for (const [i, left] of s.drying || []) if (drying.has(i)) drying.set(i, Math.max(0, +left || 0));
   for (const [i, left] of s.torchBurn || []) if (torchBurn.has(i)) torchBurn.set(i, Math.max(0, +left || 0));
@@ -7179,11 +7559,11 @@ function applyPlayerSave(s) {
   for (const d of s.drops || []) {
     if (!BLOCKS[d.id]) continue;
     dropItem(d.id, d.x, d.y, d.z);
-    Object.assign(drops[drops.length - 1], { vx: 0, vy: 0, vz: 0, age: d.age || 0, wear: d.wear | 0, data: d.data || null });
+    Object.assign(drops[drops.length - 1], { vx: 0, vy: 0, vz: 0, age: d.age || 0, wear: d.wear | 0, data: d.data || null, keep: !!d.keep });
   }
 }
 (async () => {
-  if (Worlds.current.temp) return;   // a friend's world: it loads once their game sends it (see Multiplayer)
+  if (Worlds.current.temp || MENU_ONLY) return;   // (no world in the main menu.) A friend's world: it loads once their game sends it (see Multiplayer)
   try {
     const s = await Worlds.load(Worlds.current.id);
     if (s && s.seed === seed) applySave(s);
@@ -7338,6 +7718,7 @@ addEventListener('pagehide', () => autoSave());
   // ---------------- hosting ----------------
   async function host() {
     if (Worlds.current.temp) return status("This is a friend's world, so only they can host it.");
+    if (MENU_ONLY) return status("Open one of your worlds first (Singleplayer), then host it from the pause menu.");
     status('Starting...');
     try { await loadPeer(); } catch (e) { return status("Couldn't start multiplayer. Are you online?"); }
     const code = makeCode();
@@ -7370,7 +7751,7 @@ addEventListener('pagehide', () => autoSave());
     const f = friends.get(conn.peer);
     if (f) f.seen = performance.now();
     if (d.t === 'hello') {          // someone checking which world this is, before they load it
-      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, s: WX, mode: gameMode, host: myName });
+      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, s: WX, b: BIOME_SCALE, mode: gameMode, host: myName });
     } else if (d.t === 'join') {
       if (d.ver !== GAME_VERSION) { conn.send({ t: 'refuse', why: `You need the same version of the game. They have ${GAME_VERSION}, you have ${d.ver}.` }); return; }
       const used = new Set([HUES[0], ...[...friends.values()].map(x => x.hue)]);
@@ -7400,6 +7781,10 @@ addEventListener('pagehide', () => autoSave());
     } else if (d.t === 'feed') {    // a friend fed a cow Grain (they've used it up: if the cow doesn't want it, it goes back)
       const m = mobs.find(m => m.k === d.k && !m.dead);
       if (!m || !MOB_TYPES[m.type].cow || !feed(m)) conn.send({ t: 'give', id: GRAIN });
+    } else if (d.t === 'stime') {   // (a friend's staircase)
+      timeOfDay = Math.min(1, Math.max(0, +d.time || 0));
+    } else if (d.t === 'sdrop') {
+      stairDrop(d.id | 0, d.n | 0, d.w | 0, null, [+d.x || 0, +d.y || 0, +d.z || 0]);
     } else if (d.t === 'pickup') {
       const dr = drops.find(x => x.k === d.k);
       if (dr && dr.age > 0.5) { removeDrop(dr); conn.send({ t: 'give', id: dr.id }); }
@@ -7452,7 +7837,7 @@ addEventListener('pagehide', () => autoSave());
         if (d.ver !== GAME_VERSION) return fail(`${d.host} is playing version ${d.ver}, and you have ${GAME_VERSION}. You both need the same version.`);
         clearTimeout(joinTimeout); done = true;
         status('Joining...');
-        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, s: d.s, mode: d.mode, host: d.host })); } catch (e) {}
+        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, s: d.s, b: d.b, mode: d.mode, host: d.host })); } catch (e) {}
         p.destroy();
         await saveBeforeLeaving();
         location.hash = 'join=' + code;
@@ -7589,6 +7974,8 @@ addEventListener('pagehide', () => autoSave());
     hitMob(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'hit', k: m.k }); },
     feed(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'feed', k: m.k }); },
     pickup(d) { if (hostConn && hostConn.open) hostConn.send({ t: 'pickup', k: d.k }); },
+    toHost(msg) { if (hostConn && hostConn.open) hostConn.send(msg); },
+    friendCount() { return friends.size; },
     // (host) keep a mob around if it's near any friend, even when it's far from you
     farthestPlayer(m) {
       for (const p of others.values()) if (Math.hypot(m.x - p.x, m.z - p.z) < mobRange(MOB_TYPES[m.type])) return Infinity;
@@ -7715,7 +8102,7 @@ function showWorlds(open) {
     const row = document.createElement('div'); row.className = 'world-row';
     const info = document.createElement('div');
     const nm = document.createElement('div'); nm.className = 'wname'; nm.textContent = w.name + (w.id === Worlds.current.id ? '  (open now)' : '');
-    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 3 ? 'Biomes' : w.gen === 2 ? 'Rolling hills' : 'Plateaus'} · ${w.s === 1280 && w.h !== 640 ? 1280 : 640} wide · ${w.h === 640 ? 640 : 192} tall · ${w.mode === 'survival' ? 'Survival' : 'Creative'}${w.ver ? ` · v${w.ver}` : ''}`;
+    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 3 ? 'Biomes' : w.gen === 2 ? 'Rolling hills' : 'Plateaus'} · ${validSize(w.s, w.h)} wide${w.gen === 3 && validBiomes(w.b) !== 1 ? ` · Biomes x${validBiomes(w.b)}` : ''} · ${w.h === 640 ? 640 : 192} tall · ${w.mode === 'survival' ? 'Survival' : 'Creative'}${w.ver ? ` · v${w.ver}` : ''}`;
     info.append(nm, sub);
     const playBtn = document.createElement('button'); playBtn.textContent = 'Play';
     playBtn.onclick = async () => {
@@ -7727,18 +8114,79 @@ function showWorlds(open) {
     const del = document.createElement('button'); del.textContent = 'Delete'; del.className = 'danger';
     del.disabled = w.id === Worlds.current.id;
     del.onclick = async () => { if (confirm(`Delete "${w.name}"? This can't be undone.`)) { await Worlds.remove(w.id); showWorlds(true); } };
-    row.append(info, playBtn, del);
+    const exp = document.createElement('button'); exp.textContent = 'Export'; exp.title = 'Save this world to a file';
+    exp.onclick = () => exportWorld(w).catch(e => alert(`Couldn't export "${w.name}": ${e.message || e}`));
+    row.append(info, playBtn, exp, del);
     worldListEl.append(row);
   }
 }
+
+// ---- Exporting and importing worlds: a .cubeland file holds a world's details and its save, to back it up or move it ----
+// (The save's buffers, like the changed blocks, are written as base64 text so the file is plain JSON.)
+const WORLD_FILE = 'cubeland-world';
+const FILE_TYPED = { Uint8Array, Int8Array, Uint16Array, Int16Array, Uint32Array, Int32Array, Float32Array, Float64Array };
+function bytesToB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+function b64ToBytes(b64) { const s = atob(b64), u8 = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i); return u8; }
+function packForFile(v) {
+  if (v instanceof ArrayBuffer) return { $buf: bytesToB64(new Uint8Array(v)) };
+  if (ArrayBuffer.isView(v)) return { $typed: v.constructor.name, $buf: bytesToB64(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)) };
+  if (Array.isArray(v)) return v.map(packForFile);
+  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v)) o[k] = packForFile(v[k]); return o; }
+  return v;
+}
+function unpackFromFile(v) {
+  if (Array.isArray(v)) return v.map(unpackFromFile);
+  if (v && typeof v === 'object') {
+    if (typeof v.$buf === 'string') { const bytes = b64ToBytes(v.$buf); const T = FILE_TYPED[v.$typed]; return T ? new T(bytes.buffer) : bytes.buffer; }
+    const o = {}; for (const k of Object.keys(v)) o[k] = unpackFromFile(v[k]); return o;
+  }
+  return v;
+}
+async function exportWorld(w) {
+  if (w.id === Worlds.current.id) await saveWorld();   // (the one that's open: save it first, so the file has everything)
+  const data = await Worlds.load(w.id);
+  const { id, temp, code, ...info } = w;
+  const text = JSON.stringify({ type: WORLD_FILE, game: GAME_VERSION, info, save: data ? packForFile(data) : null });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = (w.name.replace(/[\\/:*?"<>|]+/g, '').trim() || 'world') + '.cubeland';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+async function importWorld(file) {
+  let f;
+  try { f = JSON.parse(await file.text()); } catch (e) { throw new Error("it isn't a CubeLand world file"); }
+  if (!f || f.type !== WORLD_FILE || !f.info || !isFinite(f.info.seed)) throw new Error("it isn't a CubeLand world file");
+  return Worlds.add(f.info, f.save ? unpackFromFile(f.save) : null);
+}
+const importInput = document.createElement('input'); importInput.type = 'file'; importInput.accept = '.cubeland,application/json'; importInput.style.display = 'none';
+document.body.append(importInput);
+importInput.addEventListener('change', async () => {
+  const file = importInput.files[0]; importInput.value = '';
+  if (!file) return;
+  try { const w = await importWorld(file); showWorlds(true); alert(`Imported "${w.name}". It's in your list of worlds.`); }
+  catch (e) { alert(`Couldn't import ${file.name}: ${e.message || e}`); }
+});
+document.getElementById('worlds-import').addEventListener('click', () => importInput.click());
 document.getElementById('mm-single').addEventListener('click', () => showWorlds(true));
 document.getElementById('mm-multi').addEventListener('click', () => document.getElementById('multi-btn').click());
 document.getElementById('worlds-close').addEventListener('click', () => showWorlds(false));
 document.getElementById('new-create').addEventListener('click', async () => {
-  const w = Worlds.create(document.getElementById('new-name').value, document.getElementById('new-seed').value, +document.getElementById('new-gen').value, document.getElementById('new-mode').value);
+  const w = Worlds.create(document.getElementById('new-name').value, document.getElementById('new-seed').value, +document.getElementById('new-gen').value, document.getElementById('new-mode').value,
+    +document.getElementById('new-size').value, +document.getElementById('new-gen').value === 3 ? +document.getElementById('new-biomes').value : 1);
   await saveBeforeLeaving();
   Worlds.open(w.id);
 });
+// the new-world sliders: show what they're set to (biome size only means something for Biomes worlds)
+{
+  const size = document.getElementById('new-size'), biomes = document.getElementById('new-biomes'), gen = document.getElementById('new-gen');
+  const show = () => {
+    document.getElementById('new-size-v').textContent = `${size.value} x ${size.value}`;
+    document.getElementById('new-biomes-v').textContent = +biomes.value === 1 ? 'Normal' : `x${+biomes.value}`;
+    biomes.disabled = +gen.value !== 3;
+  };
+  size.addEventListener('input', show); biomes.addEventListener('input', show); gen.addEventListener('change', show); show();
+}
 
 // ===================== Game loop =====================
 // frames stop when the game is in the background, so a timer keeps queuing the next loop of the song
@@ -7754,6 +8202,11 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
+  if (MENU_ONLY) {   // the main menu, with no world: just the panorama (or the sky, without its pictures)
+    panorama(dt);
+    if (pano.ready) renderer.render(pano.scene, pano.cam); else renderer.render(scene, camera);
+    return;
+  }
   if (worldLoaded) pumpChunkBuilds(buildDone === 0 ? 60 : 14);   // wait for the save so chunks are built with your changes
   else { player.vx = player.vy = player.vz = 0; }
   if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
@@ -7826,7 +8279,7 @@ function frame(now) {
   if (player.onGround && !player.fly && !swimming) {
     if (!wasOnGround && player.impact > 5) Sound.land(blockUnderPlayer(), player.impact);
     // survival: falling more than 3 blocks hurts, half a heart for each block past that (landing in water is safe)
-    if (!wasOnGround) { const fell = player.impact * player.impact / 56; if (fell > 3.5) hurtPlayer(Math.floor(fell - 3)); }
+    if (!wasOnGround) { const fell = player.impact * player.impact / 56; if (fell > 3.5 && !stairFall) hurtPlayer(Math.floor(fell - 3)); stairFall = false; }
     stepDistance += Math.hypot(player.x - prevX, player.z - prevZ);
     if (stepDistance > 1.7) { stepDistance = 0; Sound.step(blockUnderPlayer()); }
   }
@@ -7840,6 +8293,7 @@ function frame(now) {
   updateFalls(dt);
   updateWater(dt);
   updateHealth(dt);
+  if (locked && worldLoaded) { updateStairs(); updateEerie(dt); }
   if (hurtFlash > 0 || hurtEl.style.opacity !== '0') { hurtFlash = Math.max(0, hurtFlash - dt); hurtEl.style.opacity = String(Math.min(1, hurtFlash / 0.2)); }
   Net.update(dt);
   // the further you are from open sky, the darker the haze, until it's black (no glowing fog deep underground)
@@ -7865,6 +8319,7 @@ function frame(now) {
   Sound.underwater(underwater);
   nightMusic = nightMusic ? skyDay < 0.5 : skyDay < 0.12;   // starts once it's properly dark, stops near sunrise
   Sound.music(nightMusic ? 'night' : 'day');   // (also ticked by a timer below, so music keeps going while tabbed out)
+  Sound.hush(nearStair());
 
   const hit = locked ? raycast() : null;
   outline.visible = !!hit;

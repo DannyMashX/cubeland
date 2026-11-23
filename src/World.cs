@@ -53,14 +53,22 @@ public partial class World
 	public Action<int, int, int> NearbyRebuild;   // (x, z): chunks around here need their sky light redone soon
 	public Action<int, int, int, int> BlockChanged;   // (index, old, new, ...) for the game's own bookkeeping
 
-	// height: 640 for tall worlds, 192 otherwise; size: 1280 for new worlds, 640 for ones made before (a tall world is always 640 across)
-	public World(long seed, int gen, int height = 192, int size = 640)
+	// The sizes a world can be made (the slider when you make one): 256 to 2048 across, in steps of 128. Worlds made before
+	// you could choose are 1280 (or, before that, 640). A tall world is always 640 across. (The same as the web version.)
+	public const int MinSize = 256, MaxSize = 2048, SizeStep = 128, DefaultSize = 1280;
+	public static int ValidSize(int size, int height) => height == 640 ? 640 : size >= MinSize && size <= MaxSize && size % SizeStep == 0 ? size : 640;
+	// How big the biomes are (Biomes worlds): 0.5 (half size) to 4 (4 times as big), in quarters; 1 is the usual size
+	public const double MinBiomes = 0.5, MaxBiomes = 4;
+	public static double ValidBiomes(double b) => b >= MinBiomes && b <= MaxBiomes && Math.Abs(b * 4 - Math.Round(b * 4)) < 1e-9 ? Math.Round(b * 4) / 4 : 1;
+
+	// height: 640 for tall worlds, 192 otherwise; size: how far across (see ValidSize); biomes: how big the biomes are
+	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1)
 	{
 		WY = height == 640 ? 640 : 192;
-		WX = size == 1280 && WY == 192 ? 1280 : 640;
+		WX = ValidSize(size, WY);
 		Blocks = new BlockStore(WX, WY, WZ);
 		Heights = new int[WX * WZ]; ChunkTop = new int[NCX * NCZ]; SkyTop = new short[WX * WZ];
-		Gen = new WorldGen(this, seed, gen);
+		Gen = new WorldGen(this, seed, gen) { BiomeScale = ValidBiomes(biomes) };
 	}
 
 	public void Generate(Action<float> progress)
@@ -72,6 +80,7 @@ public partial class World
 		{
 			uint h = 2166136261; foreach (byte b in Raw) h = (h ^ b) * 16777619;
 			Godot.GD.Print($"WORLDHASH {h:x8}");
+			Godot.GD.Print($"STAIRS {Gen.StairSpots.Count} spots: " + string.Join(" ", Gen.StairSpots.FindAll(s => s.Placed).ConvertAll(s => $"{s.X},{s.Y},{s.Z},{s.Dir},{s.N},{s.Mat}")));
 		}
 		var packTime = System.Diagnostics.Stopwatch.StartNew();
 		Blocks.Load(Raw); Raw = null;
@@ -260,6 +269,18 @@ public partial class World
 		ChunksChanged?.Invoke(dirty);
 		WakeWater(x, y, z);
 		WakeFall(x, y, z);
+	}
+
+	// a change only for show (the lone doorway): not saved, not one of your edits, not sent to anyone, nothing else told
+	public void SetLooks(int x, int y, int z, int id)
+	{
+		if (!Inside(x, y, z)) return;
+		Blocks.Set(x, y, z, id);
+		int ck = (z / CS) * NCX + x / CS;
+		if (id != 0) ChunkTop[ck] = Math.Max(ChunkTop[ck], y + 1);
+		var dirty = new HashSet<int>();
+		MarkDirty(x, y, z, dirty);
+		ChunksChanged?.Invoke(dirty);
 	}
 
 	// ---- Loading a save: the blocks you changed, put back on top of the freshly grown terrain (before any chunk is built) ----

@@ -14,12 +14,12 @@ public static class Worlds
 {
 	public class Info
 	{
-		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192, S = 640; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall. S: its width and depth; worlds made before 1280 are 640)
+		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192, S = 640; public double B = 1; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall. S: its width and depth; worlds made before 1280 are 640. B: how big its biomes are, 1 = the usual size)
 		[JsonIgnore] public bool Survival => Mode == "survival";
 	}
 	public class PlayerSave { public float X, Y, Z, Yaw, Pitch, DarkTime, LightTime; public bool Fly; public int Health, Gloom; }
 	public class MobSave { public string Type; public float X, Y, Z, Yaw; public int Health, Layer; public float Baby, Happy, Room, MateCool; public int Fed; }   // (the last five: cows)
-	public class DropSave { public int Id, Wear; public float X, Y, Z, Age; public Inventory.PackData Data; }
+	public class DropSave { public int Id, Wear; public float X, Y, Z, Age; public Inventory.PackData Data; public bool Keep; }
 	public class Save
 	{
 		public int Version = 1, Seed; public long SavedAt;
@@ -27,6 +27,7 @@ public static class Worlds
 		public PlayerSave Player; public float Time;
 		public int[] Hotbar, Counts, Wear; public int Selected, OffSel; public Dictionary<int, Inventory.PackData> Data;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();
+		public int[] Stairs = Array.Empty<int>();   // staircases that moved somewhere the world had no spot for (x, y, z, way, steps, block, ...)
 		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: lucky ticks so far in each stage)
 		public Dictionary<int, int> Fert = new();   // fertilized soil -> harvests left
 		public Dictionary<int, float> Grazed = new();   // grass a cow ate -> seconds until it grows back
@@ -64,13 +65,13 @@ public static class Worlds
 		return h;
 	}
 	// gen = terrain style: 2 = rolling hills (default), 1 = plateaus. mode = "creative" or "survival".
-	public static Info Create(string name, string seedText, int gen = 3, string mode = "creative")
+	public static Info Create(string name, string seedText, int gen = 3, string mode = "creative", int size = World.DefaultSize, double biomes = 1)
 	{
 		Load();
 		name = (name ?? "").Trim(); if (name.Length > 32) name = name[..32];
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		var w = new Info { Id = Convert.ToString(now, 16) + Random.Shared.Next(0x1000, 0xffff).ToString("x"), Name = name == "" ? $"World {list.Count + 1}" : name,
-			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.TallWorlds ? 640 : 1280 };
+			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.ValidSize(World.TallWorlds ? 640 : size, World.TallWorlds ? 640 : 192), B = World.ValidBiomes(biomes) };
 		list.Add(w); SaveList();
 		return w;
 	}

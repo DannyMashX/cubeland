@@ -456,6 +456,10 @@ public partial class Sound : Node
 	}
 
 	public void Step(int id) => Play(Mat(id), "step", 0.45f, 1, "player");
+	public void StepBehind(int id, float vol) => Play(Mat(id), "step", vol, 0.94f, "player");   // (someone else's step)
+	float wobble;   // seconds the music plays a little out of tune
+	public void Wobble(float seconds) => wobble = seconds;
+	public bool MusicPlaying => current != null && !Muted && MusicLevel > 0 && hush > 0.5f;
 	public void Jump(int id) => Play(Mat(id), "step", 0.3f, 1.05f, "player");
 	public void Land(int id, float speed) => Play(Mat(id), "step", Math.Min(1, 0.4f + speed / 18), 0.85f, "player");
 	public void Splash(float speed) => Play("water", "splash", Math.Min(1, 0.3f + speed / 14), speed > 12 ? 0.85f : 1, "player");
@@ -575,6 +579,8 @@ public partial class Sound : Node
 	AudioStreamPlayer current, fading; string currentName, wanted; double waitUntil;
 	float MusicLevel => Muted ? 0 : 0.32f * Levels["master"] * Levels["music"];
 	public void Music(string name) => wanted = name;   // "day" or "night" (called every frame)
+	public bool Hushed;          // (some places have no music: it fades away while you're there, and back after)
+	float hush = 1;
 	AudioStreamPlayer StartSong(string name, bool fadeIn)
 	{
 		(AudioStreamWav wav, float peak) s; lock (songs) if (!songs.TryGetValue(name, out s)) return null;
@@ -587,7 +593,8 @@ public partial class Sound : Node
 		float dt = (float)delta;
 		// the underwater muffle closes and opens smoothly
 		muffle.CutoffHz += (muffleTarget - muffle.CutoffHz) * Math.Min(1, dt * 20);
-		AudioServer.SetBusVolumeDb(musicBus, Mathf.LinearToDb(Math.Max(1e-4f, MusicLevel)));
+		hush = Hushed ? Math.Max(0, hush - dt / 2.5f) : Math.Min(1, hush + dt / 4);
+		AudioServer.SetBusVolumeDb(musicBus, Mathf.LinearToDb(Math.Max(1e-4f, MusicLevel * hush)));
 		if (wanted == null) return;
 		double now = Time.GetTicksMsec() / 1000.0;
 		if (current == null && currentName == null) { current = StartSong(wanted, false); if (current != null) currentName = wanted; }
@@ -596,9 +603,11 @@ public partial class Sound : Node
 			fading?.QueueFree(); fading = current; fading.SetMeta("out", 1f); current = null; currentName = wanted; waitUntil = now + 4.2;
 		}
 		else if (current == null && currentName != null && now >= waitUntil) current = StartSong(currentName, true);
+		if (wobble > 0) wobble -= dt;
 		foreach (var p in new[] { current, fading })
 		{
 			if (p == null) continue;
+			p.PitchScale = wobble > 0 ? 0.966f : 1;
 			float peak = (float)p.GetMeta("peak");
 			float f = (float)p.GetMeta("fade");
 			f = p.HasMeta("out") ? f - dt / 4 : Math.Min(1, f + dt / 3);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Cubeland;
 
@@ -76,8 +77,9 @@ public class WorldGen
 	// the climate borders (as the web version). Warmth: below COLD snowy, then up to COOL taiga, above HOT hot lands (desert where
 	// wetness is below ARID, badlands up to BADLANDS, then woods). In between: swamp above WET, plains below DRY, meadow up to MEADOW, then woods.
 	const double COLD = 0.33, COOL = 0.38, HOT = 0.54, ARID = 0.48, BADLANDS = 0.58, DRY = 0.38, MEADOW = 0.45, WET = 0.53;
-	double WarmthAt(double x, double z) => Fbm(x / 180 + 300, z / 180 + 300, 3, 1100);
-	double WetnessAt(double x, double z) => Fbm(x / 150 + 600, z / 150 + 600, 3, 1110);
+	public double BiomeScale = 1;   // how big the biomes are: the climate maps are stretched by this (see World.ValidBiomes)
+	double WarmthAt(double x, double z) => Fbm(x / (180 * BiomeScale) + 300, z / (180 * BiomeScale) + 300, 3, 1100);
+	double WetnessAt(double x, double z) => Fbm(x / (150 * BiomeScale) + 600, z / (150 * BiomeScale) + 600, 3, 1110);
 	public int BiomeAt(int x, int z)
 	{
 		double t = WarmthAt(x, z), w = WetnessAt(x, z);
@@ -148,7 +150,95 @@ public class WorldGen
 		Trees();
 		Rocks();
 		Flowers();
+		if (gen == 3 && EerieOn) Staircases();
 		Progress?.Invoke(0.9f);
+	}
+
+	// --- Staircases: now and then, deep in a forest high up in the world, a short flight of stairs stands on its own ---
+	// Spots are tried on a grid; the few that get a staircase are picked by hash, far apart. The rest are kept as places a
+	// staircase could later turn up (see Main.Stairs). Exactly as the web version, so both grow the same world.
+	// The eerie update (the staircases, and the strange things in Main.Eerie.cs) is held back for now: while EerieReady is
+	// false, worlds grow without staircases and none of it happens. It must match EERIE_READY in the web game's index.html,
+	// or web and desktop grow different worlds. (Test: `--eerieon` turns it on anyway.)
+	public const bool EerieReady = false;
+	public static readonly bool EerieOn = EerieReady || Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--eerieon") >= 0;
+	public class StairSpot { public int X, Y, Z, Dir, N, Mat; public double Order; public bool Placed; }
+	public readonly List<StairSpot> StairSpots = new();
+	public const int StairMinUp = 6;    // how far above the sea the ground must be at least (they go on the highest forest ground there is)
+	public static readonly int[][] StairDirs = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 } };
+	public static readonly int[] StairMasks = { 0x33 | 0x88, 0x33 | 0x44, 0x33 | 0xC0, 0x33 | 0x0C };   // (the step's high half faces the way it climbs)
+	public static int StairTop(StairSpot s, int k) => s.Y + k;   // (step k's block height)
+	public bool StairForest(int x, int z) => Forest(x, z);
+	public int StairMat(int x, int z) => Hash(x, z, 7704) < 1 / 3.0 ? Blocks.Cobblestone : biomeMap[z * WX + x] == Taiga ? Blocks.FirPlanks : Blocks.Planks;
+	bool Forest(int x, int z) => x >= 0 && z >= 0 && x < WX && z < WZ && (biomeMap[z * WX + x] == Woods || biomeMap[z * WX + x] == Taiga) && W.Heights[z * WX + x] > SeaLevel;
+	bool IsTrunk(int b) => b == Blocks.Log || b == Blocks.FirLog;
+	// (also used later, on the grown world: can a staircase stand here? ground from `at`, blocks from `get`)
+	public static bool StairFits(StairSpot s, Func<int, int> groundAt, Func<int, int, int, int> get)
+	{
+		var d = StairDirs[s.Dir];
+		for (int k = 0; k < s.N; k++)
+		{
+			int cx = s.X + d[0] * k, cz = s.Z + d[1] * k;
+			if (cx < 1 || cz < 1 || cx >= WX - 1 || cz >= WZ - 1) return false;
+			int gk = groundAt(cz * WX + cx), top = get(cx, gk, cz);
+			if (gk != s.Y - 1 && gk != s.Y - 2) return false;                          // (on level ground: a block lower at most)
+			if (top != Blocks.Grass && top != Blocks.Dirt && top != Blocks.SnowyGrass) return false;
+			for (int y = gk + 1; y <= s.Y + k + 3; y++) if (get(cx, y, cz) != 0) return false;   // (nothing in the way, and room above)
+		}
+		return true;
+	}
+	void Staircases()
+	{
+		const int Cell = 16;
+		for (int gz = 0; gz < WZ / Cell; gz++) for (int gx = 0; gx < WX / Cell; gx++)
+		{
+			int x = gx * Cell + 2 + (int)Math.Floor(Hash(gx, gz, 7700) * 12), z = gz * Cell + 2 + (int)Math.Floor(Hash(gx, gz, 7701) * 12);
+			if (!Forest(x, z)) continue;
+			int g = W.Heights[z * WX + x];
+			if (g < SeaLevel + StairMinUp) continue;
+			bool deep = true;   // deep in the forest: 8 blocks out every way is still forest
+			foreach (var e in PalmFronds) if (!Forest(x + e[0] * 8, z + e[1] * 8)) { deep = false; break; }
+			if (!deep) continue;
+			int trunks = 0;     // and trees nearby
+			for (int dz = -6; dz <= 6; dz++) for (int dx = -6; dx <= 6; dx++)
+			{
+				int c = (z + dz) * WX + x + dx;
+				if (IsTrunk(world[Idx(x + dx, W.Heights[c] + 1, z + dz)])) trunks++;
+			}
+			if (trunks < 2) continue;
+			var s = new StairSpot { X = x, Y = g + 1, Z = z, N = 5 + (int)Math.Floor(Hash(x, z, 7702) * 4), Order = Hash(x, z, 7705) };
+			s.Mat = Hash(x, z, 7704) < 1 / 3.0 ? Blocks.Cobblestone : biomeMap[z * WX + x] == Taiga ? Blocks.FirPlanks : Blocks.Planks;
+			int d0 = (int)Math.Floor(Hash(x, z, 7703) * 4); bool fits = false;   // (a random way first, then the others)
+			for (int t = 0; t < 4 && !fits; t++) { s.Dir = (d0 + t) % 4; fits = StairFits(s, c => W.Heights[c], (a, b, c) => world[Idx(a, b, c)]); }
+			if (!fits) continue;
+			StairSpots.Add(s);
+		}
+		// the highest first (the staircases stand in the world's highest forests), then by hash
+		StairSpots.Sort((a, b) => a.Y != b.Y ? b.Y - a.Y : a.Order != b.Order ? a.Order.CompareTo(b.Order) : a.X != b.X ? a.X - b.X : a.Z - b.Z);
+		int want = WX * WZ / 320000 + 1;   // (6 in a 1280 world, 2 in a 640 one)
+		var placed = new List<StairSpot>();
+		foreach (var s in StairSpots)
+		{
+			if (placed.Count >= want) break;
+			if (placed.Exists(p => Math.Abs(p.X - s.X) + Math.Abs(p.Z - s.Z) < WX / 5)) continue;   // (far apart)
+			BuildStair(s, (x, y, z, id) => world[Idx(x, y, z)] = (byte)id, c => W.Heights[c]);
+			s.Placed = true; placed.Add(s);
+		}
+	}
+	// the staircase itself: each step is a stairs piece, standing on a solid base of the same block down to the ground
+	public void BuildStair(StairSpot s, Action<int, int, int, int> set, Func<int, int> groundAt)
+	{
+		var d = StairDirs[s.Dir];
+		for (int k = 0; k < s.N; k++)
+		{
+			int cx = s.X + d[0] * k, cz = s.Z + d[1] * k, gk = groundAt(cz * WX + cx);
+			for (int y = gk + 1; y < s.Y + k; y++) set(cx, y, cz, s.Mat);
+			var a = new int[8];
+			for (int b = 0; b < 8; b++) if ((StairMasks[s.Dir] & (1 << b)) != 0) a[b] = s.Mat;
+			W.PieceMap[Idx(cx, s.Y + k, cz)] = a;
+			set(cx, s.Y + k, cz, Blocks.Pieces);
+			W.Heights[cz * WX + cx] = Math.Max(W.Heights[cz * WX + cx], s.Y + k);
+		}
 	}
 
 	// --- Plateaus (the original style): flat steps at many heights, with curvy swirled edges ---

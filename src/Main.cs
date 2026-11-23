@@ -32,6 +32,7 @@ public partial class Main : Node3D
 	float camSky = 1, camSkyCheck; bool nightMusic, wasUnder;
 	readonly Random rnd = new();
 	static bool HasArg(string a) => OS.GetCmdlineUserArgs().Contains(a);
+	static int ArgInt(string prefix, int fallback) => OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith(prefix)) is { } a ? int.Parse(a[prefix.Length..]) : fallback;
 
 	public override void _Ready()
 	{
@@ -73,7 +74,8 @@ public partial class Main : Node3D
 		BuildMenus();
 		ApplySettings();
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
-		world = new World(current.Seed, current.Gen, current.H, current.S);
+		if (current == null) return;   // (the main menu, with no world: see PickWorld)
+		world = new World(current.Seed, current.Gen, current.H, current.S, current.B);
 		genTask = Task.Run(() => { world.Generate(p => genProgress = p); LoadSaveBlocks(); });
 	}
 
@@ -158,6 +160,7 @@ public partial class Main : Node3D
 		float dt = (float)Math.Min(delta, 0.1);
 		NetUpdate(dt);
 		Atlas.SpinSaw(delta);   // (the Cutter's saw blade)
+		if (current == null) { MenuOnly(dt); return; }
 		if (!ready)
 		{
 			if (genTask.IsFaulted) { loading.Text = "Couldn't make the world:\n" + genTask.Exception?.InnerException?.Message; return; }
@@ -192,6 +195,7 @@ public partial class Main : Node3D
 		sky.Tick(dt, cam);
 		UpdateSkyAndWater(dt);
 		UpdateHealth(dt);
+		if (moving) { UpdateStairs(); UpdateEerie(dt); }
 		TickLifeUi(dt);
 		UpdateMobs(moving || invOpen || hosting || netClient ? dt : 0);   // (mobs wait while you're paused, like the rest of the world; a joined game follows the host)
 		UpdateHand(dt);
@@ -220,6 +224,29 @@ public partial class Main : Node3D
 	const float PanoTurn = 0.05f;   // how fast it turns (radians a second: once round in about 2 minutes)
 	float panoYaw = float.NaN;
 	Node3D panoBox; bool panoTried;
+	// the main menu with no world (see PickWorld): only the panorama turning (or the sky, without its pictures)
+	float menuShotTimer;
+	void MenuOnly(float dt)
+	{
+		loading.Visible = false; uiLayer.Visible = false;
+		if (!panoTried) { panoTried = true; panoBox = MakePanoBox(); }
+		if (float.IsNaN(panoYaw)) panoYaw = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--panoyaw=")) is { } py ? float.Parse(py[10..], System.Globalization.CultureInfo.InvariantCulture) : 0;
+		panoYaw += dt * PanoTurn;
+		cam.Position = new Vector3(0, 100, 0);
+		cam.Rotation = new Vector3(-0.1f, panoYaw, 0);
+		if (panoBox != null) { panoBox.Visible = true; panoBox.GlobalPosition = cam.GlobalPosition; }
+		sky.Tick(dt, cam);
+		// (test: --shot=file.png takes a picture of the menu and quits)
+		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--shot=")) is { } shot && (menuShotTimer += dt) > 1.5f)
+		{
+			var open = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--open="));
+			if (open == "--open=worlds" && !worldsPanel.Visible) { ShowWorlds(true); menuShotTimer = 0; return; }
+			if (open == "--open=multi" && !multiPanel.Visible) { multiPanel.Visible = true; Host(); menuShotTimer = 0; return; }
+			GetViewport().GetTexture().GetImage().SavePng(shot[7..]);
+			GD.Print("shot saved (main menu, no world)");
+			GetTree().Quit();
+		}
+	}
 	// the cube's six sides: which way each picture looks, and which way is up in it (the same in the web version)
 	public static readonly Vector3[] PanoDirs = { new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1) };
 	public static readonly Vector3[] PanoUps = { new(0, 1, 0), new(0, 1, 0), new(0, 0, 1), new(0, 0, -1), new(0, 1, 0), new(0, 1, 0) };
@@ -296,7 +323,8 @@ public partial class Main : Node3D
 		{
 			if (ev.Impact > 5) s.Land(player.BlockUnder(), ev.Impact);
 			float fell = ev.Impact * ev.Impact / 56;   // (about how many blocks you fell)
-			if (fell > 3.5f) HurtPlayer((int)MathF.Floor(fell - 3));
+			if (fell > 3.5f && !stairFall) HurtPlayer((int)MathF.Floor(fell - 3));
+			stairFall = false;
 		}
 	}
 	// the sky colour behind everything, the haze, and how it all looks with your head underwater
@@ -333,6 +361,7 @@ public partial class Main : Node3D
 		// night music comes on once it's properly dark, and goes back to day music once it's light again
 		nightMusic = nightMusic ? sky.SkyDay < 0.5f : sky.SkyDay < 0.12f;
 		Sound.I?.Music(nightMusic ? "night" : "day");
+		if (Sound.I != null) Sound.I.Hushed = NearStair();
 	}
 	float target = 1;
 

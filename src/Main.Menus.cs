@@ -67,17 +67,20 @@ public partial class Main
 		if (sa != null)
 		{   // testing: a throwaway world that isn't in your list and never saves
 			tempWorld = true;
-			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : 1280, Mode = HasArg("--survival") ? "survival" : "creative" };
+			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : ArgInt("--size=", 1280), B = ArgInt("--biomescale=", 100) / 100.0, Mode = HasArg("--survival") ? "survival" : "creative" };
 			menuOpen = HasArg("--menu");
 			return;
 		}
 		if (joinInfo != null && openWorldId == "join-" + joinInfo.Code)
 		{   // a friend's world you're joining: it isn't one of your worlds and isn't saved here
-			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, S = joinInfo.S, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
+			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, S = joinInfo.S, B = joinInfo.B, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
 			menuOpen = false; wantPlay = true; playOnLoad = false;
 			return;
 		}
 		joinInfo = null;
+		// no world picked: the main menu, with no world at all. A world only opens from Singleplayer (or by joining a friend),
+		// and quitting to the main menu closes it. (--play for testing: straight into the last world played.)
+		if ((openWorldId == null || Worlds.Get(openWorldId) == null) && !HasArg("--play")) { current = null; menuOpen = true; playOnLoad = false; return; }
 		current = (openWorldId != null ? Worlds.Get(openWorldId) : null) ?? Worlds.Last();
 		Worlds.MarkOpened(current);
 		if (HasArg("--play")) menuOpen = false;   // (testing: straight into the game)
@@ -137,8 +140,8 @@ public partial class Main
 		pm.AddChild(Btn("Settings", () => ShowSettings(true)));
 		pm.AddChild(Btn("Skin", OpenSkinEditor));
 		pauseMultiBtn = Btn("Multiplayer", () => { RefreshNetUi(); multiPanel.Visible = true; }); pm.AddChild(pauseMultiBtn);
-		quitBtn = Btn("Save & quit to main menu", () => { if (netClient) { LeaveGame(); return; } if (settings.Autosave) SaveWorld(); ShowMainMenu(true); }); pm.AddChild(quitBtn);
-		discardBtn = Btn("Quit without saving", () => Ask("Quit without saving?\n\nEverything you did since the last save will be lost.", () => { discarding = true; SwitchWorld(current.Id, false); }));
+		quitBtn = Btn("Save & quit to main menu", () => { if (netClient) { LeaveGame(); return; } SwitchWorld(null, false); });   // (closes the world: see PickWorld) pm.AddChild(quitBtn);
+		discardBtn = Btn("Quit without saving", () => Ask("Quit without saving?\n\nEverything you did since the last save will be lost.", () => { discarding = true; SwitchWorld(null, false); }));
 		pm.AddChild(discardBtn);
 		savedNote = Centre(Text("", 13, 0.8f)); pm.AddChild(savedNote);
 		newerNote = Centre(Text("", 13)); newerNote.AddThemeColorOverride("font_color", new Color(1, 0.8f, 0.4f)); newerNote.AutowrapMode = TextServer.AutowrapMode.WordSmart; newerNote.CustomMinimumSize = new Vector2(420, 0); pm.AddChild(newerNote);
@@ -222,9 +225,24 @@ public partial class Main
 		var gen = new OptionButton { TooltipText = "Terrain style" }; gen.AddItem("Biomes", 3); gen.AddItem("Rolling hills", 2); gen.AddItem("Plateaus", 1);
 		var mode = new OptionButton { TooltipText = "Game mode" }; mode.AddItem("Creative"); mode.AddItem("Survival");
 		row.AddChild(name); row.AddChild(seed); row.AddChild(gen); row.AddChild(mode);
+		// how big the world is, and (Biomes worlds) how big its biomes are
+		var row2 = new HBoxContainer(); row2.AddThemeConstantOverride("separation", 8); b.AddChild(row2);
+		HSlider NewSlider(string label, double min, double max, double step, double value, Func<double, string> show)
+		{
+			row2.AddChild(Text(label, 14));
+			var s = new HSlider { MinValue = min, MaxValue = max, Step = step, Value = value, CustomMinimumSize = new Vector2(170, 24), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+			var v = Text(show(value), 14); v.CustomMinimumSize = new Vector2(84, 0);
+			s.ValueChanged += x => v.Text = show(x);
+			row2.AddChild(s); row2.AddChild(v);
+			return s;
+		}
+		var size = NewSlider("World size", World.MinSize, World.MaxSize, World.SizeStep, World.DefaultSize, x => $"{(int)x} x {(int)x}");
+		var biomes = NewSlider("Biome size", World.MinBiomes, World.MaxBiomes, 0.25, 1, x => x == 1 ? "Normal" : $"x{x:0.##}");
+		biomes.TooltipText = "How big the biomes are (Biomes worlds)";
+		gen.ItemSelected += _ => biomes.Editable = gen.GetSelectedId() == 3;
 		row.AddChild(Btn("Create & play", () =>
 		{
-			var w = Worlds.Create(name.Text, seed.Text, gen.GetSelectedId(), mode.Selected == 1 ? "survival" : "creative");
+			var w = Worlds.Create(name.Text, seed.Text, gen.GetSelectedId(), mode.Selected == 1 ? "survival" : "creative", (int)size.Value, gen.GetSelectedId() == 3 ? biomes.Value : 1);
 			SwitchWorld(w.Id, true);
 		}, 140));
 		b.AddChild(Btn("Back", () => ShowWorlds(false), 160));
@@ -238,9 +256,9 @@ public partial class Main
 		{
 			var row = new HBoxContainer(); row.AddThemeConstantOverride("separation", 8);
 			var info = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-			info.AddChild(Text(w.Name + (w.Id == current.Id ? "  (open now)" : ""), 16));
+			info.AddChild(Text(w.Name + (w.Id == current?.Id ? "  (open now)" : ""), 16));
 			string played = DateTimeOffset.FromUnixTimeMilliseconds(w.Played).ToLocalTime().ToString("g");
-			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 3 ? "Biomes" : w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {(w.S == 1280 && w.H != 640 ? 1280 : 640)} wide · {(w.H == 640 ? 640 : 192)} tall · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
+			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 3 ? "Biomes" : w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {World.ValidSize(w.S, w.H)} wide{(w.Gen == 3 && w.B != 1 ? $" · Biomes x{w.B}" : "")} · {(w.H == 640 ? 640 : 192)} tall · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
 			row.AddChild(info);
 			var id = w.Id;
 			row.AddChild(Btn("Play", () =>
@@ -251,7 +269,7 @@ public partial class Main
 				else SwitchWorld(id, true);
 			}, 80));
 			var del = Btn("Delete", () => Ask($"Delete \"{w.Name}\"? This can't be undone.", () => { Worlds.Remove(id); ShowWorlds(true); }), 80);
-			del.Disabled = w.Id == current.Id; del.AddThemeColorOverride("font_color", new Color(1, 0.55f, 0.5f));
+			del.Disabled = w.Id == current?.Id; del.AddThemeColorOverride("font_color", new Color(1, 0.55f, 0.5f));
 			row.AddChild(del);
 			worldList.AddChild(row);
 		}
@@ -302,6 +320,7 @@ public partial class Main
 	// into the game
 	void Play()
 	{
+		if (current == null) return;   // (no world to go into: one opens from Singleplayer)
 		ShowMainMenu(false);
 		pauseTitle.Text = "Paused"; resumeBtn.Text = "Back to game";
 		if (!ready) { wantPlay = true; loading.Visible = true; return; }   // (still growing: goes in once it's ready)
@@ -350,12 +369,13 @@ public partial class Main
 			Seed = current.Seed, SavedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 			Idxs = world.Edits.Keys.ToArray(), Ids = world.Edits.Values.ToArray(),
 			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => (int)v))).ToArray(),
+			Stairs = SaveExtraStairs(),
 			Player = new() { X = player.Pos.X, Y = player.Pos.Y, Z = player.Pos.Z, Yaw = player.Yaw, Pitch = player.Pitch, Fly = player.Flying, Health = health, Gloom = gloom, DarkTime = darkTime, LightTime = lightTime },
 			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Wear = inv.Wear.ToArray(), Selected = inv.Selected, OffSel = inv.OffSel,
 			Data = Enumerable.Range(0, Inventory.NS).Where(i => inv.Data[i] != null).ToDictionary(i => i, i => inv.Data[i]),
 			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health, Layer = m.Layer,
 				Baby = m.Baby, Happy = MathF.Round(m.Happy), Room = MathF.Round(Math.Max(0, m.Room) * 100) / 100, MateCool = MathF.Round(m.MateCool), Fed = m.Fed }).ToList(),
-			Drops = drops.All.Select(d => new Worlds.DropSave { Id = d.Id, X = d.P.X, Y = d.P.Y, Z = d.P.Z, Age = d.Age, Wear = d.Wear, Data = d.Data }).ToList(),
+			Drops = drops.All.Select(d => new Worlds.DropSave { Id = d.Id, X = d.P.X, Y = d.P.Y, Z = d.P.Z, Age = d.Age, Wear = d.Wear, Data = d.Data, Keep = d.Keep }).ToList(),
 			Drying = new(world.Drying), TorchBurn = world.TorchBurn.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
 			Crops = world.Crops.ToDictionary(k => k.Key, k => MathF.Round(k.Value)), Fert = new(world.FertLeft),
 			Grazed = world.Grazed.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
@@ -380,6 +400,7 @@ public partial class Main
 				if (a.Any(v => v != 0)) world.PieceMap[s.Pieces[k]] = a;
 			}
 			world.ApplyEdits(s.Idxs, s.Ids);
+			LoadExtraStairs(s.Stairs);
 			foreach (var (i, left) in s.Drying) if (world.Drying.ContainsKey(i)) world.Drying[i] = Math.Max(0, left);
 			foreach (var (i, left) in s.TorchBurn) if (world.TorchBurn.ContainsKey(i)) world.TorchBurn[i] = Math.Max(0, left);
 			if (s.Crops != null) foreach (var (i, left) in s.Crops) if (world.Crops.ContainsKey(i)) world.Crops[i] = Math.Max(0, left);
@@ -426,7 +447,7 @@ public partial class Main
 			mob.Yaw = m.Yaw; mob.Health = m.Health > 0 ? m.Health : mob.Health;
 			if (t.Cow) { mob.Baby = Math.Max(0, m.Baby); mob.Fed = Math.Clamp(m.Fed, 0, FedMax); mob.Happy = Math.Max(0, m.Happy); mob.Room = Math.Clamp(m.Room, 0, 1); mob.MateCool = Math.Max(0, m.MateCool); }
 		}
-		foreach (var d in s.Drops) if (Blocks.Get(d.Id) != null) { var dr = drops.Add(d.Id, d.X, d.Y, d.Z); dr.V = Vector3.Zero; dr.Age = d.Age; dr.Wear = d.Wear; dr.Data = d.Data; }
+		foreach (var d in s.Drops) if (Blocks.Get(d.Id) != null) { var dr = drops.Add(d.Id, d.X, d.Y, d.Z); dr.V = Vector3.Zero; dr.Age = d.Age; dr.Wear = d.Wear; dr.Data = d.Data; dr.Keep = d.Keep; }
 		DrawHearts();
 	}
 

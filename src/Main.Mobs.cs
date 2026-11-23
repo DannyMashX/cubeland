@@ -70,6 +70,7 @@ public partial class Main
 		// cows: Baby = seconds until a calf grows up (0 = grown), Fed = Grain eaten, Happy = seconds of happiness left, Room = 0 (crowded) .. 1
 		// (-1 = not worked out yet), Variant = which model it wears (see Main.Cows.cs)
 		public float Baby, Happy, Room, MateCool, MateCheck, MateFor, RoomIn, Grazing, GrazeIn, GrazeAnim, HeartIn; public int Fed, Near, Variant; public Mob Mate;
+		public float Stare;   // seconds it stands still, looking at you
 	}
 	// an arm or leg: swings at Pivot (shoulder/hip); Lower (forearm/shin, if the model has one) bends at the elbow/knee
 	public class Limb { public Node3D Pivot, Lower; public float Phase; }
@@ -769,6 +770,12 @@ public partial class Main
 				if (t.Snuffer && m.Fade == 0 && TorchBearerNear(new Vector3(m.X, m.Y + 0.5f, m.Z), GloomFadeRange)) StartFade(m);
 				var snuff = t.Snuffer && m.Fade == 0 && m.Flee <= 0 ? SnuffGoal(m, dt) : null;
 				if (m.Fade > 0) m.Walking = false;
+				else if (m.Stare > 0)
+				{   // stands still and turns to look at you
+					m.Stare -= dt; m.Walking = false; m.Grazing = 0;
+					float toward = MathF.Atan2(m.X - P.X, m.Z - P.Z);
+					m.Yaw += Turn(m.Yaw, toward) * Math.Min(1, dt * 5); m.TurnTo = m.Yaw;
+				}
 				else if (hunting && t.Thrower)
 				{   // a Skeleton: faces you, keeps between Near and Far blocks away, and throws a Rock whenever it can see you
 					float toward = MathF.Atan2(m.X - P.X, m.Z - P.Z);

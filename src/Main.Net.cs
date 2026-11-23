@@ -26,7 +26,7 @@ public partial class Main
 	static List<(string[] urls, string user, string pass)> relayServers;
 
 	// a friend's game you're joining (kept while the game restarts into their world)
-	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host, int H, int S);
+	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host, int H, int S, double B);
 	static JoinInfo joinInfo;
 	bool netClient => joinInfo != null && current?.Id == "join-" + joinInfo.Code;
 
@@ -173,6 +173,7 @@ public partial class Main
 	{
 		if (netClient) { NetStatus("This is a friend's world, so only they can host it."); return; }
 		if (tempWorld) { NetStatus("Test worlds can't be hosted."); return; }
+		if (current == null) { NetStatus("Open one of your worlds first (Singleplayer), then host it from the pause menu."); return; }
 		NetStatus("Starting...");
 		var ice = await IceServers();
 		var code = MakeCode();
@@ -211,7 +212,7 @@ public partial class Main
 		if (known) friends[conn.PeerId] = f with { seen = Now };
 		string t = d.S("t");
 		if (t == "hello")   // someone checking which world this is, before they load it
-			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["h"] = current.H, ["s"] = current.S, ["mode"] = current.Mode, ["host"] = settings.Name });
+			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["h"] = current.H, ["s"] = current.S, ["b"] = current.B, ["mode"] = current.Mode, ["host"] = settings.Name });
 		else if (t == "join")
 		{
 			if (d.S("ver") != NetVersion) { conn.Send(new Dictionary<string, object> { ["t"] = "refuse", ["why"] = $"You need the same version of the game. They have {NetVersion}, you have {d.S("ver")}." }); return; }
@@ -257,6 +258,8 @@ public partial class Main
 			var m = mobList.FirstOrDefault(m => m.K == d.I("k") && m.Dead == 0 && m.T.Cow);
 			if (m == null || !Feed(m)) conn.Send(new Dictionary<string, object> { ["t"] = "give", ["id"] = Blocks.Grain });
 		}
+		else if (t == "stime") sky.TimeOfDay = Math.Clamp(d.F("time"), 0, 1);   // (a friend's staircase)
+		else if (t == "sdrop") StairDrop(d.I("id"), d.I("n"), d.I("w"), null, new Vector3(d.F("x"), d.F("y"), d.F("z")));
 		else if (t == "pickup")
 		{
 			var dr = drops.All.FirstOrDefault(x => x.K == d.I("k"));
@@ -314,7 +317,7 @@ public partial class Main
 				done = true; joinTimer = 0;
 				NetStatus("Joining...");
 				p.Destroy(); peer = null;
-				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192, d.I("s") == 1280 ? 1280 : 640);
+				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192, World.ValidSize(d.I("s"), d.I("h") == 640 ? 640 : 192), d.ContainsKey("b") ? World.ValidBiomes(d.F("b")) : 1);
 				SwitchWorld("join-" + code, true);
 			};
 		};
