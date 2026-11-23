@@ -233,6 +233,8 @@ public class Inventory
 		new() { Out = Blocks.ClayBall, N = 4, Needs = new[] { (Blocks.Clay, 1) } },
 		new() { Out = Blocks.ClayBall, N = 1, Needs = new[] { (Blocks.PieceItem + Blocks.Clay, 2) } },
 		new() { Out = Blocks.Clay, N = 1, Needs = new[] { (Blocks.ClayBall, 4) } },   // 4 Clay Balls packed back into Clay
+		new() { Out = Blocks.SnowBlock, N = 1, Needs = new[] { (Blocks.Snowball, 4) } },   // 4 Snowballs packed into a Snow Block
+		new() { Out = Blocks.Snow, N = 8, Needs = new[] { (Blocks.SnowBlock, 1) } },     // ... which makes 8 layers of Snow
 		new() { Out = Blocks.BricksBlock, N = 1, Needs = new[] { (Blocks.Brick, 4) }, At = "bench" },
 		new() { Out = Blocks.Furnace, N = 1, Needs = new[] { (Blocks.Brick, 8) }, At = "bench" },
 		new() { Out = 67, N = 1, Needs = new[] { (65, 1) }, At = "bench", Tool = "pickaxe" },

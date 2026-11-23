@@ -22,7 +22,7 @@ public partial class Main
 	bool StairStanding(WorldGen.StairSpot s)
 	{
 		var (x, y, z) = StairTopCell(s);
-		if (world.GetBlock(x, y, z) != Blocks.Pieces || !world.PieceMap.TryGetValue(World.Idx(x, y, z), out var a)) return false;
+		if (!Blocks.IsPieces(world.GetBlock(x, y, z)) || !world.PieceMap.TryGetValue(World.Idx(x, y, z), out var a)) return false;
 		for (int b = 0; b < 8; b++) if (a[b] != ((WorldGen.StairMasks[s.Dir] & (1 << b)) != 0 ? s.Mat : 0)) return false;
 		return true;
 	}
@@ -156,7 +156,7 @@ public partial class Main
 		for (int k = 0; k < s.N; k++)
 		{
 			int cx = s.X + d[0] * k, cz = s.Z + d[1] * k;
-			if (world.GetBlock(cx, s.Y + k, cz) == Blocks.Pieces) world.SetBlock(cx, s.Y + k, cz, 0);
+			if (Blocks.IsPieces(world.GetBlock(cx, s.Y + k, cz))) world.SetBlock(cx, s.Y + k, cz, 0);
 			for (int y = s.Y + k - 1; y >= s.Y - 1; y--) if (world.GetBlock(cx, y, cz) == s.Mat) world.SetBlock(cx, y, cz, 0);
 		}
 		stairFall = true; stairOn = -1;

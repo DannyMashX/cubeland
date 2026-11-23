@@ -49,15 +49,44 @@ public static class Atlas
 	public static Image Image;          // TILE*NT x TILE, the plain strip (used to draw icons)
 	public static ImageTexture Texture; // the padded GPU copy, used by the world's blocks
 
+	// The GPU atlas is a grid, Cols pictures across (a single strip got too wide for graphics cards once the cut-shape
+	// pictures came in). The plain Image used for icons is still one strip.
+	const int Cols = 64;
+	static int Rows => (NT + Cols - 1) / Cols;
+	static Vector2I Cell(int t) => new(t % Cols * PW, t / Cols * PW);   // (a picture's top-left corner in the GPU atlas)
 	// the u, v (0-1) in the GPU atlas of a point (u, v in 0-1, v = 0 at the picture's bottom like the web version) inside picture `tile`
-	public static Vector2 UV(int tile, float u, float v) => new((tile * PW + 1 + u * TILE) / (PW * NT), (1 + (1 - v) * TILE) / PW);
+	public static Vector2 UV(int tile, float u, float v) { var c = Cell(tile); return new((c.X + 1 + u * TILE) / (PW * Cols), (c.Y + 1 + (1 - v) * TILE) / (PW * Rows)); }
+
+	// Cut-shape pictures (textures/blocks/shapes/<picture>_<shape>.png): the same picture with its frame drawn along the cut
+	// edges too, for a slab's, stairs'... face that only fills some quarters of it. Quarters of a face, as seen in the
+	// picture: 1 top-left, 2 top-right, 4 bottom-left, 8 bottom-right. Same rule as the web version (see ShapeTile).
+	static readonly Dictionary<string, int> ShapeMasks = new()
+	{
+		["top_half"] = 3, ["bottom_half"] = 12, ["left_half"] = 5, ["right_half"] = 10, ["top_left"] = 1, ["top_right"] = 2, ["bottom_left"] = 4, ["bottom_right"] = 8,
+		["no_top_left"] = 14, ["no_top_right"] = 13, ["no_bottom_left"] = 11, ["no_bottom_right"] = 7, ["diagonal_a"] = 9, ["diagonal_b"] = 6,
+	};
+	static readonly Dictionary<(int, int), int> shapeTiles = new();
+	// the picture for a face showing quarters `mask` of picture `tile`: its cut-shape picture if there is one, else the picture itself
+	// (a face filling just its top or bottom half, like a slab's or a double slab's side: <picture>_slab_side if there is one,
+	// the two halves framed, which the user asked for by name; pixel for pixel the same as top_half / bottom_half)
+	public static int ShapeTile(int tile, int mask) =>
+		(mask == 3 || mask == 12) && slabSides.TryGetValue(tile, out int ss) ? ss
+		: mask != 15 && mask != 0 && shapeTiles.TryGetValue((tile, mask), out int t) ? t : tile;
+	static readonly Dictionary<int, int> slabSides = new();
+	public static int Quarter(int col, int row) => row == 0 ? (col == 0 ? 1 : 2) : (col == 0 ? 4 : 8);   // (col 0 left, row 0 top)
 
 	public static void Build()
 	{
 		System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(Blocks).TypeHandle);   // (every block has asked for its pictures)
 		// the picture files, by name
 		var files = new Dictionary<string, Image>();
-		foreach (string folder in new[] { "res://textures/blocks", "res://textures/items" })
+		// the cut-shape pictures of the pictures blocks use (each gets a place in the atlas now, before it's made)
+		foreach (var (file, _) in Pictures("res://textures/blocks/shapes"))
+			foreach (var (shape, mask) in ShapeMasks)
+				if (file.EndsWith("_" + shape) && slotOf.TryGetValue(file[..^(shape.Length + 1)], out int baseTile)) { shapeTiles[(baseTile, mask)] = Tile(file); break; }
+		foreach (var (file, _) in Pictures("res://textures/blocks"))
+			if (file.EndsWith("_slab_side") && slotOf.TryGetValue(file[..^"_slab_side".Length], out int baseTile)) slabSides[baseTile] = Tile(file);
+		foreach (string folder in new[] { "res://textures/blocks", "res://textures/items", "res://textures/blocks/shapes" })
 			foreach (var (file, path) in Pictures(folder))
 			{
 				string name = Spellings.TryGetValue(file, out var s) ? s : file;
@@ -79,12 +108,12 @@ public static class Atlas
 			for (int y = 0; y < TILE; y++) for (int x = 0; x < TILE; x++)
 				Image.SetPixel(t * TILE + x, y, ((x / 4 + y / 4) & 1) == 0 ? new Color(0.8f, 0.4f, 0.7f) : new Color(0.3f, 0.3f, 0.3f));
 		}
-		gpu = Image.CreateEmpty(PW * NT, PW, false, Image.Format.Rgba8);
-		for (int t = 0; t < NT; t++) for (int y = 0; y < PW; y++) for (int x = 0; x < PW; x++)
+		gpu = Image.CreateEmpty(PW * Cols, PW * Rows, false, Image.Format.Rgba8);
+		for (int t = 0; t < NT; t++) { var c = Cell(t); for (int y = 0; y < PW; y++) for (int x = 0; x < PW; x++)
 		{
 			int sx = t * TILE + Mathf.Clamp(x - 1, 0, TILE - 1), sy = Mathf.Clamp(y - 1, 0, TILE - 1);
-			gpu.SetPixel(t * PW + x, y, Image.GetPixel(sx, sy));
-		}
+			gpu.SetPixel(c.X + x, c.Y + y, Image.GetPixel(sx, sy));
+		} }
 		Texture = ImageTexture.CreateFromImage(gpu);
 	}
 	static Image gpu;
@@ -97,13 +126,13 @@ public static class Atlas
 		int f = (int)(sawTime * SawFps) % SawFrames.Length;
 		if (f == sawFrame) return;
 		sawFrame = f;
-		gpu.BlitRect(gpu, new Rect2I(SawFrames[f] * PW, 0, PW, PW), new Vector2I(SawTile * PW, 0));
+		gpu.BlitRect(gpu, new Rect2I(Cell(SawFrames[f]), new Vector2I(PW, PW)), Cell(SawTile));
 		Texture.Update(gpu);
 	}
 	// (self-test: stepping on by one frame's time shows the other frame, then the first again)
 	public static bool SawSpins()
 	{
-		byte[] Px(int t) => gpu.GetRegion(new Rect2I(t * PW, 0, PW, PW)).GetData();
+		byte[] Px(int t) => gpu.GetRegion(new Rect2I(Cell(t), new Vector2I(PW, PW))).GetData();
 		bool Shows(int t) => Px(SawTile).AsSpan().SequenceEqual(Px(t));
 		if (gpu == null || Px(SawFrames[0]).AsSpan().SequenceEqual(Px(SawFrames[1]))) return false;   // (two different pictures needed)
 		int a = SawFrames[sawFrame], b = SawFrames[1 - sawFrame];
@@ -154,10 +183,29 @@ public static class Atlas
 			return boxes.ToArray();
 		}
 		if (b.Shape == "half") return new[] { new[] { 0, 16, 0, 16, 0, 8 } };   // the Cutter: half a block tall
+		if (b.Shape == "snow") return new[] { new[] { 0, 16, 0, 16, 0, 2 * b.Layers } };   // snow: as deep as its layers
 		if (!IsCubeIcon(id)) return null;
 		return b.Shape == "torch" ? new[] { new[] { 6, 10, 6, 10, 0, 16 } } : new[] { new[] { 0, 16, 0, 16, 0, 16 } };
 	}
 	public static bool Is3DIcon(int id) => IconBoxes(id) != null;
+	// a slab's, stairs'... face in its icon or model, facing (dx, dy, dz): its cut-shape picture. The quarters that show are
+	// the spots in the same layer along that axis that are filled and not covered that way by another spot of the shape;
+	// each is the quarter of the picture its face shows (col 0 left, row 0 top). Same rule as the world's pieces.
+	static int CutTile(int id, int tile, int[] box, int dx, int dy, int dz)
+	{
+		var b = Blocks.Get(id);
+		if (b?.Form == null || !IconMasks.TryGetValue(b.Form, out int mask)) return tile;
+		bool Filled(int x, int y, int z) => x >= 0 && x < 2 && y >= 0 && y < 2 && z >= 0 && z < 2 && (mask & (1 << (x + y * 2 + z * 4))) != 0;
+		int sx = box[0] / 8, sz = box[2] / 8, sy = box[4] / 8, q = 0;
+		for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++)
+		{
+			int x = dx != 0 ? sx : i, y = dy != 0 ? sy : dx != 0 ? i : j, z = dz != 0 ? sz : j;
+			if (!Filled(x, y, z) || Filled(x + dx, y + dy, z + dz)) continue;
+			int col = dy != 0 ? x : dz > 0 ? x : dz < 0 ? 1 - x : dx > 0 ? 1 - z : z, row = dy != 0 ? z : 1 - y;
+			q |= Quarter(col, row);
+		}
+		return ShapeTile(tile, q);
+	}
 	// a thing's face pictures: top, front, side, bottom (the kiln's front is its opening)
 	static int[] IconTiles(BlockDef b) => new[] { b.T[1], b.T.Length > 3 ? b.T[3] : b.T[0], b.T[0], b.T[2] };
 	// The 3D icon: seen from above at the front-left corner, in a 4 x TILE square (each texture pixel is 2 icon pixels
@@ -167,6 +215,7 @@ public static class Atlas
 	{
 		int R = TILE * 4, T = TILE; float k = 2;
 		var boxes = IconBoxes(id); var tiles = IconTiles(Blocks.Get(id));
+		bool saw = Blocks.Plain(id) == Blocks.Cutter;
 		float[] shades = { 1, 0.8f, 0.62f };
 		var img = Image.CreateEmpty(R, R, false, Image.Format.Rgba8);
 		for (int y = 0; y < R; y++)
@@ -178,11 +227,12 @@ public static class Atlas
 				foreach (var bx in boxes)
 				{
 					float a0 = bx[0], a1 = bx[1], b0 = bx[2], b1 = bx[3], d0 = T - bx[5], d1 = T - bx[4];
+					int[] bt = { CutTile(id, tiles[0], bx, 0, 1, 0), CutTile(id, tiles[1], bx, 0, 0, 1), CutTile(id, tiles[2], bx, 1, 0, 0) };   // (top, front, side)
 					void Try(int f, float A, float B, float D, int u, int v)
 					{
 						float depth = A + B - D;
 						if (depth <= best) return;
-						var c = Image.GetPixel(tiles[f] * T + u, v);
+						var c = Image.GetPixel(bt[f] * T + u, v);
 						if (c.A < 0.5f) return;
 						best = depth; col = new Color(c.R * shades[f], c.G * shades[f], c.B * shades[f], 1);
 					}
@@ -193,21 +243,17 @@ public static class Atlas
 					{ float B = a1 - X, D = Y - (a1 + B) / 2;                           // side
 					  if (B >= b0 && B < b1 && D >= d0 && D < d1) Try(2, a1, B, D, T - 1 - (int)MathF.Floor(B), (int)MathF.Floor(D)); }
 				}
+				if (saw)
+				{   // the Cutter's saw blade: the top half of its picture, standing up across the middle (x 8) above the base, as in the world
+					float B = T / 2f - X, D = Y - (T / 2f + B) / 2, depth = T / 2f + B - D;
+					if (B >= 0 && B < T && D >= 0 && D < T / 2f && depth > best)
+					{
+						var c = Image.GetPixel(SawTile * T + (int)MathF.Floor(B), (int)MathF.Floor(D));
+						if (c.A >= 0.5f) { best = depth; col = new Color(c.R * 0.8f, c.G * 0.8f, c.B * 0.8f, 1); }
+					}
+				}
 				if (col != null) img.SetPixel(x, y, col.Value);
 			}
-		return LeafTint(id, img);
-	}
-	// Fir, Palm and Willow Leaves (and their pieces, slabs and stairs) share the Oak Leaves picture: their icons and drops get its green in their own colour
-	static Image LeafTint(int id, Image img)
-	{
-		var b = Blocks.Get(id);
-		var t = b == null ? null : Blocks.LeafTint(id) ?? Blocks.LeafTint(b.Piece) ?? Blocks.LeafTint(b.Of);
-		if (t == null) return img;
-		for (int y = 0; y < img.GetHeight(); y++) for (int x = 0; x < img.GetWidth(); x++)
-		{
-			var c = img.GetPixel(x, y);
-			if (c.G > c.R && c.G > c.B) img.SetPixel(x, y, new Color(c.R * t[0], c.G * t[1], Mathf.Min(1, c.B * t[2]), c.A));
-		}
 		return img;
 	}
 	// the same boxes as a little 3D model, 1 unit for a whole block, centred, with each face's picture (for drops).
@@ -218,17 +264,26 @@ public static class Atlas
 	{
 		if (boxModels.TryGetValue(id, out var m)) return m;
 		int T = TILE; var tiles = IconTiles(Blocks.Get(id));
-		var strip = Image.CreateEmpty(T * 4, T, false, Image.Format.Rgba8);
-		for (int f = 0; f < 4; f++) strip.BlitRect(Image, new Rect2I(tiles[f] * T, 0, T, T), new Vector2I(f * T, 0));
-		strip = LeafTint(id, strip);
-		var st = new SurfaceTool(); st.Begin(Mesh.PrimitiveType.Triangles);
-		// one face: corners p ({A, h, B}), their texture pixels q ({u, v}, v down from the picture's top), tile f, shade
-		void Face(float[][] p, float[][] q, int f, float s)
+		// its texture: the pictures its faces use (the 4 face pictures, cut-shape ones, the Cutter's saw blade) side by side
+		const int Slots = 32;
+		var strip = Image.CreateEmpty(T * Slots, T, false, Image.Format.Rgba8);
+		var slotOfTile = new Dictionary<int, int>();
+		int Slot(int tile)
 		{
+			if (slotOfTile.TryGetValue(tile, out int sl)) return sl;
+			sl = slotOfTile.Count; slotOfTile[tile] = sl;
+			strip.BlitRect(Image, new Rect2I(tile * T, 0, T, T), new Vector2I(sl * T, 0));
+			return sl;
+		}
+		var st = new SurfaceTool(); st.Begin(Mesh.PrimitiveType.Triangles);
+		// one face: corners p ({A, h, B}), their texture pixels q ({u, v}, v down from the picture's top), picture `tile`, shade
+		void Face(float[][] p, float[][] q, int tile, float s)
+		{
+			int f = Slot(tile);
 			foreach (int i in new[] { 0, 1, 2, 0, 2, 3 })
 			{
 				st.SetColor(new Color(s, s, s));
-				st.SetUV(new Vector2((f * T + q[i][0]) / (T * 4f), q[i][1] / T));
+				st.SetUV(new Vector2((f * T + q[i][0]) / (T * (float)Slots), q[i][1] / T));
 				st.AddVertex(new Vector3(p[i][0] / T - 0.5f, p[i][1] / T - 0.5f, p[i][2] / T - 0.5f));
 			}
 		}
@@ -237,12 +292,18 @@ public static class Atlas
 		foreach (var bx in IconBoxes(id))
 		{
 			float a0 = bx[0], a1 = bx[1], b0 = bx[2], b1 = bx[3], h0 = bx[4], h1 = bx[5], d0 = T - h1, d1 = T - h0;
-			Face(new[] { P(a0, h1, b0), P(a0, h1, b1), P(a1, h1, b1), P(a1, h1, b0) }, new[] { Q(a0, b0), Q(a0, b1), Q(a1, b1), Q(a1, b0) }, 0, 1);       // top
-			Face(new[] { P(a0, h0, b1), P(a0, h0, b0), P(a1, h0, b0), P(a1, h0, b1) }, new[] { Q(a0, b1), Q(a0, b0), Q(a1, b0), Q(a1, b1) }, 3, 0.5f);    // bottom
-			Face(new[] { P(a0, h1, b1), P(a0, h0, b1), P(a1, h0, b1), P(a1, h1, b1) }, new[] { Q(a0, d0), Q(a0, d1), Q(a1, d1), Q(a1, d0) }, 1, 0.8f);    // front
-			Face(new[] { P(a1, h1, b0), P(a1, h0, b0), P(a0, h0, b0), P(a0, h1, b0) }, new[] { Q(T - a1, d0), Q(T - a1, d1), Q(T - a0, d1), Q(T - a0, d0) }, 2, 0.8f);   // back
-			Face(new[] { P(a1, h1, b1), P(a1, h0, b1), P(a1, h0, b0), P(a1, h1, b0) }, new[] { Q(T - b1, d0), Q(T - b1, d1), Q(T - b0, d1), Q(T - b0, d0) }, 2, 0.62f);  // right side
-			Face(new[] { P(a0, h1, b0), P(a0, h0, b0), P(a0, h0, b1), P(a0, h1, b1) }, new[] { Q(b0, d0), Q(b0, d1), Q(b1, d1), Q(b1, d0) }, 2, 0.62f);   // left side
+			Face(new[] { P(a0, h1, b0), P(a0, h1, b1), P(a1, h1, b1), P(a1, h1, b0) }, new[] { Q(a0, b0), Q(a0, b1), Q(a1, b1), Q(a1, b0) }, CutTile(id, tiles[0], bx, 0, 1, 0), 1);       // top
+			Face(new[] { P(a0, h0, b1), P(a0, h0, b0), P(a1, h0, b0), P(a1, h0, b1) }, new[] { Q(a0, b1), Q(a0, b0), Q(a1, b0), Q(a1, b1) }, CutTile(id, tiles[3], bx, 0, -1, 0), 0.5f);    // bottom
+			Face(new[] { P(a0, h1, b1), P(a0, h0, b1), P(a1, h0, b1), P(a1, h1, b1) }, new[] { Q(a0, d0), Q(a0, d1), Q(a1, d1), Q(a1, d0) }, CutTile(id, tiles[1], bx, 0, 0, 1), 0.8f);    // front
+			Face(new[] { P(a1, h1, b0), P(a1, h0, b0), P(a0, h0, b0), P(a0, h1, b0) }, new[] { Q(T - a1, d0), Q(T - a1, d1), Q(T - a0, d1), Q(T - a0, d0) }, CutTile(id, tiles[2], bx, 0, 0, -1), 0.8f);   // back
+			Face(new[] { P(a1, h1, b1), P(a1, h0, b1), P(a1, h0, b0), P(a1, h1, b0) }, new[] { Q(T - b1, d0), Q(T - b1, d1), Q(T - b0, d1), Q(T - b0, d0) }, CutTile(id, tiles[2], bx, 1, 0, 0), 0.62f);  // right side
+			Face(new[] { P(a0, h1, b0), P(a0, h0, b0), P(a0, h0, b1), P(a0, h1, b1) }, new[] { Q(b0, d0), Q(b0, d1), Q(b1, d1), Q(b1, d0) }, CutTile(id, tiles[2], bx, -1, 0, 0), 0.62f);   // left side
+		}
+		if (Blocks.Plain(id) == Blocks.Cutter)
+		{   // the saw blade: the top half of its picture, standing up across the middle (x 8) above the base, seen from both sides
+			float mid = T / 2f;
+			Face(new[] { P(mid, T, 0), P(mid, mid, 0), P(mid, mid, T), P(mid, T, T) }, new[] { Q(0, 0), Q(0, mid), Q(T, mid), Q(T, 0) }, SawTile, 0.8f);
+			Face(new[] { P(mid, T, T), P(mid, mid, T), P(mid, mid, 0), P(mid, T, 0) }, new[] { Q(T, 0), Q(T, mid), Q(0, mid), Q(0, 0) }, SawTile, 0.8f);
 		}
 		return boxModels[id] = (st.Commit(), ImageTexture.CreateFromImage(strip));
 	}
@@ -281,6 +342,6 @@ public static class Atlas
 			int tile = b.Icon >= 0 ? b.Icon : b.T[0];
 			icon.BlitRect(Image, new Rect2I(tile * TILE, 0, TILE, TILE), Vector2I.Zero);
 		}
-		return LeafTint(id, icon);
+		return icon;
 	}
 }

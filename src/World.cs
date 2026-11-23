@@ -60,15 +60,19 @@ public partial class World
 	// How big the biomes are (Biomes worlds): 0.5 (half size) to 4 (4 times as big), in quarters; 1 is the usual size
 	public const double MinBiomes = 0.5, MaxBiomes = 4;
 	public static double ValidBiomes(double b) => b >= MinBiomes && b <= MaxBiomes && Math.Abs(b * 4 - Math.Round(b * 4)) < 1e-9 ? Math.Round(b * 4) / 4 : 1;
+	// The land's version: which features a world grows with. 0 = worlds made before Beta 0.1.1.3 (they keep growing exactly as they did);
+	// 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. New worlds get LandVersion.
+	public const int LandVersion = 1;
+	public static int ValidLand(int l) => Math.Clamp(l, 0, LandVersion);
 
 	// height: 640 for tall worlds, 192 otherwise; size: how far across (see ValidSize); biomes: how big the biomes are
-	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1)
+	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1, int land = 0)
 	{
 		WY = height == 640 ? 640 : 192;
 		WX = ValidSize(size, WY);
 		Blocks = new BlockStore(WX, WY, WZ);
 		Heights = new int[WX * WZ]; ChunkTop = new int[NCX * NCZ]; SkyTop = new short[WX * WZ];
-		Gen = new WorldGen(this, seed, gen) { BiomeScale = ValidBiomes(biomes) };
+		Gen = new WorldGen(this, seed, gen) { BiomeScale = ValidBiomes(biomes), Land = ValidLand(land) };
 	}
 
 	public void Generate(Action<float> progress)
@@ -76,21 +80,24 @@ public partial class World
 		Gen.Progress = progress;
 		Raw = new byte[WX * WY * WZ];
 		Gen.Generate();
+		var late = Gen.Late.FindAll(l => Raw[l.i] == l.stand);   // (the blocks numbered 256 and up that are still wanted)
 		if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--worldhash") >= 0)   // (testing: a fingerprint of the new world, to check the web version grows the same one)
 		{
 			uint h = 2166136261; foreach (byte b in Raw) h = (h ^ b) * 16777619;
+			foreach (var l in late) { h = (h ^ (uint)l.i) * 16777619; h = (h ^ (uint)l.id) * 16777619; }
 			Godot.GD.Print($"WORLDHASH {h:x8}");
+			Godot.GD.Print($"STRUCTURES {Gen.Built.Count}: " + string.Join(" | ", Gen.Built));
 			Godot.GD.Print($"STAIRS {Gen.StairSpots.Count} spots: " + string.Join(" ", Gen.StairSpots.FindAll(s => s.Placed).ConvertAll(s => $"{s.X},{s.Y},{s.Z},{s.Dir},{s.N},{s.Mat}")));
 		}
 		var packTime = System.Diagnostics.Stopwatch.StartNew();
 		Blocks.Load(Raw); Raw = null;
+		foreach (var l in late) Blocks[l.i] = l.id;
 		if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--worldhash") >= 0)   // (testing: how much the packed blocks take)
 		{
 			var (bytes, uniform) = Blocks.Usage();
 			Godot.GD.Print($"BLOCKSTORE {bytes / 1048576.0:0.0} MB (was {Blocks.Length / 1048576.0:0.0} MB), {uniform} chunks all one block, packed in {packTime.ElapsedMilliseconds} ms");
 			uint h2 = 2166136261; for (int i = 0; i < Blocks.Length; i++) h2 = (h2 ^ (byte)Blocks[i]) * 16777619;
-			Godot.GD.Print($"PACKEDHASH {h2:x8}");
-		}
+			Godot.GD.Print($"PACKEDHASH {h2:x8}");		}
 		RecomputeHeights();
 		Array.Clear(ChunkTop);
 		for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
@@ -135,8 +142,8 @@ public partial class World
 	{
 		int x = FloorDiv(X, 2), y = FloorDiv(Y, 2), z = FloorDiv(Z, 2), b = GetBlock(x, y, z);
 		if (b != 0 && Cubeland.Blocks.B[b]?.Shape == "half") return Y - 2 * y != 0 ? 0 : b;   // (a half-tall block fills only the bottom half)
-		if (b != Cubeland.Blocks.Pieces) return b;
-		return PieceMap.TryGetValue(Idx(x, y, z), out var a) ? a[(X - 2 * x) + (Y - 2 * y) * 2 + (Z - 2 * z) * 4] : 0;
+		if (!Cubeland.Blocks.IsPieces(b)) return b;
+		return PieceMap.TryGetValue(Idx(x, y, z), out var a) ? SpotBlock(a[(X - 2 * x) + (Y - 2 * y) * 2 + (Z - 2 * z) * 4]) : 0;
 	}
 	public static int FloorDiv(int a, int b) => (int)Math.Floor(a / (double)b);
 
@@ -243,13 +250,13 @@ public partial class World
 		int i = Idx(x, y, z), old = Blocks.Get(x, y, z);
 		Blocks.Set(x, y, z, id);
 		Edits[i] = id;
-		if (id != Cubeland.Blocks.Pieces) PieceMap.Remove(i);
+		if (!Cubeland.Blocks.IsPieces(id)) PieceMap.Remove(i);
 		if (Cubeland.Blocks.IsTorch(old)) Torches.Remove(i);
 		if (Cubeland.Blocks.IsTorch(id)) Torches.Add(i);
 		// a torch spot that's newly lit or smoldering starts its burn-down timer (adding one to a spot keeps its timer)
 		if (!BurnsDown(id)) TorchBurn.Remove(i);
 		else if (!BurnsDown(old) || Cubeland.Blocks.B[old].Burn != Cubeland.Blocks.B[id].Burn) TorchBurn[i] = BurnTime(Cubeland.Blocks.B[id].Burn);
-		if (id == Cubeland.Blocks.ClayBallBlock) { if (old != id) Drying[i] = DryTime; } else Drying.Remove(i);
+		if (Cubeland.Blocks.Plain(id) == Cubeland.Blocks.ClayBallBlock) { if (Cubeland.Blocks.Plain(old) != Cubeland.Blocks.ClayBallBlock) Drying[i] = DryTime; } else Drying.Remove(i);
 		FarmChanged(i, old, id, false);
 		BlockChanged?.Invoke(i, old, id, 0);
 		// keep the sky map up to date, and relight nearby chunks if what can see the sky changed
@@ -291,13 +298,13 @@ public partial class World
 		{
 			int i = idxs[k], id = ids[k];
 			if (i < 0 || i >= Blocks.Length || (id != 0 && Cubeland.Blocks.Get(id) == null)) continue;
-			if (id == Cubeland.Blocks.Pieces && !PieceMap.ContainsKey(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
-			if (id != Cubeland.Blocks.Pieces) PieceMap.Remove(i);
+			if (Cubeland.Blocks.IsPieces(id) && !PieceMap.ContainsKey(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
+			if (!Cubeland.Blocks.IsPieces(id)) PieceMap.Remove(i);
 			var (x, y, z) = FromIdx(i);
 			Blocks.Set(x, y, z, id); Edits[i] = id;
 			if (Cubeland.Blocks.IsTorch(id)) Torches.Add(i); else Torches.Remove(i);
 			if (BurnsDown(id)) TorchBurn[i] = BurnTime(Cubeland.Blocks.B[id].Burn); else TorchBurn.Remove(i);   // (then the save puts back how long each has left)
-			if (id == Cubeland.Blocks.ClayBallBlock) Drying[i] = DryTime; else Drying.Remove(i);
+			if (Cubeland.Blocks.Plain(id) == Cubeland.Blocks.ClayBallBlock) Drying[i] = DryTime; else Drying.Remove(i);
 			FarmChanged(i, 0, id, true);
 			WakeWater(x, y, z);   // water that was still flowing when you saved carries on
 			cols.Add(z * WX + x);
@@ -328,7 +335,7 @@ public partial class World
 			int id = Blocks[i];
 			if (!BurnsDown(id)) { TorchBurn.Remove(i); continue; }
 			var b = Cubeland.Blocks.B[id]; var (x, y, z) = FromIdx(i);
-			SetBlock(x, y, z, Cubeland.Blocks.TorchVariant(b.Wi, b.Count, b.Burn + 1));   // (starts the next stage's timer, or ends it once burnt)
+			SetBlock(x, y, z, Cubeland.Blocks.WithSnow(Cubeland.Blocks.TorchVariant(b.Wi, b.Count, b.Burn + 1), b.Snowed));   // (starts the next stage's timer, or ends it once burnt)
 		}
 		done.Clear();
 		foreach (var i in new List<int>(Drying.Keys)) { float left = Drying[i] - dt; if (left > 0) Drying[i] = left; else done.Add(i); }
@@ -336,7 +343,7 @@ public partial class World
 		{
 			Drying.Remove(i);
 			var (x, y, z) = FromIdx(i);
-			if (Blocks[i] == Cubeland.Blocks.ClayBallBlock) SetBlock(x, y, z, Cubeland.Blocks.BrickBlock);
+			if (Cubeland.Blocks.Plain(Blocks[i]) == Cubeland.Blocks.ClayBallBlock) SetBlock(x, y, z, Cubeland.Blocks.WithSnow(Cubeland.Blocks.BrickBlock, Cubeland.Blocks.SnowIn(Blocks[i])));
 		}
 		TickFarm(dt);
 	}
@@ -422,14 +429,23 @@ public partial class World
 	// when a block is removed, torches standing on it or stuck to its sides fall off (and a rock lying on it)
 	public void DropTorchesAround(int x, int y, int z, Func<int, int> dropFor)
 	{
-		void Fall(int tx, int ty, int tz, int t) { for (int n = Cubeland.Blocks.B[t].Count; n > 0; n--) Drop?.Invoke(Cubeland.Blocks.TorchDrop(t), tx, ty, tz); SetBlock(tx, ty, tz, 0); }
+		void Snowballs(int tx, int ty, int tz, int layers) { for (int n = Cubeland.Blocks.SnowballsFor(layers, Random.Shared); n > 0; n--) Drop?.Invoke(Cubeland.Blocks.Snowball, tx, ty, tz); }
+		// (a torch on a wall falls off it, but the snow round it still lies on the ground, so that stays)
+		void Fall(int tx, int ty, int tz, int t, bool keepSnow = false)
+		{
+			for (int n = Cubeland.Blocks.B[t].Count; n > 0; n--) Drop?.Invoke(Cubeland.Blocks.TorchDrop(t), tx, ty, tz);
+			if (keepSnow && Cubeland.Blocks.SnowIn(t) > 0) SetBlock(tx, ty, tz, Cubeland.Blocks.Snow);
+			else { Snowballs(tx, ty, tz, Cubeland.Blocks.SnowIn(t)); SetBlock(tx, ty, tz, 0); }
+		}
 		int above = GetBlock(x, y + 1, z);
 		if (Cubeland.Blocks.IsTorch(above) && Cubeland.Blocks.B[above].Wall == null) Fall(x, y + 1, z, above);
-		if (Cubeland.Blocks.Get(above)?.Shape is "flat" or "plant") { Drop?.Invoke(dropFor(above), x, y + 1, z); SetBlock(x, y + 1, z, 0); }   // (a rock lying on it, or a flower growing in it)
+		else if (Cubeland.Blocks.Get(above)?.Shape is "flat" or "plant") { Drop?.Invoke(dropFor(above), x, y + 1, z); Snowballs(x, y + 1, z, Cubeland.Blocks.SnowIn(above)); SetBlock(x, y + 1, z, 0); }   // (a rock lying on it, or a flower growing in it)
+		else if (Cubeland.Blocks.SnowIn(above) > 0 && !Cubeland.Blocks.IsPieces(above)) { Snowballs(x, y + 1, z, 1); SetBlock(x, y + 1, z, Cubeland.Blocks.Plain(above)); }   // (the snow round a wall torch, stairs or the Cutter, with nothing under it now)
+		if (Cubeland.Blocks.IsSnow(above)) { Snowballs(x, y + 1, z, Cubeland.Blocks.B[above].Layers); SetBlock(x, y + 1, z, 0); }   // (snow lying on it)
 		foreach (var s in Sides)
 		{
 			int n = GetBlock(x + s[0], y, z + s[1]);
-			if (Cubeland.Blocks.IsTorch(n) && Cubeland.Blocks.B[n].Wall is { } w && w[0] == -s[0] && w[1] == -s[1]) Fall(x + s[0], y, z + s[1], n);
+			if (Cubeland.Blocks.IsTorch(n) && Cubeland.Blocks.B[n].Wall is { } w && w[0] == -s[0] && w[1] == -s[1]) Fall(x + s[0], y, z + s[1], n, true);
 		}
 	}
 
@@ -438,41 +454,51 @@ public partial class World
 	{
 		if (!Inside(x, y, z)) return false;
 		int i = Idx(x, y, z), cur = Blocks.Get(x, y, z);
-		int[] a = cur == Cubeland.Blocks.Pieces && PieceMap.TryGetValue(i, out var have) ? have : null;
+		int[] a = Cubeland.Blocks.IsPieces(cur) && PieceMap.TryGetValue(i, out var have) ? have : null;
 		if (a == null)
 		{
-			if (id == 0 || (cur != 0 && !Cubeland.Blocks.IsWater(cur))) return false;
+			if (id == 0 || (cur != 0 && !Cubeland.Blocks.IsWater(cur) && cur != Cubeland.Blocks.Snow)) return false;   // (into one layer of snow too: it stays round them)
 			a = new int[8];
 		}
 		a = (int[])a.Clone();
-		for (int s = 0; s < 8; s++) if ((mask & (1 << s)) != 0) { if (id != 0 && a[s] != 0) return false; a[s] = id; }
-		ApplyPieces(x, y, z, a);
+		int v = id == 0 ? 0 : id + GroupMul * FreeGroup(a);
+		for (int s = 0; s < 8; s++) if ((mask & (1 << s)) != 0) { if (id != 0 && a[s] != 0) return false; a[s] = v; }
+		ApplyPieces(x, y, z, a, cur == Cubeland.Blocks.Snow || cur == Cubeland.Blocks.SnowyPieces);
 		return true;
 	}
+	// Each of a pieces space's 8 spots holds block + GroupMul x group. Everything put down at once (a slab, stairs, a quarter,
+	// a vertical shape, or one loose piece) shares a group, 1-15, the lowest free in that space; spots saved before groups came
+	// in are group 0 (they keep the old rule: the same block's spots are one shape). Things never join together: two slabs
+	// stay a double slab, 8 pieces stay 8 pieces. Same numbers as the web version.
+	public const int GroupMul = 4096;
+	public static int SpotBlock(int v) => v % GroupMul;
+	static int FreeGroup(int[] a) { for (int g = 1; g <= 15; g++) if (Array.TrueForAll(a, v => v / GroupMul != g)) return g; return 15; }
 	public bool SetPiece(int x, int y, int z, int s, int id)
 	{
 		if (!Inside(x, y, z)) return false;
 		int i = Idx(x, y, z), cur = Blocks.Get(x, y, z);
-		int[] a = cur == Cubeland.Blocks.Pieces && PieceMap.TryGetValue(i, out var have) ? have : null;
+		int[] a = Cubeland.Blocks.IsPieces(cur) && PieceMap.TryGetValue(i, out var have) ? have : null;
 		if (a == null)
 		{
-			if (id == 0 || (cur != 0 && !Cubeland.Blocks.IsWater(cur))) return false;
+			if (id == 0 || (cur != 0 && !Cubeland.Blocks.IsWater(cur) && cur != Cubeland.Blocks.Snow)) return false;
 			a = new int[8];
 		}
 		if (id != 0 && a[s] != 0) return false;
-		a = (int[])a.Clone(); a[s] = id;
-		ApplyPieces(x, y, z, a);
+		a = (int[])a.Clone(); a[s] = id == 0 ? 0 : id + GroupMul * FreeGroup(a);
+		ApplyPieces(x, y, z, a, cur == Cubeland.Blocks.Snow || cur == Cubeland.Blocks.SnowyPieces);
 		return true;
 	}
-	void ApplyPieces(int x, int y, int z, int[] a)
+	// (in snow: the space keeps its layer of snow while it holds pieces, and is left as Snow when the last one goes)
+	void ApplyPieces(int x, int y, int z, int[] a, bool snowy = false)
 	{
 		bool all = a[0] != 0, any = false;
 		for (int s = 0; s < 8; s++) { if (a[s] != a[0]) all = false; if (a[s] != 0) any = true; }
-		if (all) SetBlock(x, y, z, a[0]);
-		else if (any) { PieceMap[Idx(x, y, z)] = a; SetBlock(x, y, z, Cubeland.Blocks.Pieces); }
-		else SetBlock(x, y, z, 0);
+		if (all && a[0] < GroupMul) SetBlock(x, y, z, a[0]);   // (only spots from before groups ever join into a whole block)
+		else if (any) { PieceMap[Idx(x, y, z)] = a; SetBlock(x, y, z, snowy ? Cubeland.Blocks.SnowyPieces : Cubeland.Blocks.Pieces); }
+		else if (snowy && Cubeland.Blocks.Get(GetBlock(x, y - 1, z)) is { Shape: null, Liquid: false, NoCollide: false, Item: false }) SetBlock(x, y, z, Cubeland.Blocks.Snow);
+		else { if (snowy) for (int n = Cubeland.Blocks.SnowballsFor(1, Random.Shared); n > 0; n--) Drop?.Invoke(Cubeland.Blocks.Snowball, x, y, z); SetBlock(x, y, z, 0); }   // (nothing under it to hold the snow: Snowballs)
 	}
-	// the shape the piece in spot s belongs to (its block's pieces in this space), or null if it's a loose piece
+	// the shape the piece in spot s belongs to (the spots of its group: put down together), or null if it's a loose piece
 	public static (string shape, int mask, int block)? ShapeAt(int[] a, int s)
 	{
 		int b = a[s];
@@ -480,6 +506,6 @@ public partial class World
 		int mask = 0;
 		for (int k = 0; k < 8; k++) if (a[k] == b) mask |= 1 << k;
 		var shape = Cubeland.Blocks.ShapeOfMask(mask);
-		return shape != null ? (shape, mask, b) : null;
+		return shape != null ? (shape, mask, SpotBlock(b)) : null;
 	}
 }

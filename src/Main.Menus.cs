@@ -25,7 +25,7 @@ public partial class Main
 	// ---- Settings (saved in the game's user folder) ----
 	public class SettingsData
 	{
-		public int Sens = 100, Fov = 75, RenderDist = 10; public bool Info = true, Autosave = true, Muted; public string Name = "Player";
+		public int Sens = 100, Fov = 75, RenderDist = 10, Gui; public bool Info = true, Autosave = true, Muted; public string Name = "Player";
 		public Dictionary<string, int> Vol = new() { ["master"] = 100, ["block"] = 100, ["player"] = 100, ["mob"] = 100, ["music"] = 100 };
 	}
 	static SettingsData settings;
@@ -42,12 +42,24 @@ public partial class Main
 		cam.Fov = settings.Fov;
 		settings.RenderDist = Math.Clamp(settings.RenderDist, MinRender, MaxRender);
 		ApplyRenderDist();
+		ApplyGui();
 		info.Visible = settings.Info;
 		foreach (var (k, v) in settings.Vol) Sound.Levels[k] = v / 100f;
 		Sound.Muted = settings.Muted;
 		using var f = FileAccess.Open("user://settings.json", FileAccess.ModeFlags.Write);
 		f?.StoreString(JsonSerializer.Serialize(settings, SetOpts));
 		UpdateSaveText();
+	}
+	// GUI scale: 0 = automatic (from your display scaling), or 1-4 times. Always a whole number, so every pixel stays even;
+	// a bigger one than the window has room for is made as big as fits.
+	static int autoGui = 1;
+	const int MaxGui = 4;
+	static int GuiFits() { var s = DisplayServer.WindowGetSize(); return Math.Max(1, Math.Min(s.X / 600, s.Y / 360)); }
+	void ApplyGui()
+	{
+		settings.Gui = Math.Clamp(settings.Gui, 0, MaxGui);
+		if (OS.GetCmdlineUserArgs().Any(a => a.StartsWith("--uiscale="))) return;
+		GetTree().Root.ContentScaleFactor = settings.Gui > 0 ? Math.Min(settings.Gui, GuiFits()) : autoGui;
 	}
 	float MouseSens => 0.0025f * settings.Sens / 100f;
 
@@ -67,13 +79,13 @@ public partial class Main
 		if (sa != null)
 		{   // testing: a throwaway world that isn't in your list and never saves
 			tempWorld = true;
-			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : ArgInt("--size=", 1280), B = ArgInt("--biomescale=", 100) / 100.0, Mode = HasArg("--survival") ? "survival" : "creative" };
+			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : ArgInt("--size=", 1280), B = ArgInt("--biomescale=", 100) / 100.0, Land = HasArg("--oldland") ? 0 : World.LandVersion, Mode = HasArg("--survival") ? "survival" : "creative" };
 			menuOpen = HasArg("--menu");
 			return;
 		}
 		if (joinInfo != null && openWorldId == "join-" + joinInfo.Code)
 		{   // a friend's world you're joining: it isn't one of your worlds and isn't saved here
-			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, S = joinInfo.S, B = joinInfo.B, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
+			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, S = joinInfo.S, B = joinInfo.B, Land = joinInfo.Land, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
 			menuOpen = false; wantPlay = true; playOnLoad = false;
 			return;
 		}
@@ -173,12 +185,13 @@ public partial class Main
 		var b = Centered(settingsPanel, true);
 		b.AddChild(Text("Settings", 20));
 		var grid = new GridContainer { Columns = 3 }; grid.AddThemeConstantOverride("h_separation", 14); b.AddChild(grid);
-		void Slider(string name, int min, int max, int step, Func<int> get, Action<int> set, string unit)
+		void Slider(string name, int min, int max, int step, Func<int> get, Action<int> set, string unit, Func<int, string> show = null)
 		{
 			var nl = Text(name, 15); nl.CustomMinimumSize = new Vector2(150, 0); grid.AddChild(nl);
 			var s = new HSlider { MinValue = min, MaxValue = max, Step = step, Value = get(), CustomMinimumSize = new Vector2(240, 24), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-			var v = Text(get() + unit, 15); v.CustomMinimumSize = new Vector2(56, 0);
-			s.ValueChanged += x => { set((int)x); v.Text = (int)x + unit; ApplySettings(); };
+			show ??= x => x + unit;
+			var v = Text(show(get()), 15); v.CustomMinimumSize = new Vector2(90, 0);
+			s.ValueChanged += x => { set((int)x); v.Text = show((int)x); ApplySettings(); };
 			grid.AddChild(s); grid.AddChild(v);
 		}
 		void Toggle(string name, Func<string> label, Action flip)
@@ -191,6 +204,7 @@ public partial class Main
 		Slider("Mouse sensitivity", 20, 300, 10, () => settings.Sens, x => settings.Sens = x, "%");
 		Slider("Field of view", 50, 110, 5, () => settings.Fov, x => settings.Fov = x, "");
 		Slider("Render distance", MinRender, MaxRender, 1, () => settings.RenderDist, x => settings.RenderDist = x, " chunks");
+		Slider("GUI scale", 0, MaxGui, 1, () => settings.Gui, x => settings.Gui = x, "", x => x == 0 ? $"Auto ({autoGui}x)" : x + "x");
 		Toggle("Sound (M)", () => settings.Muted ? "Off" : "On", () => settings.Muted = !settings.Muted);
 		Toggle("FPS and position", () => settings.Info ? "Shown" : "Hidden", () => settings.Info = !settings.Info);
 		Toggle("Auto save", () => settings.Autosave ? "On (every 30 seconds)" : "Off", () => settings.Autosave = !settings.Autosave);
@@ -396,7 +410,7 @@ public partial class Main
 			for (int k = 0; k + 8 < s.Pieces.Length; k += 9)
 			{
 				var a = new int[8];
-				for (int j = 0; j < 8; j++) { int id = s.Pieces[k + 1 + j]; var d = Blocks.Get(id); a[j] = d != null && !d.Item && id != Blocks.Pieces ? id : 0; }
+				for (int j = 0; j < 8; j++) { int id = s.Pieces[k + 1 + j], b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
 				if (a.Any(v => v != 0)) world.PieceMap[s.Pieces[k]] = a;
 			}
 			world.ApplyEdits(s.Idxs, s.Ids);

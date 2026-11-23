@@ -485,7 +485,9 @@ public partial class Main
 	// a model of item `id` to hold: a small cube for an ordinary block, a small model of its shape for a slab, stairs,
 	// quarter or piece (the same one it drops as), otherwise its flat picture (both sides)
 	static readonly Dictionary<int, Mesh> heldCubes = new();
-	static bool IsHeldShape(int id) => (Blocks.IsPiece(id) || Blocks.FormOf(id) != null || Blocks.Get(id)?.Shape == "half") && Atlas.Is3DIcon(id);   // (a slab, stairs, quarter or piece: held as a model of its shape)
+	// (a slab, stairs, quarter, piece, the Cutter, a layer of snow or a torch: held as a model of its shape; flowers stay pictures)
+	// (items, Rock, Clay Ball and Brick included, are flat pictures in the hand; only tools are made thick)
+	static bool IsHeldShape(int id) => Blocks.Get(id) is { } b && (Blocks.IsPiece(id) || Blocks.FormOf(id) != null || (!b.Item && b.Shape is "half" or "snow" or "torch")) && Atlas.Is3DIcon(id);
 	static (MeshInstance3D mi, ShaderMaterial mat, bool cube) HeldModel(int id)
 	{
 		itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
@@ -497,7 +499,7 @@ public partial class Main
 		{   // (the model is 1 for a whole block: shrunk to the held cube's size)
 			var (bm, btex) = Atlas.BoxModel(id);
 			mat.SetShaderParameter("tex", btex);
-			return (new MeshInstance3D { Mesh = bm, MaterialOverride = mat, Scale = Vector3.One * 0.3f, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off }, mat, true);
+			return (new MeshInstance3D { Mesh = bm, MaterialOverride = mat, Scale = Vector3.One * (Blocks.IsTorch(id) ? 0.5f : 0.3f), CastShadow = GeometryInstance3D.ShadowCastingSetting.Off }, mat, true);
 		}
 		if (cube)
 		{
@@ -509,8 +511,7 @@ public partial class Main
 				// each face: its picture, its shade (lit from above, like the world's blocks), and its corners (bottom-left, bottom-right, top-right, top-left seen from outside)
 				void Face(int tile, float shade, Vector3 o, Vector3 r, Vector3 u)
 				{
-					var e = Blocks.LeafTint(id) ?? new[] { 1f, 1f, 1f };   // (Fir, Palm and Willow Leaves: the leaves picture in their own colour)
-					var c = new Color(shade * e[0], shade * e[1], shade * e[2]);
+					var c = new Color(shade, shade, shade);
 					Vector3[] p = { o, o + r, o + r + u, o + u }; Vector2[] uv = { new(0, 0), new(1, 0), new(1, 1), new(0, 1) };
 					foreach (int k in new[] { 0, 2, 1, 0, 3, 2 }) { st.SetColor(c); st.SetUV(Atlas.UV(tile, uv[k].X, uv[k].Y)); st.AddVertex(p[k] * h * 2 - Vector3.One * h); }
 				}
@@ -799,7 +800,7 @@ public partial class Main
 						{
 							m.Snuffing = 0;
 							var b = Blocks.B[world.GetBlock(sn.x, sn.y, sn.z)];
-							world.SetBlock(sn.x, sn.y, sn.z, Blocks.TorchVariant(b.Wi, b.Count, b.Burn + 1));
+							world.SetBlock(sn.x, sn.y, sn.z, Blocks.WithSnow(Blocks.TorchVariant(b.Wi, b.Count, b.Burn + 1), b.Snowed));
 						}
 					}
 					else { m.Walking = true; m.Snuffing = 0; }
@@ -968,23 +969,32 @@ public partial class Main
 		return true;
 	}
 
-	// ---- Thrown Rocks (Skeletons): they fly in an arc at you. One that hits you hurts; one that hits a block breaks. ----
-	public class Rock { public int K, Damage; public Vector3 P, V, T; public float Age, LightTimer, Sky = 1, Torch; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
+	// ---- Thrown things: Rocks (Skeletons) and Snowballs (players). They fly in an arc; the host's game moves them. ----
+	// A Rock that hits you hurts, one that hits a block breaks. A Snowball bursts on whatever it hits and knocks mobs
+	// and players back a little, doing no harm. In the air each is its flat item picture, always facing you.
+	public class Rock { public int K, Damage, Item = Blocks.Rock; public string Owner; public Vector3 P, V, T; public float Age, LightTimer, Sky = 1, Torch; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
 	readonly List<Rock> rocks = new();
 	int rockCount;
-	const float RockGravity = 20;
-	static BoxMesh rockMesh;
-	Rock MakeRock(Vector3 at)
+	const float RockGravity = 20, SnowballSpeed = 22, SnowballPush = 4, SnowballLift = 3;
+	static QuadMesh rockMesh;
+	float throwCool, lastThrow = -9;   // (lastThrow: when you last threw, by the game clock)
+	Rock MakeRock(Vector3 at, int item = Blocks.Rock)
 	{
 		itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
-		var mat = new ShaderMaterial { Shader = itemShader }; mat.SetShaderParameter("tex", Atlas.IconTexture(Blocks.Rock));
-		var mi = new MeshInstance3D { Mesh = rockMesh ??= new BoxMesh { Size = Vector3.One * 0.2f }, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = at };
+		var mat = new ShaderMaterial { Shader = itemShader }; mat.SetShaderParameter("tex", Atlas.IconTexture(item));
+		var mi = new MeshInstance3D { Mesh = rockMesh ??= new QuadMesh { Size = Vector2.One * 0.35f }, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = at };
 		mobRoot.AddChild(mi);
-		var r = new Rock { K = ++rockCount, P = at, T = at, Mesh = mi, Mat = mat };
+		var r = new Rock { K = ++rockCount, P = at, T = at, Item = item, Mesh = mi, Mat = mat };
 		rocks.Add(r);
 		return r;
 	}
 	void RemoveRock(Rock r) { r.Mesh.QueueFree(); rocks.Remove(r); }
+	// a sound from a spot in the world (throws, splats): fades out by ~24 blocks
+	void SoundAt(string name, Vector3 at, float loud = 1, string ch = "block")
+	{
+		float d = at.DistanceTo(player.EyePos), vol = loud * MathF.Pow(Math.Max(0, 1 - d / 24), 1.5f);
+		if (vol > 0.01f) Sound.I?.PlayAt(name, at, vol, ch);
+	}
 	void ThrowRock(Mob m)
 	{
 		// from its right hand, aimed where you'll be when it gets there, a little off at random
@@ -995,9 +1005,71 @@ public partial class Main
 		var r = MakeRock(h);
 		r.Damage = MobDamage(m);
 		r.V = new Vector3((tx - h.X) / T, (ty - h.Y) / T + 0.5f * RockGravity * T, (tz - h.Z) / T);
+		SoundAt("throw", h, 0.7f, "mob");
 	}
+	// right-click holding a Snowball: throw it where you're looking
+	bool ThrowSnowball()
+	{
+		if (inv.Held != Blocks.Snowball) return false;
+		if (dead || throwCool > 0) return true;
+		throwCool = 0.25f; lastThrow = Now;
+		var dir = player.LookDir; var at = player.EyePos + dir * 0.4f; var v = dir * SnowballSpeed;
+		if (netClient) hostConn?.Send(new Dictionary<string, object> { ["t"] = "throw", ["id"] = Blocks.Snowball, ["x"] = at.X, ["y"] = at.Y, ["z"] = at.Z, ["vx"] = v.X, ["vy"] = v.Y, ["vz"] = v.Z });
+		else AddSnowball(at, v, "host");
+		Sound.I?.Throw(); SwingHand(); inv.UseOne();
+		return true;
+	}
+	void AddSnowball(Vector3 at, Vector3 v, string owner)
+	{
+		var r = MakeRock(at, Blocks.Snowball); r.V = v; r.Owner = owner;
+		if (owner != "host") SoundAt("throw", at, 0.7f, "mob");
+	}
+	// a Snowball bursts: everyone sees the puff and hears the splat
+	void EndSnowball(Rock r)
+	{
+		Splat(r.P);
+		foreach (var (_, f) in friends) f.conn.Send(new Dictionary<string, object> { ["t"] = "splat", ["x"] = R2(r.P.X), ["y"] = R2(r.P.Y), ["z"] = R2(r.P.Z) });
+		RemoveRock(r);
+	}
+	void Splat(Vector3 at) { SoundAt("splat", at); SnowPuff(at); }
+	// knocked by a Snowball: pushed the way it was flying, and lifted a little
+	void Knock(Vector3 v)
+	{
+		var h = new Vector2(v.X, v.Z); if (h.Length() > 0) h = h.Normalized() * SnowballPush;
+		player.Vel.X += h.X; player.Vel.Z += h.Y; player.Vel.Y = Math.Max(player.Vel.Y, SnowballLift);
+	}
+	// the puff of snow: little white squares flying out, falling and fading
+	class Bit { public Vector3 P, V; public float Age; public MeshInstance3D Mesh; public StandardMaterial3D Mat; }
+	readonly List<Bit> bits = new();
+	static QuadMesh bitMesh;
+	void SnowPuff(Vector3 at)
+	{
+		bitMesh ??= new QuadMesh { Size = Vector2.One * 0.08f };
+		for (int i = 0; i < 8; i++)
+		{
+			var d = new Vector3((float)rnd.NextDouble() - 0.5f, (float)rnd.NextDouble() * 0.8f, (float)rnd.NextDouble() - 0.5f).Normalized() * 1.5f;
+			var mat = new StandardMaterial3D { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(0.95f, 0.97f, 1f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+				BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled, CullMode = BaseMaterial3D.CullModeEnum.Disabled };
+			var mi = new MeshInstance3D { Mesh = bitMesh, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = at };
+			mobRoot.AddChild(mi); bits.Add(new Bit { P = at, V = d, Mesh = mi, Mat = mat });
+		}
+	}
+	void UpdateBits(float dt)
+	{
+		foreach (var b in bits.ToArray())
+		{
+			b.Age += dt;
+			if (b.Age >= 0.4f) { b.Mesh.QueueFree(); bits.Remove(b); continue; }
+			b.V.Y -= 10 * dt; b.P += b.V * dt; b.Mesh.Position = b.P;
+			b.Mat.AlbedoColor = new Color(0.95f, 0.97f, 1f, 1 - b.Age / 0.4f);
+		}
+	}
+	// is a flying thing inside a standing body (feet at f)?
+	static bool InBody(Vector3 p, Vector3 f, float half, float height) => Math.Abs(p.X - f.X) < half && Math.Abs(p.Z - f.Z) < half && p.Y > f.Y && p.Y < f.Y + height;
 	void UpdateRocks(float dt)
 	{
+		throwCool -= dt;
+		UpdateBits(dt);
 		foreach (var r in rocks.ToArray())
 		{
 			r.Age += dt;
@@ -1005,21 +1077,41 @@ public partial class Main
 			else
 			{
 				r.V.Y -= RockGravity * dt; r.P += r.V * dt;
-				if (r.Age > 5 || r.P.Y < -10) { RemoveRock(r); continue; }
+				bool snow = r.Item == Blocks.Snowball;
+				if (r.Age > 5 || r.P.Y < -10) { if (snow) EndSnowball(r); else RemoveRock(r); continue; }
 				var P = player.Pos;
-				if (!dead && Math.Abs(r.P.X - P.X) < 0.45f && Math.Abs(r.P.Z - P.Z) < 0.45f && r.P.Y > P.Y && r.P.Y < P.Y + 1.85f)
+				bool fresh = r.Age < 0.3f;   // (a Snowball can't hit whoever threw it as it leaves their hand)
+				if (!dead && !(snow && fresh && r.Owner == "host") && InBody(r.P, P, 0.45f, 1.85f))
 				{
-					HurtPlayer(r.Damage > 0 ? r.Damage : MobTypes["skeleton"].Damage, r.P - r.V);
-					RemoveRock(r); continue;
+					if (snow) { Knock(r.V); EndSnowball(r); }
+					else { HurtPlayer(r.Damage > 0 ? r.Damage : MobTypes["skeleton"].Damage, r.P - r.V); RemoveRock(r); }
+					continue;
+				}
+				if (snow)
+				{
+					bool hit = false;
+					foreach (var (id, f) in friends)
+						if (others.TryGetValue(id, out var o) && !(fresh && r.Owner == id) && InBody(r.P, new Vector3(o.X, o.Y, o.Z), 0.45f, 1.85f))
+						{ f.conn.Send(new Dictionary<string, object> { ["t"] = "knock", ["vx"] = R2(r.V.X), ["vz"] = R2(r.V.Z) }); hit = true; break; }
+					if (!hit)
+						foreach (var m in mobList)
+							if (m.Dead == 0 && InBody(r.P, new Vector3(m.X, m.Y, m.Z), m.Half + 0.1f, m.Height))
+							{
+								var h = new Vector2(r.V.X, r.V.Z); if (h.Length() > 0) h = h.Normalized() * SnowballPush;
+								m.Vx += h.X; m.Vz += h.Y; m.Vy = Math.Max(m.Vy, SnowballLift);
+								hit = true; break;
+							}
+					if (hit) { EndSnowball(r); continue; }
 				}
 				if (world.Solid((int)MathF.Floor(r.P.X), (int)MathF.Floor(r.P.Y), (int)MathF.Floor(r.P.Z)))
 				{
-					if (r.P.DistanceTo(P) < 16) Sound.I?.Place(Blocks.RockBlock);   // (a clack, if you're close enough to hear it)
-					RemoveRock(r); continue;
+					if (snow) EndSnowball(r);
+					else { if (r.P.DistanceTo(P) < 16) Sound.I?.Place(Blocks.RockBlock); RemoveRock(r); }   // (a clack, if you're close enough to hear it)
+					continue;
 				}
 			}
 			r.Mesh.Position = r.P;
-			r.Mesh.Rotation = new Vector3(r.Age * 9, r.Age * 7, 0);
+			if (cam != null) r.Mesh.GlobalBasis = cam.GlobalBasis;   // (always facing you)
 			if ((r.LightTimer -= dt) <= 0)
 			{
 				r.LightTimer = 0.2f;

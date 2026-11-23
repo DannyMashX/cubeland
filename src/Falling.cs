@@ -55,6 +55,7 @@ public partial class Falling : Node3D
 		int there = W.GetBlock(f.X, y, f.Z);
 		if (Blocks.IsTorch(there)) for (int n = Blocks.B[there].Count; n > 0; n--) collect(Blocks.TorchDrop(there), f.X, y, f.Z);
 		else if (there != 0 && !Blocks.IsWater(there)) collect(dropFor(there), f.X, y, f.Z);
+		for (int n = Blocks.SnowballsFor(Blocks.SnowIn(there), Random.Shared); n > 0; n--) collect(Blocks.Snowball, f.X, y, f.Z);   // (and any snow round it)
 		W.SetBlock(f.X, y, f.Z, f.Id);
 	}
 	// (saving: anything still in the air lands straight away, so it's never lost)

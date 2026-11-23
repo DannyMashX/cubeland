@@ -14,7 +14,7 @@ public static class Worlds
 {
 	public class Info
 	{
-		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192, S = 640; public double B = 1; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall. S: its width and depth; worlds made before 1280 are 640. B: how big its biomes are, 1 = the usual size)
+		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192, S = 640, Land; public double B = 1; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall. S: its width and depth; worlds made before 1280 are 640. B: how big its biomes are, 1 = the usual size. Land: see World.LandVersion)
 		[JsonIgnore] public bool Survival => Mode == "survival";
 	}
 	public class PlayerSave { public float X, Y, Z, Yaw, Pitch, DarkTime, LightTime; public bool Fly; public int Health, Gloom; }
@@ -71,7 +71,7 @@ public static class Worlds
 		name = (name ?? "").Trim(); if (name.Length > 32) name = name[..32];
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		var w = new Info { Id = Convert.ToString(now, 16) + Random.Shared.Next(0x1000, 0xffff).ToString("x"), Name = name == "" ? $"World {list.Count + 1}" : name,
-			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.ValidSize(World.TallWorlds ? 640 : size, World.TallWorlds ? 640 : 192), B = World.ValidBiomes(biomes) };
+			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.ValidSize(World.TallWorlds ? 640 : size, World.TallWorlds ? 640 : 192), B = World.ValidBiomes(biomes), Land = World.LandVersion };
 		list.Add(w); SaveList();
 		return w;
 	}

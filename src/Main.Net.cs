@@ -26,7 +26,7 @@ public partial class Main
 	static List<(string[] urls, string user, string pass)> relayServers;
 
 	// a friend's game you're joining (kept while the game restarts into their world)
-	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host, int H, int S, double B);
+	public record JoinInfo(string Code, int Seed, int Gen, string Mode, string Host, int H, int S, double B, int Land);
 	static JoinInfo joinInfo;
 	bool netClient => joinInfo != null && current?.Id == "join-" + joinInfo.Code;
 
@@ -135,7 +135,7 @@ public partial class Main
 		for (int k = 0; k + 8 < list.Count; k += 9)
 		{
 			var a = new int[8];
-			for (int j = 0; j < 8; j++) { int id = list[k + 1 + j]; var d = Blocks.Get(id); a[j] = d != null && !d.Item && id != Blocks.Pieces ? id : 0; }
+			for (int j = 0; j < 8; j++) { int id = list[k + 1 + j], b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id >= 0 && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
 			if (a.Any(v => v != 0)) world.PieceMap[list[k]] = a;
 		}
 	}
@@ -148,9 +148,9 @@ public partial class Main
 		for (int k = 0; k + 1 < list.Count; k += 2)
 		{
 			int i = list[k], id = list[k + 1];
-			if (i < 0 || i >= world.Blocks.Length || (id != 0 && Blocks.Get(id) == null) || (world.Blocks[i] == id && id != Blocks.Pieces)) continue;
-			if (id == Blocks.Pieces && !world.PieceMap.ContainsKey(i)) continue;
-			if (id == Blocks.Pieces && world.Blocks[i] == Blocks.Pieces && before.TryGetValue(i, out var was) && was.SequenceEqual(world.PieceMap[i])) continue;
+			if (i < 0 || i >= world.Blocks.Length || (id != 0 && Blocks.Get(id) == null) || (world.Blocks[i] == id && !Blocks.IsPieces(id))) continue;
+			if (Blocks.IsPieces(id) && !world.PieceMap.ContainsKey(i)) continue;
+			if (Blocks.IsPieces(id) && world.Blocks[i] == id && before.TryGetValue(i, out var was) && was.SequenceEqual(world.PieceMap[i])) continue;
 			var (x, y, z) = World.FromIdx(i);
 			world.SetBlock(x, y, z, id);
 		}
@@ -161,7 +161,7 @@ public partial class Main
 		if (pending.Count == 0) return;
 		var p = new List<object>();
 		for (int k = 0; k < pending.Count; k += 2)
-			if (pending[k + 1] == Blocks.Pieces && world.PieceMap.TryGetValue(pending[k], out var a)) { p.Add(pending[k]); foreach (var v in a) p.Add(v); }
+			if (Blocks.IsPieces(pending[k + 1]) && world.PieceMap.TryGetValue(pending[k], out var a)) { p.Add(pending[k]); foreach (var v in a) p.Add(v); }
 		var msg = new Dictionary<string, object> { ["t"] = "sets", ["l"] = pending.Cast<object>().ToList(), ["p"] = p };
 		pending.Clear();
 		if (hosting) foreach (var f in friends.Values) f.conn.Send(msg);
@@ -212,7 +212,7 @@ public partial class Main
 		if (known) friends[conn.PeerId] = f with { seen = Now };
 		string t = d.S("t");
 		if (t == "hello")   // someone checking which world this is, before they load it
-			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["h"] = current.H, ["s"] = current.S, ["b"] = current.B, ["mode"] = current.Mode, ["host"] = settings.Name });
+			conn.Send(new Dictionary<string, object> { ["t"] = "info", ["ver"] = NetVersion, ["seed"] = current.Seed, ["gen"] = current.Gen, ["h"] = current.H, ["s"] = current.S, ["b"] = current.B, ["land"] = current.Land, ["mode"] = current.Mode, ["host"] = settings.Name });
 		else if (t == "join")
 		{
 			if (d.S("ver") != NetVersion) { conn.Send(new Dictionary<string, object> { ["t"] = "refuse", ["why"] = $"You need the same version of the game. They have {NetVersion}, you have {d.S("ver")}." }); return; }
@@ -253,6 +253,11 @@ public partial class Main
 			var m = mobList.FirstOrDefault(m => m.K == d.I("k") && m.Dead == 0);
 			if (m != null && others.TryGetValue(conn.PeerId, out var o)) HitMob(m, new Vector3(o.X, o.Y, o.Z));
 		}
+		else if (t == "throw" && d.I("id") == Blocks.Snowball)
+		{   // a friend threw a Snowball: this game moves it
+			var at = new Vector3(d.F("x"), d.F("y"), d.F("z")); var v = new Vector3(d.F("vx"), d.F("vy"), d.F("vz"));
+			if (at.IsFinite() && v.IsFinite() && v.Length() <= SnowballSpeed + 1 && others.TryGetValue(conn.PeerId, out var o) && at.DistanceTo(new Vector3(o.X, o.Y, o.Z)) < 4) AddSnowball(at, v, conn.PeerId);
+		}
 		else if (t == "feed")
 		{   // a friend fed a cow Grain (if it didn't want it, they get the Grain back)
 			var m = mobList.FirstOrDefault(m => m.K == d.I("k") && m.Dead == 0 && m.T.Cow);
@@ -275,7 +280,7 @@ public partial class Main
 		// (a mob's 9th number is 1 while it's fading away, 2 while it's throwing; a cow has a 10th: how it looks, see CowLook)
 		var ms = mobList.Select(m => { var l = new List<object> { m.K, m.Type, R2(m.X), R2(m.Y), R2(m.Z), R2(m.Yaw), m.Dead > 0 ? 1 : 0, m.Hurt > 0 ? 1 : 0, m.Fade > 0 ? 1 : m.ThrowT > 0 ? 2 : 0 }; if (m.T.Cow) l.Add(CowLook(m)); return (m, l: (object)l); }).ToList();
 		var ds = drops.All.Select(d => (object)new List<object> { d.K, d.Id, R2(d.P.X), R2(d.P.Y), R2(d.P.Z) }).ToList();
-		var rs = rocks.Select(r => (object)new List<object> { r.K, R2(r.P.X), R2(r.P.Y), R2(r.P.Z) }).ToList();
+		var rs = rocks.Select(r => (object)new List<object> { r.K, R2(r.P.X), R2(r.P.Y), R2(r.P.Z), r.Item }).ToList();   // (the 5th: Rock or Snowball)
 		var fs = falling.All.Select(b => (object)new List<object> { b.K, b.Id, b.X, R2(b.Y), b.Z }).ToList();
 		foreach (var (id, f) in friends.ToArray())
 		{
@@ -317,7 +322,7 @@ public partial class Main
 				done = true; joinTimer = 0;
 				NetStatus("Joining...");
 				p.Destroy(); peer = null;
-				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192, World.ValidSize(d.I("s"), d.I("h") == 640 ? 640 : 192), d.ContainsKey("b") ? World.ValidBiomes(d.F("b")) : 1);
+				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192, World.ValidSize(d.I("s"), d.I("h") == 640 ? 640 : 192), d.ContainsKey("b") ? World.ValidBiomes(d.F("b")) : 1, World.ValidLand(d.I("land")));
 				SwitchWorld("join-" + code, true);
 			};
 		};
@@ -402,7 +407,8 @@ public partial class Main
 				int k = (int)BinaryPack.Num(a[0]);
 				var at = new Vector3((float)BinaryPack.Num(a[1]), (float)BinaryPack.Num(a[2]), (float)BinaryPack.Num(a[3]));
 				seenR.Add(k);
-				if (!byR.TryGetValue(k, out var r)) { r = MakeRock(at); r.K = k; }
+				int item = a.Count > 4 && (int)BinaryPack.Num(a[4]) == Blocks.Snowball ? Blocks.Snowball : Blocks.Rock;
+				if (!byR.TryGetValue(k, out var r)) { r = MakeRock(at, item); r.K = k; if (!(Now - lastThrow < 0.6f && at.DistanceTo(player.EyePos) < 4)) SoundAt("throw", at, 0.7f, "mob"); }   // (your own throw was heard already)
 				r.T = at;
 			}
 			foreach (var r in rocks.ToArray()) if (!seenR.Contains(r.K)) RemoveRock(r);
@@ -434,6 +440,8 @@ public partial class Main
 		}
 		else if (t == "sets" && d.L("l") is { } l) ApplySets(Ints(l), Ints(d.L("p")));
 		else if (t == "give") inv.Give(d.I("id"));
+		else if (t == "knock") Knock(new Vector3(d.F("vx"), 0, d.F("vz")));   // hit by a Snowball
+		else if (t == "splat") Splat(new Vector3(d.F("x"), d.F("y"), d.F("z")));
 		else if (t == "skin" && d.S("id") is { } sid)
 		{
 			if (PlayerSkin.Valid(d.S("s"))) skins[sid] = d.S("s"); else skins.Remove(sid);

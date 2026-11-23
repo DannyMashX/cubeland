@@ -79,25 +79,33 @@ public class ChunkMesher
 			int id = W.Blocks.Get(x, y, z);
 			if (id == 0) continue;
 			var b = Blocks.B[id];
-			if (b.Shape == "torch") { AddTorch(x, y, z, id, P, anyLight, sky); continue; }
+			if (b.Snowed > 0 && b.Shape is "torch" or "plant" or "flat")
+			{   // snow-logged: the torch, flower or rock (lying on top of the snow), then its layer of snow is drawn below like any snow
+				if (b.Shape == "torch") AddTorch(x, y, z, id, P, anyLight, sky); else if (b.Shape == "plant") AddPlant(x, y, z, b, P, anyLight, sky); else AddFlat(x, y, z, b, P, anyLight, sky, 1 / 8f);
+				id = Blocks.Snow; b = Blocks.B[id];
+			}
+			else if (b.Shape == "torch") { AddTorch(x, y, z, id, P, anyLight, sky); continue; }
 			if (b.Shape == "flat") { AddFlat(x, y, z, b, P, anyLight, sky); continue; }
 			if (b.Shape == "plant") { AddPlant(x, y, z, b, P, anyLight, sky); continue; }
 			if (b.Liquid) { AddWater(x, y, z, id, Wt, anyLight, sky); continue; }
-			if (id == Blocks.Pieces) { AddPieces(x, y, z, P, anyLight, sky); continue; }
-			if (b.Shape == "half")   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
+			if (Blocks.IsPieces(id)) { AddPieces(x, y, z, P, anyLight, sky); if (id == Blocks.SnowyPieces) AddSnowUnder(x, y, z, P, anyLight, sky); continue; }
+			if (b.Shape == "half")   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top; in snow, the snow is all under it)
 			{
 				AddPieces(x, y, z, P, anyLight, sky, new[] { id, id, 0, 0, id, id, 0, 0 });
-				if (id == Blocks.Cutter) AddSaw(x, y, z, P, anyLight, sky);
+				if (Blocks.Plain(id) == Blocks.Cutter) AddSaw(x, y, z, P, anyLight, sky);
 				continue;
 			}
 			float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);   // a little darker deep down
 			bool tinted = Blocks.TakesBiomeTint(id);
-			var lt = Blocks.LeafTint(id); var extra = lt != null ? new Color(lt[0], lt[1], lt[2]) : white;
+			float h = b.Shape == "snow" ? b.Layers / 8f : 1;   // (snow: only as deep as its layers)
 			foreach (var f in Faces)
 			{
 				int n = W.GetBlock(x + f.Dir[0], y + f.Dir[1], z + f.Dir[2]);
-				if (n != 0 && (n == id || !Blocks.B[n].Transparent)) continue;
-				int tile = f.Dir[1] > 0 ? b.T[1] : f.Dir[1] < 0 ? b.T[2] : b.Front != null && f.Dir[0] == b.Front[0] && f.Dir[2] == b.Front[1] ? b.T[3] : b.T[0];
+				if ((h == 1 || f.Dir[1] <= 0) && n != 0 && (n == id || !Blocks.B[n].Transparent || (id == Blocks.Snow && f.Dir[1] == 0 && Blocks.SnowIn(n) > 0 && !Blocks.IsPieces(n)))) continue;   // (one layer of snow next to a torch or flower in snow: the snow carries on)
+				// a lying log: its ends (the top picture) face along its axis, and its bark is turned to run that way
+				int tile = b.Axis == 0 ? f.Dir[1] > 0 ? b.T[1] : f.Dir[1] < 0 ? b.T[2] : b.Front != null && f.Dir[0] == b.Front[0] && f.Dir[2] == b.Front[1] ? b.T[3] : b.T[0]
+					: (b.Axis == 1 ? f.Dir[0] != 0 : f.Dir[2] != 0) ? b.T[1] : b.T[0];
+				bool turn = b.Axis == 1 ? f.Dir[0] == 0 : b.Axis == 2 && f.Dir[0] != 0;
 				int bas = P.Pos.Count;
 				int na = f.Dir[0] != 0 ? 0 : f.Dir[1] != 0 ? 1 : 2;
 				int ta = na == 0 ? 1 : 0, tb = na == 2 ? 1 : 2;
@@ -119,7 +127,8 @@ public class ChunkMesher
 					q[ta] += sa; if (s1 == 0) { if (anyLight) sum += W.LightAt(q[0], q[1], q[2]); skySum += W.SkyExposure(q[0], q[1], q[2], sky); cnt++; }
 					q[tb] += sb; if (s3 == 0 && !(s1 == 1 && s2 == 1)) { if (anyLight) sum += W.LightAt(q[0], q[1], q[2]); skySum += W.SkyExposure(q[0], q[1], q[2], sky); cnt++; }
 					q[ta] -= sa; if (s2 == 0) { if (anyLight) sum += W.LightAt(q[0], q[1], q[2]); skySum += W.SkyExposure(q[0], q[1], q[2], sky); cnt++; }
-					P.V(x + c[0], y + c[1], z + c[2], Atlas.UV(tile, c[3], c[4]), shade, anyLight ? World.LightCurve(sum / cnt) : 0, skySum / cnt, tinted ? TintAt(x + c[0], z + c[2]) * extra : white);
+					float cv = f.Dir[1] == 0 ? c[4] * h : c[4];
+					P.V(x + c[0], y + c[1] * h, z + c[2], turn ? Atlas.UV(tile, cv, c[3]) : Atlas.UV(tile, c[3], cv), shade, anyLight ? World.LightCurve(sum / cnt) : 0, skySum / cnt, tinted ? TintAt(x + c[0], z + c[2]) : white);
 				}
 				// pick the quad diagonal that keeps the shading smooth
 				if (ao[0] + ao[3] > ao[1] + ao[2]) P.QuadFlipped(bas); else P.Quad(bas);
@@ -204,7 +213,7 @@ public class ChunkMesher
 			}
 	}
 	// something lying flat on the ground (a rock): its picture just above the block under it, turned a random way
-	void AddFlat(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddFlat(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky, float lift = 0)
 	{
 		double a = W.Gen.Hash(x, z, y + 4242) * Math.PI * 2; float ca = (float)Math.Cos(a) * 0.5f, sa = (float)Math.Sin(a) * 0.5f;
 		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, s = W.SkyExposure(x, y, z, sky);
@@ -212,7 +221,7 @@ public class ChunkMesher
 		foreach (var (u, v) in new[] { (0, 0), (1, 0), (0, 1), (1, 1) })
 		{
 			float dx = u - 0.5f, dz = v - 0.5f;
-			P.V(x + 0.5f + (dx * ca - dz * sa) * 2, y + 0.02f, z + 0.5f + (dx * sa + dz * ca) * 2, Atlas.UV(tile, u, v), 1, light, s);
+			P.V(x + 0.5f + (dx * ca - dz * sa) * 2, y + lift + 0.02f, z + 0.5f + (dx * sa + dz * ca) * 2, Atlas.UV(tile, u, v), 1, light, s);
 		}
 		P.Quad(bas); P.Ind.Add(bas); P.Ind.Add(bas + 1); P.Ind.Add(bas + 2); P.Ind.Add(bas + 2); P.Ind.Add(bas + 1); P.Ind.Add(bas + 3);   // both sides
 	}
@@ -269,22 +278,48 @@ public class ChunkMesher
 	}
 	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky, int[] a = null)
 	{
+		bool given = a != null;
 		if (a == null && !W.PieceMap.TryGetValue(World.Idx(x, y, z), out a)) return;
 		float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);
 		var lp = new float[3];
+		bool cut = !given;   // (a pieces space: its faces use the cut-shape pictures)
+		// does spot s2 show its face fi? (something see-through, and not the same block, in front of it)
+		bool Shows(int s2, int fi)
+		{
+			int id2 = World.SpotBlock(a[s2]);
+			if (id2 == 0 || Blocks.B[id2] == null) return false;
+			var d = Faces[fi].Dir;
+			int n = W.SubBlock(x * 2 + (s2 & 1) + d[0], y * 2 + ((s2 >> 1) & 1) + d[1], z * 2 + (s2 >> 2) + d[2]);
+			return n == 0 || (n != id2 && Blocks.B[n].Transparent);
+		}
 		for (int s = 0; s < 8; s++)
 		{
-			int id = a[s];
+			int raw = a[s], id = World.SpotBlock(raw);   // (block + group: see World.GroupMul)
 			if (id == 0 || Blocks.B[id] == null) continue;
 			var b = Blocks.B[id]; int sx = s & 1, sy = (s >> 1) & 1, sz = s >> 2;
 			int X = x * 2 + sx, Y = y * 2 + sy, Z = z * 2 + sz;
 			for (int fi = 0; fi < 6; fi++)
 			{
 				var f = Faces[fi];
-				int n = W.SubBlock(X + f.Dir[0], Y + f.Dir[1], Z + f.Dir[2]);
-				if (n != 0 && (n == id || !Blocks.B[n].Transparent)) continue;
+				if (!Shows(s, fi)) continue;
 				int tile = f.Dir[1] > 0 ? b.T[1] : f.Dir[1] < 0 ? b.T[2] : b.T[0];
 				var fu = FaceUv[fi]; int bas = P.Pos.Count;
+				if (cut)
+				{   // which quarters of this face's picture show: the 4 spots in the same layer along the face's axis,
+					// that hold the same block of the same group (put down together) and show their face this way too
+					// (each picks the quarter its face shows). A loose piece is framed all round; a double slab is two slabs.
+					int ax = f.Dir[0] != 0 ? 0 : f.Dir[1] != 0 ? 1 : 2, mask = 0;
+					int along = ax == 0 ? sx : ax == 1 ? sy : sz;
+					for (int t2 = 0; t2 < 8; t2++)
+					{
+						int[] c2 = { t2 & 1, (t2 >> 1) & 1, t2 >> 2 };
+						if (c2[ax] != along || a[t2] != raw || !Shows(t2, fi)) continue;
+						for (int k = 0; k < 3; k++) lp[k] = (c2[k] + 0.5f) * 0.5f;
+						float u = fu[0].flip ? 1 - lp[fu[0].axis] : lp[fu[0].axis], v = fu[1].flip ? 1 - lp[fu[1].axis] : lp[fu[1].axis];
+						mask |= Atlas.Quarter(u > 0.5f ? 1 : 0, v > 0.5f ? 0 : 1);
+					}
+					tile = Atlas.ShapeTile(tile, mask);
+				}
 				int fx = World.FloorDiv(X + f.Dir[0], 2), fy = World.FloorDiv(Y + f.Dir[1], 2), fz = World.FloorDiv(Z + f.Dir[2], 2);
 				float light = anyLight ? World.LightCurve(W.LightAt(fx, fy, fz)) : 0, s2 = W.SkyExposure(fx, fy, fz, sky);
 				foreach (var c in f.C)
@@ -296,6 +331,61 @@ public class ChunkMesher
 				P.Quad(bas);
 			}
 		}
+	}
+	// a pieces space in snow (388): one layer of snow on every upward surface in it. Each patch is a 1/2 x 1/8 x 1/2 box on a
+	// spot: on the floor under an empty bottom spot (where what's below holds snow), on top of a bottom-layer piece with
+	// nothing above it, and on top of a top-layer piece (sticking 1/8 up into the space above, if that's air or something
+	// you walk through that isn't water or snow). Same as the web version.
+	void AddSnowUnder(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky)
+	{
+		if (!W.PieceMap.TryGetValue(World.Idx(x, y, z), out var a)) return;
+		var sb = Blocks.B[Blocks.Snow]; float h = 1 / 8f, depth = 0.75f + 0.25f * Math.Min(1, y / 20f);
+		bool Filled(int sx, int sy, int sz) => a[sx + sy * 2 + sz * 4] != 0;
+		bool Holds(int n) => Blocks.Get(n) is { } d && d.Shape == null && !d.Liquid && !d.NoCollide && !d.Item;
+		bool Open(int n) => n == 0 || (Blocks.B[n].NoCollide && !Blocks.IsWater(n) && !Blocks.IsSnow(n));
+		// the snow patches: [column] -> its heights in half-blocks (0 floor, 1 middle, 2 top)
+		var at = new List<int>[4];
+		for (int sz = 0; sz < 2; sz++) for (int sx = 0; sx < 2; sx++)
+		{
+			var l = at[sx + sz * 2] = new List<int>();
+			if (!Filled(sx, 0, sz) && Holds(W.SubBlock(x * 2 + sx, y * 2 - 1, z * 2 + sz))) l.Add(0);
+			if (Filled(sx, 0, sz) && !Filled(sx, 1, sz)) l.Add(1);
+			if (Filled(sx, 1, sz) && Open(W.SubBlock(x * 2 + sx, y * 2 + 2, z * 2 + sz))) l.Add(2);
+		}
+		var lp = new float[3];
+		for (int sz = 0; sz < 2; sz++) for (int sx = 0; sx < 2; sx++)
+			foreach (int lv in at[sx + sz * 2])
+			{
+				int cy = y + (lv == 2 ? 1 : 0);   // (the space whose light it takes)
+				float light = anyLight ? World.LightCurve(W.LightAt(x, cy, z)) : 0, s2 = W.SkyExposure(x, cy, z, sky);
+				for (int fi = 0; fi < 6; fi++)
+				{
+					var f = Faces[fi];
+					if (f.Dir[1] < 0) continue;   // (it lies on something)
+					if (f.Dir[1] == 0)
+					{
+						int nx = sx + f.Dir[0], nz = sz + f.Dir[2];
+						if (nx >= 0 && nx <= 1 && nz >= 0 && nz <= 1)
+						{   // beside it in this space: a piece at that height, or snow at the same height, hides that side
+							if ((lv < 2 && Filled(nx, lv, nz)) || at[nx + nz * 2].Contains(lv)) continue;
+						}
+						else
+						{
+							int n = W.SubBlock(x * 2 + nx, y * 2 + lv, z * 2 + nz);
+							if (n != 0 && (!Blocks.B[n].Transparent || Blocks.B[n].Shape == "snow" || Blocks.SnowIn(n) > 0)) continue;
+						}
+					}
+					int tile = f.Dir[1] > 0 ? sb.T[1] : sb.T[0];
+					var fu = FaceUv[fi]; int bas = P.Pos.Count;
+					foreach (var c in f.C)
+					{
+						lp[0] = (sx + c[0]) * 0.5f; lp[1] = c[1] * h; lp[2] = (sz + c[2]) * 0.5f;
+						float u = fu[0].flip ? 1 - lp[fu[0].axis] : lp[fu[0].axis], v = fu[1].flip ? 1 - lp[fu[1].axis] : lp[fu[1].axis];
+						P.V(x + lp[0], y + lv * 0.5f + lp[1], z + lp[2], Atlas.UV(tile, u, v), f.Shade * depth, light, s2);
+					}
+					P.Quad(bas);
+				}
+			}
 	}
 	// water: only the sides touching air or see-through blocks; the surface's corners are averaged so it slopes smoothly
 	float WaterCornerHeight(int x, int y, int z, int gx, int gz)

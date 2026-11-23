@@ -9,6 +9,7 @@ public class WorldGen
 	readonly World W;
 	readonly long seed;
 	readonly int gen;
+	public int Land;   // the land's version (see World.LandVersion): 1 = natural structures, and trunks up into the leaves
 	const byte RAW = 255;   // "land, decide grass/dirt/stone later"
 	static int Lift => World.Lift;   // (tall worlds: the land is lifted this far, with rock below)
 	public int SeaLevel => Lift + (gen == 1 ? 38 : 63);
@@ -72,6 +73,10 @@ public class WorldGen
 
 	public Action<float> Progress;
 
+	// Blocks numbered 256 and up (lying logs, snow): the world grows one byte per block, so `stand` goes in for now, and the
+	// real block takes its place once the world is packed, if nothing else has been put there since (see World.Generate).
+	public readonly List<(int i, int id, byte stand)> Late = new();
+
 	// --- Biome worlds (gen 3): two slow climate maps, warmth and wetness, pick each spot's biome ---
 	public const int Woods = 0, Plains = 1, Desert = 2, Snowy = 3, Swamp = 4, Taiga = 5, Meadow = 6, Badlands = 7;
 	// the climate borders (as the web version). Warmth: below COLD snowy, then up to COOL taiga, above HOT hot lands (desert where
@@ -103,10 +108,10 @@ public class WorldGen
 	public Godot.Color GrassTint(double x, double z)
 	{
 		if (gen != 3) return new Godot.Color(1, 1, 1);
-		var c = Climate(x, z, 0.05);   // (snowy bluer, taiga blue-green, desert and badlands yellower, swamp murkier, plains brighter, meadow fresh green)
-		return new Godot.Color((float)(1 - 0.20 * c.snowy - 0.12 * c.taiga + 0.30 * c.desert + 0.24 * c.badlands - 0.10 * c.swamp + 0.08 * c.plains - 0.02 * c.meadow),
-		                 (float)(1 - 0.08 * c.snowy - 0.02 * c.taiga + 0.02 * c.desert + 0.00 * c.badlands - 0.10 * c.swamp + 0.06 * c.plains + 0.08 * c.meadow),
-		                 (float)(1 + 0.30 * c.snowy + 0.10 * c.taiga - 0.30 * c.desert - 0.30 * c.badlands - 0.25 * c.swamp - 0.15 * c.plains - 0.06 * c.meadow));
+		var c = Climate(x, z, 0.05);   // (snowy bluer, taiga a cool blue-green, desert and badlands yellower, swamp murkier, plains brighter, meadow fresh green)
+		return new Godot.Color((float)(1 - 0.20 * c.snowy - 0.16 * c.taiga + 0.30 * c.desert + 0.24 * c.badlands - 0.10 * c.swamp + 0.08 * c.plains - 0.02 * c.meadow),
+		                 (float)(1 - 0.08 * c.snowy - 0.04 * c.taiga + 0.02 * c.desert + 0.00 * c.badlands - 0.10 * c.swamp + 0.06 * c.plains + 0.08 * c.meadow),
+		                 (float)(1 + 0.30 * c.snowy + 0.17 * c.taiga - 0.30 * c.desert - 0.30 * c.badlands - 0.25 * c.swamp - 0.15 * c.plains - 0.06 * c.meadow));
 	}
 	byte[] biomeMap = new byte[WX * WZ];
 
@@ -150,6 +155,8 @@ public class WorldGen
 		Trees();
 		Rocks();
 		Flowers();
+		if (gen == 3 && Land >= 1) Structures();
+		if (gen == 3 && Land >= 1) SnowCover();
 		if (gen == 3 && EerieOn) Staircases();
 		Progress?.Invoke(0.9f);
 	}
@@ -239,6 +246,227 @@ public class WorldGen
 			set(cx, s.Y + k, cz, Blocks.Pieces);
 			W.Heights[cz * WX + cx] = Math.Max(W.Heights[cz * WX + cx], s.Y + k);
 		}
+	}
+
+	// --- Natural structures (Biomes worlds from Land 1): things the land made by itself. One try in each 64 x 64 cell, at a
+	// spot picked by hash; what grows there depends on the biome. Exactly as the web version, so both grow the same world.
+	//   Deserts and badlands: stone arches and rock spires (Sandstone, or the badlands' terracotta stripes)
+	//   Out at sea (shallow water): sea stacks of stone
+	//   Woods, taiga and swamps: fallen giant trees, hollow so you can walk through
+	//   Plains and meadows: sinkholes down into the ground, with a pool at the bottom
+	//   Taiga and snowy lands: fields of boulders
+	//   Swamps: hollows, mounds of peat and mud with a dead willow trunk, ringed by still water
+	const int StructCell = 64;
+	public readonly List<string> Built = new();   // (what was built where, for testing: printed with --worldhash)
+	bool Plant(int b) => b == 0 || Blocks.IsLeaves(b) || b == Blocks.Log || b == Blocks.FirLog || b == Blocks.PalmLog || b == Blocks.WillowLog || Blocks.IsFlower(b) || b == Blocks.RockBlock;
+	// the ground under a spot (under any trees, flowers or rocks; the top of the water at sea)
+	int GroundAt(int x, int z) { int y = W.Heights[z * WX + x]; while (y > 0 && Plant(world[Idx(x, y, z)])) y--; return y; }
+	bool Inside(int x, int z, int m) => x >= m && z >= m && x < WX - m && z < WZ - m;
+	// place a structure's block where there's only air or plants (or water too, out at sea)
+	void PutOver(int x, int y, int z, int id, bool wet = false)
+	{
+		if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 1 || y >= WY - 1) return;
+		int i = Idx(x, y, z), b = world[i];
+		if (!Plant(b) && !(wet && Blocks.IsWater(b))) return;
+		world[i] = (byte)id;
+		if (id != 0 && y > W.Heights[z * WX + x]) W.Heights[z * WX + x] = y;
+	}
+	int RockOf(int bi, int y) { if (bi != Badlands) return Blocks.Sandstone; int n = BadlandsBands.Length, k = y % n; return BadlandsBands[k < 0 ? k + n : k]; }
+	void Structures()
+	{
+		for (int gz = 0; gz < WZ / StructCell; gz++) for (int gx = 0; gx < WX / StructCell; gx++)
+		{
+			int x = gx * StructCell + 12 + (int)Math.Floor(Hash(gx, gz, 8100) * (StructCell - 24)), z = gz * StructCell + 12 + (int)Math.Floor(Hash(gx, gz, 8101) * (StructCell - 24));
+			double roll = Hash(gx, gz, 8102);
+			int bi = biomeMap[z * WX + x], g = GroundAt(x, z);
+			bool sea = Blocks.IsWater(world[Idx(x, g, z)]);
+			if (sea) { if (bi != Snowy && roll < 0.3) SeaStack(x, z); continue; }
+			if (bi == Desert || bi == Badlands) { if (roll < 0.2) Arch(x, z, bi); else if (roll < 0.42) Spire(x, z, bi); }
+			else if (bi == Woods) { if (roll < 0.35) FallenGiant(x, z, Blocks.Log); }
+			else if (bi == Taiga) { if (roll < 0.3) FallenGiant(x, z, Blocks.FirLog); else if (roll < 0.5) Boulders(x, z); }
+			else if (bi == Snowy) { if (roll < 0.3) Boulders(x, z); }
+			else if (bi == Swamp) { if (roll < 0.35) Hollow(x, z); else if (roll < 0.5) FallenGiant(x, z, Blocks.WillowLog); }
+			else if (bi == Plains || bi == Meadow) { if (roll < 0.15) Sinkhole(x, z); }
+		}
+	}
+	// an arch: half a ring of rock standing on two legs, 3 blocks thick (5 for the big ones), running along x or z
+	void Arch(int x, int z, int bi)
+	{
+		int g = GroundAt(x, z);
+		if (g <= SeaLevel + 1) return;
+		bool alongX = Hash(x, z, 8110) < 0.5;
+		int R = 5 + (int)Math.Floor(Hash(x, z, 8111) * 5), H = 6 + (int)Math.Floor(Hash(x, z, 8112) * 7), w = R >= 8 ? 2 : 1;
+		for (int t = -R - 2; t <= R + 2; t++) for (int a = -w; a <= w; a++)
+		{
+			int cx = alongX ? x + t : x + a, cz = alongX ? z + a : z + t;
+			if (!Inside(cx, cz, 2)) continue;
+			int lg = GroundAt(cx, cz);
+			for (int y = Math.Min(lg + 1, g); y <= g + H + 2; y++)
+			{
+				int dy = Math.Max(0, y - g);
+				double o1 = t / (R + 1.5), o2 = dy / (H + 1.5), i1 = t / (R - 1.5), i2 = dy / (H - 1.5);
+				if (o1 * o1 + o2 * o2 <= 1 && i1 * i1 + i2 * i2 > 1) PutOver(cx, y, cz, RockOf(bi, y));
+			}
+		}
+		Built.Add($"arch {x},{g},{z}");
+	}
+	// a spire: a tall column of rock, narrowing as it goes up, a little lumpy
+	void Spire(int x, int z, int bi)
+	{
+		int g = GroundAt(x, z);
+		if (g <= SeaLevel) return;
+		int H = 12 + (int)Math.Floor(Hash(x, z, 8120) * 16); double r0 = 2.0 + Hash(x, z, 8121) * 1.4;
+		Column(x, z, g, g + H, r0, (yy) => RockOf(bi, yy), false);
+		Built.Add($"spire {x},{g},{z}");
+	}
+	// a sea stack: the same, of stone, standing in shallow sea a little off the shore
+	void SeaStack(int x, int z)
+	{
+		int f = SeaLevel; while (f > 1 && Blocks.IsWater(world[Idx(x, f, z)])) f--;
+		if (SeaLevel - f < 1 || SeaLevel - f > 8) return;
+		int H = 6 + (int)Math.Floor(Hash(x, z, 8125) * 12); double r0 = 2.4 + Hash(x, z, 8126) * 1.6;
+		Column(x, z, f, SeaLevel + H, r0, _ => Blocks.Stone, true);
+		Built.Add($"stack {x},{f},{z}");
+	}
+	void Column(int x, int z, int bottom, int top, double r0, Func<int, int> mat, bool wet)
+	{
+		for (int dz = -5; dz <= 5; dz++) for (int dx = -5; dx <= 5; dx++)
+		{
+			int cx = x + dx, cz = z + dz;
+			if (!Inside(cx, cz, 2)) continue;
+			int lg = wet ? bottom : GroundAt(cx, cz);
+			for (int y = Math.Min(lg + 1, bottom); y <= top; y++)
+			{
+				double f = (double)(Math.Max(y, bottom) - bottom) / (top - bottom);
+				double r = r0 * (1 - 0.4 * f) + (Hash(x + y / 3, z, 8122) - 0.5) * 1.0;
+				if (dx * dx + dz * dz <= r * r) PutOver(cx, y, cz, mat(y), wet);
+			}
+		}
+	}
+	// a fallen giant: a huge old trunk lying on the ground, 5 blocks thick and hollow inside, its roots (a disc of dirt)
+	// standing up at one end, and leaves growing here and there along the top
+	void FallenGiant(int x, int z, int log)
+	{
+		int g = GroundAt(x, z);
+		if (g < SeaLevel) return;
+		bool alongX = Hash(x, z, 8130) < 0.5;
+		int L = 15 + (int)Math.Floor(Hash(x, z, 8131) * 11), ay = g + 2;
+		for (int k = 0; k < L; k++)   // (only on ground that's fairly level the whole way, and dry)
+		{
+			int cx = alongX ? x + k : x, cz = alongX ? z : z + k;
+			if (!Inside(cx, cz, 4)) return;
+			int lg = GroundAt(cx, cz);
+			if (lg < g - 2 || lg > g + 2 || Blocks.IsWater(world[Idx(cx, lg, cz)])) return;
+		}
+		for (int k = 0; k < L; k++) for (int dy = -3; dy <= 3; dy++) for (int a = -3; a <= 3; a++)
+		{
+			int cx = alongX ? x + k : x + a, cz = alongX ? z + a : z + k, y = ay + dy, d = dy * dy + a * a;
+			if (d <= 5)
+			{
+				if (k > 0 && d <= 1) { int i = Idx(cx, y, cz); if (Plant(world[i])) world[i] = 0; }   // (hollow, open at the far end)
+				else { PutOver(cx, y, cz, log); if (y > 0 && y < WY && world[Idx(cx, y, cz)] == log) Late.Add((Idx(cx, y, cz), Blocks.Turned(log, alongX ? 1 : 2), (byte)log)); }   // (lying along its length)
+			}
+			else if (k == 0 && d <= 11 && dy >= -2) PutOver(cx, y, cz, Blocks.Dirt);   // (the roots)
+		}
+		for (int k = 1; k < L; k++)
+			if (Hash(k, x + z, 8135) < 0.3) { int cx = alongX ? x + k : x, cz = alongX ? z : z + k; PutOver(cx, ay + 3, cz, log == Blocks.FirLog ? Blocks.FirLeaves : log == Blocks.WillowLog ? Blocks.WillowLeaves : Blocks.Leaves); }
+		Built.Add($"giant {x},{g},{z}");
+	}
+	// Snowy lands: one layer of Snow on top of everything open to the sky that snow can lie on (not water, ice or plants),
+	// and on the ground under the trees too (snow sifts down through the leaves). A flower there gets snow round it.
+	void SnowCover()
+	{
+		bool Holds(int b) => Blocks.Get(b) is { } d && d.Shape == null && !d.Liquid && !d.NoCollide && b != Blocks.Ice;
+		for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
+		{
+			if (biomeMap[z * WX + x] != Snowy) continue;
+			int y = WY - 2;
+			while (y > 0 && world[Idx(x, y, z)] == 0) y--;
+			while (y > 0)   // (exactly as the web version, so both grow the same world)
+			{
+				int b = world[Idx(x, y, z)];
+				if (Blocks.IsFlower(b)) { if (Holds(world[Idx(x, y - 1, z)])) Late.Add((Idx(x, y, z), Blocks.WithSnow(b, 1), (byte)b)); break; }
+				if (Holds(b) && world[Idx(x, y + 1, z)] == 0) Late.Add((Idx(x, y + 1, z), Blocks.Snow, 0));
+				if (!Blocks.IsLeaves(b)) break;   // (the ground, a log, a boulder...: the snow goes no further down)
+				y--;
+				while (y > 0 && world[Idx(x, y, z)] == 0) y--;   // (down through the leaves and the air under them)
+			}
+		}
+	}
+	// a sinkhole: a round hole straight down into the ground, its grassy rim hanging over the edge, a pool at the bottom
+	void Sinkhole(int x, int z)
+	{
+		int g = GroundAt(x, z);
+		if (g < SeaLevel + 3) return;
+		int R = 3 + (int)Math.Floor(Hash(x, z, 8140) * 4), yb = Math.Max(6, g - 15 - (int)Math.Floor(Hash(x, z, 8141) * 20));
+		for (int dz = -R - 2; dz <= R + 2; dz++) for (int dx = -R - 2; dx <= R + 2; dx++)   // (open ground all round: no trees, no water)
+		{
+			int cx = x + dx, cz = z + dz;
+			if (!Inside(cx, cz, 2)) return;
+			int lg = GroundAt(cx, cz);
+			if (lg < g - 3 || lg > g + 3 || W.Heights[cz * WX + cx] > lg + 1 || Blocks.IsWater(world[Idx(cx, lg, cz)])) return;
+		}
+		for (int dz = -R - 1; dz <= R + 1; dz++) for (int dx = -R - 1; dx <= R + 1; dx++)
+		{
+			int cx = x + dx, cz = z + dz, lg = GroundAt(cx, cz);
+			double rr = R + (Hash(cx, cz, 8142) - 0.5) * 1.2, d = Math.Sqrt(dx * dx + dz * dz);
+			if (d > rr) continue;
+			bool open = d <= rr - 1;   // (the top layer of ground reaches a block further in: the rim hangs over)
+			for (int y = yb; y <= lg + 2; y++) { if (y == lg && !open) continue; world[Idx(cx, y, cz)] = 0; }
+			if (!open) continue;
+			if (world[Idx(cx, yb - 1, cz)] != 0) { world[Idx(cx, yb, cz)] = Blocks.Water; W.Heights[cz * WX + cx] = yb; }
+			else W.Heights[cz * WX + cx] = yb - 1;
+		}
+		Built.Add($"sinkhole {x},{g},{z}");
+	}
+	// a boulder field: big rounded boulders of stone and cobblestone scattered over the ground
+	void Boulders(int x, int z)
+	{
+		int n = 5 + (int)Math.Floor(Hash(x, z, 8150) * 8);
+		for (int k = 0; k < n; k++)
+		{
+			int bx = x + (int)Math.Floor((Hash(k, x, 8151) - 0.5) * 28), bz = z + (int)Math.Floor((Hash(k, z, 8152) - 0.5) * 28);
+			if (!Inside(bx, bz, 5)) continue;
+			double r = 1.3 + Hash(k, x + z, 8153) * 1.7;
+			int bg = GroundAt(bx, bz), R = (int)Math.Ceiling(r);
+			if (bg <= SeaLevel || Blocks.IsWater(world[Idx(bx, bg, bz)])) continue;
+			int cy = bg + (int)Math.Floor(r * 0.5);
+			for (int dy = -R; dy <= R; dy++) for (int dz = -R; dz <= R; dz++) for (int dx = -R; dx <= R; dx++)
+			{
+				double e = dy * 1.15;
+				if (dx * dx + e * e + dz * dz > r * r) continue;
+				PutOver(bx + dx, cy + dy, bz + dz, Hash3(bx + dx, cy + dy, bz + dz, 8154) < 0.35 ? Blocks.Cobblestone : Blocks.Stone);
+			}
+		}
+		Built.Add($"boulders {x},{GroundAt(x, z)},{z}");
+	}
+	// a swamp hollow: a low mound of peat topped with mud, a dead willow trunk standing out of it, and a ring of still water round it
+	void Hollow(int x, int z)
+	{
+		int g = GroundAt(x, z);
+		if (g < SeaLevel || g > SeaLevel + 1 || !Inside(x, z, 8) || Blocks.IsWater(world[Idx(x, g, z)])) return;
+		double R = 2.5 + Hash(x, z, 8160) * 2; int Hm = 2 + (int)Math.Floor(Hash(x, z, 8161) * 2);
+		for (int dz = -6; dz <= 6; dz++) for (int dx = -6; dx <= 6; dx++)
+		{
+			int cx = x + dx, cz = z + dz, lg = GroundAt(cx, cz);
+			double d = Math.Sqrt(dx * dx + dz * dz);
+			if (d <= R)
+			{
+				double q = d / R;
+				int mh = (int)Math.Floor((1 - q * q) * Hm + 0.5);
+				for (int y = lg + 1; y <= lg + mh; y++) PutOver(cx, y, cz, y == lg + mh ? Blocks.Mud : Blocks.Peat);
+			}
+			else if (d <= R + 1.5)
+			{
+				if (lg == SeaLevel + 1) { for (int y = lg; y <= lg + 2; y++) if (y == lg || Plant(world[Idx(cx, y, cz)])) world[Idx(cx, y, cz)] = 0; lg--; W.Heights[cz * WX + cx] = lg; }
+				if (lg == SeaLevel && !Blocks.IsWater(world[Idx(cx, lg, cz)])) { world[Idx(cx, lg, cz)] = Blocks.Water; if (Plant(world[Idx(cx, lg + 1, cz)])) world[Idx(cx, lg + 1, cz)] = 0; W.Heights[cz * WX + cx] = lg; }
+			}
+		}
+		int th = 3 + (int)Math.Floor(Hash(x, z, 8162) * 4), top = GroundAt(x, z);
+		for (int y = top + 1; y <= top + th; y++) PutOver(x, y, z, Blocks.WillowLog);
+		for (int b = 0; b < 2; b++)   // (a broken branch or two)
+			if (Hash(x + b, z, 8166) < 0.6) { var d = PalmFronds[(int)Math.Floor(Hash(x, z + b, 8167) * 4)]; PutOver(x + d[0], top + th - 1 - b, z + d[1], Blocks.WillowLog); }
+		Built.Add($"hollow {x},{g},{z}");
 	}
 
 	// --- Plateaus (the original style): flat steps at many heights, with curvy swirled edges ---
@@ -541,6 +769,8 @@ public class WorldGen
 			if (dx * dx + dy * dy + dz * dz <= r * r) Put(cx + dx, cy + dy, cz + dz, 5, true);
 	}
 	void Trunk(int x, int y, int z, int h, int log = Blocks.Log) { for (int yy = y + 1; yy <= y + h; yy++) Put(x, yy, z, log, true); }
+	// (worlds from Land 1: a trunk that goes up through leaves already there, so it reaches into the tree's crown)
+	void TrunkInto(int x, int y, int z, int h) { for (int yy = y + 1; yy <= y + h; yy++) if (world[Idx(x, yy, z)] == 0 || Blocks.IsLeaves(world[Idx(x, yy, z)])) world[Idx(x, yy, z)] = Blocks.Log; }
 	double ForestAt(int x, int z) => Smoothstep(0.47, 0.6, Fbm(x / 110.0 + 20, z / 110.0 + 20, 2, 970));
 	// biome worlds: each biome's own trees (the Woods have the ones below)
 	static readonly int[][] PalmFronds = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 }, new[] { 1, 1 }, new[] { 1, -1 }, new[] { -1, 1 }, new[] { -1, -1 } };
@@ -551,7 +781,7 @@ public class WorldGen
 		{
 			if (top != 1 || roll > (bi == Meadow ? 0.0015 : 0.0008)) return;
 			int th = 5 + (int)(v * 3);
-			Trunk(x, h, z, th); LeafBall(x, h + th + 1, z, 2.3);
+			Trunk(x, h, z, Land >= 1 ? th + 1 : th); LeafBall(x, h + th + 1, z, 2.3);
 		}
 		else if (bi == Snowy || bi == Taiga)   // Fir trees, pointed: rings of leaves, widest at the bottom, narrowing up to a point (taiga: thicker forests, no snow)
 		{
@@ -617,11 +847,11 @@ public class WorldGen
 						Put(x + dx, ly, z + dz, 5, true);
 					}
 				}
-				Trunk(x, h, z, th);
+				if (Land >= 1) TrunkInto(x, h, z, th); else Trunk(x, h, z, th);
 			}
-			else if (kind < 0.75) { int th = 5 + (int)(v * 4); Trunk(x, h, z, th); LeafBall(x, h + th + 2, z, 2.6); }
-			else if (kind < 0.92) { int th = 10 + (int)(v * 8); Trunk(x, h, z, th); LeafBall(x, h + th + 1, z, 1.6); LeafBall(x, h + (int)Math.Floor(th * 0.6), z, 1.2); }
-			else { Trunk(x, h, z, 3); LeafBall(x, h + 7, z, 4.5); }
+			else if (kind < 0.75) { int th = 5 + (int)(v * 4); Trunk(x, h, z, Land >= 1 ? th + 2 : th); LeafBall(x, h + th + 2, z, 2.6); }
+			else if (kind < 0.92) { int th = 10 + (int)(v * 8); Trunk(x, h, z, Land >= 1 ? th + 1 : th); LeafBall(x, h + th + 1, z, 1.6); LeafBall(x, h + (int)Math.Floor(th * 0.6), z, 1.2); }
+			else { Trunk(x, h, z, Land >= 1 ? 7 : 3); LeafBall(x, h + 7, z, 4.5); }
 		}
 	}
 

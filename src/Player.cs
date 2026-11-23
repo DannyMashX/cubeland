@@ -27,15 +27,16 @@ public class Player
 		if (y >= World.WY) return;
 		int id = W.Blocks.Get(x, y, z);
 		if (id == 0) return;
-		if (id == Blocks.Pieces)
+		if (Blocks.IsPieces(id))
 		{
 			if (!W.PieceMap.TryGetValue(World.Idx(x, y, z), out var a)) return;
 			for (int s = 0; s < 8; s++)
-				if (a[s] != 0 && !Blocks.B[a[s]].NoCollide)
+				if (a[s] != 0 && !Blocks.B[World.SpotBlock(a[s])].NoCollide)
 					into.Add(new Aabb(new Vector3(x + (s & 1) * 0.5f, y + ((s >> 1) & 1) * 0.5f, z + (s >> 2) * 0.5f), new Vector3(0.5f, 0.5f, 0.5f)));
 			return;
 		}
 		if (Blocks.B[id].Shape == "half") { into.Add(new Aabb(new Vector3(x, y, z), new Vector3(1, 0.5f, 1))); return; }   // a half-tall block: just its bottom half
+		if (Blocks.B[id].Shape == "snow") { if (Blocks.B[id].Layers > 1) into.Add(new Aabb(new Vector3(x, y, z), new Vector3(1, (Blocks.B[id].Layers - 1) / 8f, 1))); return; }   // snow: you sink in one layer
 		if (Blocks.B[id].NoCollide) return;
 		into.Add(new Aabb(new Vector3(x, y, z), Vector3.One));
 	}
@@ -84,9 +85,11 @@ public class Player
 			Pos = p; Vel.Y = 0;
 			return;
 		}
-		// walking into something only half a block high (pieces): step up onto it, like a stair
-		float t = float.MinValue; foreach (var b in hits) t = MathF.Max(t, b.End.Y);
-		if (!Flying && t > Pos.Y && t - Pos.Y <= 0.5f + 1e-6f && !Fits(Pos - new Vector3(0, 0.05f, 0)))
+		// walking into something only half a block high made of pieces (slabs, stairs, quarters, loose pieces): step up onto
+		// it, like a stair. Nothing else: not a whole block (even from on top of a slab), the Cutter, or snow.
+		float t = float.MinValue; bool pieces = true;
+		foreach (var b in hits) { t = MathF.Max(t, b.End.Y); if (b.Size.X != 0.5f || b.Size.Y != 0.5f || b.Size.Z != 0.5f) pieces = false; }
+		if (!Flying && pieces && t > Pos.Y && t - Pos.Y <= 0.5f + 1e-6f && !Fits(Pos - new Vector3(0, 0.05f, 0)))
 		{
 			var up = p; up.Y = t;
 			if (Fits(up)) { Pos = up; Vel.Y = MathF.Max(0, Vel.Y); return; }
@@ -158,6 +161,9 @@ public class Player
 	// the block you're standing on (checks the corners too, for when you're on an edge), or a piece
 	public int BlockUnder()
 	{
+		// feet in a layer of snow (or in a block with snow round it): you're walking in the snow
+		int feet = W.GetBlock((int)MathF.Floor(Pos.X), (int)MathF.Floor(Pos.Y + 0.01f), (int)MathF.Floor(Pos.Z));
+		if (Blocks.IsSnow(feet) || Blocks.SnowIn(feet) > 0) return Blocks.Snow;
 		foreach (var (dx, dz) in new[] { (0f, 0f), (-Half, -Half), (Half, -Half), (-Half, Half), (Half, Half) })
 		{
 			int b = W.SubBlock((int)MathF.Floor((Pos.X + dx) * 2), (int)MathF.Floor((Pos.Y - 0.05f) * 2), (int)MathF.Floor((Pos.Z + dz) * 2));
@@ -204,7 +210,7 @@ public class Player
 				best = new Hit { X = x, Y = y, Z = z, Nx = nx, Ny = ny, Nz = nz, Sub = sub, Id = id, Pt = o + d * t };
 			}
 		}
-		if (id == Blocks.Pieces)
+		if (Blocks.IsPieces(id))
 		{
 			if (W.PieceMap.TryGetValue(World.Idx(x, y, z), out var a))
 				for (int s = 0; s < 8; s++)
@@ -213,6 +219,7 @@ public class Player
 		else if (b.Shape == "torch") { var bx = ChunkMesher.TorchGeo(id).Box; Try(bx[0], bx[1], bx[2], bx[3], bx[4], bx[5], -1); }
 		else if (b.Box != null) Try(b.Box[0], b.Box[1], b.Box[2], b.Box[3], b.Box[4], b.Box[5], -1);
 		else Try(0, 0, 0, 1, 1, 1, -1);
+		if (b.Snowed > 0 && b.Shape is "torch" or "plant" or "flat") Try(0, 0, 0, 1, 1 / 8f, 1, -1);   // (snow-logged: its snow can be aimed at too)
 		return best;
 	}
 	static bool RayBox(Vector3 o, Vector3 d, Vector3 min, Vector3 max, out float t, out int axis)

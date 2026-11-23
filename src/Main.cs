@@ -44,6 +44,9 @@ public partial class Main : Node3D
 		float uiScale = uiArg != null ? float.Parse(uiArg[10..], System.Globalization.CultureInfo.InvariantCulture)
 			: MathF.Floor(DisplayServer.ScreenGetDpi() / 96f + 0.5f);
 		uiScale = Mathf.Max(1, MathF.Round(uiScale) - (uiArg != null ? 0 : 1));   // (one step smaller than your display scaling: 150% -> 1x)
+		autoGui = (int)uiScale;
+		LoadSettings();
+		if (uiArg == null && settings.Gui > 0) uiScale = settings.Gui;   // (the GUI scale you picked in Settings)
 		GetTree().Root.ContentScaleFactor = uiScale;
 		if (uiScale > 1 && DisplayServer.WindowGetMode() == DisplayServer.WindowMode.Windowed)
 		{
@@ -75,7 +78,7 @@ public partial class Main : Node3D
 		ApplySettings();
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
 		if (current == null) return;   // (the main menu, with no world: see PickWorld)
-		world = new World(current.Seed, current.Gen, current.H, current.S, current.B);
+		world = new World(current.Seed, current.Gen, current.H, current.S, current.B, current.Land);
 		genTask = Task.Run(() => { world.Generate(p => genProgress = p); LoadSaveBlocks(); });
 	}
 
@@ -368,7 +371,7 @@ public partial class Main : Node3D
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -681,6 +684,146 @@ public partial class Main : Node3D
 			Check("Flour by hand, Bread in the kiln, Bread is food", Inventory.Recipes.Any(r => r.Out == Blocks.Flour) && Kilns.Smelts.Any(s => s.Out == Blocks.Bread && s.From == Blocks.Flour) && Blocks.Get(Blocks.Bread)?.Food > 0);
 			inv.SetSlot(0, Blocks.Bread); player.Pitch = -0.45f;
 		}
+		if (args.Contains("--snowlog") && !snowTested && !menuOpen)
+		{   // (test: snow round torches and flowers, put down and taken away the way you would, looking straight down at each spot)
+			snowTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int x0 = (int)player.Pos.X + 3, z0 = (int)player.Pos.Z, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -1; dx < 14; dx++) for (int dz = -2; dz <= 2; dz++)
+			{
+				world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Grass);
+				for (int u = 0; u < 5; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0);
+			}
+			void Aim(int x, int yy, int z) { player.Pos = new Vector3(x + 0.5f, yy + 1.2f, z + 0.5f); player.Flying = true; player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0; }
+			void Hold(int id) { inv.SetSlot(0, id); SelectSlot(0); }
+			// a flower planted in a layer of snow keeps it; more Snow on it does nothing (one layer only)
+			int f = Blocks.Flowers[0];
+			world.SetBlock(x0, y, z0, Blocks.Snow);
+			Aim(x0, y, z0); Hold(f); Place();
+			Check("a flower planted in snow keeps the snow", world.GetBlock(x0, y, z0) == Blocks.WithSnow(f, 1));
+			Hold(Blocks.Snow); Aim(x0, y, z0); Place();
+			Check("more snow on it does nothing", world.GetBlock(x0, y, z0) == Blocks.WithSnow(f, 1));
+			// snow put on a plain flower; breaking takes the flower and leaves the snow
+			world.SetBlock(x0 + 2, y, z0, f); Aim(x0 + 2, y, z0); Hold(Blocks.Snow); Place();
+			Check("snow on a flower", world.GetBlock(x0 + 2, y, z0) == Blocks.WithSnow(f, 1));
+			Aim(x0 + 2, y, z0); Hold(0); Break();
+			Check("breaking it takes the flower, the snow stays", world.GetBlock(x0 + 2, y, z0) == Blocks.Snow);
+			// a torch in snow; another added; it burns down and keeps its snow
+			world.SetBlock(x0 + 4, y - 1, z0, Blocks.Stone);
+			world.SetBlock(x0 + 4, y, z0, Blocks.WithSnow(Blocks.Torch, 1));
+			Aim(x0 + 4, y, z0); Hold(Blocks.Torch); Place();
+			Check("a second torch joins it in the snow", world.GetBlock(x0 + 4, y, z0) == Blocks.WithSnow(Blocks.TorchVariant(0, 2, 0), 1));
+			Check("it still gives light", world.Torches.Contains(World.Idx(x0 + 4, y, z0)));
+			for (int s = 0; s < 3000; s++) world.TickTimers(1);
+			Check("burnt down, the snow is still round it", Blocks.SnowIn(world.GetBlock(x0 + 4, y, z0)) == 1 && Blocks.B[world.GetBlock(x0 + 4, y, z0)].Burn == 2);
+			world.SetBlock(x0 + 6, y, z0, Blocks.Snow); Aim(x0 + 6, y, z0); Hold(Blocks.Torch); Place();
+			Check("a torch put on a layer of snow stands in it", world.GetBlock(x0 + 6, y, z0) == Blocks.WithSnow(Blocks.Torch, 1));
+			// a wall torch in snow: its wall goes, the snow stays; the ground goes, everything falls
+			world.SetBlock(x0 + 8, y, z0, Blocks.Stone);
+			world.SetBlock(x0 + 9, y, z0, Blocks.WithSnow(Blocks.TorchVariant(Blocks.WallIndex(-1, 0), 1, 0), 1));
+			world.SetBlock(x0 + 8, y, z0, 0); world.DropTorchesAround(x0 + 8, y, z0, DropFor);
+			Check("wall gone: the torch falls, the snow stays", world.GetBlock(x0 + 9, y, z0) == Blocks.Snow);
+			world.SetBlock(x0 + 10, y, z0, Blocks.WithSnow(f, 1));
+			world.SetBlock(x0 + 10, y - 1, z0, 0); world.DropTorchesAround(x0 + 10, y - 1, z0, DropFor);
+			Check("ground gone: the flower and its snow fall", world.GetBlock(x0 + 10, y, z0) == 0);
+			// stairs, slabs and pieces: put into snow, snow put on them, and the last piece taken away leaves the snow
+			world.SetBlock(x0 + 12, y, z0, Blocks.Snow);
+			world.SetSpots(x0 + 12, y, z0, 0x33 | 0x88, Blocks.Planks);   // (stairs)
+			Check("stairs put into snow keep it", world.GetBlock(x0 + 12, y, z0) == Blocks.SnowyPieces);
+			world.SetSpots(x0 + 12, y, z0, 0x33 | 0x88, 0);
+			Check("the stairs taken away leave the snow", world.GetBlock(x0 + 12, y, z0) == Blocks.Snow);
+			world.SetSpots(x0 + 11, y, z0, 0x33, Blocks.Planks);   // (a slab)
+			Aim(x0 + 11, y, z0); Hold(Blocks.Snow); Place();
+			Check("snow put on a slab lies round it", world.GetBlock(x0 + 11, y, z0) == Blocks.SnowyPieces && world.PieceMap.ContainsKey(World.Idx(x0 + 11, y, z0)));
+			// a rock on snow, and the Cutter
+			world.SetBlock(x0 + 13, y, z0, Blocks.Snow); Aim(x0 + 13, y, z0); Hold(Blocks.Rock); Place();
+			Check("a rock put on a layer of snow lies on it", world.GetBlock(x0 + 13, y, z0) == Blocks.WithSnow(Blocks.RockBlock, 1));
+			int rolls = Enumerable.Range(0, 2000).Select(_ => Blocks.SnowballsFor(3, rnd)).Distinct().Count();
+			Check("snow breaks into 2-4 Snowballs a layer (3 layers: 6-12)", Enumerable.Range(0, 2000).All(_ => Blocks.SnowballsFor(3, rnd) is >= 6 and <= 12) && rolls == 7);
+			Check("4 Snowballs make a Snow Block, which makes 8 Snow", Inventory.Recipes.Any(r => r.Out == Blocks.SnowBlock && r.Needs.Contains((Blocks.Snowball, 4))) && Inventory.Recipes.Any(r => r.Out == Blocks.Snow && r.N == 8 && r.Needs.Contains((Blocks.SnowBlock, 1))));
+			Check("numbers match the web version (torches then flowers from 400; 388-392 pieces, Cutter, rock, clay ball, brick; 706 Snowball)",
+				Blocks.WithSnow(Blocks.Torch, 1) == 400 && Blocks.WithSnow(Blocks.Flowers[4], 1) == 460 && Blocks.WithSnow(Blocks.Pieces, 1) == 388 && Blocks.WithSnow(Blocks.Cutter, 1) == 389
+				&& Blocks.WithSnow(Blocks.RockBlock, 1) == 390 && Blocks.WithSnow(Blocks.ClayBallBlock, 1) == 391 && Blocks.WithSnow(Blocks.BrickBlock, 1) == 392 && Blocks.B[706]?.Name == "Snowball");
+			// a row to look at: each kind standing in snow
+			for (int dx = 0; dx < 14; dx++) world.SetBlock(x0 + dx, y, z0 + 2, 0);
+			world.SetBlock(x0, y, z0 + 2, Blocks.WithSnow(Blocks.Flowers[2], 1));
+			world.SetBlock(x0 + 1, y, z0 + 2, Blocks.WithSnow(Blocks.Torch, 1));
+			world.SetBlock(x0 + 2, y, z0 + 2, Blocks.WithSnow(Blocks.RockBlock, 1));
+			world.SetBlock(x0 + 3, y, z0 + 2, Blocks.WithSnow(Blocks.Cutter, 1));
+			world.SetBlock(x0 + 4, y, z0 + 2, Blocks.Snow); world.SetSpots(x0 + 4, y, z0 + 2, 0x33 | 0x88, Blocks.Planks);
+			world.SetBlock(x0 + 5, y, z0 + 2, Blocks.Snow); world.SetPiece(x0 + 5, y, z0 + 2, 0, 3);
+			world.SetBlock(x0 + 6, y, z0 + 2, Blocks.Snow); world.SetSpots(x0 + 6, y, z0 + 2, 0x0C | 0xC0, Blocks.Planks);   // (a top slab)
+			world.SetBlock(x0 + 7, y, z0 + 2, Blocks.Snow);
+			player.Pos = new Vector3(x0 + 3.5f, y + 2.6f, z0 + 4.5f); player.Yaw = 0; player.Pitch = -0.75f; Hold(Blocks.Snowball);
+		}
+		if (args.Contains("--throwtest") && !throwTested && !menuOpen)
+		{   // (test: throw Snowballs at a wall and at a cow, and check the new sounds are there)
+			throwTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int x0 = (int)player.Pos.X, z0 = (int)player.Pos.Z, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -2; dx <= 2; dx++) for (int dz = -12; dz <= 2; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 5; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			for (int dx = -2; dx <= 2; dx++) for (int u = 0; u < 5; u++) world.SetBlock(x0 + dx, y + u, z0 - 12, Blocks.Stone);
+			player.Pos = new Vector3(x0 + 0.5f, y, z0 + 0.5f); player.Vel = Vector3.Zero; player.Yaw = 0; player.Pitch = 0; player.Flying = false;
+			inv.SetSlot(0, Blocks.Snowball, 5); SelectSlot(0); throwCool = 0;
+			int before = rocks.Count;
+			Check("right-click with a Snowball throws it", ThrowSnowball() && rocks.Count == before + 1 && rocks[^1].Item == Blocks.Snowball);
+			for (int i = 0; i < 100 && rocks.Any(r => r.Item == Blocks.Snowball); i++) UpdateRocks(0.02f);
+			Check("it bursts on the wall, with a puff", !rocks.Any(r => r.Item == Blocks.Snowball) && bits.Count == 8);
+			var cow = SpawnMob("cow", x0 + 0.5f, y, z0 - 5.5f); int hp = cow.Health; cow.Vx = cow.Vz = 0;
+			throwCool = 0; player.Pitch = -0.05f; ThrowSnowball();
+			for (int i = 0; i < 100 && rocks.Any(r => r.Item == Blocks.Snowball); i++) UpdateRocks(0.02f);
+			Check("a cow hit by a Snowball is pushed back, unharmed", cow.Vz < -1 && cow.Health == hp);
+			Check("the thrower isn't hit by their own Snowball", player.Vel.Length() < 0.01f);
+			var rk = MakeRock(player.EyePos + new Vector3(0, 0, -1)); rk.V = new Vector3(0, 0, 0);
+			Check("a thrown Rock is a flat picture", rk.Mesh.Mesh is QuadMesh); RemoveRock(rk);
+			foreach (var k in new[] { "snow:step", "snow:dig", "snow:place", "throw:say", "splat:say" }) Check("sound " + k + " is made", Sound.Loudness(k) > 0.1f);
+			world.SetBlock(x0, y, z0, Blocks.Snow);
+			Check("walking in snow sounds like snow", player.BlockUnder() == Blocks.Snow && Sound.MatOf(Blocks.Snow) == "snow" && Sound.MatOf(Blocks.SnowBlock) == "snow");
+			Check("a torch in snow breaks like a torch", Sound.MatOf(Blocks.WithSnow(Blocks.Torch, 1)) == "wood");
+			Check("lying logs sound like wood", Enumerable.Range(0, 16).All(k => Sound.MatOf(Blocks.TurnedLogs + k) == "wood"));
+			world.SetBlock(x0, y, z0, 0); RemoveMob(cow);
+		}
+		if (throwTested && !throwShown && shotTimer > 1.2f) { throwShown = true; var e = player.EyePos; MakeRock(e + new Vector3(-0.35f, 0, -1.4f)).V = new Vector3(0, 3, 0); MakeRock(e + new Vector3(0.35f, 0, -1.4f), Blocks.Snowball).V = new Vector3(0, 3, 0); }   // (thrown things to look at)
+		if (args.Contains("--cutshapes") && !cutTested && !menuOpen)
+		{   // (test: slabs, stairs, quarters and pieces of stone, grass and terracotta to look at, and their icons in the hotbar)
+			cutTested = true;
+			int x0 = (int)player.Pos.X + 2, z0 = (int)player.Pos.Z - 4, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -1; dx < 16; dx++) for (int dz = -1; dz < 8; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 4; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			int[] masks = { 0x33, 0xCC, 0x33 | 0x88, 0x55, 0x30, 0x01, 0xFF ^ 0xA0, 0x33 | 0x44 };
+			int[] mats = { Blocks.Stone, 1, 65 };
+			for (int r = 0; r < mats.Length; r++) for (int k = 0; k < masks.Length; k++) world.SetSpots(x0 + k * 2, y, z0 + r * 2, masks[k], mats[r]);
+			// double slabs and loose pieces: nothing joins together any more
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int r4 = z0 + 6;
+			world.SetSpots(x0, y, r4, 0x33, Blocks.Stone); world.SetSpots(x0, y, r4, 0xCC, Blocks.Stone);
+			Check("two slabs stay a double slab", Blocks.IsPieces(world.GetBlock(x0, y, r4)));
+			var ds = world.PieceMap[World.Idx(x0, y, r4)];
+			Check("its top slab is a slab on its own", World.ShapeAt(ds, 2) is { shape: "slab", mask: 0xCC });
+			world.SetSpots(x0, y, r4, World.ShapeAt(ds, 2).Value.mask, 0);
+			Check("taking the top slab leaves the bottom one", Blocks.IsPieces(world.GetBlock(x0, y, r4)) && World.ShapeAt(world.PieceMap[World.Idx(x0, y, r4)], 0) is { shape: "slab" });
+			world.SetSpots(x0, y, r4, 0xCC, Blocks.Stone);   // (and back, to look at)
+			for (int s = 0; s < 8; s++) world.SetPiece(x0 + 2, y, r4, s, 65);
+			Check("8 pieces stay 8 pieces", Blocks.IsPieces(world.GetBlock(x0 + 2, y, r4)) && Enumerable.Range(0, 8).All(s => World.ShapeAt(world.PieceMap[World.Idx(x0 + 2, y, r4)], s) == null));
+			for (int s = 0; s < 4; s++) world.SetPiece(x0 + 4, y, r4, new[] { 0, 1, 4, 5 }[s], Blocks.Stone);
+			Check("4 pieces side by side aren't a slab", World.ShapeAt(world.PieceMap[World.Idx(x0 + 4, y, r4)], 0) == null);
+			world.SetSpots(x0 + 6, y, r4, 0x33, 1); world.SetSpots(x0 + 6, y, r4, 0xCC, 1);   // (a grass double slab)
+			world.SetSpots(x0 + 8, y, r4, 0x33, 65); world.SetSpots(x0 + 8, y, r4, 0xCC, 65);
+			// snow on the stone row's slabs and stairs: a layer on every top
+			for (int k = 0; k < masks.Length; k++) world.SetBlock(x0 + k * 2, y, z0, Blocks.SnowyPieces);
+			world.SetSpots(x0 + 12, y, r4, 0x33, Blocks.Stone); world.SetBlock(x0 + 12, y, r4, Blocks.SnowyPieces);
+			world.SetSpots(x0 + 12, y, r4, 0x33, 0);
+			Check("the last slab gone from snow on stone leaves the Snow", world.GetBlock(x0 + 12, y, r4) == Blocks.Snow);
+			world.SetBlock(x0 + 12, y - 1, r4, 0); world.SetBlock(x0 + 12, y, r4, 0);
+			world.SetSpots(x0 + 12, y, r4, 0xCC, Blocks.Stone); world.SetBlock(x0 + 12, y, r4, Blocks.SnowyPieces);
+			world.SetSpots(x0 + 12, y, r4, 0xCC, 0);
+			Check("the last slab gone from snow over a hole leaves air", world.GetBlock(x0 + 12, y, r4) == 0);
+			world.SetBlock(x0 + 12, y - 1, r4, Blocks.Stone);
+			string[] forms = { "slab", "stairs", "vslab", "quarter", "vstairs", "piece" };
+			for (int k = 0; k < forms.Length; k++) inv.SetSlot(k, Blocks.FormItem(forms[k], Blocks.Stone));
+			inv.SetSlot(6, Blocks.FormItem("slab", 1)); inv.SetSlot(7, Blocks.FormItem("stairs", 65));
+			SelectSlot(1);
+			player.Pos = new Vector3(x0 + 4.5f, y + 4.5f, z0 + 10f); player.Flying = true; player.Yaw = 0; player.Pitch = -0.95f;
+		}
 		if (args.Contains("--face") && others.Count > 0)
 		{   // multiplayer test: step back from the first other player and look at them, menus closed
 			var o = others.Values.First();
@@ -831,7 +974,7 @@ public partial class Main : Node3D
 			s.Craft(palmPlanks) == true && s.CountOf(Blocks.PalmPlanks) == 4 && s.BenchCut(Blocks.PalmPlanks, 3).StartsWith("Made 4")
 			&& s.CountOf(Blocks.FormItem("stairs", Blocks.PalmPlanks)) == 4 && Blocks.Get(Blocks.FormItem("stairs", Blocks.PalmPlanks))?.Name == "Palm Planks Stairs"
 			&& Kilns.Smelts.Any(m => m.Out == Blocks.MudBricks && m.From == Blocks.Mud) && Kilns.Fuel[Blocks.Peat] == 8 && Blocks.B[Blocks.Dates].Food > 0
-			&& Blocks.LeafTint(Blocks.WillowLeaves) != null && Blocks.TakesBiomeTint(Blocks.PalmLeaves));
+			&& Blocks.B[Blocks.WillowLeaves].T[0] != Blocks.B[Blocks.Leaves].T[0] && Blocks.TakesBiomeTint(Blocks.PalmLeaves));
 		// deep stone sets: every piece / slab / stairs item has its own number, and each layer's stone gives its own cobblestone
 		var forms = Blocks.Splittable.SelectMany(b => Blocks.Forms.Select(f => (b, f, id: Blocks.FormItem(f, b)))).ToArray();
 		Check("deep sets: all piece and shape items are different", forms.Select(x => x.id).Distinct().Count() == forms.Length

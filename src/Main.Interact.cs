@@ -19,8 +19,9 @@ public partial class Main
 	Player.Hit lastAim;
 	void Placed(int block) { MobNoise(lastAim.X, lastAim.Y, lastAim.Z); if (Blocks.IsWater(block)) Sound.I?.Pour(); else Sound.I?.Place(block); inv.UseOne(); }
 	// survival: logs and planks only break with an axe, stone-type blocks only with a pickaxe (true, with a note, when you can't)
-	bool NeedTool(int b)
+	bool NeedTool(int b0)
 	{
+		int b = Blocks.Plain(b0);   // (a block standing in snow: the block itself)
 		if (!Survival) return false;
 		bool Tell(string text) { ShowNote(text, 2); return true; }
 		if (b == Blocks.Bedrock) return Tell("Bedrock can't be broken");
@@ -51,7 +52,7 @@ public partial class Main
 		else Collect(id, x, y, z);
 	}
 	// the tool each block is meant for (null: none in particular)
-	static string RightTool(int b) => Array.IndexOf(Blocks.NeedsAxe, b) >= 0 ? "axe" : Array.IndexOf(Blocks.NeedsPickaxe, b) >= 0 || Blocks.Get(b)?.Pick > 0 ? "pickaxe"
+	static string RightTool(int b) => (b = Blocks.Plain(b)) < 0 ? null : Array.IndexOf(Blocks.NeedsAxe, b) >= 0 ? "axe" : Array.IndexOf(Blocks.NeedsPickaxe, b) >= 0 || Blocks.Get(b)?.Pick > 0 ? "pickaxe"
 		: Array.IndexOf(Blocks.Diggable, b) >= 0 ? "shovel" : Blocks.IsLeaves(b) ? "hoe" : null;
 	// breaking block b with what you're holding: 1, or 2 with the wrong tool
 	int BreakWear(int b) { string k = RightTool(b); return k == null || inv.Holding(k) ? 1 : 2; }
@@ -73,7 +74,7 @@ public partial class Main
 		{
 			if (player.Raycast() is not { } h) return sel;
 			int b = h.Id;
-			if (h.Sub >= 0 && world.PieceMap.TryGetValue(World.Idx(h.X, h.Y, h.Z), out var a) && a != null) b = a[h.Sub];
+			if (h.Sub >= 0 && world.PieceMap.TryGetValue(World.Idx(h.X, h.Y, h.Z), out var a) && a != null) b = World.SpotBlock(a[h.Sub]);
 			kind = RightTool(b);
 		}
 		if (kind == null || Blocks.Get(inv.Id[sel])?.Tool == kind) return sel;
@@ -116,8 +117,8 @@ public partial class Main
 		if (h.Sub >= 0)
 		{
 			world.PieceMap.TryGetValue(World.Idx(h.X, h.Y, h.Z), out var a);
-			if (a != null && NeedTool(a[h.Sub])) return;
-			if (a != null) WearTool(BreakWear(a[h.Sub]));
+			if (a != null && NeedTool(World.SpotBlock(a[h.Sub]))) return;
+			if (a != null) WearTool(BreakWear(World.SpotBlock(a[h.Sub])));
 			if (a != null && World.ShapeAt(a, h.Sub) is { } g)
 			{
 				Collect(Blocks.FormItem(g.shape, Blocks.StoneDropOf(g.block)), h.X, h.Y, h.Z);   // (stone gives cobblestone)
@@ -125,8 +126,8 @@ public partial class Main
 				world.SetSpots(h.X, h.Y, h.Z, g.mask, 0);
 				return;
 			}
-			if (a != null) Sound.I?.Break(a[h.Sub]);
-			if (a != null) Collect(Blocks.FormItem("piece", Blocks.StoneDropOf(a[h.Sub])), h.X, h.Y, h.Z);
+			if (a != null) Sound.I?.Break(World.SpotBlock(a[h.Sub]));
+			if (a != null) Collect(Blocks.FormItem("piece", Blocks.StoneDropOf(World.SpotBlock(a[h.Sub]))), h.X, h.Y, h.Z);
 			world.SetPiece(h.X, h.Y, h.Z, h.Sub, 0);
 			return;
 		}
@@ -135,13 +136,16 @@ public partial class Main
 		if (NeedTool(hb)) return;
 		int cost = BreakWear(hb);   // (the tool wears after the block is broken, so its last use still counts as that tool)
 		// leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
-		if (!Blocks.IsLeaves(hb) || inv.Holding("hoe")) CollectBlock(hb, h.X, h.Y, h.Z);
+		if (Blocks.IsSnow(hb) || hb == Blocks.SnowBlock)   // snow breaks into Snowballs: 2-4 for each layer, 4 from a Snow Block
+			for (int n = hb == Blocks.SnowBlock ? 4 : Blocks.SnowballsFor(Blocks.B[hb].Layers, rnd); n > 0; n--) Collect(Blocks.Snowball, h.X, h.Y, h.Z);
+		else if (!Blocks.IsLeaves(hb) || inv.Holding("hoe")) CollectBlock(hb, h.X, h.Y, h.Z);
 		Sound.I?.Break(hb);
 		if (Blocks.IsLeaves(hb) && !inv.Holding("hoe") && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);
 		if (hb == Blocks.PalmLeaves && !inv.Holding("hoe") && rnd.NextDouble() < 0.25) Collect(Blocks.Dates, h.X, h.Y, h.Z);   // Palm Leaves: a 1 in 4 chance of Dates
 		if (hb == Blocks.GrainRipe) for (int n = 1 + rnd.Next(2); n > 0; n--) Collect(Blocks.GrainSeeds, h.X, h.Y, h.Z);   // ripe Grain: 1-2 seeds too
 		var b = Blocks.B[hb];
-		if (Blocks.IsTorch(hb) && b.Count > 1) world.SetBlock(h.X, h.Y, h.Z, Blocks.TorchVariant(b.Wi, b.Count - 1, b.Burn));   // take one torch off
+		if (Blocks.IsTorch(hb) && b.Count > 1) world.SetBlock(h.X, h.Y, h.Z, Blocks.WithSnow(Blocks.TorchVariant(b.Wi, b.Count - 1, b.Burn), b.Snowed));   // take one torch off
+		else if (b.Snowed > 0) world.SetBlock(h.X, h.Y, h.Z, Blocks.Snow);   // snow-logged: the torch, flower, rock or Cutter comes out, the snow stays
 		else { world.SetBlock(h.X, h.Y, h.Z, 0); world.DropTorchesAround(h.X, h.Y, h.Z, DropFor); }
 		WearTool(cost);
 	}
@@ -182,16 +186,36 @@ public partial class Main
 	void Place()
 	{
 		// holding food: eat it (survival); holding Fire Essence: it lifts the gloom
-		if (FeedCow() || UseFireEssence() || Eat()) return;
+		if (FeedCow() || UseFireEssence() || Eat() || ThrowSnowball()) return;
 		if (player.Raycast() is not { } h) return;
+		// a single layer of snow is in the way of anything but more snow: aiming at it is aiming at the top of what it lies on
+		if (Blocks.Get(h.Id)?.Layers == 1 && inv.Held != Blocks.Snow && h.Y > 0)
+			h = new Player.Hit { X = h.X, Y = h.Y - 1, Z = h.Z, Ny = 1, Sub = -1, Id = world.GetBlock(h.X, h.Y - 1, h.Z), Pt = new Vector3(h.Pt.X, h.Y, h.Pt.Z) };
 		lastAim = h;
 		int hb = h.Id, id = inv.Held;
 		// right-click a Crafting Bench (survival: its recipes) or a Cutter to use it (hold Shift to build against it instead)
-		if ((hb == Blocks.Cutter || hb == Blocks.CraftingBench && inv.Survival) && !ShiftDown) { OpenBench(hb == Blocks.Cutter); return; }
+		if ((Blocks.Plain(hb) == Blocks.Cutter || hb == Blocks.CraftingBench && inv.Survival) && !ShiftDown) { OpenBench(Blocks.Plain(hb) == Blocks.Cutter); return; }
 		// right-click a lit (burning) kiln holding a Stick: the stick catches fire and becomes a Torch
 		if (Blocks.IsFurnace(hb) && Blocks.B[hb].Lit && id == Blocks.Stick) { LightStick(); return; }
 		if (Blocks.IsFurnace(hb) && !ShiftDown) { kilnAt = World.Idx(h.X, h.Y, h.Z); OpenPanel(kilnPanel); return; }
 		if (FarmUse(h.X, h.Y, h.Z, hb)) return;
+		// Snow on something that doesn't fill its space (a torch, flower, rock, the Cutter, stairs, slabs, pieces): one layer of
+		// snow lies round it, never more. (Aiming at it, or at the side of the wall a torch is on.)
+		if (id == Blocks.Snow && !Blocks.CanSnowLog(hb) && World.Inside(h.X + h.Nx, h.Y + h.Ny, h.Z + h.Nz) && Blocks.CanSnowLog(world.GetBlock(h.X + h.Nx, h.Y + h.Ny, h.Z + h.Nz)))
+			h = new Player.Hit { X = h.X + h.Nx, Y = h.Y + h.Ny, Z = h.Z + h.Nz, Ny = 1, Sub = -1, Id = world.GetBlock(h.X + h.Nx, h.Y + h.Ny, h.Z + h.Nz), Pt = h.Pt };
+		if (id == Blocks.Snow && Blocks.CanSnowLog(h.Id))
+		{
+			if (Blocks.SnowIn(h.Id) > 0 || (!Blocks.IsPieces(h.Id) && !SnowRests(world.GetBlock(h.X, h.Y - 1, h.Z)))) return;   // (already in snow: no more. Slabs and stairs take it on their tops whatever is under them)
+			lastAim = h;
+			world.SetBlock(h.X, h.Y, h.Z, Blocks.WithSnow(h.Id, 1)); Placed(Blocks.Snow); return;
+		}
+		// Snow on snow: one more layer (8 make a Snow Block)
+		if (id == Blocks.Snow && Blocks.IsSnow(hb))
+		{
+			int more = Blocks.B[hb].Layers + 1;
+			if (player.TouchesBox(h.X, h.Y, h.Z, 1) && player.Pos.Y < h.Y + (more - 1) / 8f) return;   // (not up into you)
+			world.SetBlock(h.X, h.Y, h.Z, more == 8 ? Blocks.SnowBlock : Blocks.Snow + more - 1); Placed(Blocks.Snow); return;
+		}
 		if (id == 0) return;
 		if (Blocks.FormOf(id) != null) { PlaceShape(h, id); return; }
 		// a piece goes in the half-block spot just in front of whatever you're looking at
@@ -212,9 +236,9 @@ public partial class Main
 			{
 				var tb = Blocks.B[hb];
 				// a lit torch lights a smoldering one up again (it isn't used up)
-				if ((burn == 0 || burn == 3) && tb.Burn == 1) { world.SetBlock(h.X, h.Y, h.Z, Blocks.TorchVariant(tb.Wi, tb.Count, 0)); ShowNote("Lit the torch again"); return; }
+				if ((burn == 0 || burn == 3) && tb.Burn == 1) { world.SetBlock(h.X, h.Y, h.Z, Blocks.WithSnow(Blocks.TorchVariant(tb.Wi, tb.Count, 0), tb.Snowed)); ShowNote("Lit the torch again"); return; }
 				// clicking a torch adds another one of the same kind to that spot (up to 4 standing, 2 on a wall)
-				if (tb.Burn == burn && tb.Count < Blocks.TorchMax(tb.Wi)) { world.SetBlock(h.X, h.Y, h.Z, Blocks.TorchVariant(tb.Wi, tb.Count + 1, burn)); Placed(id); }
+				if (tb.Burn == burn && tb.Count < Blocks.TorchMax(tb.Wi)) { world.SetBlock(h.X, h.Y, h.Z, Blocks.WithSnow(Blocks.TorchVariant(tb.Wi, tb.Count + 1, burn), tb.Snowed)); Placed(id); }
 				return;
 			}
 			// otherwise: on top of a block (standing) or on its side (leaning off the wall), never underneath
@@ -223,8 +247,9 @@ public partial class Main
 			if (wi < 0 || !World.Inside(bx, by, bz)) return;
 			int there = world.GetBlock(bx, by, bz);
 			if (there == 0) world.SetBlock(bx, by, bz, Blocks.TorchVariant(wi, 1, burn));
+			else if (there == Blocks.Snow) world.SetBlock(bx, by, bz, Blocks.WithSnow(Blocks.TorchVariant(wi, 1, burn), 1));   // (into a layer of snow: it stays round the torch)
 			else if (Blocks.IsTorch(there) && Blocks.B[there].Wi == wi && Blocks.B[there].Burn == burn && Blocks.B[there].Count < Blocks.TorchMax(wi))
-				world.SetBlock(bx, by, bz, Blocks.TorchVariant(wi, Blocks.B[there].Count + 1, burn));
+				world.SetBlock(bx, by, bz, Blocks.WithSnow(Blocks.TorchVariant(wi, Blocks.B[there].Count + 1, burn), Blocks.B[there].Snowed));
 			else return;
 			Placed(id);
 			return;
@@ -232,19 +257,25 @@ public partial class Main
 		{
 			if (!World.Inside(bx, by, bz)) return;
 			int there = world.GetBlock(bx, by, bz);
-			if (there != 0 && !Blocks.IsWater(there)) return;   // (water can be built over)
+			if (there != 0 && !Blocks.IsWater(there) && Blocks.Get(there)?.Layers != 1) return;   // (water and a thin layer of snow can be built over)
 			if (id == Blocks.Water) { world.SetBlock(bx, by, bz, Blocks.Water); Placed(Blocks.Water); return; }   // water can go anywhere, even where you stand
 			int pid = Blocks.PlaceId(id, rnd);
+			pid = Blocks.Turned(pid, h.Ny != 0 ? 0 : h.Nx != 0 ? 1 : 2);   // a log lies pointing out from the side you put it against
+			if (Blocks.B[pid].Shape == "snow")
+			{   // snow: only on top of a whole block
+				if (!SnowRests(world.GetBlock(bx, by - 1, bz)) || Blocks.IsWater(there)) return;
+				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
+			}
 			if (Blocks.B[pid].Shape == "flat")
 			{   // a rock: only on top of a solid block
 				if (by != h.Y + 1 || !world.Solid(bx, by - 1, bz) || Blocks.IsWater(there)) return;
-				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
+				world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid); return;   // (on a layer of snow: it lies on it)
 			}
 			if (Blocks.B[pid].Shape == "plant")
 			{   // a flower: planted on top of grass or dirt
 				int under = world.GetBlock(bx, by - 1, bz);
-				if (by != h.Y + 1 || (!Blocks.IsGrassy(under) && under != Blocks.Dirt) || there != 0) return;
-				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
+				if (by != h.Y + 1 || (!Blocks.IsGrassy(under) && under != Blocks.Dirt) || (there != 0 && there != Blocks.Snow)) return;
+				world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid); return;   // (into a layer of snow: it stays round the flower)
 			}
 			if (pid == Blocks.Furnace || pid == Blocks.Foundry)
 			{   // a kiln (or the Foundry's Furnace) turns its front towards you
@@ -257,9 +288,11 @@ public partial class Main
 				}
 			}
 			if (player.Touches(bx, by, bz)) return;
-			world.SetBlock(bx, by, bz, pid); Placed(pid);
+			world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid);   // (the Cutter put down in a layer of snow stands in it)
 		}
 	}
+	// what snow can lie on: whole blocks (not water, plants, torches, pieces or more snow)
+	static bool SnowRests(int b) => Blocks.Get(b) is { } d && d.Shape == null && !d.Liquid && !d.NoCollide && !d.Item;
 	// the half-block spot just in front of where you aim (on the half-block grid: 2x world position)
 	static Vector3I HalfSpot(Player.Hit h) =>
 		new((int)MathF.Floor((h.Pt.X + h.Nx * 0.25f) * 2), (int)MathF.Floor((h.Pt.Y + h.Ny * 0.25f) * 2), (int)MathF.Floor((h.Pt.Z + h.Nz * 0.25f) * 2));

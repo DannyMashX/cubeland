@@ -40,8 +40,18 @@ public partial class Sound : Node
 		foreach (int b in Blocks.Flowers) Material[b] = "grass";
 		foreach (int b in Blocks.GrainStages) Material[b] = "grass";
 		foreach (int b in Blocks.Soils) Material[b] = "stone";   // (tilled soil sounds like dirt, which now has the sharp sound; gravel has the crumbly one)
+		for (int b = Blocks.Snow; b <= Blocks.SnowBlock; b++) Material[b] = "snow";   // (the layers and the Snow Block)
+		for (int k = 0; k < 16; k++) Material[Blocks.TurnedLogs + k] = "wood";   // (logs lying on their sides)
 	}
-	static string Mat(int id) => Blocks.IsTorch(id) ? "wood" : Material.TryGetValue(id, out var m) ? m : "stone";
+	static string Mat(int id) { id = Blocks.Plain(id); return Blocks.IsTorch(id) ? "wood" : Material.TryGetValue(id, out var m) ? m : "stone"; }
+	public static string MatOf(int id) => Mat(id);
+	// (tests) how loud a made sound is at its loudest: builds one variation of "material:kind"
+	public static float Loudness(string key)
+	{
+		var (m, k) = (key.Split(':')[0], key.Split(':')[1]);
+		var o = m == "throw" ? Whoosh(Rng(61000)) : m == "splat" ? Splat(Rng(62000)) : k == "place" && PlaceRecipes.TryGetValue(m, out var f) ? f(Rng(11000)) : Recipes.Contains(m) ? Recipe(m, k == "dig", Rng(9173)) : new float[1];
+		return o.Max(Math.Abs);
+	}
 
 	// ---- tiny sound-building toolkit (works on raw sample arrays) ----
 	static Func<double> Rng(int seed)
@@ -222,12 +232,27 @@ public partial class Sound : Node
 				for (int i = 0; i < 8; i++) Ring(o, 1500 + r() * 4000, 0.004 + r() * 0.018, 0.3 + r() * 0.5, Math.Pow(r(), 2.5) * 0.08);
 				Crackles(o, r, 35, 0.25, 0.04, 0.001, 0.004, 1500, 4500, 2.5, 0.45, 1.6);
 				return Finish(o, 0.9);
+			case "snow":   // a soft, packed crunch
+				if (!dig)
+				{
+					o = Buf(0.26);
+					Crackles(o, r, 60, 0.16, 0, 0.003, 0.009, 700, 2200, 2.5, 1, 1.3);
+					Burst(o, r, 0.015, 0.04, "lp", 500, amp: 0.5);
+					Filter(o, "lp", 4000, 0.7);
+					return Finish(o, 0.5);
+				}
+				o = Buf(0.4);
+				Crackles(o, r, 130, 0.28, 0, 0.003, 0.01, 600, 2400, 2.5, 1, 1.2);
+				Crackles(o, r, 40, 0.25, 0.01, 0.002, 0.005, 2500, 5000, 1.5, 0.35);
+				Burst(o, r, 0.01, 0.05, "lp", 380, amp: 0.7);
+				Filter(o, "lp", 4500, 0.7);
+				return Finish(o, 0.75);
 			case "cobble": return dig ? DeepGrit(r, true) : Recipe("rock", false, r);
 			case "brick": return dig ? PlaceRock(r) : Recipe("rock", false, r);
 		}
 		return Buf(0.1);
 	}
-	static readonly string[] Recipes = { "grass", "leaves", "gravel", "sand", "dirt", "stone", "rock", "wood", "glass", "shatter", "cobble", "brick" };
+	static readonly string[] Recipes = { "grass", "leaves", "gravel", "sand", "dirt", "stone", "rock", "wood", "glass", "shatter", "cobble", "brick", "snow" };
 	// stone set on stone: deep dry clack + thump + gritty scrape
 	static float[] PlaceRock(Func<double> r)
 	{
@@ -248,7 +273,33 @@ public partial class Sound : Node
 		return Finish(o, dig ? 0.9 : 0.8);
 	}
 	static readonly Dictionary<string, Func<Func<double>, float[]>> PlaceRecipes = new()
-	{ ["rock"] = PlaceRock, ["cobble"] = r => DeepGrit(r, false), ["brick"] = PlaceRock };
+	{ ["rock"] = PlaceRock, ["cobble"] = r => DeepGrit(r, false), ["brick"] = PlaceRock, ["snow"] = PlaceSnow };
+	// Snow pressed down: a soft thump and a little crunch
+	static float[] PlaceSnow(Func<double> r)
+	{
+		var o = Buf(0.3);
+		Burst(o, r, 0.006, 0.035, "lp", 260, amp: 1);
+		Crackles(o, r, 45, 0.12, 0.005, 0.003, 0.008, 800, 2000, 2, 0.5, 1.5);
+		Filter(o, "lp", 3000, 0.7);
+		return Finish(o, 0.7);
+	}
+	// anything thrown: a rising rush of air
+	static float[] Whoosh(Func<double> r)
+	{
+		var o = Buf(0.3);
+		for (int k = 0; k < 6; k++) Burst(o, r, 0.03, 0.025, "bp", 500 + k * 250, 1.2, 0.4 + 0.12 * k, 0.03 * k);
+		Filter(o, "lp", 3500, 0.7);
+		return Finish(o, 0.45);
+	}
+	// a Snowball bursting on something
+	static float[] Splat(Func<double> r)
+	{
+		var o = Buf(0.25);
+		Burst(o, r, 0.002, 0.03, "lp", 300, amp: 1);
+		Crackles(o, r, 50, 0.08, 0, 0.002, 0.007, 1000, 3000, 2, 0.6, 2);
+		Filter(o, "lp", 5000, 0.7);
+		return Finish(o, 0.6);
+	}
 
 	// Grr Angry's growl: a low, rough "grrrr": a buzzy throat tone shaped by mouth-like filters, plus breathy noise, rattled
 	static float[] Growl(Func<double> r)
@@ -422,6 +473,8 @@ public partial class Sound : Node
 			Add(Recipes[m] + ":dig", v => Recipe(Recipes[m], true, Rng(9173 + m * 101 + v * 17 + 5000)));
 		}
 		foreach (var (m, f) in PlaceRecipes) Add(m + ":place", v => f(Rng(11000 + v * 17)));
+		Add("throw:say", v => Whoosh(Rng(61000 + v * 23)));
+		Add("splat:say", v => Splat(Rng(62000 + v * 23)));
 		lock (bank) foreach (var (k, l) in raw) bank[k] = l.Select(d => Wav(d)).ToArray();
 		ready = true;
 		BuildMusic();
@@ -445,9 +498,9 @@ public partial class Sound : Node
 		p.Play();
 	}
 	// a sound from a spot in the world (mob voices): quieter the further away, from the left or right speaker
-	public void PlayAt(string voice, Vector3 at, float vol)
+	public void PlayAt(string voice, Vector3 at, float vol, string ch = "mob")
 	{
-		vol *= Levels["master"] * Levels["mob"];
+		vol *= Levels["master"] * Levels[ch];
 		if (Muted || vol <= 0.01f) return;
 		var s = Pick(voice + ":say"); if (s == null) return;
 		var p = new AudioStreamPlayer3D { Stream = s, Bus = "Sfx", AttenuationModel = AudioStreamPlayer3D.AttenuationModelEnum.Disabled, VolumeDb = Mathf.LinearToDb(vol),
@@ -465,6 +518,7 @@ public partial class Sound : Node
 	public void Splash(float speed) => Play("water", "splash", Math.Min(1, 0.3f + speed / 14), speed > 12 ? 0.85f : 1, "player");
 	public void Swim() => Play("water", "swim", 0.55f, 1, "player");
 	public void Pour() => Play("water", "place", 0.8f, 1);
+	public void Throw() => Play("throw", "say", 0.7f, 1);   // you threw something (others hear it with PlayAt("throw", ...))
 	public void Place(int id) { var m = Mat(id); if (PlaceRecipes.ContainsKey(m)) Play(m, "place", 0.9f, 1); else Play(m, "dig", 0.75f, 0.9f); }
 	public void Break(int id)
 	{

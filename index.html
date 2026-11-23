@@ -375,6 +375,7 @@
     <div class="set-row"><span>Mouse sensitivity</span><input type="range" id="set-sens" min="20" max="300" step="10"><b id="set-sens-v"></b></div>
     <div class="set-row"><span>Field of view</span><input type="range" id="set-fov" min="50" max="110" step="5"><b id="set-fov-v"></b></div>
     <div class="set-row"><span>Render distance</span><input type="range" id="set-render" min="4" max="32" step="1"><b id="set-render-v"></b></div>
+    <div class="set-row"><span>GUI scale</span><input type="range" id="set-gui" min="0" max="4" step="1"><b id="set-gui-v"></b></div>
     <div class="set-row"><span>Sound (M)</span><button id="set-sound"></button></div>
     <div class="set-row"><span>FPS and position</span><button id="set-info"></button></div>
     <div class="set-row"><span>Auto save</span><button id="set-autosave"></button></div>
@@ -489,7 +490,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=beta-0.1.1.2"></script>
+<script src="textures.js?v=beta-0.1.2.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -497,7 +498,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.1.2';
+const GAME_VERSION = 'Beta 0.1.2.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -526,6 +527,10 @@ const validSize = (s, h) => h === 640 ? 640 : Number.isInteger(s) && s >= WORLD_
 // How big the biomes are (Biomes worlds): 0.5 (half size) to 4 (4 times as big), in quarters; 1 (or none saved) is the usual size
 const BIOMES_MIN = 0.5, BIOMES_MAX = 4;
 const validBiomes = b => typeof b === "number" && b >= BIOMES_MIN && b <= BIOMES_MAX && Math.abs(b * 4 - Math.round(b * 4)) < 1e-9 ? Math.round(b * 4) / 4 : 1;
+// The land's version: which features a world grows with. 0 (or none saved) = worlds made before Beta 0.1.1.3 (they keep growing
+// exactly as they did); 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. (As the desktop version.)
+const LAND_VERSION = 1;
+const validLand = l => Math.min(LAND_VERSION, Math.max(0, l | 0));
 const Worlds = (() => {
   const LIST_KEY = 'cubeland-worlds', LAST_KEY = 'cubeland-last-world';
   let list = [];
@@ -547,7 +552,7 @@ const Worlds = (() => {
   // s = its width and depth: 1280 (a tall world 640); worlds made before 1280-wide worlds have none and are 640
   function create(name, seedText, gen = 3, mode = 'creative', size = WORLD_DEFAULT, biomes = 1) {
     const w = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name || '').trim().slice(0, 32) || `World ${list.length + 1}`,
-      seed: seedFrom(seedText), gen, h: TALL_WORLDS ? 640 : 192, s: TALL_WORLDS ? 640 : validSize(size, 192), b: validBiomes(biomes), mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
+      seed: seedFrom(seedText), gen, h: TALL_WORLDS ? 640 : 192, s: TALL_WORLDS ? 640 : validSize(size, 192), b: validBiomes(biomes), land: LAND_VERSION, mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
     list.push(w); saveList();
     return w;
   }
@@ -560,7 +565,7 @@ const Worlds = (() => {
   try { joined = JSON.parse(sessionStorage.getItem('cubeland-join')); } catch (e) {}
   let current;
   if (joinCode && joined && joined.code === joinCode && isFinite(joined.seed)) {
-    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, s: joined.s, b: joined.b, mode: joined.mode, temp: true, code: joinCode };
+    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, s: joined.s, b: joined.b, land: joined.land, mode: joined.mode, temp: true, code: joinCode };
   } else if (list.some(w => w.id === want)) {
     current = list.find(w => w.id === want);
     current.played = Date.now(); saveList();
@@ -600,6 +605,7 @@ const Worlds = (() => {
       if (info.h === 640) w.h = 640; else if (info.h != null) w.h = 192;
       if (info.s != null) w.s = validSize(info.s, w.h);
       if (info.b != null) w.b = validBiomes(info.b);
+      if (info.land != null) w.land = validLand(info.land);
       if (typeof info.ver === 'string') w.ver = info.ver.slice(0, 32);
       if (data) await tx('readwrite', st => st.put(data, w.id));
       list.push(w); saveList();
@@ -626,6 +632,7 @@ const Worlds = (() => {
 const WY = Worlds.current.h === 640 ? 640 : 192, WX = Worlds.current.menu ? 32 : validSize(Worlds.current.s, WY), WZ = WX;   // (no world in the main menu: see Worlds)
 const MENU_ONLY = !!Worlds.current.menu;
 const BIOME_SCALE = validBiomes(Worlds.current.b);   // how big the biomes are: the climate maps are stretched by this
+const LAND = validLand(Worlds.current.land);   // the land's version (see LAND_VERSION)
 const LIFT = WY - 192;
 const CS = 16;                        // chunk size: chunks are 16x16x16 cubes
 const NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;
@@ -758,16 +765,16 @@ const BLOCKS = {
   61: { name: 'Stripped Oak Log',  t: P('stripped_log_side', 'stripped_log_top', 'stripped_log_top') },
   // Fir (the snowy biome's trees)
   [FIR_LOG]:          { name: 'Fir Log',          t: P('fir_log_side', 'fir_log_top', 'fir_log_top') },
-  [FIR_LEAVES]:       { name: 'Fir Leaves',       t: P3('leaves'), transparent: true },   // (the Oak Leaves picture, tinted: see LEAF_TINT)
+  [FIR_LEAVES]:       { name: 'Fir Leaves',       t: P3('fir_leaves'), transparent: true },
   [FIR_PLANKS]:       { name: 'Fir Planks',       t: P3('fir_planks') },
   [STRIPPED_FIR_LOG]: { name: 'Stripped Fir Log', t: P('stripped_fir_log_side', 'stripped_fir_log_top', 'stripped_fir_log_top') },
   // Palm (the desert's trees) and Willow (the swamp's)
   [PALM_LOG]:            { name: 'Palm Log',            t: P('palm_log_side', 'palm_log_top', 'palm_log_top') },
-  [PALM_LEAVES]:         { name: 'Palm Leaves',         t: P3('leaves'), transparent: true },   // (the Oak Leaves picture, tinted: see LEAF_TINT)
+  [PALM_LEAVES]:         { name: 'Palm Leaves',         t: P3('palm_leaves'), transparent: true },
   [PALM_PLANKS]:         { name: 'Palm Planks',         t: P3('palm_planks') },
   [STRIPPED_PALM_LOG]:   { name: 'Stripped Palm Log',   t: P('stripped_palm_log_side', 'stripped_palm_log_top', 'stripped_palm_log_top') },
   [WILLOW_LOG]:          { name: 'Willow Log',          t: P('willow_log_side', 'willow_log_top', 'willow_log_top') },
-  [WILLOW_LEAVES]:       { name: 'Willow Leaves',       t: P3('leaves'), transparent: true },
+  [WILLOW_LEAVES]:       { name: 'Willow Leaves',       t: P3('willow_leaves'), transparent: true },
   [WILLOW_PLANKS]:       { name: 'Willow Planks',       t: P3('willow_planks') },
   [STRIPPED_WILLOW_LOG]: { name: 'Stripped Willow Log', t: P('stripped_willow_log_side', 'stripped_willow_log_top', 'stripped_willow_log_top') },
   // the desert's building stone and the swamp's ground
@@ -859,6 +866,18 @@ const isTorch = id => !!(BLOCKS[id] && BLOCKS[id].shape === 'torch');
 // 51-57 = flowing water, one step weaker for each block it runs from the still water (it stops after 7).
 const WATER = 50;
 for (let l = 0; l <= 7; l++) BLOCKS[WATER + l] = { name: 'Water', t: P3('water'), transparent: true, noCollide: true, liquid: true, level: l };
+// Logs lie the way you put them down: on the top or bottom of something they stand upright; on a side they lie pointing
+// out from it. Each kind of log has two lying blocks (360-375): 360 + 2k along x, 361 + 2k along z, k its place in LOGS.
+// (They're numbered over 255, so the world's growing puts them in after it's packed: see `late`.)
+const LOGS = [4, 61, FIR_LOG, STRIPPED_FIR_LOG, PALM_LOG, STRIPPED_PALM_LOG, WILLOW_LOG, STRIPPED_WILLOW_LOG], TURNED_LOGS = 360;
+const turned = (log, axis) => { const k = LOGS.indexOf(log); return k < 0 || !axis ? log : TURNED_LOGS + 2 * k + axis - 1; };
+for (const log of LOGS) for (let axis = 1; axis <= 2; axis++) BLOCKS[turned(log, axis)] = { name: BLOCKS[log].name, t: BLOCKS[log].t, axis, drop: log };
+// Snow: Snow (380-386) lies in layers, 1 to 7 deep (each an eighth of a block); putting Snow on Snow adds a layer, and an
+// 8th layer makes it a Snow Block (387). Only the 2nd layer up is solid (you sink into the first). It falls off whatever
+// it was lying on if that goes. Breaking it gives you a Snow for each layer. Snowy lands are covered in one layer.
+const SNOW = 380, SNOW_BLOCK = 387, isSnow = b => b >= SNOW && b < SNOW_BLOCK;
+for (let n = 1; n < 8; n++) BLOCKS[SNOW + n - 1] = { name: 'Snow', t: P3('snow'), shape: 'snow', layers: n, transparent: true, noCollide: n === 1, box: [0, 0, 0, 1, n / 8, 1], drop: SNOW };
+BLOCKS[SNOW_BLOCK] = { name: 'Snow Block', t: P3('snow') };
 const isWater = id => id >= WATER && id <= WATER + 7;
 // how high the water's surface sits in its block (water with more water on top fills the whole block)
 const waterHeight = (id, above) => isWater(above) ? 1 : id === WATER ? 0.875 : Math.max(0.15, 0.875 * (8 - (id - WATER)) / 8);
@@ -1067,8 +1086,8 @@ const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // The soil family (Dirt, Grass, Sand, Gravel and Clay) can be dug by hand, but then gives 1-8 pieces instead of
 // the whole block (a shovel gets you the whole block). Grass gives Dirt.
 // Bricks, Terracotta, the chiseled blocks and the Furnace count as stone-type too.
-const NEEDS_AXE = [4, 7, 61, FIR_LOG, FIR_PLANKS, STRIPPED_FIR_LOG, PALM_LOG, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_LOG, WILLOW_PLANKS, STRIPPED_WILLOW_LOG],
-  DIGGABLE = [1, 2, 6, 11, 63, FIRECLAY, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, MUD, PEAT];
+const NEEDS_AXE = [4, 7, 61, FIR_LOG, FIR_PLANKS, STRIPPED_FIR_LOG, PALM_LOG, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_LOG, WILLOW_PLANKS, STRIPPED_WILLOW_LOG, ...Array.from({ length: 16 }, (_, k) => TURNED_LOGS + k)],
+  DIGGABLE = [1, 2, 6, 11, 63, FIRECLAY, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, MUD, PEAT, ...Array.from({ length: 8 }, (_, k) => SNOW + k)];
 const NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, FURNACE, FURNACE + 1, FURNACE + 2, FURNACE + 3, FURNACE + 4, FURNACE + 5, FURNACE + 6, FURNACE + 7, ...NEW_COLOUR_BLOCKS, ...DEEP_BLOCKS,
   ...ORES, ...FIRECLAY_BLOCKS, ...Array.from({ length: 8 }, (_, k) => FOUNDRY + k), 97, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS];
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
@@ -1081,7 +1100,50 @@ const BRICK_VARIANTS = [12, 13, 14, 15];
 // Spot number = x + y*2 + z*4, where x, y and z are 0 (low half) or 1 (high half) of the block space.
 const PIECES = 70, CRAFTING_BENCH = 60, CUTTER = 159;
 BLOCKS[PIECES] = { name: 'Pieces', t: P3('stone'), transparent: true, shape: 'pieces' };
-const pieceMap = new Map();     // world index -> Int32Array(8) of block ids (0 = empty spot)
+// Snowlogging: a block you can walk through or that isn't a whole block (a torch of any kind, wall and count, a flower, a
+// space of pieces: slabs, stairs, quarters..., the Cutter, a Rock, Clay Ball or Brick) can have one layer of Snow in its
+// space too, never more. Put Snow on one, or one of them into a layer of snow, and both stay. Each is its own block, the
+// plain one with `inner` (what it holds) and `snowed: 1`: torches and flowers from 400 (the torches by number, then the
+// flowers), and 388 pieces (the same 8 spots in pieceMap as 70), 389 Cutter, 390 Rock, 391 Clay Ball, 392 Brick. Breaking
+// it takes the block (or the piece you aimed at) and leaves the snow. Exactly as the desktop version.
+const SNOW_LOGGED_1 = 400, PIECES_IN_SNOW = 388;
+const SNOW_LOGGABLE = [...new Set(Object.values(TORCH_IDS))].concat(FLOWERS).sort((a, c) => a - c);
+const snowLoggedIds = new Map();   // the plain block -> it with snow round it
+[...SNOW_LOGGABLE.map((inner, k) => [inner, SNOW_LOGGED_1 + k]), [PIECES, PIECES_IN_SNOW], [CUTTER, 389], [62, 390], [71, 391], [72, 392]].forEach(([inner, id]) => {
+  const b = BLOCKS[inner];
+  if (BLOCKS[id]) throw new Error(`Block ${id} is already ${BLOCKS[id].name}: it's needed for a snowlogged ${b.name}`);
+  const d = { ...b, inner, snowed: 1 };
+  if (!d.drop && !isTorch(inner) && inner !== PIECES) d.drop = inner;   // (breaking it gives what it holds, not the snowlogged block)
+  if (d.box && d.box[4] < 1 / 8) d.box = [d.box[0], d.box[1], d.box[2], d.box[3], 1 / 8, d.box[5]];
+  BLOCKS[id] = d;
+  snowLoggedIds.set(inner, id);
+});
+const snowIn = b => BLOCKS[b] && BLOCKS[b].snowed || 0;                       // how many layers of snow are round it (0 or 1)
+const plainOf = b => BLOCKS[b] && BLOCKS[b].inner || b;                       // the block without its snow
+const canSnowLog = b => snowLoggedIds.has(plainOf(b));
+// b (or what b holds) with snow round it (n = 1) or without (n = 0). Anything that can't be snowlogged stays as it is.
+const withSnow = (b, n) => { const p = plainOf(b); return !(n > 0) ? p : snowLoggedIds.get(p) || b; };
+const isPieces = b => b === PIECES || b === PIECES_IN_SNOW;
+// Snowballs: breaking snow gives 2-4 for each layer (a Snow Block: 4). 4 make a Snow Block, which makes 8 Snow.
+const SNOWBALL = 706;
+BLOCKS[SNOWBALL] = { name: 'Snowball', t: P3('snowball'), item: true };
+function dropSnowballs(layers, x, y, z) { for (let n = layers; n > 0; n--) for (let k = 2 + Math.floor(Math.random() * 3); k > 0; k--) collect(SNOWBALL, x, y, z); }
+// (knocked off: the snow round it drops too)
+const dropSnowOf = (b, x, y, z) => dropSnowballs(snowIn(b), x, y, z);
+const pieceMap = new Map();     // world index -> Int32Array(8) of spots (0 = empty spot)
+// Each spot holds block + PIECE_GROUP x group. The group says which placed thing it belongs to: the spots of one slab,
+// stairs, quarter... share one, and each loose piece has its own (the lowest of 1-15 free in that space when it's put
+// down). Spots with the same value are one thing: they break together, and nothing joins up (two slabs stay a double
+// slab, 8 pieces stay 8 pieces). Group 0: pieces from before groups (and the world's own), which keep the old rule (the
+// same block's spots make the shape). Saved and sent as they are. Exactly as the desktop version.
+const PIECE_GROUP = 4096;   // (block ids stay under 4096)
+const spotBlock = v => v % PIECE_GROUP;   // the block in a spot
+// the value for a new thing of block id put into the spots `a` (before it's put in)
+function newSpotValue(a, id) {
+  const used = new Set(Array.from(a || [], v => Math.floor(v / PIECE_GROUP)));
+  for (let g = 1; g <= 15; g++) if (!used.has(g)) return id + PIECE_GROUP * g;
+  return id;
+}
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
 const PIECE_ITEM = 100;
 // cube blocks that can be cut into pieces, slabs and stairs (not torches, water, the Crafting Bench or the Furnace)
@@ -1122,36 +1184,43 @@ const SHAPE_NAME = { slab: 'Slab', vslab: 'Vertical Slab', stairs: 'Stairs', qua
 for (const b of SPLITTABLE) for (const k in SHAPE_ITEM)
   BLOCKS[formItem(k, b)] = { name: `${BLOCKS[b].name} ${SHAPE_NAME[k]}`, t: BLOCKS[b].t, item: true, form: k, of: b };
 const formOf = id => BLOCKS[id] && BLOCKS[id].form;
-// the shape the piece in spot s belongs to (its block's pieces in this space), or null if it's a loose piece
+// the shape the piece in spot s belongs to (the spots with its value in this space), or null if it's a loose piece
 function shapeAt(a, s) {
   const b = a[s];
   if (!b) return null;
   let mask = 0;
   for (let k = 0; k < 8; k++) if (a[k] === b) mask |= 1 << k;
   const shape = shapeOfMask(mask);
-  return shape ? { shape, mask, block: b } : null;
+  return shape ? { shape, mask, block: spotBlock(b) } : null;
 }
 // fill (id) or empty (0) the spots in `mask` of block space (x, y, z) all at once. Filling only works if they're all free.
-// 8 pieces of the same block turn into that whole block.
+// (Nothing joins up: see PIECE_GROUP.)
 function setSpots(x, y, z, mask, id) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false;
   const i = idx(x, y, z), cur = world.get(i);
-  let a = cur === PIECES ? pieceMap.get(i) : null;
+  let a = isPieces(cur) ? pieceMap.get(i) : null;
   if (!a) {
-    if (!id || (cur && !isWater(cur))) return false;
+    if (!id || (cur && !isWater(cur) && cur !== SNOW)) return false;   // (into empty space, water, or a layer of snow)
     a = new Int32Array(8);
   }
+  const v = id ? newSpotValue(a, id) : 0;   // (one new thing: all its spots get the same value)
   a = a.slice();
-  for (let s = 0; s < 8; s++) if (mask & (1 << s)) { if (id && a[s]) return false; a[s] = id; }
-  if (a[0] && a.every(v => v === a[0])) setBlock(x, y, z, a[0]);
-  else if (a.some(v => v)) { pieceMap.set(i, a); setBlock(x, y, z, PIECES); }
-  else setBlock(x, y, z, 0);
+  for (let s = 0; s < 8; s++) if (mask & (1 << s)) { if (id && a[s]) return false; a[s] = v; }
+  putPieces(x, y, z, i, a, cur === SNOW || cur === PIECES_IN_SNOW);
   return true;
+}
+// the 8 spots of block space (x, y, z) are now `a`: all 8 the same value (only ever old pieces, group 0) are that whole
+// block again; none left, it's empty. With snow in the space (snowlogged pieces) the snow stays: it's 388 while there are pieces, then just Snow.
+function putPieces(x, y, z, i, a, snow) {
+  if (a[0] && a.every(v => v === a[0])) setBlock(x, y, z, spotBlock(a[0]));
+  else if (a.some(v => v)) { pieceMap.set(i, a); setBlock(x, y, z, snow ? PIECES_IN_SNOW : PIECES); }
+  else if (snow && snowRests(getBlock(x, y - 1, z))) setBlock(x, y, z, SNOW);   // (the snow stays, lying on the block below)
+  else { if (snow && world.get(i) === PIECES_IN_SNOW) dropSnowballs(1, x, y, z); setBlock(x, y, z, 0); }
 }
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
 const ITEMS = [1, 2, 3, ...deepShown(3), 8, ...deepShown(8), 7, 60, CUTTER, 4, 61, 5, FIR_PLANKS, FIR_LOG, STRIPPED_FIR_LOG, FIR_LEAVES, 6, 9, ...deepShown(9), 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...deepShown(69), ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER, BEDROCK,
   ...ORES, FIRECLAY, ...FIRECLAY_BLOCKS, FOUNDRY,
-  PALM_PLANKS, PALM_LOG, STRIPPED_PALM_LOG, PALM_LEAVES, WILLOW_PLANKS, WILLOW_LOG, STRIPPED_WILLOW_LOG, WILLOW_LEAVES, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT];
+  PALM_PLANKS, PALM_LOG, STRIPPED_PALM_LOG, PALM_LEAVES, WILLOW_PLANKS, WILLOW_LOG, STRIPPED_WILLOW_LOG, WILLOW_LEAVES, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT, SNOW, SNOW_BLOCK];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 // Survival also has more slots, kept in the same arrays (by number):
 //   0-9 the hotbar, 10-19 Pockets, 20-59 the Backpack's slots (as many as the backpack you wear gives),
@@ -1198,10 +1267,27 @@ let act = 0, offSel = 0, clicking = false;
 const TILE = 16;
 // the Cutter's saw blade spins: its two frames (cutter_saw_frame_0, cutter_saw_1) take turns being copied into the picture it's drawn with (cutter_saw; see spinSaw)
 const SAW_TILE = tile('cutter_saw'), SAW_FRAMES = [tile('cutter_saw_frame_0'), tile('cutter_saw_1')];
+const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
+// Cut-shape pictures (textures/blocks/shapes/<picture>_<shape>.png): a face of a slab, stairs, quarter or piece that only
+// fills some quarters of its block's face gets a picture with the frame drawn along its cut edges too. The quarters are
+// bits: 1 top-left, 2 top-right, 4 bottom-left, 8 bottom-right (as seen in the picture). All 4 is the normal picture, and
+// a picture (or shape) without its own cut picture keeps the normal one. Exactly as the desktop version.
+const CUT_SHAPES = { top_half: 3, bottom_half: 12, left_half: 5, right_half: 10, top_left: 1, top_right: 2, bottom_left: 4, bottom_right: 8,
+  no_top_left: 14, no_top_right: 13, no_bottom_left: 11, no_bottom_right: 7, diagonal_a: 9, diagonal_b: 6 };
+const CUT_TILE = {};   // picture * 16 + quarters -> its cut picture
+for (const name of TILE_NAMES.slice()) for (const shape in CUT_SHAPES)
+  if (`${name}_${shape}` in (window.TEXTURES || {})) CUT_TILE[TILE_OF[name] * 16 + CUT_SHAPES[shape]] = tile(`${name}_${shape}`);
+const cutTile = (t, quarters) => quarters === 15 ? t : CUT_TILE[t * 16 + quarters] ?? t;
+// <picture>_slab_side: the top and bottom halves framed on their own (each slab of a double slab: see addPieces)
+const SLAB_SIDE_TILE = {};
+for (const name of TILE_NAMES.slice()) if (`${name}_slab_side` in (window.TEXTURES || {})) SLAB_SIDE_TILE[TILE_OF[name]] = tile(`${name}_slab_side`);
 // the atlas holds one picture for every name the blocks and items asked for (see tile)
 const NT = TILE_NAMES.length;
+// The GPU copy of the atlas (see gpuAtlas) is a grid, ATLAS_COLS pictures across, so it stays small enough for any
+// graphics card. atlasUV: where point (u, v) of picture t is in it (u across, v up, 0-1).
+const ATLAS_COLS = 64, ATLAS_ROWS = Math.ceil(NT / ATLAS_COLS);
+const atlasUV = (t, u, v) => [((t % ATLAS_COLS) * PW + 1 + u * TILE) / (PW * ATLAS_COLS), ((ATLAS_ROWS - 1 - Math.floor(t / ATLAS_COLS)) * PW + 1 + v * TILE) / (PW * ATLAS_ROWS)];
 atlasMade = true;
-const PW = TILE + 2; // tiles in the GPU atlas are padded by 1px on each side (see gpuAtlas)
 const atlas = document.createElement('canvas');
 atlas.width = TILE * NT; atlas.height = TILE;
 const g = atlas.getContext('2d');
@@ -1470,12 +1556,17 @@ function buildPixelFont(glyphs) {
 // The menus, hotbar and every other part of the screen (not the world itself) are scaled by a whole number: with
 // display scaling like 150% they're made twice as big, so each of their pixels is exactly 2x2 screen pixels and
 // nothing comes out uneven. uiScale = screen pixels per page pixel; uiZoom = how much the page is zoomed to get it.
-let uiScale = 1, uiZoom = 1;
+// GUI scale (Settings): 0 = automatic, from your display scaling (autoGui), or 1-4 times; one bigger than the window has room
+// for is made as big as fits.
+let uiScale = 1, uiZoom = 1, autoGui = 1;
+const guiSetting = () => { try { return Math.min(4, Math.max(0, Math.round(+(JSON.parse(localStorage.getItem('cubeland-settings')) || {}).gui) || 0)); } catch (e) { return 0; } };
 // Text sizes: each letter pixel is made a whole number of screen pixels so your letters stay sharp. Tiers: small,
 // normal, heading, title.
 function fitFontSizes() {
   const real = window.devicePixelRatio || 1, root = document.documentElement.style;
-  uiScale = Math.max(1, Math.round(real) - 1); uiZoom = uiScale / real;   // (one step smaller than your display scaling: 150% -> 1x)
+  autoGui = Math.max(1, Math.round(real) - 1);   // (one step smaller than your display scaling: 150% -> 1x)
+  const want = guiSetting(), fits = Math.max(1, Math.floor(Math.min(innerWidth * real / 600, innerHeight * real / 360)));
+  uiScale = want ? Math.min(want, fits) : autoGui; uiZoom = uiScale / real;
   document.body.style.zoom = uiZoom === 1 ? '' : uiZoom;
   root.setProperty('--unzoom', 1 / uiZoom);                      // (the world's canvas undoes it)
   root.setProperty('--vw', innerWidth / uiZoom + 'px'); root.setProperty('--vh', innerHeight / uiZoom + 'px');   // the window, in page pixels
@@ -1535,7 +1626,7 @@ const fontReady = (() => {
 // Multiplayer (filled in further down, in "Multiplayer"). These do nothing when you're playing on your own.
 // client = you joined a friend's game (their game runs the mobs, water and items; yours shows them)
 const Net = { client: !!Worlds.current.temp, hosting: false, applying: false,
-  blockChanged() {}, hitMob() {}, pickup() {}, toHost() {}, pickedUpByFriend() { return false; }, farthestPlayer() { return 0; }, torchBearerNear() { return false; }, update() {}, infoLine() { return ''; } };
+  blockChanged() {}, hitMob() {}, splat() {}, snowballHitsFriend() { return false; }, pickup() {}, toHost() {}, pickedUpByFriend() { return false; }, farthestPlayer() { return 0; }, torchBearerNear() { return false; }, update() {}, infoLine() { return ''; } };
 
 // ===================== Terrain generation =====================
 const seed = Worlds.current.seed;
@@ -1639,17 +1730,14 @@ const biomeMap = new Uint8Array(WX * WZ);   // every column's biome (biome world
 if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) biomeMap[z * WX + x] = biomeAt(x, z);
 const grassy = b => b === 1 || b === SNOWY_GRASS || b === SWAMP_GRASS;   // grass of any biome (dirt underneath; flowers and hoes)
 const takesBiomeTint = b => b === 1 || b === SWAMP_GRASS || isLeaves(b);    // grass and leaves: coloured by the climate where they are
-// Fir, Palm and Willow Leaves use the Oak Leaves picture, with their own colour on top of the climate colour
-// (Fir: darker blue-green; Palm: brighter yellow-green; Willow: a softer olive green)
-const LEAF_TINT = { [FIR_LEAVES]: [0.78, 0.85, 1.05], [PALM_LEAVES]: [1.06, 1.1, 0.72], [WILLOW_LEAVES]: [0.92, 1, 0.78] };
 // the colour grass and leaves take on here, as [r, g, b] multipliers for their green pixels (1 = as drawn). It fades over a wider
 // way than the land's shape so colours blend between biomes. Only in Biome worlds.
 function grassTint(x, z) {
   if (GEN !== 3) return [1, 1, 1];
   const c = climate(x, z, 0.05);   // (snowy bluer, taiga blue-green, desert and badlands yellower, swamp murkier, plains brighter, meadow fresh green)
-  return [1 - 0.20 * c.snowy - 0.12 * c.taiga + 0.30 * c.desert + 0.24 * c.badlands - 0.10 * c.swamp + 0.08 * c.plains - 0.02 * c.meadow,
-    1 - 0.08 * c.snowy - 0.02 * c.taiga + 0.02 * c.desert + 0.00 * c.badlands - 0.10 * c.swamp + 0.06 * c.plains + 0.08 * c.meadow,
-    1 + 0.30 * c.snowy + 0.10 * c.taiga - 0.30 * c.desert - 0.30 * c.badlands - 0.25 * c.swamp - 0.15 * c.plains - 0.06 * c.meadow];
+  return [1 - 0.20 * c.snowy - 0.16 * c.taiga + 0.30 * c.desert + 0.24 * c.badlands - 0.10 * c.swamp + 0.08 * c.plains - 0.02 * c.meadow,
+    1 - 0.08 * c.snowy - 0.04 * c.taiga + 0.02 * c.desert + 0.00 * c.badlands - 0.10 * c.swamp + 0.06 * c.plains + 0.08 * c.meadow,
+    1 + 0.30 * c.snowy + 0.17 * c.taiga - 0.30 * c.desert - 0.30 * c.badlands - 0.25 * c.swamp - 0.15 * c.plains - 0.06 * c.meadow];
 }
 
 if (GEN === 1) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
@@ -1949,6 +2037,8 @@ function leafBall(cx, cy, cz, r) {
     if (dx * dx + dy * dy + dz * dz <= r * r) put(cx + dx, cy + dy, cz + dz, 5, true);
 }
 function trunk(x, y, z, h, log = 4) { for (let yy = y + 1; yy <= y + h; yy++) put(x, yy, z, log, true); }
+// (worlds from LAND 1: a trunk that goes up through leaves already there, so it reaches into the tree's crown)
+function trunkInto(x, y, z, h) { for (let yy = y + 1; yy <= y + h; yy++) { const i = idx(x, yy, z); if (!raw[i] || isLeaves(raw[i])) raw[i] = 4; } }
 // hills worlds: plain round-topped trees, scattered on open grass and packed close together in forests
 const forestAt = (x, z) => smoothstep(0.47, 0.6, fbm(x / 110 + 20, z / 110 + 20, 2, 970));
 // biome worlds: each biome's own trees (the Woods have the ones below)
@@ -1958,7 +2048,7 @@ function biomeTree(x, h, z, bi) {
   if (bi === PLAINS || bi === MEADOW) {   // now and then a lone round tree (a few more in meadows)
     if (top !== 1 || roll > (bi === MEADOW ? 0.0015 : 0.0008)) return;
     const th = 5 + (v * 3 | 0);
-    trunk(x, h, z, th); leafBall(x, h + th + 1, z, 2.3);
+    trunk(x, h, z, LAND >= 1 ? th + 1 : th); leafBall(x, h + th + 1, z, 2.3);
   } else if (bi === SNOWY || bi === TAIGA) {   // Fir trees, pointed: rings of leaves, widest at the bottom, narrowing up to a point (taiga: thicker forests, no snow)
     if (bi === SNOWY ? top !== SNOWY_GRASS || roll > 0.004 + forestAt(x, z) * 0.03 : top !== 1 || roll > 0.006 + forestAt(x, z) * 0.045) return;
     const th = 6 + (v * 4 | 0), tip = h + th + 1;
@@ -2008,18 +2098,18 @@ for (let z = 3; z < WZ - 3; z++) for (let x = 3; x < WX - 3; x++) {
         put(x + dx, ly, z + dz, 5, true);
       }
     }
-    trunk(x, h, z, th);
+    if (LAND >= 1) trunkInto(x, h, z, th); else trunk(x, h, z, th);
   } else if (kind < 0.75) {             // lollipop
     const th = 5 + (v * 4 | 0);
-    trunk(x, h, z, th);
+    trunk(x, h, z, LAND >= 1 ? th + 2 : th);
     leafBall(x, h + th + 2, z, 2.6);
   } else if (kind < 0.92) {             // tall and spindly
     const th = 10 + (v * 8 | 0);
-    trunk(x, h, z, th);
+    trunk(x, h, z, LAND >= 1 ? th + 1 : th);
     leafBall(x, h + th + 1, z, 1.6);
     leafBall(x, h + Math.floor(th * 0.6), z, 1.2);
   } else {                              // big puffball
-    trunk(x, h, z, 3);
+    trunk(x, h, z, LAND >= 1 ? 7 : 3);
     leafBall(x, h + 7, z, 4.5);
   }
 }
@@ -2047,6 +2137,199 @@ for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
     const h = heights[fz * WX + fx];
     if (raw[idx(fx, h, fz)] !== 1 || raw[idx(fx, h + 1, fz)]) continue;   // on grass, with nothing there yet
     raw[idx(fx, h + 1, fz)] = flower; heights[fz * WX + fx] = h + 1;
+  }
+}
+
+// --- 8b. Natural structures (Biomes worlds from LAND 1): things the land made by itself. One try in each 64 x 64 cell, at a
+// spot picked by hash; what grows there depends on the biome. Exactly as the desktop version, so both grow the same world.
+//   Deserts and badlands: stone arches and rock spires (Sandstone, or the badlands' terracotta stripes)
+//   Out at sea (shallow water): sea stacks of stone
+//   Woods, taiga and swamps: fallen giant trees, hollow so you can walk through
+//   Plains and meadows: sinkholes down into the ground, with a pool at the bottom
+//   Taiga and snowy lands: fields of boulders
+//   Swamps: hollows, mounds of peat and mud with a dead willow trunk, ringed by still water
+const STRUCT_CELL = 64;
+const structuresBuilt = [];   // (what was built where, for testing: window.STRUCTURES with ?worldhash)
+// Blocks numbered 256 and up (lying logs, snow): the world grows one byte per block, so `stand` goes in for now, and the
+// real block takes its place once the world is packed, if nothing else has been put there since. Entries: [index, id, stand].
+const late = [];
+{
+  const plant = b => b === 0 || isLeaves(b) || b === 4 || b === FIR_LOG || b === PALM_LOG || b === WILLOW_LOG || isFlower(b) || b === ROCK_BLOCK;
+  // the ground under a spot (under any trees, flowers or rocks; the top of the water at sea)
+  const groundAt = (x, z) => { let y = heights[z * WX + x]; while (y > 0 && plant(raw[idx(x, y, z)])) y--; return y; };
+  const inside = (x, z, m) => x >= m && z >= m && x < WX - m && z < WZ - m;
+  // place a structure's block where there's only air or plants (or water too, out at sea)
+  const putOver = (x, y, z, id, wet = false) => {
+    if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 1 || y >= WY - 1) return;
+    const i = idx(x, y, z), b = raw[i];
+    if (!plant(b) && !(wet && isWater(b))) return;
+    raw[i] = id;
+    if (id !== 0 && y > heights[z * WX + x]) heights[z * WX + x] = y;
+  };
+  const rockOf = (bi, y) => { if (bi !== BADLANDS) return SANDSTONE; const n = BADLANDS_BANDS.length, k = y % n; return BADLANDS_BANDS[k < 0 ? k + n : k]; };
+  // an arch: half a ring of rock standing on two legs, 3 blocks thick (5 for the big ones), running along x or z
+  function arch(x, z, bi) {
+    const g = groundAt(x, z);
+    if (g <= SEA_LEVEL + 1) return;
+    const alongX = hash(x, z, 8110) < 0.5;
+    const R = 5 + Math.floor(hash(x, z, 8111) * 5), H = 6 + Math.floor(hash(x, z, 8112) * 7), w = R >= 8 ? 2 : 1;
+    for (let t = -R - 2; t <= R + 2; t++) for (let a = -w; a <= w; a++) {
+      const cx = alongX ? x + t : x + a, cz = alongX ? z + a : z + t;
+      if (!inside(cx, cz, 2)) continue;
+      const lg = groundAt(cx, cz);
+      for (let y = Math.min(lg + 1, g); y <= g + H + 2; y++) {
+        const dy = Math.max(0, y - g);
+        const o1 = t / (R + 1.5), o2 = dy / (H + 1.5), i1 = t / (R - 1.5), i2 = dy / (H - 1.5);
+        if (o1 * o1 + o2 * o2 <= 1 && i1 * i1 + i2 * i2 > 1) putOver(cx, y, cz, rockOf(bi, y));
+      }
+    }
+    structuresBuilt.push(`arch ${x},${g},${z}`);
+  }
+  function column(x, z, bottom, top, r0, mat, wet) {
+    for (let dz = -5; dz <= 5; dz++) for (let dx = -5; dx <= 5; dx++) {
+      const cx = x + dx, cz = z + dz;
+      if (!inside(cx, cz, 2)) continue;
+      const lg = wet ? bottom : groundAt(cx, cz);
+      for (let y = Math.min(lg + 1, bottom); y <= top; y++) {
+        const f = (Math.max(y, bottom) - bottom) / (top - bottom);
+        const r = r0 * (1 - 0.4 * f) + (hash(x + Math.floor(y / 3), z, 8122) - 0.5) * 1.0;
+        if (dx * dx + dz * dz <= r * r) putOver(cx, y, cz, mat(y), wet);
+      }
+    }
+  }
+  // a spire: a tall column of rock, narrowing as it goes up, a little lumpy
+  function spire(x, z, bi) {
+    const g = groundAt(x, z);
+    if (g <= SEA_LEVEL) return;
+    const H = 12 + Math.floor(hash(x, z, 8120) * 16), r0 = 2.0 + hash(x, z, 8121) * 1.4;
+    column(x, z, g, g + H, r0, yy => rockOf(bi, yy), false);
+    structuresBuilt.push(`spire ${x},${g},${z}`);
+  }
+  // a sea stack: the same, of stone, standing in shallow sea a little off the shore
+  function seaStack(x, z) {
+    let f = SEA_LEVEL; while (f > 1 && isWater(raw[idx(x, f, z)])) f--;
+    if (SEA_LEVEL - f < 1 || SEA_LEVEL - f > 8) return;
+    const H = 6 + Math.floor(hash(x, z, 8125) * 12), r0 = 2.4 + hash(x, z, 8126) * 1.6;
+    column(x, z, f, SEA_LEVEL + H, r0, () => 3, true);
+    structuresBuilt.push(`stack ${x},${f},${z}`);
+  }
+  // a fallen giant: a huge old trunk lying on the ground, 5 blocks thick and hollow inside, its roots (a disc of dirt)
+  // standing up at one end, and leaves growing here and there along the top
+  function fallenGiant(x, z, log) {
+    const g = groundAt(x, z);
+    if (g < SEA_LEVEL) return;
+    const alongX = hash(x, z, 8130) < 0.5;
+    const L = 15 + Math.floor(hash(x, z, 8131) * 11), ay = g + 2;
+    for (let k = 0; k < L; k++) {   // (only on ground that's fairly level the whole way, and dry)
+      const cx = alongX ? x + k : x, cz = alongX ? z : z + k;
+      if (!inside(cx, cz, 4)) return;
+      const lg = groundAt(cx, cz);
+      if (lg < g - 2 || lg > g + 2 || isWater(raw[idx(cx, lg, cz)])) return;
+    }
+    for (let k = 0; k < L; k++) for (let dy = -3; dy <= 3; dy++) for (let a = -3; a <= 3; a++) {
+      const cx = alongX ? x + k : x + a, cz = alongX ? z + a : z + k, y = ay + dy, d = dy * dy + a * a;
+      if (d <= 5) {
+        if (k > 0 && d <= 1) { const i = idx(cx, y, cz); if (plant(raw[i])) raw[i] = 0; }   // (hollow, open at the far end)
+        else { putOver(cx, y, cz, log); if (y > 0 && y < WY && raw[idx(cx, y, cz)] === log) late.push([idx(cx, y, cz), turned(log, alongX ? 1 : 2), log]); }   // (lying along its length)
+      } else if (k === 0 && d <= 11 && dy >= -2) putOver(cx, y, cz, 2);   // (the roots)
+    }
+    for (let k = 1; k < L; k++)
+      if (hash(k, x + z, 8135) < 0.3) { const cx = alongX ? x + k : x, cz = alongX ? z : z + k; putOver(cx, ay + 3, cz, log === FIR_LOG ? FIR_LEAVES : log === WILLOW_LOG ? WILLOW_LEAVES : 5); }
+    structuresBuilt.push(`giant ${x},${g},${z}`);
+  }
+  // a sinkhole: a round hole straight down into the ground, its grassy rim hanging over the edge, a pool at the bottom
+  function sinkhole(x, z) {
+    const g = groundAt(x, z);
+    if (g < SEA_LEVEL + 3) return;
+    const R = 3 + Math.floor(hash(x, z, 8140) * 4), yb = Math.max(6, g - 15 - Math.floor(hash(x, z, 8141) * 20));
+    for (let dz = -R - 2; dz <= R + 2; dz++) for (let dx = -R - 2; dx <= R + 2; dx++) {   // (open ground all round: no trees, no water)
+      const cx = x + dx, cz = z + dz;
+      if (!inside(cx, cz, 2)) return;
+      const lg = groundAt(cx, cz);
+      if (lg < g - 3 || lg > g + 3 || heights[cz * WX + cx] > lg + 1 || isWater(raw[idx(cx, lg, cz)])) return;
+    }
+    for (let dz = -R - 1; dz <= R + 1; dz++) for (let dx = -R - 1; dx <= R + 1; dx++) {
+      const cx = x + dx, cz = z + dz, lg = groundAt(cx, cz);
+      const rr = R + (hash(cx, cz, 8142) - 0.5) * 1.2, d = Math.sqrt(dx * dx + dz * dz);
+      if (d > rr) continue;
+      const open = d <= rr - 1;   // (the top layer of ground reaches a block further in: the rim hangs over)
+      for (let y = yb; y <= lg + 2; y++) { if (y === lg && !open) continue; raw[idx(cx, y, cz)] = 0; }
+      if (!open) continue;
+      if (raw[idx(cx, yb - 1, cz)] !== 0) { raw[idx(cx, yb, cz)] = WATER; heights[cz * WX + cx] = yb; }
+      else heights[cz * WX + cx] = yb - 1;
+    }
+    structuresBuilt.push(`sinkhole ${x},${g},${z}`);
+  }
+  // a boulder field: big rounded boulders of stone and cobblestone scattered over the ground
+  function boulders(x, z) {
+    const n = 5 + Math.floor(hash(x, z, 8150) * 8);
+    for (let k = 0; k < n; k++) {
+      const bx = x + Math.floor((hash(k, x, 8151) - 0.5) * 28), bz = z + Math.floor((hash(k, z, 8152) - 0.5) * 28);
+      if (!inside(bx, bz, 5)) continue;
+      const r = 1.3 + hash(k, x + z, 8153) * 1.7;
+      const bg = groundAt(bx, bz), R = Math.ceil(r);
+      if (bg <= SEA_LEVEL || isWater(raw[idx(bx, bg, bz)])) continue;
+      const cy = bg + Math.floor(r * 0.5);
+      for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        const e = dy * 1.15;
+        if (dx * dx + e * e + dz * dz > r * r) continue;
+        putOver(bx + dx, cy + dy, bz + dz, hash3(bx + dx, cy + dy, bz + dz, 8154) < 0.35 ? 8 : 3);
+      }
+    }
+    structuresBuilt.push(`boulders ${x},${groundAt(x, z)},${z}`);
+  }
+  // a swamp hollow: a low mound of peat topped with mud, a dead willow trunk standing out of it, and a ring of still water round it
+  function hollow(x, z) {
+    const g = groundAt(x, z);
+    if (g < SEA_LEVEL || g > SEA_LEVEL + 1 || !inside(x, z, 8) || isWater(raw[idx(x, g, z)])) return;
+    const R = 2.5 + hash(x, z, 8160) * 2, Hm = 2 + Math.floor(hash(x, z, 8161) * 2);
+    for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) {
+      const cx = x + dx, cz = z + dz;
+      let lg = groundAt(cx, cz);
+      const d = Math.sqrt(dx * dx + dz * dz);
+      if (d <= R) {
+        const q = d / R;
+        const mh = Math.floor((1 - q * q) * Hm + 0.5);
+        for (let y = lg + 1; y <= lg + mh; y++) putOver(cx, y, cz, y === lg + mh ? MUD : PEAT);
+      } else if (d <= R + 1.5) {
+        if (lg === SEA_LEVEL + 1) { for (let y = lg; y <= lg + 2; y++) if (y === lg || plant(raw[idx(cx, y, cz)])) raw[idx(cx, y, cz)] = 0; lg--; heights[cz * WX + cx] = lg; }
+        if (lg === SEA_LEVEL && !isWater(raw[idx(cx, lg, cz)])) { raw[idx(cx, lg, cz)] = WATER; if (plant(raw[idx(cx, lg + 1, cz)])) raw[idx(cx, lg + 1, cz)] = 0; heights[cz * WX + cx] = lg; }
+      }
+    }
+    const th = 3 + Math.floor(hash(x, z, 8162) * 4), top = groundAt(x, z);
+    for (let y = top + 1; y <= top + th; y++) putOver(x, y, z, WILLOW_LOG);
+    for (let b = 0; b < 2; b++)   // (a broken branch or two)
+      if (hash(x + b, z, 8166) < 0.6) { const d = PALM_FRONDS[Math.floor(hash(x, z + b, 8167) * 4)]; putOver(x + d[0], top + th - 1 - b, z + d[1], WILLOW_LOG); }
+    structuresBuilt.push(`hollow ${x},${g},${z}`);
+  }
+  if (GEN === 3 && LAND >= 1) for (let gz = 0; gz < Math.floor(WZ / STRUCT_CELL); gz++) for (let gx = 0; gx < Math.floor(WX / STRUCT_CELL); gx++) {
+    const x = gx * STRUCT_CELL + 12 + Math.floor(hash(gx, gz, 8100) * (STRUCT_CELL - 24)), z = gz * STRUCT_CELL + 12 + Math.floor(hash(gx, gz, 8101) * (STRUCT_CELL - 24));
+    const roll = hash(gx, gz, 8102), bi = biomeMap[z * WX + x], g = groundAt(x, z);
+    if (isWater(raw[idx(x, g, z)])) { if (bi !== SNOWY && roll < 0.3) seaStack(x, z); continue; }
+    if (bi === DESERT || bi === BADLANDS) { if (roll < 0.2) arch(x, z, bi); else if (roll < 0.42) spire(x, z, bi); }
+    else if (bi === WOODS) { if (roll < 0.35) fallenGiant(x, z, 4); }
+    else if (bi === TAIGA) { if (roll < 0.3) fallenGiant(x, z, FIR_LOG); else if (roll < 0.5) boulders(x, z); }
+    else if (bi === SNOWY) { if (roll < 0.3) boulders(x, z); }
+    else if (bi === SWAMP) { if (roll < 0.35) hollow(x, z); else if (roll < 0.5) fallenGiant(x, z, WILLOW_LOG); }
+    else if (bi === PLAINS || bi === MEADOW) { if (roll < 0.15) sinkhole(x, z); }
+  }
+}
+// Snowy lands: one layer of Snow on top of everything open to the sky that snow can lie on (not water, ice or plants),
+// and under the trees too: on top of the leaves, then down through the leaves and the air under them onto the ground.
+// (It stops at the first block that isn't leaves, so it never falls down into a cave.) This comes last, after the caves,
+// trees and structures, so nothing takes away what the snow is lying on.
+const snowCanLie = b => { const d = BLOCKS[b]; return !!d && !d.shape && !d.liquid && !d.noCollide && b !== ICE; };
+if (GEN === 3 && LAND >= 1) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
+  if (biomeMap[z * WX + x] !== SNOWY) continue;
+  let y = WY - 2;
+  while (y > 0 && !raw[idx(x, y, z)]) y--;
+  while (y > 0) {
+    const b = raw[idx(x, y, z)];
+    if (isFlower(b)) { if (snowCanLie(raw[idx(x, y - 1, z)])) late.push([idx(x, y, z), withSnow(b, 1), b]); break; }   // (a flower: it stands in the snow)
+    if (!raw[idx(x, y + 1, z)] && snowCanLie(b)) late.push([idx(x, y + 1, z), SNOW, 0]);
+    if (!isLeaves(b)) break;   // (the ground, a log, a boulder...: the snow goes no further down)
+    y--;
+    while (y > 0 && !raw[idx(x, y, z)]) y--;
   }
 }
 
@@ -2130,9 +2413,9 @@ function getBlock(x, y, z) {
 function subBlock(X, Y, Z) {
   const x = Math.floor(X / 2), y = Math.floor(Y / 2), z = Math.floor(Z / 2), b = getBlock(x, y, z);
   if (b && BLOCKS[b].shape === 'half') return Y - 2 * y ? 0 : b;   // (a half-tall block fills only the bottom half)
-  if (b !== PIECES) return b;
+  if (!isPieces(b)) return b;
   const a = pieceMap.get(idx(x, y, z));
-  return a ? a[(X - 2 * x) + (Y - 2 * y) * 2 + (Z - 2 * z) * 4] : 0;
+  return a ? spotBlock(a[(X - 2 * x) + (Y - 2 * y) * 2 + (Z - 2 * z) * 4]) : 0;
 }
 
 // ===================== Three.js setup =====================
@@ -2155,7 +2438,8 @@ addEventListener('resize', () => {
 // The GPU copy of the atlas pads each tile with a 1px copy of its edge,
 // so neighbouring tiles' colours don't bleed into each other at the edges.
 const gpuAtlas = document.createElement('canvas');
-gpuAtlas.width = PW * NT; gpuAtlas.height = PW;
+gpuAtlas.width = PW * ATLAS_COLS; gpuAtlas.height = PW * ATLAS_ROWS;   // (a grid: see atlasUV)
+const gpuX = t => (t % ATLAS_COLS) * PW, gpuY = t => Math.floor(t / ATLAS_COLS) * PW;   // (picture t's corner in it)
 function rebuildGpuAtlas() {
   const src = g.getImageData(0, 0, atlas.width, atlas.height).data;
   const gctx = gpuAtlas.getContext('2d');
@@ -2163,7 +2447,7 @@ function rebuildGpuAtlas() {
   for (let t = 0; t < NT; t++) for (let y = 0; y < PW; y++) for (let x = 0; x < PW; x++) {
     const sx = t * TILE + Math.min(TILE - 1, Math.max(0, x - 1));
     const sy = Math.min(TILE - 1, Math.max(0, y - 1));
-    const si = (sy * atlas.width + sx) * 4, di = (y * gpuAtlas.width + t * PW + x) * 4;
+    const si = (sy * atlas.width + sx) * 4, di = ((gpuY(t) + y) * gpuAtlas.width + gpuX(t) + x) * 4;
     for (let k = 0; k < 4; k++) out.data[di + k] = src[si + k];
   }
   gctx.putImageData(out, 0, 0);
@@ -2178,7 +2462,7 @@ function spinSaw(dt) {
   if (f === sawFrame) return;
   sawFrame = f;
   const gctx = gpuAtlas.getContext('2d');
-  gctx.putImageData(gctx.getImageData(SAW_FRAMES[f] * PW, 0, PW, PW), SAW_TILE * PW, 0);
+  gctx.putImageData(gctx.getImageData(gpuX(SAW_FRAMES[f]), gpuY(SAW_FRAMES[f]), PW, PW), gpuX(SAW_TILE), gpuY(SAW_TILE));
   tex.needsUpdate = true;
 }
 tex.generateMipmaps = false;
@@ -2410,11 +2694,20 @@ waterMat.onBeforeCompile = material.onBeforeCompile;
 // Measured after everything (including trees that spill into neighbouring chunks) is placed.
 recomputeHeights();
 // the world has grown: pack it into chunks (see `world`), and let go of the one-byte-per-block copy
+const lateKept = late.filter(l => raw[l[0]] === l[2]);   // (the blocks numbered 256 and up that are still wanted)
 if (/[?&]worldhash\b/.test(location.search)) {   // (testing: a fingerprint of the new world, to compare with the desktop version's)
   let h = 2166136261; for (let i = 0; i < raw.length; i++) h = Math.imul(h ^ raw[i], 16777619) >>> 0;
+  for (const l of lateKept) { h = Math.imul(h ^ l[0], 16777619) >>> 0; h = Math.imul(h ^ l[1], 16777619) >>> 0; }
   window.WORLDHASH = h.toString(16).padStart(8, '0');
+  window.STRUCTURES = structuresBuilt.slice();
 }
 world.load(raw); raw = null;
+for (const [i, id] of lateKept) {
+  world.set(i, id);
+  const c = i % (WX * WZ), y = Math.floor(i / (WX * WZ));
+  if (y > heights[c]) heights[c] = y;   // (snow on top: the column's highest block)
+}
+late.length = 0;
 const chunkTop = new Int32Array(NCX * NCZ);
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   const k = Math.floor(z / CS) * NCX + Math.floor(x / CS);
@@ -2570,7 +2863,7 @@ function addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
       const p = stick[fi][ci];
       pos.push(x + p[0], y + p[1], z + p[2]);
       const u = c[3] ? hi : lo, v = flat ? (c[4] ? hi : lo) : c[4];
-      uv.push((tile * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+      uv.push(...atlasUV(tile, u, v));
       const s = 0.8 + 0.2 * f.shade;
       col.push(s, s, s);
       lt.push(own); sk.push(skyHere);
@@ -2581,14 +2874,14 @@ function addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
 
 // something lying flat on the ground (a rock): its picture on a square just above the block under it,
 // turned a random way (always the same way for the same spot)
-function addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
+function addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache, lift = 0) {   // (lift: lying on a layer of snow)
   const a = hash(x, z, y + 4242) * Math.PI * 2, ca = Math.cos(a) * 0.5, sa = Math.sin(a) * 0.5;
   const light = anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, sky = skyExposure(x, y, z, skyCache);
   const tile = b.t[0], base = pos.length / 3;
   for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
     const dx = u - 0.5, dz = v - 0.5;   // corner offset from the middle, then turned
-    pos.push(x + 0.5 + (dx * ca - dz * sa) * 2, y + 0.02, z + 0.5 + (dx * sa + dz * ca) * 2);
-    uv.push((tile * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+    pos.push(x + 0.5 + (dx * ca - dz * sa) * 2, y + 0.02 + lift, z + 0.5 + (dx * sa + dz * ca) * 2);
+    uv.push(...atlasUV(tile, u, v));
     col.push(1, 1, 1); lt.push(light); sk.push(sky);
   }
   // both sides, so it shows whichever way round the corners ended up
@@ -2600,7 +2893,7 @@ function addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
   const light = anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, sky = skyExposure(x, y, z, skyCache), base = pos.length / 3;
   for (const [u, v] of [[0, 0.5], [1, 0.5], [0, 1], [1, 1]]) {
     pos.push(x + 0.5, y + v, z + u);
-    uv.push((SAW_TILE * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+    uv.push(...atlasUV(SAW_TILE, u, v));
     col.push(1, 1, 1); lt.push(light); sk.push(sky);
   }
   ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
@@ -2615,7 +2908,7 @@ function addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
     for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
       const s = (u - 0.5) * 2 * r;
       pos.push(x + 0.5 + ox + s * ax * Math.SQRT1_2 * 1.4, y + v, z + 0.5 + oz + s * az * Math.SQRT1_2 * 1.4);
-      uv.push((tile * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+      uv.push(...atlasUV(tile, u, v));
       col.push(0.9, 0.9, 0.9); lt.push(light); sk.push(sky);
     }
     ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
@@ -2631,20 +2924,41 @@ function buildChunk(cx, cy, cz) {
   const anyLight = lightMap.size > 0;
   const skyCache = new Map();
   for (let y = y0; y < top; y++) for (let z = cz * CS; z < cz * CS + CS; z++) for (let x = cx * CS; x < cx * CS + CS; x++) {
-    const id = world.at(x, y, z);
+    let id = world.at(x, y, z);
     if (!id) continue;
-    const b = BLOCKS[id];
-    if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
+    let b = BLOCKS[id];
+    if (b.snowed) {   // snowlogged: what it holds, then its layer of snow is drawn below like any snow
+      const inner = b.inner;
+      if (b.shape === 'torch') addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache);
+      else if (b.shape === 'plant') addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache);
+      else if (b.shape === 'flat') addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache, 1 / 8);   // (lying on top of the snow)
+      else if (inner === PIECES) {   // pieces: snow on every upward surface in the space (see addSnowOnPieces)
+        const a = pieceMap.get(idx(x, y, z));
+        addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a);
+        addSnowOnPieces(x, y, z, a, pos, uv, col, lt, sk, ind, anyLight, skyCache);
+        continue;
+      } else if (b.shape === 'half') {   // the Cutter fills the bottom half: its snow is hidden inside it
+        addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [inner, inner, 0, 0, inner, inner, 0, 0]);
+        if (inner === CUTTER) addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache);
+        continue;
+      }
+      b = BLOCKS[id = SNOW];
+    }
+    else if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'flat') { addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'plant') { addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
     if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'half') { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [id, id, 0, 0, id, id, 0, 0]); if (id === CUTTER) addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
+    const h = b.shape === 'snow' ? b.layers / 8 : 1, ax = b.axis || 0;   // (snow: only as deep as its layers; a lying log: which way)
     for (const f of FACES) {
       const n = getBlock(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
-      if (n && (n === id || !BLOCKS[n].transparent)) continue;
-      // (front: a side with its own picture, t[3], like the furnace's front)
-      const tile = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.front && f.dir[0] === b.front[0] && f.dir[2] === b.front[1] ? b.t[3] : b.t[0];
+      if ((h === 1 || f.dir[1] <= 0) && n && (n === id || !BLOCKS[n].transparent || id === SNOW && snowIn(n) && !isPieces(n) && BLOCKS[n].shape !== 'half')) continue;   // (snow next to the layer of snow round a torch, flower or rock)
+      // (front: a side with its own picture, t[3], like the furnace's front). A lying log: its ends (the top picture) face
+      // along its axis, and its bark is turned to run that way
+      const tile = !ax ? f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.front && f.dir[0] === b.front[0] && f.dir[2] === b.front[1] ? b.t[3] : b.t[0]
+        : (ax === 1 ? f.dir[0] : f.dir[2]) ? b.t[1] : b.t[0];
+      const turn = ax === 1 ? !f.dir[0] : ax === 2 && !!f.dir[0];
       const base = pos.length / 3;
       const na = f.dir[0] ? 0 : f.dir[1] ? 1 : 2;
       const ta = na === 0 ? 1 : 0, tb = na === 2 ? 1 : 2;
@@ -2653,8 +2967,9 @@ function buildChunk(cx, cy, cz) {
       const tinted = takesBiomeTint(id);
       if (tinted) while (tn.length < base * 3) tn.push(0, 0, 0);
       f.c.forEach((c, i) => {
-        pos.push(x + c[0], y + c[1], z + c[2]);
-        uv.push((tile * PW + 1 + c[3] * TILE) / (PW * NT), (1 + c[4] * TILE) / PW);
+        pos.push(x + c[0], y + c[1] * h, z + c[2]);
+        const cv = f.dir[1] ? c[4] : c[4] * h, cu = turn ? cv : c[3], cw = turn ? c[3] : cv;
+        uv.push(...atlasUV(tile, cu, cw));
         // check the 3 blocks touching this corner, in front of the face
         p[0] = x + f.dir[0]; p[1] = y + f.dir[1]; p[2] = z + f.dir[2];
         const sa = c[ta] ? 1 : -1, sb = c[tb] ? 1 : -1;
@@ -2664,7 +2979,7 @@ function buildChunk(cx, cy, cz) {
         ao[i] = s1 && s2 ? 0 : 3 - (s1 + s2 + s3);
         const s = f.shade * depth * AO_LEVELS[ao[i]];
         col.push(s, s, s);
-        if (tinted) { const t = tintAt(x + c[0], z + c[2]), e = LEAF_TINT[id] || [1, 1, 1]; tn.push(t[0] * e[0] - 1, t[1] * e[1] - 1, t[2] * e[2] - 1); }
+        if (tinted) { const t = tintAt(x + c[0], z + c[2]); tn.push(t[0] - 1, t[1] - 1, t[2] - 1); }
         // torch light and sky light: average of the open cells around this corner, in front of the face (smooth falloff)
         const fx = x + f.dir[0], fy = y + f.dir[1], fz = z + f.dir[2];
         let sum = anyLight ? lightAt(fx, fy, fz) : 0, skySum = skyExposure(fx, fy, fz, skyCache), n = 1;
@@ -2738,18 +3053,35 @@ const FACE_UV = FACES.map(f => {
   };
   return { u: along(3), v: along(4) };
 });
+// the quarter of face fi's picture (see CUT_SHAPES) that spot s's face covers
+function quarterOf(s, fi) {
+  const lp = [((s & 1) + 0.5) / 2, (((s >> 1) & 1) + 0.5) / 2, ((s >> 2) + 0.5) / 2], fu = FACE_UV[fi];
+  const u = fu.u[1] ? 1 - lp[fu.u[0]] : lp[fu.u[0]], v = fu.v[1] ? 1 - lp[fu.v[0]] : lp[fu.v[0]];
+  return v > 0.5 ? (u < 0.5 ? 1 : 2) : (u < 0.5 ? 4 : 8);
+}
 function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a = pieceMap.get(idx(x, y, z))) {
   if (!a) return;
   const depth = 0.75 + 0.25 * Math.min(1, y / 20);
+  // which spot faces get drawn (not against the same block or a solid one)
+  const shown = new Uint8Array(48);
+  for (let s = 0; s < 8; s++) if (a[s] && BLOCKS[spotBlock(a[s])]) FACES.forEach((f, fi) => {
+    const n = subBlock(x * 2 + (s & 1) + f.dir[0], y * 2 + ((s >> 1) & 1) + f.dir[1], z * 2 + (s >> 2) + f.dir[2]);
+    shown[s * 6 + fi] = !(n && (n === spotBlock(a[s]) || !BLOCKS[n].transparent));
+  });
   for (let s = 0; s < 8; s++) {
-    const id = a[s];
+    const id = spotBlock(a[s]);
     if (!id || !BLOCKS[id]) continue;
     const b = BLOCKS[id], sx = s & 1, sy = (s >> 1) & 1, sz = s >> 2;
     const X = x * 2 + sx, Y = y * 2 + sy, Z = z * 2 + sz;
     FACES.forEach((f, fi) => {
-      const n = subBlock(X + f.dir[0], Y + f.dir[1], Z + f.dir[2]);
-      if (n && (n === id || !BLOCKS[n].transparent)) return;
-      const tile = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.t[0];
+      if (!shown[s * 6 + fi]) return;
+      // the face's picture, cut to the quarters of this face of the block space that this thing (the same spot value:
+      // block and group) shows (see CUT_SHAPES); exactly the top or bottom half: its _slab_side picture, if it has one
+      const ax = f.dir[0] ? 0 : f.dir[1] ? 1 : 2;
+      let quarters = 0;
+      for (let s2 = 0; s2 < 8; s2++) if (((s2 >> ax) & 1) === ((s >> ax) & 1) && a[s2] === a[s] && shown[s2 * 6 + fi]) quarters |= quarterOf(s2, fi);
+      const pic = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.t[0];
+      const tile = (quarters === 3 || quarters === 12) && SLAB_SIDE_TILE[pic] !== undefined ? SLAB_SIDE_TILE[pic] : cutTile(pic, quarters);
       const fu = FACE_UV[fi], base = pos.length / 3;
       // lit by the block space in front of the face (or its own space, for faces inside it)
       const fx = Math.floor((X + f.dir[0]) / 2), fy = Math.floor((Y + f.dir[1]) / 2), fz = Math.floor((Z + f.dir[2]) / 2);
@@ -2759,9 +3091,56 @@ function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a = p
         const lp = [(sx + c[0]) * 0.5, (sy + c[1]) * 0.5, (sz + c[2]) * 0.5];   // corner, inside the block space
         pos.push(x + lp[0], y + lp[1], z + lp[2]);
         const u = fu.u[1] ? 1 - lp[fu.u[0]] : lp[fu.u[0]], v = fu.v[1] ? 1 - lp[fu.v[0]] : lp[fu.v[0]];
-        uv.push((tile * PW + 1 + u * TILE) / (PW * NT), (1 + v * TILE) / PW);
+        uv.push(...atlasUV(tile, u, v));
         col.push(shade, shade, shade);
         lt.push(light); sk.push(sky);
+      });
+      ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+    });
+  }
+}
+// Pieces in snow (388): one layer of snow (an eighth of a block deep) on every upward surface in the space, a patch per
+// spot column (sx, sz): on the floor under an empty bottom spot (if the half-block spot below it holds snow), on top of a bottom piece
+// with nothing over it (half way up), and on top of a top piece (at the top, sticking up into the space above, if that's
+// open). So a slab, stairs, quarters... look snowed on, one layer, following their steps. You walk through it like any
+// single layer. Exactly as the desktop version.
+function snowPatches(x, y, z, a) {
+  const out = [], ab = getBlock(x, y + 1, z);
+  const floor = (sx, sz) => snowRests(subBlock(x * 2 + sx, y * 2 - 1, z * 2 + sz));   // (the half-block spot right under it holds snow)
+  const openAbove = !ab || (BLOCKS[ab].noCollide && !BLOCKS[ab].liquid && !isSnow(ab));
+  for (const s of [0, 1, 4, 5]) {
+    const lo = a[s], hi = a[s + 2];
+    if (hi) { if (openAbove) out.push([s & 1, s >> 2, 1]); }
+    else if (lo) out.push([s & 1, s >> 2, 0.5]);
+    else if (floor(s & 1, s >> 2)) out.push([s & 1, s >> 2, 0]);
+  }
+  return out;
+}
+function addSnowOnPieces(x, y, z, a, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
+  if (!a) return;
+  const depth = 0.75 + 0.25 * Math.min(1, y / 20), t = BLOCKS[SNOW].t, H = 1 / 8;
+  const patches = snowPatches(x, y, z, a), has = (px, pz, h) => patches.some(p => p[0] === px && p[1] === pz && p[2] === h);
+  for (const [sx, sz, h] of patches) {
+    const ly = Math.floor(h), sy = y + ly;   // (the block space the patch is in: this one, or the one above)
+    FACES.forEach((f, fi) => {
+      if (f.dir[1] < 0) return;   // (it lies on something)
+      if (f.dir[1] === 0) {
+        const nx = sx + f.dir[0], nz = sz + f.dir[2];
+        if (nx >= 0 && nx < 2 && nz >= 0 && nz < 2) {   // (beside it in the same space: a piece at that height, or snow there too)
+          if (has(nx, nz, h)) return;
+          if (h === 0 && a[nx + nz * 4]) return;
+          if (h === 0.5 && a[nx + 2 + nz * 4]) return;
+        } else { const n = getBlock(x + f.dir[0], sy, z + f.dir[2]); if (n && (!BLOCKS[n].transparent || n === SNOW || snowIn(n) && !isPieces(n))) return; }
+      }
+      const tile = f.dir[1] > 0 ? t[1] : t[0], fu = FACE_UV[fi], base = pos.length / 3;
+      const light = anyLight ? LIGHT_CURVE(lightAt(x, sy, z)) : 0, sky = skyExposure(x, sy, z, skyCache), shade = f.shade * depth;
+      f.c.forEach(c => {
+        const lp = [(sx + c[0]) * 0.5, h + c[1] * H, (sz + c[2]) * 0.5];   // corner, from the block space's corner
+        pos.push(x + lp[0], y + lp[1], z + lp[2]);
+        const q = [lp[0], lp[1] - ly, lp[2]];   // (the picture: as for the space the patch is in)
+        const u = fu.u[1] ? 1 - q[fu.u[0]] : q[fu.u[0]], v = fu.v[1] ? 1 - q[fu.v[0]] : q[fu.v[0]];
+        uv.push(...atlasUV(tile, u, v));
+        col.push(shade, shade, shade); lt.push(light); sk.push(sky);
       });
       ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
     });
@@ -2808,7 +3187,7 @@ function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
       const h = c[1] ? cornerH(c[0], c[2]) : 0;
       pos.push(x + c[0], y + h, z + c[2]);
       const v = f.dir[1] ? c[4] : c[4] ? h : 0;        // sides show only as much of the texture as the water is tall
-      uv.push((tile * PW + 1 + c[3] * TILE) / (PW * NT), (1 + v * TILE) / PW);
+      uv.push(...atlasUV(tile, c[3], v));
       col.push(f.shade, f.shade, f.shade);
       lt.push(light); sk.push(sky);
     });
@@ -2892,7 +3271,7 @@ function setBlock(x, y, z, id) {
   const i = idx(x, y, z), old = world.get(i);
   world.set(i, id);
   edits.set(i, id);
-  if (id !== PIECES) pieceMap.delete(i);
+  if (!isPieces(id)) pieceMap.delete(i);
   if (isTorch(old)) torches.delete(i);
   if (isTorch(id)) torches.add(i);
   // a torch spot that's newly lit or smoldering starts its burn-down timer (adding one to a spot keeps its timer)
@@ -2923,16 +3302,15 @@ function setBlock(x, y, z, id) {
 function setPiece(x, y, z, s, id) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return false;
   const i = idx(x, y, z), cur = world.get(i);
-  let a = cur === PIECES ? pieceMap.get(i) : null;
+  let a = isPieces(cur) ? pieceMap.get(i) : null;
   if (!a) {
-    if (!id || (cur && !isWater(cur))) return false;
+    if (!id || (cur && !isWater(cur) && cur !== SNOW)) return false;   // (into empty space, water, or a layer of snow)
     a = new Int32Array(8);
   }
   if (id && a[s]) return false;
-  a = a.slice(); a[s] = id;
-  if (a[0] && a.every(v => v === a[0])) setBlock(x, y, z, a[0]);   // all 8 pieces of one block: it's that block again
-  else if (a.some(v => v)) { pieceMap.set(i, a); setBlock(x, y, z, PIECES); }
-  else setBlock(x, y, z, 0);
+  const v = id ? newSpotValue(a, id) : 0;   // (a loose piece: a group of its own)
+  a = a.slice(); a[s] = v;
+  putPieces(x, y, z, i, a, cur === SNOW || cur === PIECES_IN_SNOW);
   return true;
 }
 
@@ -2999,13 +3377,21 @@ function updateWater(dt) {
 // when a block is removed, torches standing on it or stuck to its sides fall off
 function dropTorchesAround(x, y, z) {
   // (in survival they drop as Burnt Torches you can pick up: a torch that falls goes out)
-  const fall = (tx, ty, tz, t) => { for (let n = BLOCKS[t].count; n > 0; n--) collect(torchDrop(t), tx, ty, tz); setBlock(tx, ty, tz, 0); };
+  // (a torch on a wall falls off it, but snow round it still lies on the ground, so that stays)
+  const fall = (tx, ty, tz, t, keepSnow = false) => {
+    for (let n = BLOCKS[t].count; n > 0; n--) collect(torchDrop(t), tx, ty, tz);
+    const s = snowIn(t);
+    if (keepSnow && s) setBlock(tx, ty, tz, SNOW + s - 1);
+    else { dropSnowOf(t, tx, ty, tz); setBlock(tx, ty, tz, 0); }
+  };
   const above = getBlock(x, y + 1, z);
   if (isTorch(above) && !BLOCKS[above].wall) fall(x, y + 1, z, above);
-  if (BLOCKS[above] && (BLOCKS[above].shape === 'flat' || BLOCKS[above].shape === 'plant')) { collect(dropFor(above), x, y + 1, z); setBlock(x, y + 1, z, 0); }   // a rock lying on it, or a flower growing in it
+  else if (isTorch(above) && snowIn(above)) { dropSnowOf(above, x, y + 1, z); setBlock(x, y + 1, z, plainOf(above)); }   // (snow round a wall torch, with nothing under it now)
+  if (BLOCKS[above] && (BLOCKS[above].shape === 'flat' || BLOCKS[above].shape === 'plant')) { collect(dropFor(above), x, y + 1, z); dropSnowOf(above, x, y + 1, z); setBlock(x, y + 1, z, 0); }   // a rock lying on it, or a flower growing in it (and its snow)
+  if (isSnow(above)) { dropSnowballs(BLOCKS[above].layers, x, y + 1, z); setBlock(x, y + 1, z, 0); }   // snow lying on it (2-4 Snowballs a layer)
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const n = getBlock(x + dx, y, z + dz);
-    if (isTorch(n) && BLOCKS[n].wall && BLOCKS[n].wall[0] === -dx && BLOCKS[n].wall[1] === -dz) fall(x + dx, y, z + dz, n);
+    if (isTorch(n) && BLOCKS[n].wall && BLOCKS[n].wall[0] === -dx && BLOCKS[n].wall[1] === -dz) fall(x + dx, y, z + dz, n, true);
   }
 }
 
@@ -3047,7 +3433,9 @@ function landFalling(f, y) {
   if (y >= WY) { collect(f.id, f.x, WY - 1, f.z); return; }
   const there = getBlock(f.x, y, f.z);
   if (isTorch(there)) for (let n = BLOCKS[there].count; n > 0; n--) collect(torchDrop(there), f.x, y, f.z);
+  else if (isSnow(there)) dropSnowballs(BLOCKS[there].layers, f.x, y, f.z);
   else if (there && !isWater(there)) collect(dropFor(there), f.x, y, f.z);
+  dropSnowOf(there, f.x, y, f.z);   // (a torch or flower standing in snow: the snow too)
   setBlock(f.x, y, f.z, f.id);
 }
 // (saving: anything still in the air lands straight away, so it's never lost)
@@ -3130,10 +3518,14 @@ function solidBoxes(x0, y0, z0, x1, y1, z1) {
   for (let y = Math.floor(y0); y <= Math.floor(y1 - 1e-6); y++)
     for (let z = Math.floor(z0); z <= Math.floor(z1 - 1e-6); z++)
       for (let x = Math.floor(x0); x <= Math.floor(x1 - 1e-6); x++) {
+        const sn = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY ? snowIn(world.at(x, y, z)) : 0;   // snowlogged: its snow, as snow
+        if (sn > 1) { const h = (sn - 1) / 8; if (y < y1 && y + h > y0) out.push([x, y, z, x + 1, y + h, z + 1]); continue; }
         if (!solid(x, y, z)) continue;
         const inside = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY;
-        const a = inside && world.at(x, y, z) === PIECES ? pieceMap.get(idx(x, y, z)) : null;
+        const a = inside && isPieces(world.at(x, y, z)) ? pieceMap.get(idx(x, y, z)) : null;
         const half = inside && !a && BLOCKS[world.at(x, y, z)].shape === 'half';   // a half-tall block: just its bottom half
+        const sb = inside && !a ? BLOCKS[world.at(x, y, z)] : null;   // snow: you sink in one layer
+        if (sb && sb.shape === 'snow') { const h = (sb.layers - 1) / 8; if (y < y1 && y + h > y0) out.push([x, y, z, x + 1, y + h, z + 1]); continue; }
         if (half) { if (y < y1 && y + 0.5 > y0) out.push([x, y, z, x + 1, y + 0.5, z + 1]); continue; }
         if (!a) { out.push([x, y, z, x + 1, y + 1, z + 1]); continue; }
         for (let s = 0; s < 8; s++) {
@@ -3157,9 +3549,10 @@ function moveAxis(axis, d) {
     player.vy = 0;
     return;
   }
-  // walking into something only half a block high (pieces): step up onto it, like a stair
-  const top = Math.max(...bs.map(b => b[4]));
-  if (!player.fly && top > player.y && top - player.y <= 0.5 + 1e-6 &&
+  // walking into something only half a block high made of pieces (slabs, stairs, quarters, loose pieces): step up onto
+  // it, like a stair. Nothing else: not a whole block (even from on top of a slab), the Cutter, or snow.
+  const top = Math.max(...bs.map(b => b[4])), pieces = bs.every(b => b[3] - b[0] === 0.5 && b[4] - b[1] === 0.5 && b[5] - b[2] === 0.5);
+  if (!player.fly && pieces && top > player.y && top - player.y <= 0.5 + 1e-6 &&
       solidBoxes(player.x - P_HALF, player.y - 0.05, player.z - P_HALF, player.x + P_HALF, player.y, player.z + P_HALF).length) {
     const was = player.y;
     player.y = top;
@@ -3205,6 +3598,8 @@ const Sound = (() => {
   for (const b of ORES) MATERIAL[b] = 'rock';
   MATERIAL[FIRECLAY] = 'dirt';
   for (let b = FIRECLAY_TERRACOTTA; b < FOUNDRY + 8; b++) MATERIAL[b] = 'brick';   // the Fireclay blocks and the Foundry's Furnace
+  for (let b = SNOW; b <= SNOW_BLOCK; b++) MATERIAL[b] = 'snow';   // (the layers and the Snow Block)
+  for (let k = 0; k < 16; k++) MATERIAL[TURNED_LOGS + k] = 'wood';   // (logs lying on their sides)
   // materials whose placing sound is their footstep sound instead of their dig sound
   // materials with their own placing sound (others reuse the breaking sound, softer)
   const PLACE_RECIPES = {
@@ -3219,7 +3614,29 @@ const Sound = (() => {
     },
     cobble(r, sr) { return deepGrit(r, sr, false); },
     brick(r, sr) { return PLACE_RECIPES.rock(r, sr); },
+    snow(r, sr) {               // Snow pressed down: a soft thump and a little crunch
+      const out = new Float32Array(Math.floor(sr * 0.3));
+      burst(out, r, sr, { attack: 0.006, decay: 0.035, type: 'lp', freq: 260, amp: 1 });
+      crackles(out, r, sr, { count: 45, spread: 0.12, start: 0.005, len: [0.003, 0.008], freq: [800, 2000], q: 2, amp: 0.5, bunch: 1.5 });
+      filter(out, 'lp', 3000, 0.7, sr);
+      return finish(out, sr, 0.7);
+    },
   };
+  // anything thrown: a rising rush of air
+  function whoosh(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.3));
+    for (let k = 0; k < 6; k++) burst(out, r, sr, { attack: 0.03, decay: 0.025, type: 'bp', freq: 500 + k * 250, q: 1.2, amp: 0.4 + 0.12 * k, start: 0.03 * k });
+    filter(out, 'lp', 3500, 0.7, sr);
+    return finish(out, sr, 0.45);
+  }
+  // a Snowball bursting on something
+  function splat(r, sr) {
+    const out = new Float32Array(Math.floor(sr * 0.25));
+    burst(out, r, sr, { attack: 0.002, decay: 0.03, type: 'lp', freq: 300, amp: 1 });
+    crackles(out, r, sr, { count: 50, spread: 0.08, start: 0, len: [0.002, 0.007], freq: [1000, 3000], q: 2, amp: 0.6, bunch: 2 });
+    filter(out, 'lp', 5000, 0.7, sr);
+    return finish(out, sr, 0.6);
+  }
   const VARIANTS = 4;
   const GRASS_MIX = 0.3; // grass breaking/placing sound: 0 = all soft swish, 1 = all chunky crunch (footsteps are always just the swish)
 
@@ -3390,6 +3807,21 @@ const Sound = (() => {
     },
     brick(dig, r, sr) {          // bricks: walk like stone ("bm"); breaking uses stone's placing clack
       return dig ? PLACE_RECIPES.rock(r, sr) : RECIPES.rock(false, r, sr);
+    },
+    snow(dig, r, sr) {           // a soft, packed crunch (exactly as the desktop version)
+      if (!dig) {
+        const out = new Float32Array(Math.floor(sr * 0.26));
+        crackles(out, r, sr, { count: 60, spread: 0.16, start: 0, len: [0.003, 0.009], freq: [700, 2200], q: 2.5, amp: 1, bunch: 1.3 });
+        burst(out, r, sr, { attack: 0.015, decay: 0.04, type: 'lp', freq: 500, amp: 0.5 });
+        filter(out, 'lp', 4000, 0.7, sr);
+        return finish(out, sr, 0.5);
+      }
+      const out = new Float32Array(Math.floor(sr * 0.4));
+      crackles(out, r, sr, { count: 130, spread: 0.28, start: 0, len: [0.003, 0.01], freq: [600, 2400], q: 2.5, amp: 1, bunch: 1.2 });
+      crackles(out, r, sr, { count: 40, spread: 0.25, start: 0.01, len: [0.002, 0.005], freq: [2500, 5000], q: 1.5, amp: 0.35 });
+      burst(out, r, sr, { attack: 0.01, decay: 0.05, type: 'lp', freq: 380, amp: 0.7 });
+      filter(out, 'lp', 4500, 0.7, sr);
+      return finish(out, sr, 0.75);
     },
   };
   // sand footstep: a smooth, soft "sss" hiss that fades in and out (no thump, no grains)
@@ -3591,6 +4023,15 @@ const Sound = (() => {
         bank[mat].place.push(b);
       }
     });
+    for (const [name, fn, seed] of [['throw', whoosh, 61000], ['splat', splat, 62000]]) {
+      bank[name] = { say: [] };
+      for (let v = 0; v < VARIANTS; v++) {
+        const data = fn(rng(seed + v * 23), sr);
+        const b = ctx.createBuffer(1, data.length, sr);
+        b.copyToChannel(data, 0);
+        bank[name].say.push(b);
+      }
+    }
   }
   const lastPlayed = {};
   // ch = which volume slider this sound follows: 'block', 'player' or 'mob' (all of them also follow the master volume)
@@ -3610,7 +4051,7 @@ const Sound = (() => {
     node.connect(master);
     src.start();
   }
-  const mat = id => isTorch(id) ? 'wood' : MATERIAL[id] || 'stone';
+  const mat = id => { id = plainOf(id); return isTorch(id) ? 'wood' : MATERIAL[id] || 'stone'; };   // (a snowlogged block: the block's own sound)
 
   // ---------- Music: a synthesized piano ----------
   // Song notation: a space = one beat, notes written with no space between them = half a beat.
@@ -3767,6 +4208,9 @@ const Sound = (() => {
     splash(speed) { play('water', 'splash', Math.min(1, 0.3 + speed / 14), speed > 12 ? 0.85 : 1, 0, 'player'); },   // harder falls = bigger, deeper splash
     swim() { play('water', 'swim', 0.55, 1, 0, 'player'); },   // (low sounds seem quieter, so this is turned up a little)
     pour() { play('water', 'place', 0.8, 1); },
+    throw() { play('throw', 'say', 0.7, 1); },   // you threw something (others hear it with Sound.at)
+    // a sound from a spot in the world ('throw', 'splat'): quieter the further away, panned left/right
+    at(voice, vol, pan, ch = 'mob') { if (vol > 0.01) play(voice, 'say', vol, 1, pan, ch); },
     // head underwater: everything (except the music) sounds muffled
     underwater(on) {
       if (!ctx || !muffle || muffle.on === on) return;
@@ -3796,7 +4240,9 @@ const Sound = (() => {
 })();
 
 // the block the player is standing on (checks the corners too, for when you're on an edge)
-function blockUnderPlayer() {   // (or the piece under them)
+function blockUnderPlayer() {   // (or the piece under them; feet in a layer of snow, or a snowlogged block: snow)
+  const feet = getBlock(Math.floor(player.x), Math.floor(player.y + 0.01), Math.floor(player.z));
+  if (feet && (isSnow(feet) || snowIn(feet))) return SNOW;
   for (const [dx, dz] of [[0, 0], [-P_HALF, -P_HALF], [P_HALF, -P_HALF], [-P_HALF, P_HALF], [P_HALF, P_HALF]]) {
     const b = subBlock(Math.floor((player.x + dx) * 2), Math.floor((player.y - 0.05) * 2), Math.floor((player.z + dz) * 2));
     if (b) return b;
@@ -3920,7 +4366,7 @@ function updateSaveText() {
 }
 
 // ---- Settings (saved in this browser) ----
-const settings = { sens: 100, fov: 75, renderDist: 10, info: true, autosave: true, vol: { master: 100, block: 100, player: 100, mob: 100, music: 100 } };
+const settings = { sens: 100, fov: 75, renderDist: 10, gui: 0, info: true, autosave: true, vol: { master: 100, block: 100, player: 100, mob: 100, music: 100 } };
 try {
   const saved = JSON.parse(localStorage.getItem('cubeland-settings')) || {};
   Object.assign(settings, saved, { vol: Object.assign(settings.vol, saved.vol) });
@@ -3935,6 +4381,7 @@ function applySettings() {
   document.getElementById('set-sens').value = settings.sens; document.getElementById('set-sens-v').textContent = settings.sens + '%';
   document.getElementById('set-fov').value = settings.fov; document.getElementById('set-fov-v').textContent = settings.fov;
   document.getElementById('set-render').value = settings.renderDist; document.getElementById('set-render-v').textContent = settings.renderDist + ' chunks';
+  document.getElementById('set-gui').value = settings.gui; document.getElementById('set-gui-v').textContent = settings.gui ? settings.gui + 'x' : `Auto (${autoGui}x)`;
   applyRenderDist();
   document.getElementById('set-sound').textContent = Sound.muted ? 'Off' : 'On';
   document.getElementById('set-info').textContent = settings.info ? 'Shown' : 'Hidden';
@@ -3947,6 +4394,7 @@ function applySettings() {
 document.getElementById('set-sens').addEventListener('input', e => { settings.sens = +e.target.value; applySettings(); });
 document.getElementById('set-fov').addEventListener('input', e => { settings.fov = +e.target.value; applySettings(); });
 document.getElementById('set-render').addEventListener('input', e => { settings.renderDist = +e.target.value; applySettings(); });
+document.getElementById('set-gui').addEventListener('input', e => { settings.gui = +e.target.value; applySettings(); fitFontSizes(); });
 document.getElementById('set-sound').addEventListener('click', () => { Sound.toggleMute(); applySettings(); });
 document.getElementById('set-info').addEventListener('click', () => { settings.info = !settings.info; applySettings(); });
 document.getElementById('set-autosave').addEventListener('click', () => { settings.autosave = !settings.autosave; applySettings(); });
@@ -4038,7 +4486,7 @@ function raycast(max = 6) {
   const at = (h, extra) => ({ x, y, z, px, py, pz, t: h.t, n: h.n, pt: [o.x + d.x * h.t, o.y + d.y * h.t, o.z + d.z * h.t], ...extra });
   while (t <= max) {
     const b = y >= 0 ? getBlock(x, y, z) : 0;
-    if (b === PIECES) {
+    if (isPieces(b)) {
       // a space with pieces: only counts if the ray touches one of them (the nearest one is the hit)
       const a = pieceMap.get(idx(x, y, z)) || [];
       let best = null, slot = -1;
@@ -4051,7 +4499,8 @@ function raycast(max = 6) {
       if (best) return at(best, { slot });
     }
     // torches (and rocks) only count as hit if the ray actually touches them, not the whole block space
-    else if (b && !isWater(b) && (!hitBox(b) || rayHitsBox(o, d, x, y, z, hitBox(b), max)))
+    // (snowlogged: its snow can be aimed at too)
+    else if (b && !isWater(b) && (!hitBox(b) || rayHitsBox(o, d, x, y, z, hitBox(b), max) || snowIn(b) && rayHitsBox(o, d, x, y, z, [0, 0, 0, 1, snowIn(b) / 8, 1], max)))
       return at(rayBox(o, d, [x, y, z, x + 1, y + 1, z + 1], max + 2) || { t, n: [px - x, py - y, pz - z] });
     px = x; py = y; pz = z;
     if (tmx < tmy && tmx < tmz) { x += sx; t = tmx; tmx += tdx; }
@@ -4635,27 +5084,29 @@ function setHeld(b, id) {
   arm.lower.add(mesh);
   b.mats.push(mesh.material); b.heldMesh = mesh;
 }
-// a model of item `id` to hold: a small cube for an ordinary block, a small model of its shape for a slab, stairs,
-// quarter or piece (the same one it drops as), otherwise its flat picture (both sides)
+// a model of item `id` to hold: a small cube for an ordinary block, a small model of its shape for anything that isn't a
+// whole block (a slab, stairs, quarter, piece, the Cutter, snow, a torch: the same one it drops as), otherwise its flat
+// picture (both sides: flowers and items; tools are pictures given thickness, see thickPicture). Items are never 3D in the
+// hotbar or inventory, tools included. As the desktop version: 0.3 of a block, a torch 0.5 (half its stick below the fist)
 function heldModel(id) {
   const b = BLOCKS[id];
-  if ((isPiece(id) || formOf(id) || (b && b.shape === 'half')) && iconBoxes(id)) {   // (the model is 1 for a whole block: shrunk to the held cube's size)
+  if ((isPiece(id) || formOf(id) || (b && b.shape)) && iconBoxes(id)) {   // (the model is 1 for a whole block: shrunk to the held cube's size)
     const box = boxModel(id);
     const mesh = new THREE.Mesh(box.geo, withHaze(new THREE.MeshBasicMaterial({ map: box.tex, vertexColors: true, alphaTest: 0.5 })));
-    mesh.scale.setScalar(0.3);
+    mesh.scale.setScalar(isTorch(id) ? 0.5 : 0.3);
     mesh.userData.cube = mesh.userData.sharedGeo = true;
     return mesh;
   }
   if (b && b.t && !isItem(id) && !b.shape && !b.liquid && !isPiece(id) && !formOf(id)) {
     const s = 0.3, geo = new THREE.BoxGeometry(s, s, s), uv = geo.attributes.uv;
-    const cols = [], e = LEAF_TINT[id] || [1, 1, 1];   // (Fir, Palm and Willow Leaves: the leaves picture in their own colour)
+    const cols = [];
     for (let f = 0; f < 6; f++) {   // faces: +x, -x, top, bottom, +z (the front, if it has one), -z
       const t = f === 2 ? b.t[1] : f === 3 ? b.t[2] : f === 4 && b.t[3] !== undefined ? b.t[3] : b.t[0];
-      const u0 = (t * PW + 1) / (PW * NT), u1 = (t * PW + 1 + TILE) / (PW * NT), v0 = 1 / PW, v1 = (1 + TILE) / PW;
+      const [u0, v0] = atlasUV(t, 0, 0), [u1, v1] = atlasUV(t, 1, 1);
       const shade = f === 2 ? 1 : f === 3 ? 0.55 : f < 2 ? 0.8 : 0.9;   // (lit from above, like the world's blocks)
       for (let k = 0; k < 4; k++) {
         uv.setXY(f * 4 + k, u0 + uv.getX(f * 4 + k) * (u1 - u0), v0 + uv.getY(f * 4 + k) * (v1 - v0));
-        cols.push(shade * e[0], shade * e[1], shade * e[2]);
+        cols.push(shade, shade, shade);
       }
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
@@ -5541,7 +5992,7 @@ function updateMobs(dt) {
           if ((m.snuffing = (m.snuffing || 0) + dt) >= 1.5) {
             m.snuffing = 0;
             const b = BLOCKS[getBlock(snuff.x, snuff.y, snuff.z)];
-            setBlock(snuff.x, snuff.y, snuff.z, torchVariant(b.wi, b.count, b.burn + 1));
+            setBlock(snuff.x, snuff.y, snuff.z, withSnow(torchVariant(b.wi, b.count, b.burn + 1), b.snowed));
           }
         } else { m.state = 'walk'; m.snuffing = 0; }
       } else if (hunting) {
@@ -5711,18 +6162,75 @@ function seesPlayer(m) {
   for (let k = 1; k < n; k++) if (solid(Math.floor(ox + dx * k / n), Math.floor(oy + dy * k / n), Math.floor(oz + dz * k / n))) return false;
   return true;
 }
-// ---- Thrown Rocks (Skeletons): they fly in an arc at you. One that hits you hurts; one that hits a block breaks. ----
+// ---- Thrown things: Rocks (Skeletons) and Snowballs (players). They fly in an arc. A Rock that hits you hurts; one that
+// hits a block breaks. A Snowball bursts into a puff of snow on whatever it hits, knocking mobs and players back a little
+// (no harm done). The host's game moves them all. Each is drawn as its flat picture, always facing you. ----
 const rocks = [];
 let rockCount = 0;
 const ROCK_GRAVITY = 20;
-function makeRock(x, y, z) {
-  const mat = withHaze(new THREE.MeshBasicMaterial({ map: iconTexture(ROCK), alphaTest: 0.5, side: THREE.DoubleSide }));
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), mat);
+function makeRock(x, y, z, id = ROCK) {
+  const mat = withHaze(new THREE.MeshBasicMaterial({ map: iconTexture(id), alphaTest: 0.5, side: THREE.DoubleSide }));
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.35), mat);
   scene.add(mesh);
-  const r = { k: ++rockCount, x, y, z, vx: 0, vy: 0, vz: 0, age: 0, mesh, light: 0 };
+  const r = { k: ++rockCount, id, x, y, z, vx: 0, vy: 0, vz: 0, age: 0, mesh, light: 0 };
   rocks.push(r);
   return r;
 }
+// a sound from a spot in the world ('throw', 'splat'): quieter the further away, from the left or right
+function soundAt(voice, x, y, z, loud = 0.85, ch = 'mob') {
+  const dx = x - player.x, dz = z - player.z, d = Math.hypot(dx, dz, y - player.y);
+  const side = Math.hypot(dx, dz) > 0.5 ? (dx * Math.cos(player.yaw) - dz * Math.sin(player.yaw)) / Math.hypot(dx, dz) : 0;
+  Sound.at(voice, loud * Math.pow(Math.max(0, 1 - d / 28), 1.5), side * 0.8, ch);
+}
+// right-click with a Snowball: throw one (survival: uses it up)
+let lastThrow = -1;
+function throwSnowball() {
+  if (HOTBAR[act] !== SNOWBALL) return false;
+  const now = performance.now() / 1000;
+  if (now - lastThrow < 0.25) return true;
+  lastThrow = now;
+  const d = new THREE.Vector3(); camera.getWorldDirection(d);
+  const o = camera.position, x = o.x + d.x * 0.4, y = o.y + d.y * 0.4, z = o.z + d.z * 0.4;
+  if (Net.client) Net.toHost({ t: 'throw', id: SNOWBALL, x, y, z, vx: d.x * 22, vy: d.y * 22, vz: d.z * 22 });   // (the host's game throws it)
+  else Object.assign(makeRock(x, y, z, SNOWBALL), { vx: d.x * 22, vy: d.y * 22, vz: d.z * 22, owner: 'host' });
+  Sound.throw(); useOne();
+  return true;
+}
+// a Snowball hit something: knocked 4 blocks/s the way it was flying, and a little up
+function knockFrom(r) {
+  const h = Math.hypot(r.vx, r.vz) || 1;
+  return { vx: r.vx / h * 4, vz: r.vz / h * 4 };
+}
+function knockPlayer(vx, vz) { player.vx += vx; player.vz += vz; player.vy = Math.max(player.vy, 3); }
+// a Snowball burst here: a puff of snow and a soft splat (every game shows it: the host tells the others)
+const puffs = [];
+let puffColor = null;
+function splatAt(x, y, z) {
+  soundAt('splat', x, y, z, 1, 'block');
+  if (!puffColor) {   // (the Snowball picture's colour)
+    const c = iconTexture(SNOWBALL).image, px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0, cr = 0, cg = 0, cb = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i + 3] >= 128) { n++; cr += px[i]; cg += px[i + 1]; cb += px[i + 2]; }
+    puffColor = n ? new THREE.Color(cr / n / 255, cg / n / 255, cb / n / 255) : new THREE.Color(1, 1, 1);
+  }
+  for (let k = 0; k < 8; k++) {
+    const mat = new THREE.MeshBasicMaterial({ color: puffColor, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.08), mat);
+    const a = Math.random() * Math.PI * 2, sp = 1.5 * (0.6 + Math.random() * 0.8);
+    mesh.position.set(x, y, z); scene.add(mesh);
+    puffs.push({ mesh, vx: Math.cos(a) * sp, vy: (Math.random() * 2 - 0.5) * sp * 0.7 + 1, vz: Math.sin(a) * sp, age: 0 });
+  }
+}
+function updatePuffs(dt) {
+  for (const p of [...puffs]) {
+    p.age += dt; p.vy -= 10 * dt;
+    p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt;
+    p.mesh.quaternion.copy(camera.quaternion);
+    p.mesh.material.opacity = Math.max(0, 1 - p.age / 0.4);
+    if (p.age >= 0.4) { scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose(); puffs.splice(puffs.indexOf(p), 1); }
+  }
+}
+function endSnowball(r) { splatAt(r.x, r.y, r.z); Net.splat(r.x, r.y, r.z); removeRock(r); }
 function removeRock(r) { scene.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose(); rocks.splice(rocks.indexOf(r), 1); }
 function throwRock(m) {
   // from its right hand, aimed where you'll be when it gets there, a little off at random
@@ -5733,8 +6241,10 @@ function throwRock(m) {
   const r = makeRock(hx, hy, hz);
   r.damage = mobDamage(m);
   r.vx = (tx - hx) / T; r.vz = (tz - hz) / T; r.vy = (ty - hy) / T + 0.5 * ROCK_GRAVITY * T;
+  soundAt('throw', hx, hy, hz);   // (a whoosh: friends hear it when the Rock turns up in their game)
 }
 function updateRocks(dt) {
+  updatePuffs(dt);
   for (const r of [...rocks]) {
     r.age += dt;
     if (Net.client) {   // a joined game: the host's game moves them
@@ -5743,18 +6253,30 @@ function updateRocks(dt) {
     } else {
       r.vy -= ROCK_GRAVITY * dt;
       r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt;
-      if (r.age > 5 || r.y < -10) { removeRock(r); continue; }
-      if (!player.dead && Math.abs(r.x - player.x) < 0.45 && Math.abs(r.z - player.z) < 0.45 && r.y > player.y && r.y < player.y + 1.85) {
-        hurtPlayer(r.damage || MOB_TYPES.skeleton.damage, { x: r.x - r.vx, z: r.z - r.vz });
-        removeRock(r); continue;
-      }
-      if (solid(Math.floor(r.x), Math.floor(r.y), Math.floor(r.z))) {
-        if (Math.hypot(r.x - player.x, r.y - player.y, r.z - player.z) < 16) Sound.place(ROCK_BLOCK);   // (a clack, if you're close enough to hear it)
-        removeRock(r); continue;
+      if (r.id === SNOWBALL) {   // a Snowball: bursts on anything it hits
+        if (r.age > 5 || r.y < -10) { endSnowball(r); continue; }
+        const own = r.age < 0.3;   // (it can't hit whoever threw it straight away)
+        if (!player.dead && !(own && r.owner === 'host') && Math.abs(r.x - player.x) < 0.45 && Math.abs(r.z - player.z) < 0.45 && r.y > player.y && r.y < player.y + 1.85) {
+          const k = knockFrom(r); knockPlayer(k.vx, k.vz); endSnowball(r); continue;
+        }
+        if (Net.snowballHitsFriend(r, own)) { endSnowball(r); continue; }
+        const m = mobs.find(m => !m.dead && Math.abs(r.x - m.x) < m.half && Math.abs(r.z - m.z) < m.half && r.y > m.y && r.y < m.y + m.height);
+        if (m) { const k = knockFrom(r); m.vx = k.vx; m.vz = k.vz; m.vy = Math.max(m.vy || 0, 3); endSnowball(r); continue; }
+        if (solid(Math.floor(r.x), Math.floor(r.y), Math.floor(r.z))) { endSnowball(r); continue; }
+      } else {
+        if (r.age > 5 || r.y < -10) { removeRock(r); continue; }
+        if (!player.dead && Math.abs(r.x - player.x) < 0.45 && Math.abs(r.z - player.z) < 0.45 && r.y > player.y && r.y < player.y + 1.85) {
+          hurtPlayer(r.damage || MOB_TYPES.skeleton.damage, { x: r.x - r.vx, z: r.z - r.vz });
+          removeRock(r); continue;
+        }
+        if (solid(Math.floor(r.x), Math.floor(r.y), Math.floor(r.z))) {
+          if (Math.hypot(r.x - player.x, r.y - player.y, r.z - player.z) < 16) Sound.place(ROCK_BLOCK);   // (a clack, if you're close enough to hear it)
+          removeRock(r); continue;
+        }
       }
     }
     r.mesh.position.set(r.x, r.y, r.z);
-    r.mesh.rotation.set(r.age * 9, r.age * 7, 0);
+    r.mesh.quaternion.copy(camera.quaternion);   // (its flat picture, facing you)
     if ((r.light -= dt) <= 0) {
       r.light = 0.2;
       const bx = Math.floor(r.x), by = Math.floor(r.y), bz = Math.floor(r.z);
@@ -5889,15 +6411,21 @@ addEventListener('mousedown', e => {
   if (e.button === 2 && feedCow()) return;   // holding Grain, looking at a cow: feed it
   if (e.button === 2 && eat()) return;   // holding food (survival): right-click eats it
   if (e.button === 2 && useFireEssence()) return;   // holding Fire Essence while gloomed: right-click lifts the gloom
-  const hit = raycast();
+  if (e.button === 2 && throwSnowball()) return;   // holding a Snowball: throw it
+  let hit = raycast();
   if (!hit) return;
-  const hb = getBlock(hit.x, hit.y, hit.z);
-  // pieces: break just the one you're looking at (or the whole slab / stairs it's part of)
+  let hb = getBlock(hit.x, hit.y, hit.z);
+  // a single layer of snow is in the way of anything but more snow: aiming at it is aiming at the top of what it lies on
+  if (e.button === 2 && BLOCKS[hb] && BLOCKS[hb].layers === 1 && HOTBAR[act] !== SNOW && hit.y > 0) {
+    hit = { x: hit.x, y: hit.y - 1, z: hit.z, px: hit.x, py: hit.y, pz: hit.z, n: [0, 1, 0], pt: [hit.pt[0], hit.y, hit.pt[2]] };
+    hb = getBlock(hit.x, hit.y, hit.z);
+  }
+  // pieces: break just the one you're looking at (or the whole slab / stairs it was put down as)
   if (e.button === 0 && hit.slot !== undefined) {
-    const a = pieceMap.get(idx(hit.x, hit.y, hit.z));
-    if (a && needAxe(a[hit.slot])) return;
-    Sound.break(a ? a[hit.slot] : 3);
-    if (a) wearTool(breakWear(a[hit.slot]));
+    const a = pieceMap.get(idx(hit.x, hit.y, hit.z)), pb = a ? spotBlock(a[hit.slot]) : 3;
+    if (a && needAxe(pb)) return;
+    Sound.break(pb);
+    if (a) wearTool(breakWear(pb));
     const g = a && shapeAt(a, hit.slot);
     if (g) {
       collect(formItem(g.shape, stoneDropOf(g.block)), hit.x, hit.y, hit.z);   // (stone gives cobblestone, like the block)
@@ -5905,17 +6433,34 @@ addEventListener('mousedown', e => {
       mobNoise(hit.x, hit.y, hit.z);
       return;
     }
-    if (a) collect(formItem('piece', stoneDropOf(a[hit.slot])), hit.x, hit.y, hit.z);   // (a stone piece gives a cobblestone piece)
+    if (a) collect(formItem('piece', stoneDropOf(pb)), hit.x, hit.y, hit.z);   // (a stone piece gives a cobblestone piece)
     setPiece(hit.x, hit.y, hit.z, hit.slot, 0);
     mobNoise(hit.x, hit.y, hit.z);
     return;
   }
   // right-click a Crafting Bench (survival: its recipes) or a Cutter to use it (hold Shift to build against it instead)
-  if (e.button === 2 && (hb === CUTTER || hb === CRAFTING_BENCH && SURVIVAL) && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(hb === CUTTER); return; }
+  if (e.button === 2 && (plainOf(hb) === CUTTER || hb === CRAFTING_BENCH && SURVIVAL) && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(plainOf(hb) === CUTTER); return; }
   // right-click a lit (burning) furnace holding a Stick: the stick catches fire and becomes a Torch
   if (e.button === 2 && isFurnace(hb) && BLOCKS[hb].lit && HOTBAR[act] === STICK) { lightStick(); return; }
   if (e.button === 2 && isFurnace(hb) && !(keys.ShiftLeft || keys.ShiftRight)) { openFurnace(idx(hit.x, hit.y, hit.z)); return; }
   if (e.button === 2 && farmUse(hit, hb)) return;   // tilling, planting, fertilizing
+  // Snow on a torch, a flower, pieces (slabs, stairs...), the Cutter, a rock...: one layer of snow lies in its space too
+  // (aiming at it, or at the side of the wall a torch is on; only with a whole block under it for the snow to lie on).
+  // Never more than one layer: Snow on one that already has its snow does nothing.
+  if (e.button === 2 && HOTBAR[act] === SNOW && !canSnowLog(hb) && canSnowLog(getBlock(hit.px, hit.py, hit.pz)))
+    hit = { x: hit.px, y: hit.py, z: hit.pz, px: hit.px, py: hit.py + 1, pz: hit.pz, t: hit.t, n: [0, 1, 0], pt: hit.pt };
+  if (e.button === 2 && HOTBAR[act] === SNOW && canSnowLog(getBlock(hit.x, hit.y, hit.z)) && (isPieces(getBlock(hit.x, hit.y, hit.z)) || snowRests(getBlock(hit.x, hit.y - 1, hit.z)))) {   // (pieces: the snow lies on them)
+    hb = getBlock(hit.x, hit.y, hit.z);
+    if (snowIn(hb)) return;
+    setBlock(hit.x, hit.y, hit.z, withSnow(hb, 1)); Sound.place(SNOW); mobNoise(hit.x, hit.y, hit.z); useOne(); return;
+  }
+  // Snow on snow: one more layer (8 make a Snow Block)
+  if (e.button === 2 && HOTBAR[act] === SNOW && isSnow(hb)) {
+    const more = BLOCKS[hb].layers + 1;
+    const inYou = hit.x < player.x + P_HALF && hit.x + 1 > player.x - P_HALF && hit.z < player.z + P_HALF && hit.z + 1 > player.z - P_HALF && hit.y < player.y + P_H && hit.y + 1 > player.y;
+    if (inYou && player.y < hit.y + (more - 1) / 8) return;   // (not up into you)
+    setBlock(hit.x, hit.y, hit.z, more === 8 ? SNOW_BLOCK : SNOW + more - 1); Sound.place(SNOW); mobNoise(hit.x, hit.y, hit.z); useOne(); return;
+  }
   // placing a slab, vertical slab or stairs
   if (e.button === 2 && formOf(HOTBAR[act])) { placeShape(hit); return; }
   // placing a piece: it goes in the half-block spot just in front of whatever you're looking at
@@ -5935,15 +6480,18 @@ addEventListener('mousedown', e => {
     return;
   }
   if (e.button === 0 && hit.y > 0) {
-    if (needAxe(hb)) return;
-    Sound.break(hb);
-    const cost = breakWear(hb);   // (the tool wears after the block is broken, so its last use still counts as that tool)
+    if (needAxe(plainOf(hb))) return;   // (snowlogged: as what it holds)
+    Sound.break(plainOf(hb));
+    const cost = breakWear(plainOf(hb));   // (the tool wears after the block is broken, so its last use still counts as that tool)
     // leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
-    if (!isLeaves(hb) || holding('hoe')) collectBlock(hb, hit.x, hit.y, hit.z);
+    if ((!isLeaves(hb) || holding('hoe')) && !isSnow(hb) && hb !== SNOW_BLOCK) collectBlock(hb, hit.x, hit.y, hit.z);
     if (isLeaves(hb) && !holding('hoe') && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);
     if (hb === PALM_LEAVES && !holding('hoe') && Math.random() < 0.25) collect(DATES, hit.x, hit.y, hit.z);   // Palm Leaves: a 1 in 4 chance of Dates
     if (hb === GRAIN_RIPE) for (let n = 1 + (Math.random() < 0.5 ? 1 : 0); n > 0; n--) collect(GRAIN_SEEDS, hit.x, hit.y, hit.z);   // ripe Grain: 1-2 Seeds too
-    if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn)); // take one torch off
+    if (isSnow(hb)) dropSnowballs(BLOCKS[hb].layers, hit.x, hit.y, hit.z);   // snow: 2-4 Snowballs for each layer
+    if (hb === SNOW_BLOCK) for (let n = 4; n > 0; n--) collect(SNOWBALL, hit.x, hit.y, hit.z);   // a Snow Block: 4
+    if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, withSnow(torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn), snowIn(hb))); // take one torch off
+    else if (snowIn(hb)) setBlock(hit.x, hit.y, hit.z, SNOW);   // (snowlogged: what it held comes out, the snow stays)
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
     mobNoise(hit.x, hit.y, hit.z);
     wearTool(cost);
@@ -5955,9 +6503,9 @@ addEventListener('mousedown', e => {
     if (isTorch(hb)) {
       const tb = BLOCKS[hb];
       // a lit torch lights a smoldering one up again (it isn't used up)
-      if ((burn === 0 || burn === 3) && tb.burn === 1) { setBlock(hit.x, hit.y, hit.z, torchVariant(tb.wi, tb.count, 0)); Sound.place(TORCH); nameEl.textContent = 'Lit the torch again'; nameEl.style.opacity = 1; nameTimer = 1.5; return; }
+      if ((burn === 0 || burn === 3) && tb.burn === 1) { setBlock(hit.x, hit.y, hit.z, withSnow(torchVariant(tb.wi, tb.count, 0), tb.snowed)); Sound.place(TORCH); nameEl.textContent = 'Lit the torch again'; nameEl.style.opacity = 1; nameTimer = 1.5; return; }
       // clicking a torch adds another one of the same kind to that spot (up to 4 standing, 2 on a wall)
-      if (tb.burn === burn && tb.count < torchMax(tb.wi)) { setBlock(hit.x, hit.y, hit.z, torchVariant(tb.wi, tb.count + 1, burn)); Sound.place(TORCH); mobNoise(hit.x, hit.y, hit.z); useOne(); }
+      if (tb.burn === burn && tb.count < torchMax(tb.wi)) { setBlock(hit.x, hit.y, hit.z, withSnow(torchVariant(tb.wi, tb.count + 1, burn), tb.snowed)); Sound.place(TORCH); mobNoise(hit.x, hit.y, hit.z); useOne(); }
       return;
     }
     // otherwise: on top of a block (standing) or on its side (leaning off the wall), never underneath
@@ -5967,7 +6515,8 @@ addEventListener('mousedown', e => {
     const wi = ny > 0 ? 0 : wallIndex(-nx, -nz);
     const there = getBlock(bx, by, bz);
     if (!there) setBlock(bx, by, bz, torchVariant(wi, 1, burn));
-    else if (isTorch(there) && BLOCKS[there].wi === wi && BLOCKS[there].burn === burn && BLOCKS[there].count < torchMax(wi)) setBlock(bx, by, bz, torchVariant(wi, BLOCKS[there].count + 1, burn));
+    else if (BLOCKS[there].layers === 1) setBlock(bx, by, bz, withSnow(torchVariant(wi, 1, burn), 1));   // (into a layer of snow: it stays round the torch)
+    else if (isTorch(there) && BLOCKS[there].wi === wi && BLOCKS[there].burn === burn && BLOCKS[there].count < torchMax(wi)) setBlock(bx, by, bz, withSnow(torchVariant(wi, BLOCKS[there].count + 1, burn), snowIn(there)));
     else return;
     Sound.place(TORCH);
     mobNoise(bx, by, bz);
@@ -5977,17 +6526,21 @@ addEventListener('mousedown', e => {
   if (e.button === 2) {
     const { px: bx, py: by, pz: bz } = hit;
     const there = getBlock(bx, by, bz);
-    if (there && !isWater(there)) return;   // don't overwrite a torch the ray passed by (water can be built over)
+    if (there && !isWater(there) && BLOCKS[there].layers !== 1) return;   // don't overwrite a torch the ray passed by (water and a thin layer of snow can be built over)
     const id = HOTBAR[act];
     if (id === WATER) { setBlock(bx, by, bz, WATER); Sound.pour(); mobNoise(bx, by, bz); useOne(); return; }   // water can go anywhere, even where you stand
     if (BLOCKS[placeId(id)].shape === 'flat') {   // a rock: only on top of a solid block (you can stand on it, so anywhere else is fine)
       if (by !== hit.y + 1 || !solid(bx, by - 1, bz) || isWater(there)) return;
-      setBlock(bx, by, bz, placeId(id)); Sound.place(placeId(id)); mobNoise(bx, by, bz); useOne(); return;
+      setBlock(bx, by, bz, there === SNOW ? withSnow(placeId(id), 1) : placeId(id)); Sound.place(placeId(id)); mobNoise(bx, by, bz); useOne(); return;   // (into a layer of snow: it stays round it)
+    }
+    if (BLOCKS[id].shape === 'snow') {   // snow: only on top of a whole block
+      if (!snowRests(getBlock(bx, by - 1, bz)) || isWater(there)) return;
+      setBlock(bx, by, bz, id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;
     }
     if (BLOCKS[id].shape === 'plant') {   // a flower: planted on top of grass or dirt
       const under = getBlock(bx, by - 1, bz);
-      if (by !== hit.y + 1 || (!grassy(under) && under !== 2) || there) return;
-      setBlock(bx, by, bz, id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;
+      if (by !== hit.y + 1 || (!grassy(under) && under !== 2) || (there && BLOCKS[there].layers !== 1)) return;
+      setBlock(bx, by, bz, isSnow(there) ? withSnow(id, 1) : id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;   // (into snow: it stays round the flower)
     }
     const overlapsPlayer =
       bx < player.x + P_HALF && bx + 1 > player.x - P_HALF &&
@@ -5995,13 +6548,17 @@ addEventListener('mousedown', e => {
       by < player.y + P_H && by + 1 > player.y;
     // (a furnace turns its front towards you)
     let pid = placeId(HOTBAR[act]);
+    pid = turned(pid, hit.n[1] ? 0 : hit.n[0] ? 1 : 2);   // a log lies pointing out from the side you put it against
     if (pid === FURNACE || pid === FOUNDRY) {
       const dx = player.x - (bx + 0.5), dz = player.z - (bz + 0.5);
       pid = pid + FURNACE_FRONTS.findIndex(([fx, fz]) => Math.abs(dx) > Math.abs(dz) ? fx === Math.sign(dx) : fz === (Math.sign(dz) || 1));
     }
-    if (!overlapsPlayer) { setBlock(bx, by, bz, pid); Sound.place(HOTBAR[act]); mobNoise(bx, by, bz); useOne(); }
+    if (!overlapsPlayer) { setBlock(bx, by, bz, there === SNOW && canSnowLog(pid) ? withSnow(pid, 1) : pid); Sound.place(HOTBAR[act]);   // (the Cutter into a layer of snow: it stays round it)
+      mobNoise(bx, by, bz); useOne(); }
   }
 });
+// what snow can lie on: whole blocks (not water, plants, torches, pieces or more snow)
+const snowRests = b => { const d = BLOCKS[b]; return !!d && !d.shape && !d.liquid && !d.noCollide && !d.item; };
 // Put down the slab / vertical slab / stairs in your hand, in the space just in front of where you're looking
 // (or into the empty half of a space you're looking at, like a second slab on top of a slab).
 //  slab: bottom half, or the top half if you aim at the upper half of a side or at the underside of something
@@ -6110,18 +6667,7 @@ let nameTimer = 0;
 const hotbarIcons = [], hotbarCounts = [], hotbarWears = [];
 // `flat`: always the flat picture (for what's held). Otherwise a block, slab, stairs, piece or torch is drawn in 3D.
 // Fir, Palm and Willow Leaves (and their pieces, slabs and stairs) share the Oak Leaves picture: their icons and drops get its green in their own colour
-const leafTintOf = id => { const b = BLOCKS[id]; return b ? LEAF_TINT[id] || LEAF_TINT[b.piece] || LEAF_TINT[b.of] : undefined; };
-function leafTint(canvas, id) {
-  const t = leafTintOf(id);
-  if (!t) return;
-  const ctx = canvas.getContext('2d'), img = ctx.getImageData(0, 0, canvas.width, canvas.height), d = img.data;
-  for (let i = 0; i < d.length; i += 4) if (d[i + 1] > d[i] && d[i + 1] > d[i + 2]) { d[i] *= t[0]; d[i + 1] *= t[1]; d[i + 2] = Math.min(255, d[i + 2] * t[2]); }
-  ctx.putImageData(img, 0, 0);
-}
-function drawIcon(canvas, id, flat) {
-  drawIconPlain(canvas, id, flat);
-  leafTint(canvas, id);
-}
+function drawIcon(canvas, id, flat) { drawIconPlain(canvas, id, flat); }
 function drawIconPlain(canvas, id, flat) {
   if (!flat && iconBoxes(id)) { drawBoxIcon(canvas, id); return; }
   if (canvas.width !== TILE) canvas.width = canvas.height = TILE;
@@ -6165,11 +6711,32 @@ function iconBoxes(id) {
     return boxes;
   }
   if (b.shape === 'half') return [[0, 16, 0, 16, 0, 8]];   // the Cutter: half a block tall
+  if (b.shape === 'snow') return [[0, 16, 0, 16, 0, 2 * b.layers]];   // snow: as deep as its layers
   if (!isCubeIcon(id)) return null;
   return isTorch(id) ? [[6, 10, 6, 10, 0, 16]] : [[0, 16, 0, 16, 0, 16]];
 }
 // a thing's face pictures: top, front, side, bottom (the kiln's front is its opening)
 const iconTiles = b => [b.t[1], b.t[3] ?? b.t[0], b.t[0], b.t[2] ?? b.t[0]];
+// The face pictures of each box of an icon or held / dropped model: for a slab, stairs, quarter... each box is one of its
+// spots, and each face gets its cut picture (see CUT_SHAPES) from the quarters of that face the shape shows: the spots
+// in the same layer whose face that way isn't covered by another spot of the shape. faces: [dir, base picture, left(s),
+// top(s)] (which quarter of that face's picture spot s covers). Anything else: the plain pictures.
+function boxFaceTiles(id, boxes, faces) {
+  const form = formOf(id), mask = form ? ICON_MASKS[form] : 0;
+  return boxes.map(([a0, , b0, , h0]) => faces.map(([dir, base, left, top]) => {
+    if (!form) return base;
+    const s = a0 / 8 + (h0 / 8) * 2 + (b0 / 8) * 4, ax = dir[0] ? 0 : dir[1] ? 1 : 2;
+    let q = 0;
+    for (let s2 = 0; s2 < 8; s2++) {
+      if (!(mask >> s2 & 1) || ((s2 >> ax) & 1) !== ((s >> ax) & 1)) continue;
+      const c = [s2 & 1, (s2 >> 1) & 1, s2 >> 2]; c[ax] += dir[ax];
+      if (c[ax] >= 0 && c[ax] < 2 && (mask >> (c[0] + c[1] * 2 + c[2] * 4) & 1)) continue;   // (covered by another spot of the shape)
+      q |= top(s2) ? (left(s2) ? 1 : 2) : (left(s2) ? 4 : 8);
+    }
+    return cutTile(base, q);
+  }));
+}
+const spotX = s => s & 1, spotY = s => (s >> 1) & 1, spotZ = s => s >> 2;
 // The 3D icon: seen from above at the front-left corner, in a 4 x TILE square (each texture pixel is 2 icon pixels
 // across). Each icon pixel takes its colour straight from the nearest face under it, so it stays crisp.
 // (The same drawing as the desktop edition's Atlas.BoxIcon.)
@@ -6177,11 +6744,17 @@ function drawBoxIcon(canvas, id) {
   const R = TILE * 4, k = 2, T = TILE, b = BLOCKS[id], boxes = iconBoxes(id);
   if (canvas.width !== R) canvas.width = canvas.height = R;
   canvas.style.imageRendering = 'auto';   // shrunk to fit a slot it's smoothed, not missing every other row
-  const tiles = iconTiles(b);
-  const src = document.createElement('canvas'); src.width = T * 3; src.height = T;
+  const tiles = iconTiles(b), saw = id === CUTTER;   // (the Cutter: its saw blade too, standing up across the middle)
+  // each box's top, front and side pictures (slabs, stairs...: cut to the face's shape), side by side in `src`, then the saw
+  const faceTiles = boxFaceTiles(id, boxes, [
+    [[0, 1, 0], tiles[0], s => !spotX(s), s => !spotZ(s)],      // top: picture across x, its top at the back
+    [[0, 0, 1], tiles[1], s => !spotX(s), s => spotY(s)],       // front
+    [[1, 0, 0], tiles[2], s => spotZ(s), s => spotY(s)]]);      // side (its picture runs the other way along z)
+  const used = [...new Set(faceTiles.flat()), SAW_TILE], slot = new Map(used.map((t, k) => [t, k])), W = used.length;
+  const src = document.createElement('canvas'); src.width = T * W; src.height = T;
   const sctx = src.getContext('2d');
-  tiles.slice(0, 3).forEach((t, f) => sctx.drawImage(atlas, t * T, 0, T, T, f * T, 0, T, T));
-  const px = sctx.getImageData(0, 0, T * 3, T).data;
+  used.forEach((t, k) => sctx.drawImage(atlas, t * T, 0, T, T, k * T, 0, T, T));
+  const px = sctx.getImageData(0, 0, T * W, T).data, sawSlot = slot.get(SAW_TILE);
   const ctx = canvas.getContext('2d'), out = ctx.createImageData(R, R);
   const shades = [1, 0.8, 0.62];
   for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) {
@@ -6189,7 +6762,7 @@ function drawBoxIcon(canvas, id) {
     // the face nearest you (the biggest A + B - D) that isn't see-through wins
     const X = (x + 0.5 - T * k) / k, Y = (y + 0.5) / k;   // (A - B, and (A + B) / 2 + D)
     let best = -1e9, col = null;
-    for (const [a0, a1, b0, b1, h0, h1] of boxes) {
+    boxes.forEach(([a0, a1, b0, b1, h0, h1], bi) => {
       const d0 = T - h1, d1 = T - h0;
       const hits = [];
       { const A = Y - d0 + X / 2, B = Y - d0 - X / 2;                          // top
@@ -6199,8 +6772,15 @@ function drawBoxIcon(canvas, id) {
       { const B = a1 - X, D = Y - (a1 + B) / 2;                                 // side
         if (B >= b0 && B < b1 && D >= d0 && D < d1) hits.push([2, a1, B, D, T - 1 - Math.floor(B), Math.floor(D)]); }
       for (const [f, A, B, D, u, v] of hits) {
-        const depth = A + B - D, i = (v * T * 3 + f * T + u) * 4;
+        const depth = A + B - D, i = (v * T * W + slot.get(faceTiles[bi][f]) * T + u) * 4;
         if (depth > best && px[i + 3] >= 128) { best = depth; col = [px[i] * shades[f], px[i + 1] * shades[f], px[i + 2] * shades[f]]; }
+      }
+    });
+    if (saw) {   // the blade: the top half of the cutter_saw picture, upright along z through the middle (x = 8), above the base
+      const B = T / 2 - X, D = Y - (T / 2 + B) / 2;
+      if (B >= 0 && B < T && D >= 0 && D < T / 2) {
+        const i = (Math.floor(D) * T * W + sawSlot * T + Math.floor(B)) * 4;
+        if (T / 2 + B - D > best && px[i + 3] >= 128) { best = T / 2 + B - D; col = [px[i] * 0.8, px[i + 1] * 0.8, px[i + 2] * 0.8]; }
       }
     }
     if (!col) continue;
@@ -6214,28 +6794,38 @@ function drawBoxIcon(canvas, id) {
 const boxModelCache = {};
 function boxModel(id) {
   if (boxModelCache[id]) return boxModelCache[id];
-  const T = TILE, tiles = iconTiles(BLOCKS[id]);
-  const c = document.createElement('canvas'); c.width = T * 4; c.height = T;
+  const T = TILE, tiles = iconTiles(BLOCKS[id]), boxes = iconBoxes(id);
+  // each box's pictures: top, bottom, front, back, right side, left side (slabs, stairs...: cut to the face's shape)
+  const faceTiles = boxFaceTiles(id, boxes, [
+    [[0, 1, 0], tiles[0], s => !spotX(s), s => !spotZ(s)], [[0, -1, 0], tiles[3], s => !spotX(s), s => !spotZ(s)],
+    [[0, 0, 1], tiles[1], s => !spotX(s), s => spotY(s)], [[0, 0, -1], tiles[2], s => spotX(s), s => spotY(s)],
+    [[1, 0, 0], tiles[2], s => spotZ(s), s => spotY(s)], [[-1, 0, 0], tiles[2], s => !spotZ(s), s => spotY(s)]]);
+  const used = [...new Set(faceTiles.flat()), SAW_TILE], slot = new Map(used.map((t, k) => [t, k])), N = used.length;
+  const c = document.createElement('canvas'); c.width = T * N; c.height = T;
   const cx = c.getContext('2d');
-  tiles.forEach((t, f) => cx.drawImage(atlas, t * T, 0, T, T, f * T, 0, T, T));
-  leafTint(c, id);
+  used.forEach((t, k) => cx.drawImage(atlas, t * T, 0, T, T, k * T, 0, T, T));
   const tex = new THREE.CanvasTexture(c);
   tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
   const pos = [], uv = [], col = [], ind = [];
   // one face: corners p (4 points [A, h, B]), their texture pixels q ([u, v], v down from the picture's top), tile f, shade
   const face = (p, q, f, s) => {
     const n = pos.length / 3;
-    p.forEach(([A, h, B], i) => { pos.push(A / T - 0.5, h / T - 0.5, B / T - 0.5); uv.push((f * T + q[i][0]) / (T * 4), 1 - q[i][1] / T); col.push(s, s, s); });
+    p.forEach(([A, h, B], i) => { pos.push(A / T - 0.5, h / T - 0.5, B / T - 0.5); uv.push((f * T + q[i][0]) / (T * N), 1 - q[i][1] / T); col.push(s, s, s); });
     ind.push(n, n + 1, n + 2, n, n + 2, n + 3);
   };
-  for (const [a0, a1, b0, b1, h0, h1] of iconBoxes(id)) {
-    const d0 = T - h1, d1 = T - h0;
-    face([[a0, h1, b0], [a0, h1, b1], [a1, h1, b1], [a1, h1, b0]], [[a0, b0], [a0, b1], [a1, b1], [a1, b0]], 0, 1);          // top
-    face([[a0, h0, b1], [a0, h0, b0], [a1, h0, b0], [a1, h0, b1]], [[a0, b1], [a0, b0], [a1, b0], [a1, b1]], 3, 0.5);        // bottom
-    face([[a0, h1, b1], [a0, h0, b1], [a1, h0, b1], [a1, h1, b1]], [[a0, d0], [a0, d1], [a1, d1], [a1, d0]], 1, 0.8);        // front
-    face([[a1, h1, b0], [a1, h0, b0], [a0, h0, b0], [a0, h1, b0]], [[T - a1, d0], [T - a1, d1], [T - a0, d1], [T - a0, d0]], 2, 0.8);   // back
-    face([[a1, h1, b1], [a1, h0, b1], [a1, h0, b0], [a1, h1, b0]], [[T - b1, d0], [T - b1, d1], [T - b0, d1], [T - b0, d0]], 2, 0.62);  // right side
-    face([[a0, h1, b0], [a0, h0, b0], [a0, h0, b1], [a0, h1, b1]], [[b0, d0], [b0, d1], [b1, d1], [b1, d0]], 2, 0.62);       // left side
+  boxes.forEach(([a0, a1, b0, b1, h0, h1], bi) => {
+    const d0 = T - h1, d1 = T - h0, k = f => slot.get(faceTiles[bi][f]);
+    face([[a0, h1, b0], [a0, h1, b1], [a1, h1, b1], [a1, h1, b0]], [[a0, b0], [a0, b1], [a1, b1], [a1, b0]], k(0), 1);          // top
+    face([[a0, h0, b1], [a0, h0, b0], [a1, h0, b0], [a1, h0, b1]], [[a0, b1], [a0, b0], [a1, b0], [a1, b1]], k(1), 0.5);        // bottom
+    face([[a0, h1, b1], [a0, h0, b1], [a1, h0, b1], [a1, h1, b1]], [[a0, d0], [a0, d1], [a1, d1], [a1, d0]], k(2), 0.8);        // front
+    face([[a1, h1, b0], [a1, h0, b0], [a0, h0, b0], [a0, h1, b0]], [[T - a1, d0], [T - a1, d1], [T - a0, d1], [T - a0, d0]], k(3), 0.8);   // back
+    face([[a1, h1, b1], [a1, h0, b1], [a1, h0, b0], [a1, h1, b0]], [[T - b1, d0], [T - b1, d1], [T - b0, d1], [T - b0, d0]], k(4), 0.62);  // right side
+    face([[a0, h1, b0], [a0, h0, b0], [a0, h0, b1], [a0, h1, b1]], [[b0, d0], [b0, d1], [b1, d1], [b1, d0]], k(5), 0.62);       // left side
+  });
+  if (id === CUTTER) {   // the saw blade: the top half of its picture, upright across the middle above the base, seen from both sides
+    const h = T / 2, m = T / 2;
+    face([[m, T, 0], [m, h, 0], [m, h, T], [m, T, T]], [[0, 0], [0, h], [T, h], [T, 0]], slot.get(SAW_TILE), 0.8);
+    face([[m, T, T], [m, h, T], [m, h, 0], [m, T, 0]], [[T, 0], [T, h], [0, h], [0, 0]], slot.get(SAW_TILE), 0.8);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -6400,7 +6990,7 @@ function actSlot(button) {
   else {
     const hit = raycast(); if (!hit) return selected;
     let b = getBlock(hit.x, hit.y, hit.z);
-    if (hit.slot !== undefined) { const a = pieceMap.get(idx(hit.x, hit.y, hit.z)); if (a) b = a[hit.slot]; }
+    if (hit.slot !== undefined) { const a = pieceMap.get(idx(hit.x, hit.y, hit.z)); if (a) b = spotBlock(a[hit.slot]); }
     kind = rightTool(b);
   }
   const hand = BLOCKS[HOTBAR[selected]];
@@ -6505,7 +7095,7 @@ const invEl = document.getElementById('inventory'), invGrid = document.getElemen
 const invIcons = [];
 // Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
 // click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, ...TOOLS, ...PACK_ITEMS, ...GEAR_ITEMS]);
+const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, SNOWBALL, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, ...TOOLS, ...PACK_ITEMS, ...GEAR_ITEMS]);
 const variantsOf = b => SPLITTABLE.includes(b)
   ? ['piece', 'slab', 'stairs', 'quarter', 'vslab', 'vstairs', 'vquarter'].map(f => formItem(f, b))
   : b === TORCH ? [SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH] : [];   // (the Torch's + shows its other kinds)
@@ -6541,7 +7131,7 @@ function showVariants(b, plus) {
 const INV_TABS = [
   ['Building Blocks', [7, 61, FIR_PLANKS, STRIPPED_FIR_LOG, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_PLANKS, STRIPPED_WILLOW_LOG, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS, 8, ...deepShown(8), 9, ...deepShown(9), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, ...deepShown(69), 10, 22, CRAFTING_BENCH, CUTTER, FURNACE, ...FIRECLAY_BLOCKS, FOUNDRY]],
   ['Natural Blocks', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, ...deepShown(3), ...ORES, 4, 5, FIR_LOG, FIR_LEAVES, PALM_LOG, PALM_LEAVES, WILLOW_LOG, WILLOW_LEAVES, 6, 97, 98, 58, MUD, PEAT, 99, 11, 63, FIRECLAY, ...FLOWERS, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...PACK_ITEMS.slice(0, 12), FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
+  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...PACK_ITEMS.slice(0, 12), FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, SNOWBALL, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
 ];
 const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
 let invTab = 0;
@@ -6871,7 +7461,7 @@ function tickTorches(dt) {
     const b = BLOCKS[world.get(i)];
     if (!burnsDown(world.get(i))) { torchBurn.delete(i); continue; }
     const [x, y, z] = fromIdx(i);
-    setBlock(x, y, z, torchVariant(b.wi, b.count, b.burn + 1));   // (starts the next stage's timer, or ends it once burnt)
+    setBlock(x, y, z, withSnow(torchVariant(b.wi, b.count, b.burn + 1), b.snowed));   // (starts the next stage's timer, or ends it once burnt)
   }
 }
 // ---- Farming (Till & Tend) ----
@@ -7065,6 +7655,8 @@ const RECIPES = [
   { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
   { out: CLAY_BALL, n: 1, needs: [[PIECE_ITEM + 63, 2]], at: 'hand' },   // 2 Clay Pieces -> a Clay Ball
   { out: 63, n: 1, needs: [[CLAY_BALL, 4]], at: 'hand' },                // 4 Clay Balls packed back into Clay
+  { out: SNOW_BLOCK, n: 1, needs: [[SNOWBALL, 4]], at: 'hand' },           // 4 Snowballs packed into a Snow Block
+  { out: SNOW, n: 8, needs: [[SNOW_BLOCK, 1]], at: 'hand' },               // ... which makes 8 Snow (layers)
   { out: 64, n: 1, needs: [[BRICK, 4]], at: 'bench' },                   // 4 Bricks -> Bricks (block)
   { out: FURNACE, n: 1, needs: [[BRICK, 8]], at: 'bench' },              // 8 Bricks -> Furnace
   // chiseled blocks: 1 block, carved with a pickaxe (not used up)
@@ -7197,7 +7789,7 @@ const extraStairs = [];   // staircases that turned up somewhere the world didn'
 const stairTopCell = s => { const [dx, dz] = STAIR_DIRS[s.dir]; return [s.x + dx * (s.n - 1), s.y + s.n - 1, s.z + dz * (s.n - 1)]; };
 function stairStanding(s) {   // is this staircase still standing (its top step as it grew)?
   const [x, y, z] = stairTopCell(s);
-  const a = getBlock(x, y, z) === PIECES && pieceMap.get(idx(x, y, z));
+  const a = isPieces(getBlock(x, y, z)) && pieceMap.get(idx(x, y, z));
   if (!a) return false;
   for (let b = 0; b < 8; b++) if (a[b] !== (STAIR_MASKS[s.dir] & (1 << b) ? s.mat : 0)) return false;
   return true;
@@ -7490,7 +8082,7 @@ function gatherPieces() {
 function applyPieces(list) {
   if (!Array.isArray(list)) return;
   for (let k = 0; k + 8 < list.length; k += 9) {
-    const a = Int32Array.from(list.slice(k + 1, k + 9), id => BLOCKS[id] && !BLOCKS[id].item && BLOCKS[id].shape !== 'pieces' ? id : 0);
+    const a = Int32Array.from(list.slice(k + 1, k + 9), v => { const b = BLOCKS[spotBlock(v)]; return b && !b.item && b.shape !== 'pieces' ? v : 0; });   // (block + group)
     if (a.some(v => v)) pieceMap.set(list[k], a);
   }
 }
@@ -7512,8 +8104,8 @@ function applyEdits(idxs, ids) {
   for (let k = 0; k < idxs.length; k++) {
     const i = idxs[k], id = ids[k];
     if (i >= world.length || (id && !BLOCKS[id])) continue;
-    if (id === PIECES && !pieceMap.has(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
-    if (id !== PIECES) pieceMap.delete(i);
+    if (isPieces(id) && !pieceMap.has(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
+    if (!isPieces(id)) pieceMap.delete(i);
     world.set(i, id); edits.set(i, id);
     const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
     if (isTorch(id)) torches.add(i);
@@ -7707,9 +8299,9 @@ addEventListener('pagehide', () => autoSave());
     applyPieces(pcs);
     for (let k = 0; k + 1 < list.length; k += 2) {
       const i = list[k], id = list[k + 1];
-      if (!(i >= 0 && i < world.length) || (id && !BLOCKS[id]) || (world.get(i) === id && id !== PIECES)) continue;
-      if (id === PIECES && !pieceMap.has(i)) continue;
-      if (id === PIECES && world.get(i) === PIECES && before.get(i) && pieceMap.get(i).every((v, s) => v === before.get(i)[s])) continue;
+      if (!(i >= 0 && i < world.length) || (id && !BLOCKS[id]) || (world.get(i) === id && !isPieces(id))) continue;
+      if (isPieces(id) && !pieceMap.has(i)) continue;
+      if (isPieces(id) && world.get(i) === id && before.get(i) && pieceMap.get(i).every((v, s) => v === before.get(i)[s])) continue;
       setBlock(i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ, id);
     }
     Net.applying = false;
@@ -7751,7 +8343,7 @@ addEventListener('pagehide', () => autoSave());
     const f = friends.get(conn.peer);
     if (f) f.seen = performance.now();
     if (d.t === 'hello') {          // someone checking which world this is, before they load it
-      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, s: WX, b: BIOME_SCALE, mode: gameMode, host: myName });
+      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, s: WX, b: BIOME_SCALE, land: LAND, mode: gameMode, host: myName });
     } else if (d.t === 'join') {
       if (d.ver !== GAME_VERSION) { conn.send({ t: 'refuse', why: `You need the same version of the game. They have ${GAME_VERSION}, you have ${d.ver}.` }); return; }
       const used = new Set([HUES[0], ...[...friends.values()].map(x => x.hue)]);
@@ -7775,6 +8367,10 @@ addEventListener('pagehide', () => autoSave());
       const s = PlayerSkin.valid(d.s) ? d.s : null;
       if (s) skins.set(conn.peer, s); else skins.delete(conn.peer);
       for (const [id, o] of friends) if (id !== conn.peer && o.conn.open) o.conn.send(skinMsg(conn.peer, s));
+    } else if (d.t === 'throw') {   // a friend threw a Snowball: this game moves it
+      if (d.id !== SNOWBALL || ![d.x, d.y, d.z, d.vx, d.vy, d.vz].every(v => isFinite(v))) return;
+      Object.assign(makeRock(+d.x, +d.y, +d.z, SNOWBALL), { vx: +d.vx, vy: +d.vy, vz: +d.vz, owner: conn.peer });
+      soundAt('throw', +d.x, +d.y, +d.z);
     } else if (d.t === 'hit') {
       const m = mobs.find(m => m.k === d.k && !m.dead), p = others.get(conn.peer);
       if (m && p) hitMob(m, p);
@@ -7799,7 +8395,7 @@ addEventListener('pagehide', () => autoSave());
     const ms = mobs.map(m => { const a = [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0, m.fade ? 1 : m.throwT ? 2 : 0];
       if (MOB_TYPES[m.type].cow) a.push(cowLook(m)); return [m, a]; });
     const ds = drops.map(d => [d.k, d.id, r2(d.x), r2(d.y), r2(d.z)]);
-    const rs = rocks.map(r => [r.k, r2(r.x), r2(r.y), r2(r.z)]);
+    const rs = rocks.map(r => [r.k, r2(r.x), r2(r.y), r2(r.z), r.id]);   // (id: Rock or Snowball)
     const fs = falling.map(f => [f.k, f.id, f.x, r2(f.y), f.z]);
     const now = performance.now(), r = renderBlocks();
     for (const [id, f] of friends) {
@@ -7837,7 +8433,7 @@ addEventListener('pagehide', () => autoSave());
         if (d.ver !== GAME_VERSION) return fail(`${d.host} is playing version ${d.ver}, and you have ${GAME_VERSION}. You both need the same version.`);
         clearTimeout(joinTimeout); done = true;
         status('Joining...');
-        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, s: d.s, b: d.b, mode: d.mode, host: d.host })); } catch (e) {}
+        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, s: d.s, b: d.b, land: d.land, mode: d.mode, host: d.host })); } catch (e) {}
         p.destroy();
         await saveBeforeLeaving();
         location.hash = 'join=' + code;
@@ -7913,10 +8509,15 @@ addEventListener('pagehide', () => autoSave());
       for (const m of [...mobs]) if (!m.dead && !seenM.has(m.k)) removeMob(m);
       // Rocks thrown by Skeletons
       const byR = new Map(rocks.map(r => [r.k, r])), seenR = new Set();
-      for (const [k, x, y, z] of d.rocks || []) {
+      for (const [k, x, y, z, id] of d.rocks || []) {
         seenR.add(k);
         let r = byR.get(k);
-        if (!r) { r = makeRock(x, y, z); r.k = k; }
+        if (!r) {
+          r = makeRock(x, y, z, id === SNOWBALL ? SNOWBALL : ROCK); r.k = k;
+          // a whoosh where it was thrown (not your own Snowball: you heard that when you threw it)
+          const mine = id === SNOWBALL && performance.now() / 1000 - lastThrow < 0.6 && Math.hypot(x - player.x, y - player.y - 1.6, z - player.z) < 4;
+          if (!mine) soundAt('throw', x, y, z);
+        }
         Object.assign(r, { tx: x, ty: y, tz: z });
       }
       for (const r of [...rocks]) if (!seenR.has(r.k)) removeRock(r);
@@ -7942,6 +8543,10 @@ addEventListener('pagehide', () => autoSave());
       applySets(d.l, d.p);
     } else if (d.t === 'give') {
       giveItem(d.id);
+    } else if (d.t === 'knock') {   // a Snowball hit you
+      if (isFinite(d.vx) && isFinite(d.vz)) knockPlayer(Math.max(-8, Math.min(8, +d.vx)), Math.max(-8, Math.min(8, +d.vz)));
+    } else if (d.t === 'splat') {
+      if ([d.x, d.y, d.z].every(v => isFinite(v))) splatAt(+d.x, +d.y, +d.z);
     }
   }
 
@@ -7949,7 +8554,7 @@ addEventListener('pagehide', () => autoSave());
     if (!pending.length) return;
     const p = [];
     for (let k = 0; k < pending.length; k += 2) {
-      const a = pending[k + 1] === PIECES && pieceMap.get(pending[k]);
+      const a = isPieces(pending[k + 1]) && pieceMap.get(pending[k]);
       if (a) p.push(pending[k], ...a);
     }
     const msg = { t: 'sets', l: pending, p }; pending = [];
@@ -7972,6 +8577,25 @@ addEventListener('pagehide', () => autoSave());
       if (Net.hosting ? friends.size : (Net.client && !Net.applying)) pending.push(i, id);
     },
     hitMob(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'hit', k: m.k }); },
+    // (host) a Snowball ended here: everyone sees the puff
+    splat(x, y, z) {
+      if (!Net.hosting) return;
+      const msg = { t: 'splat', x: r2(x), y: r2(y), z: r2(z) };
+      for (const f of friends.values()) if (f.conn.open) f.conn.send(msg);
+    },
+    // (host) did Snowball r hit a friend? Then they're knocked back (own: it can't hit whoever threw it yet)
+    snowballHitsFriend(r, own) {
+      for (const [id, f] of friends) {
+        const p = others.get(id);
+        if (!p || (own && r.owner === id)) continue;
+        if (Math.abs(r.x - p.x) < 0.45 && Math.abs(r.z - p.z) < 0.45 && r.y > p.y && r.y < p.y + 1.85) {
+          const k = knockFrom(r);
+          if (f.conn.open) f.conn.send({ t: 'knock', vx: r2(k.vx), vz: r2(k.vz) });
+          return true;
+        }
+      }
+      return false;
+    },
     feed(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'feed', k: m.k }); },
     pickup(d) { if (hostConn && hostConn.open) hostConn.send({ t: 'pickup', k: d.k }); },
     toHost(msg) { if (hostConn && hostConn.open) hostConn.send(msg); },

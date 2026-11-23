@@ -31,6 +31,10 @@ public class BlockDef
 	public int Pick;                // ores: how good a pickaxe it needs (Blocks.PickTier)
 	public int Armor = -1, Pack, Belt, BeltTools;   // gear: which piece of armor (0 helmet .. 3 boots), backpack slots, belt offhand slots and tool slots
 	public int[] HandDrop;          // dug without a shovel it gives [item, fewest, most] of that instead (Fireclay -> Fireclay Balls)
+	public int Axis;               // logs: which way it lies (0 upright, 1 along x, 2 along z)
+	public int Layers;             // snow: how many layers deep (1-7; a full block is the Snow Block)
+	public int Inner, Snowed;      // snow-logged: the torch or flower it holds, and how many layers of snow are round it
+	public BlockDef Copy() => (BlockDef)MemberwiseClone();
 }
 
 // Every block and item in the game (the same numbers as the web version, so saved worlds line up).
@@ -90,11 +94,37 @@ public static class Blocks
 	// the desert's building stone (made from Sandstone), and the swamp's ground: Mud (fired into Mud Bricks) and Peat (a long-burning fuel)
 	public const int SandstoneBricks = 162, ChiseledSandstone = 199, SmoothSandstone = 202, Mud = 203, MudBricks = 204, Peat = 205;
 	public const int Dates = 705;   // food, from Palm Leaves
+	// Logs lie the way you put them down: on the top or bottom of something they stand upright; on a side they lie pointing
+	// out from it. Each kind of log has two lying blocks (360-375): 360 + 2k along x, 361 + 2k along z, k its place in Logs.
+	// (They're numbered over 255, so the world's growing puts them in after it's packed: see WorldGen.Late.)
+	public static readonly int[] Logs = { Log, StrippedLog, FirLog, StrippedFirLog, PalmLog, StrippedPalmLog, WillowLog, StrippedWillowLog };
+	public const int TurnedLogs = 360;
+	public static int Turned(int log, int axis) { int k = Array.IndexOf(Logs, log); return k < 0 || axis == 0 ? log : TurnedLogs + 2 * k + axis - 1; }
+	public static int LogOf(int b) => b >= TurnedLogs && b < TurnedLogs + 16 ? Logs[(b - TurnedLogs) / 2] : b;   // (the upright log of a lying one)
+	// Snow: Snow (380-386) lies in layers, 1 to 7 deep (each an eighth of a block); putting Snow on Snow adds a layer, and an
+	// 8th layer makes it a Snow Block (387). Only the 2nd layer up is solid (you sink into the first). It falls off whatever
+	// it was lying on if that goes. Breaking it gives you a Snow for each layer. Snowy lands are covered in one layer.
+	public const int Snow = 380, SnowBlock = 387;
+	public static bool IsSnow(int b) => b >= Snow && b < SnowBlock;
+	// Snow-logged blocks: a block that doesn't fill its space can stand in one layer of snow (never more). Each is its own
+	// block, the same numbers as the web version: torches (any kind, wall and count) then flowers from 400, one each; 388 a
+	// pieces space (slabs, stairs, quarters, pieces: the same 8 spots as 70), 389 the Cutter, 390 a Rock, 391 a Clay Ball,
+	// 392 a Brick. Each works like the block it holds (Inner), with a layer of snow drawn round it (Snowed = 1). Breaking it
+	// takes the block (or the piece) and leaves the Snow. More Snow on it does nothing.
+	public const int SnowLogged1 = 400, SnowyPieces = 388;
+	static readonly int[] SnowLoggedOthers = { Pieces, Cutter, 62, 71, 72 };   // (-> 388-392)
+	public static int[] SnowLoggable = Array.Empty<int>();
+	static readonly Dictionary<int, int> snowLoggedIds = new();
+	public static int SnowIn(int b) => Get(b)?.Snowed ?? 0;                                   // how many layers of snow are round it (0 or 1)
+	public static int Plain(int b) => Get(b) is { Inner: > 0 } d ? d.Inner : b;             // the block without its snow
+	public static bool CanSnowLog(int b) => snowLoggedIds.ContainsKey(Plain(b));
+	public static bool IsPieces(int b) => b == Pieces || b == SnowyPieces;                    // a space holding pieces (in snow or not)
+	// b (or what b holds) in a layer of snow (n >= 1), or without it (n = 0). Anything that can't be snow-logged stays as it is.
+	public static int WithSnow(int b, int n) { int p = Plain(b); return n <= 0 ? p : snowLoggedIds.TryGetValue(p, out var id) ? id : b; }
+	// Snow breaks into Snowballs: 2-4 for each layer (a Snow Block: 4)
+	public const int Snowball = 706;
+	public static int SnowballsFor(int layers, Random r) { int n = 0; for (int k = 0; k < layers; k++) n += 2 + r.Next(3); return n; }
 	public static bool IsLeaves(int b) => b == Leaves || b == FirLeaves || b == PalmLeaves || b == WillowLeaves;
-	// Fir, Palm and Willow Leaves use the Oak Leaves picture, with their own colour on top of the climate colour
-	// (Fir: darker blue-green; Palm: brighter yellow-green; Willow: a softer olive green). null: none (Oak Leaves)
-	public static float[] LeafTint(int b) => b == FirLeaves ? FirLeafTint : b == PalmLeaves ? PalmLeafTint : b == WillowLeaves ? WillowLeafTint : null;
-	static readonly float[] FirLeafTint = { 0.78f, 0.85f, 1.05f }, PalmLeafTint = { 1.06f, 1.1f, 0.72f }, WillowLeafTint = { 0.92f, 1f, 0.78f };
 	public const int Chocolate = 200, Stick = 201, Rock = 212, CrudeAxe = 213, ClayBall = 215, Brick = 216, FireEssence = 217;
 	public const int Bone = 620, BoneAsh = 621, GloomWisp = 622;   // Fear & Foes (items 620+; 600-611 are the dyes)
 	// Till & Tend (farming Grain; see Farm.cs): items 623-626, soil blocks 93-96, Grain growing 42-49 (49 = ripe)
@@ -159,15 +189,15 @@ public static class Blocks
 	public static readonly int[] Flowers = { 194, 195, 196, 197, 198 };
 	public static bool IsFlower(int id) => id >= 194 && id <= 198;
 	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, FirPlanks, FirLog, StrippedFirLog, FirLeaves, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(DeepBlocks).Concat(ExtraFormBlocks).ToArray();
-	public static readonly int[] NeedsAxe = { 4, 7, 61, FirLog, FirPlanks, StrippedFirLog, PalmLog, PalmPlanks, StrippedPalmLog, WillowLog, WillowPlanks, StrippedWillowLog },
-		Diggable = { 1, 2, 6, 11, 63, Fireclay, 93, 94, 95, 96, Mud, Peat };
+	public static readonly int[] NeedsAxe = new[] { 4, 7, 61, FirLog, FirPlanks, StrippedFirLog, PalmLog, PalmPlanks, StrippedPalmLog, WillowLog, WillowPlanks, StrippedWillowLog }.Concat(Enumerable.Range(TurnedLogs, 16)).ToArray(),
+		Diggable = new[] { 1, 2, 6, 11, 63, Fireclay, 93, 94, 95, 96, Mud, Peat }.Concat(Enumerable.Range(Snow, 8)).ToArray();
 	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).Concat(DeepBlocks)
 		.Concat(Ores).Concat(FireclayBlocks).Concat(FoundryIds).Concat(new[] { Sandstone, SandstoneBricks, ChiseledSandstone, SmoothSandstone, MudBricks }).ToArray();
 	// Every block you can pick from the creative inventory
 	public static readonly int[] Items = new[] { new[] { 1, 2, 3 }, DeepShown(3), new[] { 8 }, DeepShown(8), new[] { 7, 60, Cutter, 4, 61, 5, FirPlanks, FirLog, StrippedFirLog, FirLeaves, 6, 9 }, DeepShown(9),
 		new[] { 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }, DeepShown(69) }.SelectMany(a => a).Concat(NewColourBlocks).Concat(Flowers)
 		.Concat(new[] { Furnace, 22, Water, Bedrock }).Concat(Ores).Append(Fireclay).Concat(FireclayBlocks).Append(Foundry)
-		.Concat(new[] { PalmPlanks, PalmLog, StrippedPalmLog, PalmLeaves, WillowPlanks, WillowLog, StrippedWillowLog, WillowLeaves, SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat }).ToArray();
+		.Concat(new[] { PalmPlanks, PalmLog, StrippedPalmLog, PalmLeaves, WillowPlanks, WillowLog, StrippedWillowLog, WillowLeaves, SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat, Snow, SnowBlock }).ToArray();
 	public const int StackMax = 64;
 
 	// shapes made of pieces: bit masks of the 8 spots (spot number = x + y*2 + z*4)
@@ -231,16 +261,16 @@ public static class Blocks
 		Def(61, "Stripped Oak Log", "stripped_log_side", "stripped_log_top", "stripped_log_top");
 		// Fir (the snowy biome's trees)
 		Def(FirLog, "Fir Log", "fir_log_side", "fir_log_top", "fir_log_top");
-		Def(FirLeaves, "Fir Leaves", "leaves", "leaves", "leaves").Transparent = true;   // (the Oak Leaves picture, tinted: see FirLeafTint)
+		Def(FirLeaves, "Fir Leaves", "fir_leaves", "fir_leaves", "fir_leaves").Transparent = true;
 		Def(FirPlanks, "Fir Planks", "fir_planks", "fir_planks", "fir_planks");
 		Def(StrippedFirLog, "Stripped Fir Log", "stripped_fir_log_side", "stripped_fir_log_top", "stripped_fir_log_top");
 		// Palm (the desert's trees) and Willow (the swamp's)
 		Def(PalmLog, "Palm Log", "palm_log_side", "palm_log_top", "palm_log_top");
-		Def(PalmLeaves, "Palm Leaves", "leaves", "leaves", "leaves").Transparent = true;   // (the Oak Leaves picture, tinted: see LeafTint)
+		Def(PalmLeaves, "Palm Leaves", "palm_leaves", "palm_leaves", "palm_leaves").Transparent = true;
 		Def(PalmPlanks, "Palm Planks", "palm_planks", "palm_planks", "palm_planks");
 		Def(StrippedPalmLog, "Stripped Palm Log", "stripped_palm_log_side", "stripped_palm_log_top", "stripped_palm_log_top");
 		Def(WillowLog, "Willow Log", "willow_log_side", "willow_log_top", "willow_log_top");
-		Def(WillowLeaves, "Willow Leaves", "leaves", "leaves", "leaves").Transparent = true;
+		Def(WillowLeaves, "Willow Leaves", "willow_leaves", "willow_leaves", "willow_leaves").Transparent = true;
 		Def(WillowPlanks, "Willow Planks", "willow_planks", "willow_planks", "willow_planks");
 		Def(StrippedWillowLog, "Stripped Willow Log", "stripped_willow_log_side", "stripped_willow_log_top", "stripped_willow_log_top");
 		// the desert's building stone and the swamp's ground
@@ -250,6 +280,13 @@ public static class Blocks
 		Def(Mud, "Mud", "mud", "mud", "mud");
 		Def(MudBricks, "Mud Bricks", "mud_bricks", "mud_bricks", "mud_bricks");
 		Def(Peat, "Peat", "peat", "peat", "peat");
+		// lying logs: their ends (the top picture) face along x or z, and the bark runs that way
+		foreach (int log in Logs) for (int axis = 1; axis <= 2; axis++)
+			B[Turned(log, axis)] = new BlockDef { Name = B[log].Name, T = B[log].T, Axis = axis, Drop = log };
+		// snow: layers 1-7, and the Snow Block
+		for (int n = 1; n < 8; n++)
+			B[Snow + n - 1] = new BlockDef { Name = "Snow", T = P3("snow"), Shape = "snow", Layers = n, Transparent = true, NoCollide = n == 1, Box = new[] { 0f, 0, 0, 1, n / 8f, 1 }, Drop = Snow };
+		Def(SnowBlock, "Snow Block", "snow", "snow", "snow");
 		B[Dates] = new BlockDef { Name = "Dates", T = P3("dates"), Item = true, Food = 3 };
 		var rock = Def(62, "Rock", "rock", "rock", "rock"); rock.Transparent = true; rock.NoCollide = true; rock.Shape = "flat"; rock.Box = new[] { 0.1f, 0, 0.1f, 0.9f, 0.12f, 0.9f };
 		Def(63, "Clay", "clay", "clay", "clay");
@@ -401,6 +438,20 @@ public static class Blocks
 		foreach (int b in Splittable)
 			foreach (var k in ShapeItem.Keys)
 				B[FormItem(k, b)] = new BlockDef { Name = $"{B[b].Name} {shapeName[k]}", T = B[b].T, Item = true, Form = k, Of = b };
+		// snow-logged: a torch or flower with snow lying round it (see SnowLogged; the torches by number, then the flowers, as the web version)
+		var torchesFlowers = Enumerable.Range(1, SnowLogged1 - 1).Where(i => B[i] != null && (B[i].Shape == "torch" || IsFlower(i))).ToArray();
+		SnowLoggable = torchesFlowers.Concat(SnowLoggedOthers).ToArray();
+		for (int k = 0; k < SnowLoggable.Length; k++)
+		{
+			int inner = SnowLoggable[k], id = k < torchesFlowers.Length ? SnowLogged1 + k : SnowyPieces + k - torchesFlowers.Length;
+			if (B[id] != null) throw new Exception($"Block {id} is already {B[id].Name}: it's needed for a snow-logged {B[inner].Name}");
+			var d = B[inner].Copy(); d.Inner = inner; d.Snowed = 1;
+			if (d.Drop == 0 && inner != Pieces && !IsTorch(inner)) d.Drop = inner;   // (breaking it gives the flower or Cutter, not the snow-logged block)
+			if (d.Box != null && d.Box[4] < 1 / 8f) d.Box = new[] { d.Box[0], d.Box[1], d.Box[2], d.Box[3], d.Box[4] + 1 / 8f, d.Box[5] };   // (a rock lies on top of the snow)
+			B[id] = d;
+			snowLoggedIds[inner] = id;
+		}
+		B[Snowball] = new BlockDef { Name = "Snowball", T = P3("snowball"), Item = true };
 	}
 
 	public static bool IsTorch(int id) => Get(id)?.Shape == "torch";
