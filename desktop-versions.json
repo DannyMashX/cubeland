@@ -1,5 +1,18 @@
 [
     {
+        "version": "Beta 0.1.1.2",
+        "folder": "beta-0.1.1.2",
+        "date": "2026-11-22",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-beta-0.1.1.2/CubeLand-Beta-0.1.1.2-windows.zip",
+        "size": 78129291,
+        "exe": "CubeLand-Beta-0.1.1.2-windows/CubeLand.exe",
+        "changes": [
+            "New: choose how big a new world is, from 256 to 2048 blocks across",
+            "New: choose how big the biomes are in a new Biomes world, from half size to 4 times as big",
+            "Changed: the main menu no longer has a world open behind it. Pick a world from Singleplayer to play, and quitting to the main menu closes it (saving it first)"
+                    ]
+    },
+    {
         "version": "Beta 0.1.1.1",
         "folder": "beta-0.1.1.1",
         "date": "2026-11-21",
