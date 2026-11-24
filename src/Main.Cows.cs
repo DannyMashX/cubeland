@@ -228,23 +228,43 @@ public partial class Main
 	}
 
 	// ---- pink hearts (the pink row, FF00FF, of textures/gui/heart_atlas.png): float up and fade ----
-	class Heart { public Sprite3D S; public float Age, Delay; public Vector3 At; }
+	// Each is lit by the light where it is (like mobs) and fades into the haze, so they don't glow at night or in caves.
+	class Heart { public MeshInstance3D S; public ShaderMaterial Mat; public float Age, Delay, LightTimer; public Vector3 At; }
 	readonly List<Heart> hearts = new();
-	static AtlasTexture heartTex;
+	static Texture2D heartAtlas; static Vector4 heartRegion;
+	static Shader spriteShader;
 	const float HeartLife = 1.3f;
+	// the light on a spot: daylight (as much sky as it can see) or torchlight, whichever is brighter, and your held light
+	Vector3 LightOnSpot(Vector3 p)
+	{
+		int bx = (int)MathF.Floor(p.X), by = (int)MathF.Floor(p.Y), bz = (int)MathF.Floor(p.Z);
+		float skyx = world.SkyExposure(bx, by, bz, null), torch = World.LightCurve(world.LightAt(bx, by, bz));
+		var d = sky.DayTint; var tc = new Vector3(1, 0.82f, 0.58f) * Math.Max(torch, HeldLightAt(p));
+		return new Vector3(Math.Max(d.X * skyx, tc.X), Math.Max(d.Y * skyx, tc.Y), Math.Max(d.Z * skyx, tc.Z));
+	}
+	// a flat square that always faces you, lit and hazed like everything else (tex null: a plain square of tint)
+	(MeshInstance3D, ShaderMaterial) Sprite(Texture2D tex, Vector4 region, Vector3 tint, float size, Vector3 at)
+	{
+		spriteShader ??= GD.Load<Shader>("res://src/sprite.gdshader");
+		var mat = new ShaderMaterial { Shader = spriteShader };
+		if (tex != null) { mat.SetShaderParameter("tex", tex); mat.SetShaderParameter("region", region); } else mat.SetShaderParameter("use_tex", false);
+		mat.SetShaderParameter("tint", tint); mat.SetShaderParameter("light", LightOnSpot(at));
+		var mi = new MeshInstance3D { Mesh = new QuadMesh { Size = Vector2.One * size }, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = at };
+		mobRoot.AddChild(mi);
+		return (mi, mat);
+	}
 	void AddHeart(Vector3 at, float delay = 0)
 	{
-		if (heartTex == null)
+		if (heartAtlas == null)
 		{
-			var tex = ResourceLoader.Load<Texture2D>("res://textures/gui/heart_atlas.png");
-			if (tex == null) return;
-			float hp = tex.GetWidth() / 9.9f;
-			heartTex = new AtlasTexture { Atlas = tex, Region = new Rect2(0, MathF.Round(hp * 8), MathF.Round(hp * 0.9f), MathF.Round(hp * 0.9f)) };   // (pink row, full heart)
+			heartAtlas = ResourceLoader.Load<Texture2D>("res://textures/gui/heart_atlas.png");
+			if (heartAtlas == null) return;
+			float hp = heartAtlas.GetWidth() / 9.9f, w = heartAtlas.GetWidth(), h = heartAtlas.GetHeight();
+			heartRegion = new Vector4(0, MathF.Round(hp * 8) / h, MathF.Round(hp * 0.9f) / w, MathF.Round(hp * 0.9f) / h);   // (pink row, full heart)
 		}
-		var s = new Sprite3D { Texture = heartTex, Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-			PixelSize = 0.28f / heartTex.Region.Size.X, Shaded = false, Visible = delay <= 0, Position = at, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
-		mobRoot.AddChild(s);
-		hearts.Add(new Heart { S = s, Delay = delay, At = at });
+		var (s, mat) = Sprite(heartAtlas, heartRegion, Vector3.One, 0.28f, at);
+		s.Visible = delay <= 0;
+		hearts.Add(new Heart { S = s, Mat = mat, Delay = delay, At = at });
 	}
 	void UpdateHearts(float dt)
 	{
@@ -256,7 +276,8 @@ public partial class Main
 			float f = h.Age / HeartLife;
 			if (f >= 1) { h.S.QueueFree(); hearts.Remove(h); continue; }
 			h.S.Position = h.At + new Vector3(MathF.Sin(h.Age * 5) * 0.05f, f * 0.7f, 0);
-			h.S.Modulate = new Color(1, 1, 1, f < 0.7f ? 1 : 1 - (f - 0.7f) / 0.3f);
+			h.Mat.SetShaderParameter("alpha", f < 0.7f ? 1 : 1 - (f - 0.7f) / 0.3f);
+			if ((h.LightTimer -= dt) <= 0) { h.LightTimer = 0.2f; h.Mat.SetShaderParameter("light", LightOnSpot(h.S.Position)); }
 		}
 	}
 }

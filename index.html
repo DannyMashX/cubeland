@@ -30,7 +30,7 @@
   #inv-split { display: flex; gap: 20px; align-items: flex-start; }
   #inv-split #inv-gear { flex: none; width: 492px; height: 460px; overflow-y: auto; overflow-x: hidden; }
   #inv-split #inv-crafting { flex: none; width: 440px; margin-top: 0; }
-  #inv-split .recipes { display: flex; flex-direction: column; gap: 4px; height: 440px; max-height: none; max-width: none; }
+  #inv-split .recipes { display: flex; flex-direction: column; gap: 4px; height: 400px; max-height: none; max-width: none; }
   #inv-split .recipe { flex: none; width: 100%; }
   #inventory .hint { white-space: pre-line; }
   .gear-row .gear-grid { display: flex; }
@@ -39,12 +39,17 @@
   #inv-gear .slot.empty-gear::after { content: attr(data-ph); position: absolute; top: 0; left: 3px; font-size: var(--f1); color: #fff; opacity: .4; pointer-events: none; }
   /* survival: the offhand slot in a box of its own, just left of the hotbar (placed by layoutHearts) */
   #offhand-box { position: fixed; bottom: 12px; display: none; padding: 4px; background: rgba(0,0,0,.45); border-radius: 6px; z-index: 10; }
+  /* survival: your tool slots in a row of their own beside the hotbar, just to show them (placed by layoutHearts) */
+  #tool-row { position: fixed; bottom: 12px; display: none; gap: 4px; padding: 4px; background: rgba(0,0,0,.45); border-radius: 6px; z-index: 10; pointer-events: none; }
+  #tool-row .slot { width: 36px; height: 36px; }
+  #tool-row .slot canvas { margin: 0; }
+  #tool-row .slot .wear { left: 4px; right: 4px; bottom: 2px; }
   #blockname { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); color: #fff; font-size: var(--f1); text-shadow: 0 1px 2px #000; transition: opacity .4s; }
   #info { position: fixed; top: 8px; left: 8px; color: #fff; font-size: var(--f1); line-height: 1.5; text-shadow: 0 1px 2px #000; white-space: pre; }
   /* full-screen menus: the main menu (title screen) and the pause screen (#overlay) */
   .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; text-align: center; z-index: 15; }
   #mainmenu { display: flex; background: rgba(0,0,0,.15); }   /* (only lightly dimmed: the world turns slowly behind it, see panorama) */
-  body.title :is(#hotbar, #crosshair, #info, #hearts, #offhand-box, #blockname) { display: none !important; }   /* (no game screen behind the main menu) */
+  body.title :is(#hotbar, #crosshair, #info, #hearts, #armor-bar, #offhand-box, #tool-row, #blockname) { display: none !important; }   /* (no game screen behind the main menu) */
   .screen h1 { font-size: var(--f6); margin: 0 0 20px; letter-spacing: 2px; }
   .screen h2 { font-size: var(--f3); margin: 0 0 6px; letter-spacing: 1px; }
   .screen p { margin: 4px 0; }
@@ -59,7 +64,8 @@
   #inventory { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 5; }
   #inventory .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; }
   #inventory h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
-  #inv-grid { display: grid; grid-template-columns: repeat(9, 44px); gap: 4px; }
+  #inv-grid { display: grid; grid-template-columns: repeat(11, 44px); grid-auto-rows: 44px; gap: 4px; align-content: start; margin-top: 6px; padding-right: 4px;
+    height: min(332px, max(92px, calc(var(--vh) - 400px))); overflow-y: auto; }
   #inv-grid .slot, #hotbar.open .slot { cursor: pointer; }
   #inv-grid .slot:hover, #hotbar.open .slot:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   #inv-name { height: 18px; margin-top: 10px; font-size: var(--f1); }
@@ -81,7 +87,8 @@
   #bench .panel { background: rgba(30,30,34,.92); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px; color: #fff; max-width: calc(var(--vw) - 32px); box-sizing: border-box; }
   #bench h2 { margin: 0 0 10px; font-size: var(--f2); font-weight: 600; letter-spacing: 1px; }
   #bench .bench-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-  #bench-grid { display: grid; grid-template-columns: repeat(7, 44px); gap: 4px; }
+  #bench-grid { display: grid; grid-template-columns: repeat(7, 44px); grid-auto-rows: 44px; gap: 4px; align-content: start; padding-right: 4px;
+    max-height: min(380px, max(140px, calc(var(--vh) - 330px))); overflow-y: auto; }
   #bench-grid .slot, #bench-out { cursor: pointer; }
   #bench-grid .slot:hover, #bench-out:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.6); }
   #bench .bench-craft { display: flex; align-items: center; gap: 10px; }
@@ -117,7 +124,9 @@
   .recipe canvas { width: 32px; height: 32px; image-rendering: pixelated; flex: none; }
   .recipe .needs { opacity: .75; }
   .recipe:disabled { opacity: .45; cursor: default; }
-  .skinned .recipe:not(:disabled):hover { border-image-source: var(--btn-hover); }
+  .recipe.off { opacity: .6; cursor: default; }
+  .skinned .recipe:not(:disabled):not(.off):hover { border-image-source: var(--btn-hover); }
+  .skinned .recipe.off:hover { border-image-source: var(--btn); }
   .screen .world-line { font-size: var(--f1); margin-bottom: 10px; opacity: .8; }
   .screen .saved-note { font-size: var(--f1); opacity: .6; margin-top: 6px; }
   .screen .newer-note { font-size: var(--f1); color: #ffd27a; max-width: 520px; margin: 6px auto 0; }
@@ -187,23 +196,23 @@
   .skinned :is(#overlay, #mainmenu, #settings, #worlds, #multi, #whatsnew, .new-world) :is(button:not(:disabled), input:not(:disabled):not([type=range]), select):is(:hover, :focus-visible) {
     background: none; border-image-source: var(--btn-hover); outline: none;
   }
-  .skinned :is(#inventory, #bench, #furnace, #whatsnew, #worlds, #multi, #settings) .panel {
+  .skinned :is(#inventory, #bench, #furnace, #whatsnew, #worlds, #multi, #settings, #howto) .panel {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
   }
   .skinned #worlds button.danger { color: #ffb4ac; }
   /* the hotbar is a menu box; slots are drawn like buttons, and light up when selected or under the mouse */
-  .skinned :is(#hotbar, #offhand-box) {
+  .skinned :is(#hotbar, #offhand-box, #tool-row) {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--panel) 2 fill stretch; image-rendering: pixelated;
   }
-  .skinned :is(#hotbar, #offhand-box, #inv-grid, #inv-gear, #inv-variants, #bench, #furnace) .slot {
+  .skinned :is(#hotbar, #offhand-box, #tool-row, #inv-grid, #inv-gear, #inv-variants, #bench, #furnace) .slot {
     background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent;
     border-image: var(--btn) 2 fill stretch; image-rendering: pixelated;
     display: flex; align-items: center; justify-content: center;
   }
-  .skinned :is(#hotbar, #offhand-box, #inv-grid, #inv-gear, #inv-variants, #bench, #furnace) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
-  .skinned :is(#hotbar, #offhand-box, #inv-grid, #inv-gear, #inv-variants, #bench, #furnace) .slot canvas { margin: 0; }
+  .skinned :is(#hotbar, #offhand-box, #tool-row, #inv-grid, #inv-gear, #inv-variants, #bench, #furnace) .slot:is(.sel, :hover) { background: none; border-image-source: var(--btn-hover); }
+  .skinned :is(#hotbar, #offhand-box, #tool-row, #inv-grid, #inv-gear, #inv-variants, #bench, #furnace) .slot canvas { margin: 0; }
   /* drop-down menus (like Creative / Survival): the browser's own look is turned off so the button picture shows,
      with a small arrow drawn on the right (on the .dropdown box around it, since the picture covers the menu's own
      background). The list that opens is the browser's, so it just gets dark colours. */
@@ -268,11 +277,82 @@
   .skinned #sk-view { background: none; border: calc(2 * var(--px)) solid transparent; border-image: var(--btn) 2 fill stretch; image-rendering: pixelated; box-sizing: content-box; }
   .skinned #sk-sheet { border: calc(2 * var(--px)) solid transparent; border-image: var(--btn) 2 fill stretch; box-sizing: content-box; }
   #multi .bottom { margin-top: 14px; text-align: right; }
+  /* ---- Inventory & GUI ---- */
+  /* search boxes: the creative inventory, the recipe lists and the Cutter's blocks (typing in one never moves you) */
+  .search { font: inherit; font-size: var(--f1); color: #fff; background: rgba(0,0,0,.35); border: 2px solid rgba(255,255,255,.3); border-radius: 4px;
+    padding: 4px 8px; box-sizing: border-box; outline: none; min-width: 0; user-select: text; }
+  .search::placeholder { color: rgba(255,255,255,.45); }
+  #inv-search { display: block; width: 100%; margin-bottom: 6px; }
+  #inv-creative-bar { display: flex; justify-content: flex-end; margin-top: 6px; }
+  /* small buttons: "Can make now" (lit while it's on), Clear hotbar, Sort */
+  .tog, #inv-clear, #inv-sort { font: inherit; font-size: var(--f1); color: #fff; padding: 4px 10px; background: rgba(255,255,255,.1);
+    border: 2px solid rgba(255,255,255,.3); border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .tog.on { background: rgba(255,255,255,.3); border-color: #fff; }
+  .skinned .tog.on { border-image-source: var(--btn-hover); }
+  #inv-sort { padding: 0 8px; margin-left: 8px; }
+  .recipe-bar { display: flex; gap: 6px; margin-bottom: 6px; }
+  .recipe-bar .search { flex: 1; }
+  /* a recipe's ingredients: each one's picture and have/need, red when you're short */
+  .recipe .ings { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-top: 2px; }
+  .recipe .ing { display: inline-flex; align-items: center; gap: 3px; cursor: help; }
+  .recipe .ing canvas { width: 16px; height: 16px; }
+  .recipe .short, .recipe .missing { color: #ff8a80; }
+  .recipe .tool-note:not(.short) { opacity: .75; }
+  .recipe-none { font-size: var(--f1); opacity: .6; padding: 6px 2px; }
+  #bench-cut-bar { margin-bottom: 8px; }
+  #bench-need { font-size: var(--f1); margin-top: 6px; }
+  #bench-need:empty { display: none; }
+  #bench-need.short { color: #ff8a80; }
+  /* slots a held stack is being shared out over */
+  .slot.drag-on { background: rgba(127,191,255,.3); border-color: #fff; }
+  .skinned :is(#hotbar, #inv-gear, #bench, #furnace) .slot.drag-on { border-image-source: var(--btn-hover); }
+  /* survival: the stack you're holding, at the mouse */
+  #held { position: fixed; display: none; pointer-events: none; z-index: 39; border-color: transparent; }
+  /* tooltips: what an item is (name, durability, healing, fuel) */
+  #tip { position: fixed; display: none; pointer-events: none; z-index: 40; max-width: 320px; padding: 4px 8px; color: #fff; font-size: var(--f1); line-height: 1.4;
+    background: rgba(20,20,26,.95); border: 2px solid rgba(255,255,255,.35); border-radius: 4px; }
+  #tip .sub { opacity: .75; }
+  .skinned #tip { background: none; border-radius: 0; border: calc(2 * var(--px)) solid transparent; border-image: var(--panel) 2 fill stretch; image-rendering: pixelated; }
+  /* how to make an item: every recipe for it, and where it's made */
+  #howto { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 30; color: #fff; }
+  #howto .panel { background: rgba(30,30,34,.95); border: 2px solid rgba(255,255,255,.25); border-radius: 8px; padding: 14px 16px 12px;
+    width: min(460px, calc(var(--vw) - 32px)); max-height: calc(var(--vh) - 32px); overflow: auto; box-sizing: border-box; }
+  #howto h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: var(--f2); font-weight: 600; }
+  #howto h2 canvas { width: 32px; height: 32px; image-rendering: pixelated; flex: none; }
+  .howto-row { padding: 6px 0; border-top: 1px solid rgba(255,255,255,.15); font-size: var(--f1); }
+  .howto-row .where { opacity: .8; margin-bottom: 4px; }
+  .howto-row .ings { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .howto-row .ing { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .howto-row .ing canvas { width: 32px; height: 32px; image-rendering: pixelated; }
+  .howto-row .makes { opacity: .8; }
+  .howto-none { font-size: var(--f1); opacity: .8; padding: 6px 0; border-top: 1px solid rgba(255,255,255,.15); }
+  #howto .bottom { margin-top: 12px; text-align: right; }
+  #howto button { font: inherit; font-size: var(--f1); color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; padding: 4px 16px; cursor: pointer; }
+  #howto button:hover { background: rgba(255,255,255,.25); }
+  /* survival: your armor, above the hotbar's right end (placed and sized by layoutHearts) */
+  #armor-bar { position: fixed; display: none; image-rendering: pixelated; pointer-events: none; z-index: 10; }
+  /* the pause screen: Back to game, a row of the other screens, Save world, then (apart, greyer) the ways out */
+  #overlay .menu > button, #overlay .pause-row, #overlay .pause-quit { width: min(360px, calc(var(--vw) - 32px)); }
+  #overlay #pause-resume { padding: 12px; }
+  #overlay .pause-row { display: flex; gap: 8px; }
+  #overlay .pause-row > button, #overlay .pause-quit > button { flex: 1 1 0; min-width: 0; font: inherit; font-size: var(--f1); padding: 8px 4px; color: #fff;
+    background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5); border-radius: 5px; cursor: pointer; margin: 0; }
+  #overlay .pause-row > button:hover, #overlay .pause-quit > button:hover { background: rgba(255,255,255,.25); }
+  #overlay .pause-quit { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; opacity: .75; }
+  #overlay .pause-quit > button { flex: none; padding: 6px 12px; }
+  /* settings: four tabs */
+  #settings .set-tabs { margin: 0 0 8px; }
+  #settings .set-tabs button { margin-left: 0; }
+  #settings .set-tabs button.on { background: rgba(255,255,255,.3); border-color: #fff; }
+  .skinned #settings .set-tabs button.on { border-image-source: var(--btn-hover); }
+  #settings .set-pages { min-height: 236px; }
+  #settings .set-page > h3:first-child { margin-top: 4px; }
 </style>
 </head>
 <body>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
+<div id="tool-row"></div>
 <div id="offhand-box"><div id="offhand" class="slot" title="Offhand: R picks the next one, F swaps it with your hand, right-click uses it"></div></div>
 <canvas id="hearts" width="49" height="9"></canvas>
 <!-- survival: shows when your hearts run out -->
@@ -285,12 +365,24 @@
 </div>
 <div id="blockname"></div>
 <div id="info"></div>
+<canvas id="armor-bar" width="198" height="18"></canvas>
+<div id="held" class="slot"><canvas></canvas><span class="count"></span><div class="wear"><i></i></div></div>
+<div id="tip"></div>
+<!-- how to make an item (R while pointing at it, or click an ingredient's picture) -->
+<div id="howto">
+  <div class="panel">
+    <h2><canvas id="howto-icon"></canvas><span id="howto-title"></span></h2>
+    <div id="howto-list"></div>
+    <div class="bottom"><button id="howto-back">Back</button></div>
+  </div>
+</div>
 <div id="inventory">
   <div class="panel">
     <h2>Inventory</h2>
+    <input id="inv-search" class="search" placeholder="Search all blocks and items" spellcheck="false" autocomplete="off">
     <div id="inv-tabs" class="bench-modes"></div>
     <div id="inv-grid"></div>
-    <div id="inv-variants" style="display:none"></div>
+    <div id="inv-creative-bar"><button id="inv-clear">Clear hotbar</button></div>
     <div id="inv-split">
     <div id="inv-gear" style="display:none">
       <div class="gear-row">
@@ -299,18 +391,21 @@
       </div>
       <h3>Tools (the right one is picked for you)</h3><div class="gear-grid" id="gear-tools"></div>
       <h3>Offhand (R picks one &middot; F swaps it with your hand &middot; right-click uses it)</h3><div class="gear-grid" id="gear-off"></div>
-      <h3>Pockets</h3><div class="gear-grid" id="gear-pockets"></div>
+      <h3>Pockets<button id="inv-sort">Sort</button></h3><div class="gear-grid" id="gear-pockets"></div>
       <div id="gear-pack-wrap"><h3 id="gear-pack-title">Backpack</h3><div class="gear-grid" id="gear-pack"></div></div>
     </div>
-    <div class="crafting" id="inv-crafting" style="display:none"><h3>Crafting</h3><div class="recipes" id="inv-recipes"></div></div>
+    <div class="crafting" id="inv-crafting" style="display:none"><h3>Crafting</h3>
+      <div class="recipe-bar"><input class="search" id="inv-rsearch" placeholder="Search recipes" spellcheck="false" autocomplete="off"><button class="tog" id="inv-can">Can make now</button></div>
+      <div class="recipes" id="inv-recipes"></div></div>
     </div>
     <div id="inv-name"></div>
-    <div class="hint" id="inv-hint">Click a block to put it in the selected slot &middot; drag it onto any slot &middot; right-click a hotbar slot to empty it &middot; E to close</div>
+    <div class="hint" id="inv-hint">Click a block to put it in the selected slot &middot; drag it onto any slot &middot; drag a hotbar slot back onto the list (or right-click it) to empty it &middot; R: how to make &middot; E to close</div>
   </div>
 </div>
 <div id="bench">
   <div class="panel">
     <h2>Crafting Bench</h2>
+    <div class="recipe-bar" id="bench-cut-bar"><input class="search" id="bench-search" placeholder="Search blocks" spellcheck="false" autocomplete="off"><button class="tog" id="bench-can">Can make now</button></div>
     <div class="bench-row" id="bench-row">
       <div id="bench-grid"></div>
       <div class="bench-craft">
@@ -319,10 +414,13 @@
         <div class="slot" id="bench-out"><span class="count" id="bench-count"></span></div>
       </div>
     </div>
+    <div id="bench-need"></div>
     <div class="bench-modes" id="bench-modes"></div>
     <div id="bench-name"></div>
-    <div class="crafting" id="bench-crafting" style="display:none"><h3>Crafting</h3><div class="recipes" id="bench-recipes"></div></div>
-    <div class="hint" id="bench-craft-hint">Click a recipe to craft it &middot; tools, armor and gear need a Crafting Bench &middot; E to close</div>
+    <div class="crafting" id="bench-crafting" style="display:none"><h3>Crafting</h3>
+      <div class="recipe-bar"><input class="search" id="bench-rsearch" placeholder="Search recipes" spellcheck="false" autocomplete="off"><button class="tog" id="bench-can-r">Can make now</button></div>
+      <div class="recipes" id="bench-recipes"></div></div>
+    <div class="hint" id="bench-craft-hint">Click a recipe to craft it &middot; click an ingredient (or press R over anything) to see how to make it &middot; E to close</div>
     <div class="hint" id="bench-hint">Click a block to put it on the Cutter &middot; pick what to cut it into &middot; click the result to take it &middot; pieces put back together in the shape of a slab, stairs or a whole block become one &middot; each block splits into 8 pieces (in creative they never run out; in survival it uses up one of that block from your hotbar) &middot; E to close</div>
   </div>
 </div>
@@ -331,9 +429,9 @@
     <h2 id="furnace-title">Kiln</h2>
     <div class="bench-row">
       <div class="bench-craft">
-        <div class="slot" id="furnace-fuel" title="Fuel"><span class="count" id="furnace-fuel-count"></span></div>
+        <div class="slot" id="furnace-fuel"><span class="count" id="furnace-fuel-count"></span></div>
         <div id="furnace-status"></div>
-        <div id="furnace-out" title="Done (click to take)"></div>
+        <div id="furnace-out"></div>
       </div>
     </div>
     <div id="furnace-name"></div>
@@ -359,39 +457,54 @@
     <h2 id="pause-title">Paused</h2>
     <div class="world-line">World: <b id="world-name"></b></div>
     <button id="pause-resume">Back to game</button>
+    <div class="pause-row"><button id="pause-settings">Settings</button><button id="pause-skin">Skin</button><button id="multi-btn">Multiplayer</button></div>
     <button id="pause-save">Save world</button>
-    <button id="pause-settings">Settings</button>
-    <button id="pause-skin">Skin</button>
-    <button id="multi-btn">Multiplayer</button>
-    <button id="pause-quit">Save &amp; quit to main menu</button>
-    <button id="pause-discard">Quit without saving</button>
     <p class="saved-note" id="saved-note">Your world saves automatically.</p>
+    <div class="pause-quit">
+      <button id="pause-quit">Save &amp; quit to main menu</button>
+      <button id="pause-discard">Quit without saving</button>
+    </div>
     <p class="newer-note" id="newer-note"></p>
   </div>
 </div>
 <div id="settings">
   <div class="panel">
     <h2>Settings</h2>
-    <div class="set-row"><span>Mouse sensitivity</span><input type="range" id="set-sens" min="20" max="300" step="10"><b id="set-sens-v"></b></div>
-    <div class="set-row"><span>Field of view</span><input type="range" id="set-fov" min="50" max="110" step="5"><b id="set-fov-v"></b></div>
-    <div class="set-row"><span>Render distance</span><input type="range" id="set-render" min="4" max="32" step="1"><b id="set-render-v"></b></div>
-    <div class="set-row"><span>GUI scale</span><input type="range" id="set-gui" min="0" max="4" step="1"><b id="set-gui-v"></b></div>
-    <div class="set-row"><span>Sound (M)</span><button id="set-sound"></button></div>
-    <div class="set-row"><span>FPS and position</span><button id="set-info"></button></div>
-    <div class="set-row"><span>Auto save</span><button id="set-autosave"></button></div>
-    <h3>Volume</h3>
-    <div class="set-row"><span>Master</span><input type="range" class="set-vol" data-vol="master" min="0" max="100" step="5"><b></b></div>
-    <div class="set-row"><span>Blocks</span><input type="range" class="set-vol" data-vol="block" min="0" max="100" step="5"><b></b></div>
-    <div class="set-row"><span>Player</span><input type="range" class="set-vol" data-vol="player" min="0" max="100" step="5"><b></b></div>
-    <div class="set-row"><span>Mobs</span><input type="range" class="set-vol" data-vol="mob" min="0" max="100" step="5"><b></b></div>
-    <div class="set-row"><span>Music</span><input type="range" class="set-vol" data-vol="music" min="0" max="100" step="5"><b></b></div>
-    <h3>Controls</h3>
-    <ul>
-      <li>WASD move &middot; Mouse look &middot; Space jump &middot; Shift sprint</li>
-      <li>Left click break &middot; Right click place &middot; 1-9, 0 or scroll wheel pick a block &middot; E inventory</li>
-      <li>Survival: right-click while holding chocolate to eat it and get health back</li>
-      <li>F or double-tap Space to fly in creative (Space up, Shift down) &middot; T skips time &middot; Esc pauses</li>
-    </ul>
+    <div class="bench-modes set-tabs" id="set-tabs"><button data-tab="video">Video</button><button data-tab="sound">Sound</button><button data-tab="controls">Controls</button><button data-tab="game">Game</button></div>
+    <div class="set-pages">
+      <div class="set-page" data-page="video">
+        <div class="set-row"><span>Field of view</span><input type="range" id="set-fov" min="50" max="110" step="5"><b id="set-fov-v"></b></div>
+        <div class="set-row"><span>Render distance</span><input type="range" id="set-render" min="4" max="32" step="1"><b id="set-render-v"></b></div>
+        <div class="set-row"><span>GUI scale</span><input type="range" id="set-gui" min="0" max="4" step="1"><b id="set-gui-v"></b></div>
+        <div class="set-row"><span>FPS and position</span><button id="set-info"></button></div>
+      </div>
+      <div class="set-page" data-page="sound">
+        <div class="set-row"><span>Sound (M)</span><button id="set-sound"></button></div>
+        <h3>Volume</h3>
+        <div class="set-row"><span>Master</span><input type="range" class="set-vol" data-vol="master" min="0" max="100" step="5"><b></b></div>
+        <div class="set-row"><span>Blocks</span><input type="range" class="set-vol" data-vol="block" min="0" max="100" step="5"><b></b></div>
+        <div class="set-row"><span>Player</span><input type="range" class="set-vol" data-vol="player" min="0" max="100" step="5"><b></b></div>
+        <div class="set-row"><span>Mobs</span><input type="range" class="set-vol" data-vol="mob" min="0" max="100" step="5"><b></b></div>
+        <div class="set-row"><span>Music</span><input type="range" class="set-vol" data-vol="music" min="0" max="100" step="5"><b></b></div>
+      </div>
+      <div class="set-page" data-page="controls">
+        <div class="set-row"><span>Mouse sensitivity</span><input type="range" id="set-sens" min="20" max="300" step="10"><b id="set-sens-v"></b></div>
+        <h3>Keys</h3>
+        <ul>
+          <li>WASD move &middot; Mouse look &middot; Space jump &middot; Shift sprint &middot; Esc pauses</li>
+          <li>Left click break &middot; Right click place or use &middot; Middle click pick block</li>
+          <li>1-9, 0 or scroll wheel pick a hotbar slot &middot; E inventory &middot; T skips time &middot; M sound on/off</li>
+          <li>Creative: F or double-tap Space to fly (Space up, Shift down)</li>
+          <li>Survival: Q drops one of what you hold &middot; Ctrl+Q or Shift+Q drops the stack &middot; right-click with food to eat it</li>
+          <li>Survival: R picks the next offhand slot &middot; F swaps it with your hand</li>
+          <li>Inventory (survival): click picks up or puts down a stack &middot; right-click picks up half, or puts down one &middot; drag a held stack across slots to share it out (right-drag: one in each) &middot; double-click gathers &middot; Shift+click moves a stack &middot; Q or Ctrl+Q drops from the slot under the mouse &middot; click outside to drop what you hold</li>
+          <li>Inventory: R shows how to make what you point at &middot; type in a search box to find things</li>
+        </ul>
+      </div>
+      <div class="set-page" data-page="game">
+        <div class="set-row"><span>Auto save</span><button id="set-autosave"></button></div>
+      </div>
+    </div>
     <div class="bottom"><button id="settings-close">Back</button></div>
   </div>
 </div>
@@ -529,8 +642,15 @@ const BIOMES_MIN = 0.5, BIOMES_MAX = 4;
 const validBiomes = b => typeof b === "number" && b >= BIOMES_MIN && b <= BIOMES_MAX && Math.abs(b * 4 - Math.round(b * 4)) < 1e-9 ? Math.round(b * 4) / 4 : 1;
 // The land's version: which features a world grows with. 0 (or none saved) = worlds made before Beta 0.1.1.3 (they keep growing
 // exactly as they did); 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. (As the desktop version.)
-const LAND_VERSION = 1;
-const validLand = l => Math.min(LAND_VERSION, Math.max(0, l | 0));
+// 2: ores as common at every depth, in every layer of stone (see placeOres). Held back for the Survival & light update: while
+// ORE_SPREAD_READY is false, new worlds are still made as land 1 (exactly as the released game makes them). A saved world
+// always grows with the land it was made with, up to the newest one this code knows (so a land 2 world made while testing,
+// or by a later version, is never grown differently). It must match OreSpreadReady in the desktop version.
+// (Test: ?orespread in the address makes new worlds land 2 anyway.)
+const LAND_KNOWN = 2;
+const ORE_SPREAD_READY = false;
+const LAND_VERSION = ORE_SPREAD_READY || /[?&]orespread\b/.test(location.search) ? 2 : 1;   // what new worlds are made as
+const validLand = l => Math.min(LAND_KNOWN, Math.max(0, l | 0));
 const Worlds = (() => {
   const LIST_KEY = 'cubeland-worlds', LAST_KEY = 'cubeland-last-world';
   let list = [];
@@ -754,7 +874,7 @@ const BLOCKS = {
   // (16-21 were ores, now removed from the game; those numbers are left unused)
   // (22-41 are torches and 50-57 water, see below)
   // Biomes: Sandstone (under desert sand), Snowy Grass (snowy lands), Ice (their frozen seas and lakes), Swamp Grass (swamps)
-  97: { name: 'Sandstone',   t: P3('sandstone') },
+  97: { name: 'Sandstone',   t: P3('sandstone'), drop: 97 },   // (breaking it gives Sandstone)
   98: { name: 'Snowy Grass', t: P('snowy_grass_side', 'snow', 'dirt') },
   99: { name: 'Ice',         t: P3('ice'), transparent: true },
   58: { name: 'Swamp Grass', t: P('swamp_grass_side', 'swamp_grass', 'dirt') },
@@ -1030,6 +1150,18 @@ METALS.forEach((m, k) => {
   BLOCKS[CHUNK[m]] = { name: `${M} Chunk`, t: P3(m + '_chunk'), item: true };
   BLOCKS[METAL_BRICK[m]] = { name: `${M} Brick`, t: P3(m + '_brick'), item: true };
 });
+// Deep ores (470-497): each ore in each deeper layer of stone (2-8), in that layer's colours; the same pickaxe needed,
+// and breaking one gives a Chunk for each layer down (see collectBlock). id = 470 + ore * 7 + layer - 2 (ORES order).
+const DEEP_ORE = 470, DEEP_ORES = [];
+const oreIn = (ore, n) => n <= 1 ? ore : DEEP_ORE + ORES.indexOf(ore) * 7 + n - 2;   // ore in layer n
+METALS.forEach((m, k) => {
+  for (let n = 2; n <= STRATA_LAYERS; n++) {
+    const id = DEEP_ORE + k * 7 + n - 2;
+    BLOCKS[id] = { name: `${colourName(m)} Ore`, t: P3(`${m}_ore_layer_${n}`), drop: CHUNK[m], pick: BLOCKS[ORES[k]].pick, layer: n };
+    DEEP_ORES.push(id);
+  }
+});
+const deepOresShown = () => TALL_WORLDS ? DEEP_ORES : [];
 BLOCKS[METAL_BRICK.bronite] = { name: 'Bronite Brick', t: P3('bronite_brick'), item: true };
 BLOCKS[METAL_BRICK.rosium] = { name: 'Rosium Brick', t: P3('rosium_brick'), item: true };
 BLOCKS[STEEL_SCRAP] = { name: 'Steel Scrap', t: P3('steel_scrap'), item: true };
@@ -1219,7 +1351,7 @@ function putPieces(x, y, z, i, a, snow) {
 }
 // Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
 const ITEMS = [1, 2, 3, ...deepShown(3), 8, ...deepShown(8), 7, 60, CUTTER, 4, 61, 5, FIR_PLANKS, FIR_LOG, STRIPPED_FIR_LOG, FIR_LEAVES, 6, 9, ...deepShown(9), 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...deepShown(69), ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER, BEDROCK,
-  ...ORES, FIRECLAY, ...FIRECLAY_BLOCKS, FOUNDRY,
+  ...ORES, ...deepOresShown(), FIRECLAY, ...FIRECLAY_BLOCKS, FOUNDRY,
   PALM_PLANKS, PALM_LOG, STRIPPED_PALM_LOG, PALM_LEAVES, WILLOW_PLANKS, WILLOW_LOG, STRIPPED_WILLOW_LOG, WILLOW_LEAVES, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT, SNOW, SNOW_BLOCK];
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 // Survival also has more slots, kept in the same arrays (by number):
@@ -1232,7 +1364,7 @@ const HOTBAR = (() => {
   try {
     const s = JSON.parse(localStorage.getItem('cubeland-hotbar'));
     // (anything no longer in the game, like the old wooden tools, becomes an empty slot)
-    if (Array.isArray(s) && s.length === 10) return s.map(id => ITEMS.includes(id) || isItem(id) ? id : 0);
+    if (Array.isArray(s) && s.length === 10) return s.map(id => BLOCKS[id] ? id : 0);
   } catch (e) {}
   return HOTBAR_DEFAULT.slice();
 })();
@@ -1963,8 +2095,13 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++)
 const ORE_VEINS = [
   [COPPER_ORE, 110, 8, 3, 999], [TIN_ORE, 90, 6, 3, 999], [IRON_ORE, 70, 6, 10, 999], [GOLD_ORE, 18, 4, 28, 999], [FIRECLAY, 20, 20, 4, 20],
 ];
+// New worlds (LAND 2): the four ores are as common at every depth (from 3 below the surface all the way down, with more
+// veins in a taller world) and turn any layer's Stone into that layer's ore. Older worlds keep the old veins exactly.
+const deepOresGrown = [];   // [index, deep ore] (put in once the world is packed, like the other blocks past 255: see `late`)
 function placeOres() {
   ORE_VEINS.forEach(([ore, per, size, top, deep], o) => {
+    const newOre = LAND >= 2 && ore !== FIRECLAY;
+    if (newOre) { top = 3; deep = 999; per *= WY / 192; }
     const s = 7001 + o * 10, n = Math.floor(WX * WZ * per / 10000);
     for (let k = 0; k < n; k++) {
       let x = Math.floor(hash(k, 1, s) * WX), z = Math.floor(hash(k, 2, s) * WZ);
@@ -1974,6 +2111,7 @@ function placeOres() {
       for (let j = 0; j < size; j++) {
         const i = idx(x, y, z), b = raw[i];
         if (b === 3 || (ore === FIRECLAY && b === 2)) raw[i] = ore;
+        else if (newOre && b >= STRATA && b < STRATA + STRATA_LAYERS - 1) { raw[i] = ore; deepOresGrown.push([i, oreIn(ore, b - STRATA + 2), ore]); }
         const [dx, dy, dz] = ORE_STEPS[Math.floor(hash3(k, j, o, s + 5) * 6)];
         x += dx; y += dy; z += dz;
         if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 2 || y >= WY) break;
@@ -2153,6 +2291,7 @@ const structuresBuilt = [];   // (what was built where, for testing: window.STRU
 // Blocks numbered 256 and up (lying logs, snow): the world grows one byte per block, so `stand` goes in for now, and the
 // real block takes its place once the world is packed, if nothing else has been put there since. Entries: [index, id, stand].
 const late = [];
+for (const d of deepOresGrown) late.push(d);   // (deep ores: see placeOres)
 {
   const plant = b => b === 0 || isLeaves(b) || b === 4 || b === FIR_LOG || b === PALM_LOG || b === WILLOW_LOG || isFlower(b) || b === ROCK_BLOCK;
   // the ground under a spot (under any trees, flowers or rocks; the top of the water at sea)
@@ -3271,6 +3410,7 @@ function setBlock(x, y, z, id) {
   const i = idx(x, y, z), old = world.get(i);
   world.set(i, id);
   edits.set(i, id);
+  if (cracks && cracks.has(i) && old !== id) { cracks.delete(i); showCrack(i, 0); }   // (a cracked block that changed: it's whole again)
   if (!isPieces(id)) pieceMap.delete(i);
   if (isTorch(old)) torches.delete(i);
   if (isTorch(id)) torches.add(i);
@@ -3595,7 +3735,7 @@ const Sound = (() => {
   for (const b of GRAIN_STAGES) MATERIAL[b] = 'grass';
   for (const b of [TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED]) MATERIAL[b] = 'stone';
   for (let b = STRATA; b <= DEEP_CHISELED + STRATA_LAYERS - 2; b++) MATERIAL[b] = 'rock';   // (deep stone and bedrock sound like stone)
-  for (const b of ORES) MATERIAL[b] = 'rock';
+  for (const b of [...ORES, ...DEEP_ORES]) MATERIAL[b] = 'rock';
   MATERIAL[FIRECLAY] = 'dirt';
   for (let b = FIRECLAY_TERRACOTTA; b < FOUNDRY + 8; b++) MATERIAL[b] = 'brick';   // the Fireclay blocks and the Foundry's Furnace
   for (let b = SNOW; b <= SNOW_BLOCK; b++) MATERIAL[b] = 'snow';   // (the layers and the Snow Block)
@@ -4203,6 +4343,8 @@ const Sound = (() => {
       const now = ctx.currentTime;
       for (const s of current.sources) { try { s.detune.setValueAtTime(-60, now); s.detune.setValueAtTime(0, now + seconds); } catch (e) {} }
     },
+    // leaving the world: every sound stops at once (the page is about to reload into the main menu)
+    silence() { if (ctx && ctx.state === 'running') ctx.suspend(); },
     musicPlaying() { return !!(ctx && current && current.sources && !hushed && musicLevel() > 0 && ctx.state === 'running'); },
     growl(vol, pan, voice = 'growl') { if (vol > 0.01) play(voice, 'say', vol, 1, pan, 'mob'); },   // quieter the further away, panned left/right
     splash(speed) { play('water', 'splash', Math.min(1, 0.3 + speed / 14), speed > 12 ? 0.85 : 1, 0, 'player'); },   // harder falls = bigger, deeper splash
@@ -4331,12 +4473,18 @@ function lockPointer() {
   }
 }
 document.getElementById('pause-resume').addEventListener('click', play);
-// quitting to the main menu closes the world: save (or ask, with auto save off), then the page reloads with no world
+// quitting to the main menu closes the world: save (or ask, with auto save off), then the page reloads with no world.
+// From the moment you quit, the world stands still and goes quiet (no mobs, ticking or sounds), even while it saves and
+// while the page reloads (which can take a moment on a slow connection).
+let leavingWorld = false;
+function leaveWorld() { leavingWorld = true; Sound.silence(); }
 function toMainMenu() {
+  leaveWorld();
   history.replaceState(null, '', location.pathname + location.search);
   location.reload();
 }
 document.getElementById('pause-quit').addEventListener('click', async () => {
+  leaveWorld();   // (the world stands still and goes quiet straight away, while it saves)
   if (!Net.client) await saveBeforeLeaving();
   discarding = true;   // (saved, or chosen not to: nothing more saves on the way out)
   toMainMenu();
@@ -4394,7 +4542,7 @@ function applySettings() {
 document.getElementById('set-sens').addEventListener('input', e => { settings.sens = +e.target.value; applySettings(); });
 document.getElementById('set-fov').addEventListener('input', e => { settings.fov = +e.target.value; applySettings(); });
 document.getElementById('set-render').addEventListener('input', e => { settings.renderDist = +e.target.value; applySettings(); });
-document.getElementById('set-gui').addEventListener('input', e => { settings.gui = +e.target.value; applySettings(); fitFontSizes(); });
+document.getElementById('set-gui').addEventListener('input', e => { settings.gui = +e.target.value; applySettings(); fitFontSizes(); setTimeout(layoutHearts); });   // (the HUD round the hotbar is placed again at the new size)
 document.getElementById('set-sound').addEventListener('click', () => { Sound.toggleMute(); applySettings(); });
 document.getElementById('set-info').addEventListener('click', () => { settings.info = !settings.info; applySettings(); });
 document.getElementById('set-autosave').addEventListener('click', () => { settings.autosave = !settings.autosave; applySettings(); });
@@ -4403,18 +4551,34 @@ document.getElementById('mm-settings').addEventListener('click', () => showSetti
 document.getElementById('pause-settings').addEventListener('click', () => showSettings(true));
 document.getElementById('settings-close').addEventListener('click', () => showSettings(false));
 applySettings();
+// four tabs: Video, Sound, Controls, Game (the one you looked at last opens again, while the game runs). Exactly as the desktop version.
+let setTab = 'video';
+function showSetTab(t) {
+  setTab = t;
+  for (const b of document.querySelectorAll('#set-tabs button')) b.classList.toggle('on', b.dataset.tab === t);
+  for (const p of document.querySelectorAll('#settings .set-page')) p.style.display = p.dataset.page === t ? '' : 'none';
+}
+for (const b of document.querySelectorAll('#set-tabs button')) b.addEventListener('click', () => showSetTab(b.dataset.tab));
+showSetTab(setTab);
 let lastSpaceTap = 0;
 function toggleFly() { if (SURVIVAL) return; player.fly = !player.fly; player.vy = 0; }   // (no flying in survival)
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;      // typing a world name or seed
-  // E opens/closes the inventory; while it's open, only the number keys (pick a slot) and Esc work
+  if (e.target.tagName === 'INPUT') return;      // typing a world name or seed (or in a search box)
+  // Ctrl+Q drops a stack (survival), not the browser's own Ctrl+Q, wherever a page is allowed to stop that (Shift+Q does the same)
+  if (e.code === 'KeyQ' && e.ctrlKey) e.preventDefault();
+  // E opens/closes the inventory; while it's open, only the number keys (pick a slot), Q (drop from the slot under the
+  // mouse), R (how to make what's under the mouse) and Esc work
   if (e.code === 'KeyE' && !e.repeat && (locked || invOpen)) { setInventory(!invOpen); e.preventDefault(); return; }
   if (invOpen) {
-    if (e.code === 'Escape') setInventory(false);
+    if (e.code === 'Escape') { if (howtoOpen) closeHowTo(); else setInventory(false); }
+    if (e.code === 'KeyR' && !e.repeat && hoverId) showHowTo(hoverId);
+    if (e.code === 'KeyQ' && SURVIVAL && hoverSlot >= 0 && !held) dropFrom(hoverSlot, e.ctrlKey || e.shiftKey);
     const n = e.code.match(/^Digit(\d)$/);
     if (n) selectSlot(n[1] === '0' ? 9 : +n[1] - 1);
     return;
   }
+  // Q (survival): drop one of what you hold, Ctrl+Q or Shift+Q the whole stack (held down: one after another)
+  if (e.code === 'KeyQ' && locked && SURVIVAL) dropFrom(selected, e.ctrlKey || e.shiftKey);
   if (e.repeat) { keys[e.code] = true; return; }
   keys[e.code] = true;
   if (!locked) return;
@@ -4441,6 +4605,10 @@ addEventListener('mousemove', e => {
 });
 addEventListener('wheel', e => { if (locked) selectSlot((selected + (e.deltaY > 0 ? 1 : -1) + 10) % 10); });
 addEventListener('contextmenu', e => e.preventDefault());
+// middle-click is pick block: never the browser's autoscroll (or paste, on Linux); links still open in a new tab
+const notLink = e => !(e.target.closest && e.target.closest('a'));
+addEventListener('mousedown', e => { if (e.button === 1 && notLink(e)) e.preventDefault(); });
+addEventListener('auxclick', e => { if (e.button === 1 && notLink(e)) e.preventDefault(); });
 
 function rayHitsBox(o, d, x, y, z, box, max) {   // slab test against a box inside block (x, y, z)
   let t0 = 0, t1 = max;
@@ -4598,6 +4766,7 @@ function hurtPlayer(amount, from) {
   if (player.health <= player.gloom) die();   // (blackened quarters count as empty)
 }
 function die() {
+  if (held) stowHeld();   // (a stack held on the cursor falls with everything else)
   player.dead = true;
   // everything you carried falls where you died (in a friend's world items live in their game, so you keep yours)
   if (!Net.client) {
@@ -4751,7 +4920,7 @@ heartImg.onload = () => {
     return c;
   };
   whiteFillOnly = fillOnly('white'); gloomFillOnly = fillOnly('gloom');
-  drawHearts();
+  drawHearts(); drawArmorBar();
 };
 if ((window.TEXTURES || {})['gui/heart_atlas']) heartImg.src = TEXTURES['gui/heart_atlas'];
 function drawHearts() {
@@ -4781,22 +4950,69 @@ function drawHearts() {
   }
   layoutHearts();
 }
-// just above the hotbar's left end, at a whole-number size so the pixels stay sharp; the block name moves up above them
+// The HUD around the hotbar, at a whole-number size so the pixels stay sharp, everything 4 apart: the hotbar at the bottom
+// in the middle, the offhand box left of it and the tool row right of it; the hearts just above the hotbar's left end and
+// the armor bar, their mirror image, just above its right end (the hearts are where they always were); with no room beside
+// the hotbar, the tool row goes above its right end, one line up (over the armor bar); the notes (block name, "Your X
+// broke"...) above all of them. Exactly as the desktop version.
 function layoutHearts() {
   if (!SURVIVAL) return;
-  // (sized as if there were 10 hearts, so each heart stays the same size whatever the atlas's resolution; a whole
-  // number of screen pixels for each of its pixels, so they stay sharp)
+  // (hearts sized as if there were 10, so each stays the same size whatever the atlas's resolution; a whole number of
+  // screen pixels for each of its pixels, so they stay sharp)
   const b = hotbarEl.getBoundingClientRect(), dpr = uiScale, z = uiZoom;   // (the hotbar's place, in page pixels)
   const r = { left: b.left / z, top: b.top / z, width: b.width / z };
   const old = Math.max(1, Math.floor(r.width / 2 / 99)) * 9;   // a heart's size on screen (css pixels), as with the first 9x9 hearts
   const s = Math.max(1, Math.round(old / HS * dpr)) / dpr;
-  const bottom = innerHeight / z - r.top + 4;
-  Object.assign(heartsEl.style, { width: heartsEl.width * s + 'px', height: HS * s + 'px', left: r.left + 'px', bottom: bottom + 'px' });
-  nameEl.style.bottom = bottom + HS * s + 8 + 'px';
-  const ob = document.getElementById('offhand-box');   // (the offhand box: 8px left of the hotbar)
-  ob.style.left = r.left - 8 - ob.getBoundingClientRect().width / z + 'px';
+  const G = 4, right = r.left + r.width, line = innerHeight / z - r.top + G, rowH = HS * s;   // (bottoms: up from the screen's bottom)
+  Object.assign(heartsEl.style, { width: heartsEl.width * s + 'px', height: rowH + 'px', left: r.left + 'px', bottom: line + 'px' });
+  let top = line + rowH;   // how high the things above the hotbar reach
+  const ob = document.getElementById('offhand-box');
+  ob.style.left = r.left - G - ob.getBoundingClientRect().width / z + 'px';
+  const tr = document.getElementById('tool-row'), tb = tr.getBoundingClientRect(), tw = tb.width / z, th = tb.height / z;
+  // the armor bar: the hearts' mirror image (as wide and as high up, its right end at the hotbar's right end)
+  if (armorShown) Object.assign(armorEl.style, { width: armorEl.width * s + 'px', height: rowH + 'px', left: right - armorEl.width * s + 'px', bottom: line + 'px' });
+  if (right + G + tw <= innerWidth / z - G) Object.assign(tr.style, { left: right + G + 'px', bottom: '12px' });   // (bottoms lined up)
+  else {
+    // (on the hearts' line only if neither the armor bar nor the hearts are in the way; otherwise one line up)
+    const up = armorShown || right - tw < r.left + heartsEl.width * s + G ? line + rowH + G : line;
+    Object.assign(tr.style, { left: right - tw + 'px', bottom: up + 'px' });
+    top = Math.max(top, up + th);
+  }
+  nameEl.style.bottom = top + G + 'px';
 }
 addEventListener('resize', () => setTimeout(layoutHearts));
+// ---- Survival: your armor bar, the hearts' mirror image: as many icons as hearts (textures/gui/armor_full, _three_quarter,
+// _half, _quarter and _empty), the same size, as high up, on the hotbar's other end, filling from its outer (right) end
+// inward, in quarters like the hearts; the part-filled pictures are drawn mirrored (filled on the outer, right side, draining
+// top-left, bottom-left, bottom-right: the hearts' order, mirrored), so they're used as they are. It shows the protection
+// your armor gives right now (armorBlock: what the damage maths uses) against a full new set's 0.5: helmet 20% of the bar,
+// chestplate 40%, leggings 25%, boots 15%, less as they wear. Rounded to the nearest quarter icon: quarters =
+// floor(protection x 8 x HEARTS + 0.5), 0 to 20; icon k from the right holds clamp(quarters - 4k, 0, 4) quarters. Nothing
+// worn: all empty.
+// Survival only, once the pictures are there; the hearts and health are just as they were. Exactly as the desktop version.
+// (var: the hotbar can be drawn before this line)
+var armorEl = document.getElementById('armor-bar');
+var armorPics = ['empty', 'quarter', 'half', 'three_quarter', 'full'].map(k => {   // (by quarters held)
+  const src = (window.TEXTURES || {})['gui/armor_' + k];
+  if (!src) return null;
+  const img = new Image(); img.onload = () => drawArmorBar(); img.src = src;
+  return img;
+});
+var armorShown = false;
+function drawArmorBar() {
+  if (!armorPics) return;   // (not set up yet)
+  const show = SURVIVAL && !!HS && armorPics.every(p => p && p.naturalWidth);
+  const w = HEARTS * HP - (HP - HS);   // (as wide as the hearts)
+  if (show && (armorEl.width !== w || armorEl.height !== HS)) { armorEl.width = w; armorEl.height = HS; armorShown = false; }
+  if (show !== armorShown) { armorShown = show; armorEl.style.display = show ? 'block' : 'none'; layoutHearts(); }
+  if (!show) return;
+  const g = armorEl.getContext('2d'), quarters = Math.floor(armorBlock() * 8 * HEARTS + 0.5);
+  g.imageSmoothingEnabled = false; g.clearRect(0, 0, w, HS);
+  for (let k = 0; k < HEARTS; k++) {   // k: icons from the right-hand end
+    const x = (HEARTS - 1 - k) * HP, pic = armorPics[Math.max(0, Math.min(4, quarters - 4 * k))];
+    g.drawImage(pic, 0, 0, pic.width, pic.height, x, 0, HS, HS);   // (as drawn: the part-filled pictures are already mirrored)
+  }
+}
 // hue (optional, 0-360): recolour the skin, turning its main colour to this hue (used for player bodies)
 function mobTexture(key, hue) {
   const c = document.createElement('canvas'); c.width = c.height = 1;   // placeholder until the picture loads
@@ -5199,7 +5415,7 @@ function updateHand(dt) {
   }
   // swinging: one swing per click, and over and over while the left button is held (breaking)
   if (hand.swing > 0) hand.swing = Math.max(0, hand.swing - dt / 0.28);
-  else if (hand.held && locked) hand.swing = 1;
+  else if (hand.held && locked) { hand.swing = 1; stageRepeat(); }   // (Stone, ores and logs: each swing hits again)
   hand.dip = Math.max(0, hand.dip - dt * 5);
   const speed = player.onGround && !player.fly ? Math.hypot(player.vx, player.vz) : 0;
   hand.bob += speed * dt * 1.6;
@@ -5898,7 +6114,7 @@ function addHeart(x, y, z, delay = 0) {
     img.src = src;
     heartMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
   }
-  const s = new THREE.Sprite(heartMat.clone());
+  const s = new THREE.Sprite(withHaze(heartMat.clone()));   // (in the haze, and lit like the cows: see updateHearts)
   s.scale.set(0.28, 0.28, 1); s.position.set(x, y, z); s.visible = delay <= 0;
   scene.add(s);
   hearts.push({ s, age: 0, delay, x, y, z });
@@ -5911,6 +6127,7 @@ function updateHearts(dt) {
     const f = h.age / HEART_LIFE;
     if (f >= 1) { scene.remove(h.s); h.s.material.dispose(); hearts.splice(hearts.indexOf(h), 1); continue; }
     h.s.position.set(h.x + Math.sin(h.age * 5) * 0.05, h.y + f * 0.7, h.z);
+    lightThing(h, h.s.position.x, h.s.position.y, h.s.position.z, dt, h.s.material);   // (dark at night and in caves)
     h.s.material.opacity = f < 0.7 ? 1 : 1 - (f - 0.7) / 0.3;
   }
 }
@@ -6176,6 +6393,17 @@ function makeRock(x, y, z, id = ROCK) {
   rocks.push(r);
   return r;
 }
+// light a little thing in the world (thrown things, hearts, snow puffs) like the mobs: the daylight it can see or
+// torchlight (or a light someone holds), whichever is brighter, looked up every 0.2 s. color: its own colour (white if none)
+function lightThing(o, x, y, z, dt, mat, color) {
+  if ((o.light = (o.light || 0) - dt) <= 0) {
+    o.light = 0.2;
+    const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+    o.sky = skyExposure(bx, by, bz, new Map()); o.torch = LIGHT_CURVE(lightAt(bx, by, bz));
+  }
+  const t = DAY_TINT.value, tl = Math.max(o.torch, heldLightAt(x, y, z)), c = color || { r: 1, g: 1, b: 1 };
+  mat.color.setRGB(c.r * Math.max(t.r * o.sky, tl * TORCH_COLOR.r), c.g * Math.max(t.g * o.sky, tl * TORCH_COLOR.g), c.b * Math.max(t.b * o.sky, tl * TORCH_COLOR.b));
+}
 // a sound from a spot in the world ('throw', 'splat'): quieter the further away, from the left or right
 function soundAt(voice, x, y, z, loud = 0.85, ch = 'mob') {
   const dx = x - player.x, dz = z - player.z, d = Math.hypot(dx, dz, y - player.y);
@@ -6214,7 +6442,7 @@ function splatAt(x, y, z) {
     puffColor = n ? new THREE.Color(cr / n / 255, cg / n / 255, cb / n / 255) : new THREE.Color(1, 1, 1);
   }
   for (let k = 0; k < 8; k++) {
-    const mat = new THREE.MeshBasicMaterial({ color: puffColor, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+    const mat = withHaze(new THREE.MeshBasicMaterial({ color: puffColor, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.08), mat);
     const a = Math.random() * Math.PI * 2, sp = 1.5 * (0.6 + Math.random() * 0.8);
     mesh.position.set(x, y, z); scene.add(mesh);
@@ -6226,6 +6454,7 @@ function updatePuffs(dt) {
     p.age += dt; p.vy -= 10 * dt;
     p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt;
     p.mesh.quaternion.copy(camera.quaternion);
+    lightThing(p, p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, dt, p.mesh.material, puffColor);   // (dark at night and in caves)
     p.mesh.material.opacity = Math.max(0, 1 - p.age / 0.4);
     if (p.age >= 0.4) { scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose(); puffs.splice(puffs.indexOf(p), 1); }
   }
@@ -6277,13 +6506,7 @@ function updateRocks(dt) {
     }
     r.mesh.position.set(r.x, r.y, r.z);
     r.mesh.quaternion.copy(camera.quaternion);   // (its flat picture, facing you)
-    if ((r.light -= dt) <= 0) {
-      r.light = 0.2;
-      const bx = Math.floor(r.x), by = Math.floor(r.y), bz = Math.floor(r.z);
-      r.sky = skyExposure(bx, by, bz, new Map()); r.torch = LIGHT_CURVE(lightAt(bx, by, bz));
-    }
-    const t = DAY_TINT.value, tl = Math.max(r.torch, heldLightAt(r.x, r.y, r.z));
-    r.mesh.material.color.setRGB(Math.max(t.r * r.sky, tl * TORCH_COLOR.r), Math.max(t.g * r.sky, tl * TORCH_COLOR.g), Math.max(t.b * r.sky, tl * TORCH_COLOR.b));
+    lightThing(r, r.x, r.y, r.z, dt, r.mesh.material);
   }
 }
 // distance along the look ray to a mob's box, or Infinity
@@ -6403,10 +6626,12 @@ function updateDrops(dt) {
 addEventListener('mousedown', e => {
   if (!locked) return;
   act = actSlot(e.button); clicking = true;
+  if (e.button === 0 && act !== selected) toolPicked(act);   // (a tool from your tool slots, picked for you)
   setTimeout(() => { clicking = false; act = selected; });
 });
 addEventListener('mousedown', e => {
   if (!locked) return;
+  if (e.button === 1) { e.preventDefault(); pickBlock(); return; }   // middle-click: pick block
   if (e.button === 0) { const m = mobInSights(); if (m) { const t = BLOCKS[HOTBAR[act]]; hitMob(m); if (t && t.tool) wearTool(t.tool === 'sword' ? 1 : 2); return; } }   // (a sword is made for hitting; other tools wear twice as fast)
   if (e.button === 2 && feedCow()) return;   // holding Grain, looking at a cow: feed it
   if (e.button === 2 && eat()) return;   // holding food (survival): right-click eats it
@@ -6480,7 +6705,11 @@ addEventListener('mousedown', e => {
     return;
   }
   if (e.button === 0 && hit.y > 0) {
-    if (needAxe(plainOf(hb))) return;   // (snowlogged: as what it holds)
+    const grew = isNatural(hit.x, hit.y, hit.z);   // (as the world grew it, before this breaks it)
+    const natural = STAGE_BREAKING && grew;   // (natural blocks break in stages: see stage breaking)
+    if (needAxe(plainOf(hb), natural)) return;   // (snowlogged: as what it holds)
+    if (STAGE_BREAKING && isStageStone(plainOf(hb)) && SURVIVAL && !holding('pickaxe')) return;   // (Stone by hand: nothing happens)
+    if (stageHit(hit.x, hit.y, hit.z, plainOf(hb))) return;   // (breaks in stages: not the last one yet)
     Sound.break(plainOf(hb));
     const cost = breakWear(plainOf(hb));   // (the tool wears after the block is broken, so its last use still counts as that tool)
     // leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
@@ -6493,6 +6722,7 @@ addEventListener('mousedown', e => {
     if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, withSnow(torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn), snowIn(hb))); // take one torch off
     else if (snowIn(hb)) setBlock(hit.x, hit.y, hit.z, SNOW);   // (snowlogged: what it held comes out, the snow stays)
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
+    if (TREE_FELLING && isLogBlock(hb) && grew) fellTree(hit.x, hit.y, hit.z);   // (the bottom log of a tree: the rest of it comes down)
     mobNoise(hit.x, hit.y, hit.z);
     wearTool(cost);
   }
@@ -6622,9 +6852,140 @@ function useOne() {
 // survival: what breaking a block gives you. Any of the 4 brick looks gives Bricks, a torch spot gives one torch,
 // water gives nothing.
 const dropFor = b => BLOCKS[b] && BLOCKS[b].drop ? BLOCKS[b].drop : isTorch(b) ? torchDrop(b) : BRICK_VARIANTS.includes(b) ? BRICK_VARIANTS[0] : ITEMS.includes(b) && !isWater(b) ? b : 0;
+// ---- Stage breaking (survival): Stone, ores and logs take no breaking time, but several swings. Each swing breaks some
+// of the block's stages straight away; it stays where it is, cracked to show how far it's gone, until its last stage
+// breaks (and only that gives anything). Holding the button swings again and again. Other blocks break with one click.
+//   Stone and ores (a pickaxe only): 4 stages for each layer down (layer 1: 4 ... layer 8: 32). Each swing breaks
+//   1 (stone pickaxe), 2 (copper), 4 (iron), 8 (bronite), 16 (rosium) or 32 (steel).
+//   Logs (any wood, standing or lying): 8 stages. Each swing breaks 1 (hand), 2 (Crude Axe), 4 (stone axe), 8 (copper and up).
+// How far each block has gone is only remembered while the world is open (and each player's is their own).
+//   Sandstone and Terracotta (a pickaxe only): 4 stages.
+// Only natural blocks (see isNatural). Exactly as the desktop version.
+// Held back for the Progression update: while STAGE_BREAKING_READY is false, none of this happens and Survival breaks the
+// old way (one click; logs need an axe; deep stone and deep ores a pickaxe good enough for their layer; an ore gives 1
+// Chunk). It must match StageBreakingReady in the desktop version. (Test: ?stagebreak in the address turns it on.)
+const STAGE_BREAKING_READY = false;
+const STAGE_BREAKING = STAGE_BREAKING_READY || /[?&]stagebreak\b/.test(location.search);
+// ---- Tree felling (survival): breaking a natural tree's bottom log (its last stage, with stage breaking; otherwise the one
+// click, with an axe) brings the whole tree down (see fellTree). It works with stage breaking on or off.
+// Held back for the Survival & light update: while TREE_FELLING_READY is false, no tree is felled. It must match
+// TreeFellingReady in the desktop version. (Test: ?treefell in the address turns it on.)
+const TREE_FELLING_READY = false;
+const TREE_FELLING = TREE_FELLING_READY || /[?&]treefell\b/.test(location.search);
+const isLogBlock = b => LOGS.includes(b) || (b >= TURNED_LOGS && b < TURNED_LOGS + 16);
+// Only natural blocks (as the world grew them: no saved edit there) break in stages. Ones a player put down (or changed)
+// break the old way: one click, the old tool rules, and a placed log never fells anything.
+const isNatural = (x, y, z) => !edits.has(idx(x, y, z));
+const STAGE_TERRACOTTA = new Set([65, ...COLOUR_TERRACOTTA]);   // (Terracotta: plain and every colour, as in the badlands)
+const isStageStone = b => b === 3 || (b >= STRATA && b < STRATA + STRATA_LAYERS - 1) || !!(BLOCKS[b] && BLOCKS[b].pick) || b === SANDSTONE || STAGE_TERRACOTTA.has(b);
+function stageTotal(b, x, y, z) {
+  if (!STAGE_BREAKING || !SURVIVAL || !isNatural(x, y, z)) return 0;
+  if (isLogBlock(b)) return 8;
+  if (isStageStone(b)) return 4 * ((BLOCKS[b] && BLOCKS[b].layer) || 1);
+  return 0;
+}
+const PICK_STAGES = { stone: 1, copper: 2, iron: 4, bronite: 8, rosium: 16, steel: 32 };
+function stagesPerSwing(b) {
+  const t = BLOCKS[HOTBAR[act]];
+  if (isLogBlock(b)) return !t || t.tool !== 'axe' ? 1 : t.material === 'crude' ? 2 : t.material === 'stone' ? 4 : 8;
+  return t && t.tool === 'pickaxe' ? PICK_STAGES[t.material] || 1 : 0;
+}
+var cracks = new Map(), crackMeshes = new Map();   // block index -> stages broken so far / its crack overlay (var: setBlock can run first)
+const crackTex = [];
+function crackTexture(f) {   // textures/blocks/break_stage_<f>.png, if it's there
+  if (crackTex[f] === undefined) {
+    const src = (window.TEXTURES || {})['break_stage_' + f];
+    crackTex[f] = null;
+    if (src) {
+      const img = new Image(), t = new THREE.Texture(img);
+      t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+      img.onload = () => { t.needsUpdate = true; }; img.src = src;
+      crackTex[f] = t;
+    }
+  }
+  return crackTex[f];
+}
+// show block i cracked to `done` of `total` stages (8 pictures; none at 0)
+function showCrack(i, done, total) {
+  let m = crackMeshes.get(i);
+  if (!done) { if (m) { scene.remove(m); m.material.dispose(); crackMeshes.delete(i); } return; }
+  const f = Math.max(1, Math.min(8, Math.ceil(8 * done / total))), tex = crackTexture(f);
+  if (!m) {
+    const x = i % WX, z = Math.floor(i / WX) % WZ, y = Math.floor(i / (WX * WZ));
+    if (!showCrack.geo) showCrack.geo = new THREE.BoxGeometry(1.004, 1.004, 1.004);
+    m = new THREE.Mesh(showCrack.geo, withHaze(new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })));
+    m.position.set(x + 0.5, y + 0.5, z + 0.5);
+    scene.add(m); crackMeshes.set(i, m);
+  }
+  if (tex) { m.material.map = tex; m.material.color.setRGB(1, 1, 1); m.material.opacity = 1; m.material.alphaTest = 0.1; }
+  else { m.material.map = null; m.material.color.setRGB(0, 0, 0); m.material.opacity = 0.08 * f; }   // (until there are crack pictures: darker each stage)
+  m.material.needsUpdate = true;
+}
+// one swing at block (x, y, z) of kind b (as it is without any snow): true if it's still standing afterwards
+function stageHit(x, y, z, b) {
+  const total = stageTotal(b, x, y, z);
+  if (!total) return false;
+  const i = idx(x, y, z), done = (cracks.get(i) || 0) + stagesPerSwing(b);
+  if (done >= total) { cracks.delete(i); showCrack(i, 0); return false; }
+  cracks.set(i, done); showCrack(i, done, total);
+  Sound.break(b); mobNoise(x, y, z);
+  return true;
+}
+// holding the left button: each new swing hits again, if it's at a block that breaks in stages (see the hand's swing)
+function stageRepeat() {
+  if (!SURVIVAL || !locked || invOpen || mobInSights()) return;
+  const hit = raycast();
+  if (!hit || hit.slot !== undefined || !stageTotal(plainOf(getBlock(hit.x, hit.y, hit.z)), hit.x, hit.y, hit.z)) return;
+  dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+}
+// Tree felling (see TREE_FELLING): breaking a natural log (its last stage, with stage breaking) with no natural log right
+// under it, when the logs joined to it (any way, corners too)
+// touch leaves: the rest of the tree comes down at once. Its logs drop as they would broken, and its leaves (those
+// joined to its logs through leaves, up to 6 away) drop what they do broken by hand. Logs nobody would call a tree
+// (no leaves on them, like a log cabin) stay up.
+function fellTree(x, y, z) {
+  const natLog = (a, b, c) => isLogBlock(getBlock(a, b, c)) && isNatural(a, b, c), natLeaves = (a, b, c) => isLeaves(getBlock(a, b, c)) && isNatural(a, b, c);
+  if (!TREE_FELLING || !SURVIVAL || natLog(x, y - 1, z)) return;
+  const key = (a, b, c) => a + ',' + b + ',' + c, seen = new Set([key(x, y, z)]), logs = [];
+  const queue = [[x, y, z]];
+  while (queue.length && logs.length < 512) {
+    const [cx, cy, cz] = queue.shift();
+    for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = cx + dx, ny = cy + dy, nz = cz + dz, k = key(nx, ny, nz);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (natLog(nx, ny, nz)) { logs.push([nx, ny, nz]); queue.push([nx, ny, nz]); }
+    }
+  }
+  const SIDES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const leavesBy = ([a, b, c]) => SIDES.filter(([dx, dy, dz]) => natLeaves(a + dx, b + dy, c + dz)).map(([dx, dy, dz]) => [a + dx, b + dy, c + dz]);
+  if (!logs.length || !logs.some(l => leavesBy(l).length)) return;
+  // its leaves: out from its logs, through leaves
+  const leaves = [], lseen = new Set();
+  let front = [];
+  for (const l of [[x, y, z], ...logs]) for (const p of leavesBy(l)) { const k = key(...p); if (!lseen.has(k)) { lseen.add(k); leaves.push(p); front.push(p); } }
+  for (let step = 1; step < 6 && front.length && leaves.length < 2048; step++) {
+    const next = [];
+    for (const [a, b, c] of front) for (const [dx, dy, dz] of SIDES) {
+      const p = [a + dx, b + dy, c + dz], k = key(...p);
+      if (lseen.has(k) || !natLeaves(...p)) continue;
+      lseen.add(k); leaves.push(p); next.push(p);
+    }
+    front = next;
+  }
+  for (const [a, b, c] of logs) { collectBlock(getBlock(a, b, c), a, b, c); cracks.delete(idx(a, b, c)); showCrack(idx(a, b, c), 0); setBlock(a, b, c, 0); }
+  for (const [a, b, c] of leaves) {
+    const lb = getBlock(a, b, c);
+    if (Math.random() < 0.2) collect(STICK, a, b, c);
+    if (lb === PALM_LEAVES && Math.random() < 0.25) collect(DATES, a, b, c);
+    setBlock(a, b, c, 0);
+  }
+  for (const [a, b, c] of [...logs, ...leaves]) dropTorchesAround(a, b, c);   // (snow lying on them, torches on them...)
+  Sound.break(4);
+}
 // survival: logs and planks only break when you're holding an axe, stone-type blocks only with a pickaxe
 // (returns true, with a note, when you can't break it)
-function needAxe(b) {
+function needAxe(b, natural = false) {   // (natural: a block the world grew, which breaks in stages)
   if (!SURVIVAL) return false;
   const tell = text => { nameEl.textContent = text; nameEl.style.opacity = 1; nameTimer = 2; return true; };
   if (b === BEDROCK) return tell("Bedrock can't be broken");
@@ -6633,11 +6994,15 @@ function needAxe(b) {
   if (pick) {
     if (!holding('pickaxe')) return tell(`You need a pickaxe to mine ${BLOCKS[b].name}`);
     if ((PICK_TIER[BLOCKS[HOTBAR[act]].material] || 0) < pick) return tell(`You need ${['', 'a stone', 'a copper', 'an iron'][pick]} pickaxe or better to mine ${BLOCKS[b].name}`);
+    // a deep ore that doesn't break in stages: like its layer's stone, the pickaxe has to be good enough for that layer too
+    const deep = BLOCKS[b].layer || 1;
+    if (!natural && deep > 1 && deep > (STRATA_PICKAXE[BLOCKS[HOTBAR[act]].material] || 0)) return tell(`You need a better pickaxe to mine ${BLOCKS[b].name} this deep`);
     return false;
   }
-  // deep stone: the pickaxe has to be good enough for this layer
+  if (isLogBlock(b) && natural) return false;   // (natural logs: your hand breaks them too, just slowly: see stage breaking)
+  // placed deep stone (or deep ore): the pickaxe has to be good enough for this layer (natural: it just takes more swings)
   const layer = stoneLayer(b), held = BLOCKS[HOTBAR[act]];
-  if (layer > 1 && holding('pickaxe') && layer > (STRATA_PICKAXE[held.material] || 0)) return tell(`You need a better pickaxe to mine ${BLOCKS[b].name} this deep`);
+  if (!natural && layer > 1 && holding('pickaxe') && layer > (STRATA_PICKAXE[held.material] || 0)) return tell(`You need a better pickaxe to mine ${BLOCKS[b].name} this deep`);
   const kind = NEEDS_AXE.includes(b) ? 'axe' : NEEDS_PICKAXE.includes(b) ? 'pickaxe' : null;
   if (!kind || holding(kind)) return false;
   nameEl.textContent = kind === 'axe' ? `You need an axe to cut ${BLOCKS[b].name}` : `You need a pickaxe to mine ${BLOCKS[b].name}`;
@@ -6652,7 +7017,7 @@ function collectBlock(b, x, y, z) {
     for (let n = hand[1] + Math.floor(Math.random() * (hand[2] - hand[1] + 1)); n > 0; n--) collect(hand[0], x, y, z);
   } else if (SURVIVAL && DIGGABLE.includes(b) && !holding('shovel') && BLOCKS[PIECE_ITEM + id]) {
     for (let n = 1 + Math.floor(Math.random() * 8); n > 0; n--) collect(PIECE_ITEM + id, x, y, z);
-  } else collect(id, x, y, z);
+  } else for (let n = STAGE_BREAKING && SURVIVAL && BLOCKS[b] && BLOCKS[b].pick && isNatural(x, y, z) ? BLOCKS[b].layer || 1 : 1; n > 0; n--) collect(id, x, y, z);   // (an ore: a Chunk for each layer down; 1 while stage breaking is held back)
 }
 function collect(id, x, y, z) {
   if (!SURVIVAL || !id || !BLOCKS[id]) return;
@@ -6667,7 +7032,17 @@ let nameTimer = 0;
 const hotbarIcons = [], hotbarCounts = [], hotbarWears = [];
 // `flat`: always the flat picture (for what's held). Otherwise a block, slab, stairs, piece or torch is drawn in 3D.
 // Fir, Palm and Willow Leaves (and their pieces, slabs and stairs) share the Oak Leaves picture: their icons and drops get its green in their own colour
-function drawIcon(canvas, id, flat) { drawIconPlain(canvas, id, flat); }
+// each picture is drawn once and copied after that (lists like the recipes are redrawn often, and a 3D icon takes a while);
+// forgotten when the textures change (see loadCustomTextures below)
+function drawIcon(canvas, id, flat) {
+  if (!id) { drawIconPlain(canvas, 0, flat); return; }
+  const cache = drawIcon.cache || (drawIcon.cache = new Map()), key = flat ? -id : id;
+  let c = cache.get(key);
+  if (!c) { c = document.createElement('canvas'); drawIconPlain(c, id, flat); cache.set(key, c); }
+  if (canvas.width !== c.width || canvas.height !== c.height) { canvas.width = c.width; canvas.height = c.height; }
+  canvas.style.imageRendering = c.style.imageRendering;
+  const g = canvas.getContext('2d'); g.clearRect(0, 0, canvas.width, canvas.height); g.drawImage(c, 0, 0);
+}
 function drawIconPlain(canvas, id, flat) {
   if (!flat && iconBoxes(id)) { drawBoxIcon(canvas, id); return; }
   if (canvas.width !== TILE) canvas.width = canvas.height = TILE;
@@ -6853,15 +7228,17 @@ function makeSlotEl(i, parent, label = '') {
   parent.append(slot);
   slotEls[i] = { el: slot, icon: c, count, wear };
   if (i < 10) { hotbarIcons.push(c); hotbarCounts.push(count); hotbarWears.push(wear); }
-  // inventory open: click picks a hotbar slot, right-click throws it out (creative: empties it), drag moves/swaps/stacks
+  // inventory open. Creative: click picks a hotbar slot, right-click empties it, drag moves/swaps/stacks.
+  // Survival: a stack on the cursor (see slotDown)
   slot.addEventListener('mousedown', e => {
     if (!invOpen) return;
-    if (e.button === 2) { if (SURVIVAL) throwSlot(i); else setSlot(i, 0); return; }
+    if (SURVIVAL) { e.preventDefault(); slotDown(i, e); return; }
+    if (e.button === 2) { setSlot(i, 0); return; }
     if (i < 10) selectSlot(i);
   });
-  slot.addEventListener('mouseenter', () => { if (invOpen && i >= 10) invName.textContent = HOTBAR[i] ? BLOCKS[HOTBAR[i]].name : SLOT_NAME(i); });
-  slot.addEventListener('mouseleave', () => { if (i >= 10) invName.textContent = ''; });
-  slot.draggable = true;
+  slot.addEventListener('mouseenter', () => slotEnter(i));
+  itemHover(slot, () => HOTBAR[i], i);
+  slot.draggable = !SURVIVAL;
   slot.addEventListener('dragstart', e => { if (!invOpen || !HOTBAR[i]) return e.preventDefault(); e.dataTransfer.setData('text/plain', 'slot:' + i); });
   slot.addEventListener('dragover', e => { if (invOpen) e.preventDefault(); });
   slot.addEventListener('drop', e => {
@@ -6945,12 +7322,279 @@ function moveSlot(j, i) {
   }
   saveHotbar(); drawHotbarIcons(); sendGear();
 }
+// ---- Tooltips: pointing at anything that shows an item (a slot, the creative list, a recipe, an ingredient, the Cutter's
+// blocks) shows its name, then what's left of a tool or armor ("Durability 37 / 120"), how much a food heals ("Heals 1.5
+// hearts": quarter hearts, shown to the half, a half rounded up) and how long a fuel burns ("Fuel: smelts 4 (20 s)").
+// An empty gear slot says what it's for. Exactly as the desktop version.
+const tipEl = document.getElementById('tip');
+var tipFor = null, hoverId = 0, hoverSlot = -1, howtoOpen = false;   // (var: used from the code above too)
+let mouseX = 0, mouseY = 0;
+function itemHover(el, getId, slot = -1) { el.classList.add('has-tip'); el._tip = { getId, slot }; }
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest ? e.target.closest('.has-tip') : null, t = el ? el._tip : null;
+  if (t !== tipFor) { tipFor = t; showTip(); }
+});
+addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; if (held && invOpen) placeHeld(); if (tipEl.style.display !== 'none') moveTip(); });
+const heartsText = food => { const h = Math.floor((food + 1) / 2) / 2; return `${h} heart${h === 1 ? '' : 's'}`; };
+function tipLines(id, slot) {
+  const d = BLOCKS[id];
+  if (!d) return [];
+  const lines = [d.name], max = maxWear(id);
+  if (max) lines.push(`Durability ${max - (slot >= 0 && HOTBAR[slot] === id ? HOTBAR_WEAR[slot] : 0)} / ${max}`);
+  if (d.food) lines.push(`Heals ${heartsText(d.food)}`);
+  if (FUEL[id]) lines.push(`Fuel: smelts ${FUEL[id]} (${FUEL[id] * SMELT_TIME} s)`);
+  return lines;
+}
+function showTip() {
+  const t = invOpen ? tipFor : null;
+  hoverId = t ? t.getId() || 0 : 0; hoverSlot = t ? t.slot : -1;
+  let lines = hoverId && !held ? tipLines(hoverId, hoverSlot) : [];
+  if (!hoverId && !held && hoverSlot >= 0 && SLOT_PH(hoverSlot)) lines = [SLOT_NAME(hoverSlot)];   // (an empty gear slot: what it's for)
+  tipEl.style.display = lines.length ? 'block' : 'none';
+  if (!lines.length) return;
+  tipEl.textContent = '';
+  lines.forEach((text, k) => { const d = document.createElement('div'); d.textContent = text; if (k) d.className = 'sub'; tipEl.append(d); });
+  moveTip();
+}
+function moveTip() {   // just below and right of the mouse, kept on the screen
+  const z = uiZoom, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  let x = mouseX / z + 14, y = mouseY / z + 14;
+  if (x + w > innerWidth / z - 4) x = mouseX / z - 14 - w;
+  if (y + h > innerHeight / z - 4) y = mouseY / z - 14 - h;
+  tipEl.style.left = Math.max(4, x) + 'px'; tipEl.style.top = Math.max(4, y) + 'px';
+}
+// ---- Survival: a stack on the cursor. With the inventory (or the Bench, Cutter or Kiln) open:
+//   left-click picks up a stack, or puts the held one down (onto the same item as much as fits; a different one swaps);
+//   right-click picks up half (the bigger half), or puts down one. Pressing with a stack held and moving across slots shares
+//   it out when the button comes up: left evenly (each gets the same, the rest stays held), right one in each.
+//   Double-click (a second press within 350 ms on the slot whose stack you just picked up) gathers more of it from your
+//   hotbar, pockets and backpack, up to a full stack. Shift-click moves a stack to where it fits (see quickMove).
+//   Q drops one from the slot under the mouse, Ctrl+Q (or Shift+Q) the stack. Clicking outside the panel drops the held
+//   stack; closing puts it back (see stowHeld). Exactly as the desktop version.
+var held = null;   // { id, n, wear, data, from: the slot it came from }   (var: the save asks for it, see carried)
+var drag = null, handShown = 0;
+let lastPick = { i: -1, t: 0 };
+const heldEl = document.getElementById('held'), heldIcon = heldEl.querySelector('canvas'), heldCount = heldEl.querySelector('.count'), heldWear = heldEl.querySelector('.wear');
+heldIcon.width = heldIcon.height = TILE;
+function clearSlot(i) { HOTBAR[i] = HOTBAR_COUNT[i] = HOTBAR_WEAR[i] = 0; HOTBAR_DATA[i] = null; }
+// a message on whichever screen is open
+function slotNote(text) { (benchEl.style.display !== 'none' ? benchName : furnaceEl.style.display !== 'none' ? furnaceName : invName).textContent = text; }
+function slotsChanged() {
+  saveHotbar(); drawHotbarIcons(); sendGear(); drawHeld(); showTip();
+  if (HOTBAR[selected] !== handShown) selectSlot(selected);   // (what's in your hand changed)
+}
+function placeHeld() { heldEl.style.left = mouseX / uiZoom - 22 + 'px'; heldEl.style.top = mouseY / uiZoom - 22 + 'px'; }
+function drawHeld() {
+  heldEl.style.display = held && invOpen ? 'block' : 'none';
+  if (!held) return;
+  drawIcon(heldIcon, held.id);
+  heldCount.textContent = held.n > 1 ? held.n : '';
+  const max = maxWear(held.id), left = max ? 1 - held.wear / max : 1;
+  heldWear.style.display = max && held.wear > 0 ? 'block' : 'none';
+  if (max) { heldWear.firstChild.style.width = Math.max(1, Math.round(left * 28)) + 'px'; heldWear.firstChild.style.background = `hsl(${Math.round(left * 120)}, 90%, 45%)`; }
+  placeHeld();
+}
+// can slot i take (some of) the held stack as it is?
+const takesHeld = i => !!held && slotOpen(i) && fits(i, held.id) &&
+  (!HOTBAR[i] || HOTBAR[i] === held.id && stackMax(held.id) > 1 && HOTBAR_COUNT[i] < stackMax(held.id));
+// put k of the held stack into slot i (empty, or holding the same item)
+function putIn(i, k) {
+  if (!held || k <= 0) return;
+  if (!HOTBAR[i]) {
+    HOTBAR[i] = held.id; HOTBAR_COUNT[i] = k; HOTBAR_WEAR[i] = held.wear; HOTBAR_DATA[i] = held.data;
+    if (i === BACK_SLOT) unpackBack();   // (a backpack put on spreads what it carries into its slots)
+  } else HOTBAR_COUNT[i] += k;
+  if ((held.n -= k) <= 0) held = null;
+}
+function slotDown(i, e) {
+  if (!slotOpen(i)) return;
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') document.activeElement.blur();   // (so Q and R work again)
+  if (held) {
+    if (e.button === 0 && lastPick.i === i && performance.now() - lastPick.t < 350) { gather(); lastPick.i = -1; slotsChanged(); return; }   // a double-click
+    if (e.button !== 0 && e.button !== 2) return;
+    if (drag) for (const k of drag.slots) slotEls[k].el.classList.remove('drag-on');   // (a button let go outside the window)
+    drag = { button: e.button, slots: [i] };   // (it happens when the button comes up: see the mouseup below)
+    slotEls[i].el.classList.add('drag-on');
+    return;
+  }
+  if (!HOTBAR[i] || (e.button !== 0 && e.button !== 2)) return;
+  if (e.button === 0 && e.shiftKey) { quickMove(i); slotsChanged(); return; }
+  const n = HOTBAR_COUNT[i] || 1, take = e.button === 2 ? Math.ceil(n / 2) : n;
+  if (i === BACK_SLOT) packBack();   // (a backpack keeps what was in it)
+  held = { id: HOTBAR[i], n: take, wear: HOTBAR_WEAR[i], data: HOTBAR_DATA[i], from: i };
+  if (take >= n) clearSlot(i); else HOTBAR_COUNT[i] -= take;
+  if (i === BELT_SLOT) fitBelt();
+  lastPick = e.button === 0 ? { i, t: performance.now() } : { i: -1, t: 0 };
+  slotsChanged();
+}
+// dragging a held stack across slots: each one that can take some of it is added (no more slots than things held)
+function slotEnter(i) {
+  if (!drag || !held || drag.slots.includes(i) || stackMax(held.id) < 2 || drag.slots.length >= held.n || !takesHeld(i)) return;
+  drag.slots.push(i); slotEls[i].el.classList.add('drag-on');
+}
+addEventListener('mouseup', e => {
+  if (!drag || e.button !== drag.button) return;
+  const d = drag; drag = null;
+  for (const i of d.slots) slotEls[i].el.classList.remove('drag-on');
+  if (!held) return;
+  if (d.slots.length === 1) clickHeld(d.slots[0], d.button);
+  else {
+    const id = held.id, to = d.slots.filter(takesHeld);
+    if (d.button === 2) for (const i of to) putIn(i, 1);
+    else { const each = Math.floor(held.n / to.length); for (const i of to) putIn(i, Math.min(each, stackMax(id) - (HOTBAR[i] ? HOTBAR_COUNT[i] : 0))); }
+  }
+  slotsChanged();
+});
+// a click on slot i with a stack held
+function clickHeld(i, button) {
+  const id = HOTBAR[i], no = () => slotNote("That doesn't go there");
+  if (button === 2) { if (takesHeld(i)) putIn(i, 1); else if (!fits(i, held.id)) no(); return; }   // put down one
+  if (!fits(i, held.id)) { no(); return; }
+  if (!id) { putIn(i, Math.min(held.n, stackMax(held.id))); return; }
+  if (id === held.id && stackMax(id) > 1) { putIn(i, Math.min(held.n, stackMax(id) - HOTBAR_COUNT[i])); return; }   // stack onto it
+  // something else: they swap (the held stack goes in, what was there is picked up)
+  if (i === BACK_SLOT) packBack();
+  const was = { id: HOTBAR[i], n: HOTBAR_COUNT[i], wear: HOTBAR_WEAR[i], data: HOTBAR_DATA[i], from: i };
+  clearSlot(i); putIn(i, held.n); held = was;
+  if (i === BELT_SLOT) fitBelt();
+}
+// double-click: more of the held item from your hotbar, pockets and backpack, up to a full stack
+function gather() {
+  const max = stackMax(held.id);
+  for (const k of storeSlots()) {
+    if (held.n >= max) break;
+    if (HOTBAR[k] !== held.id || HOTBAR_DATA[k]) continue;
+    const t = Math.min(HOTBAR_COUNT[k], max - held.n);
+    held.n += t; if (!(HOTBAR_COUNT[k] -= t)) clearSlot(k);
+  }
+}
+// shift-click: the whole stack to where it fits. Its gear slot first (a tool to a free tool slot; armor, a backpack or a belt
+// to its own slot if that's empty), then: from the hotbar to pockets, then the backpack; from pockets to the hotbar, then the
+// backpack; from the backpack to the hotbar, then pockets; from a gear slot to the hotbar, pockets, then the backpack.
+// Same-item stacks are topped up before empty slots are used.
+function quickMove(i) {
+  const id = HOTBAR[i], d = BLOCKS[id] || {};
+  const open = (a, b) => { const r = []; for (let k = a; k < b; k++) if (slotOpen(k)) r.push(k); return r; };
+  const hot = open(0, 10), pockets = open(POCKET0, PACK0), pack = open(PACK0, TOOL0);
+  const gear = i >= TOOL0 ? [] : isTool(id) ? open(TOOL0, OFF0) : d.armor !== undefined ? [ARMOR0 + d.armor] : d.pack ? [BACK_SLOT] : d.belt ? [BELT_SLOT] : [];
+  const rest = i < 10 ? [...pockets, ...pack] : i < PACK0 ? [...hot, ...pack] : i < TOOL0 ? [...hot, ...pockets] : [...hot, ...pockets, ...pack];
+  const g = gear.find(k => !HOTBAR[k] && fits(k, id));
+  if (g !== undefined) { moveTo(i, g); return; }
+  const max = stackMax(id);
+  let n = HOTBAR_COUNT[i];
+  if (max > 1) for (const k of rest) if (n && HOTBAR[k] === id && HOTBAR_COUNT[k] < max) { const t = Math.min(n, max - HOTBAR_COUNT[k]); HOTBAR_COUNT[k] += t; n -= t; }
+  if (n) { const k = rest.find(k => !HOTBAR[k] && fits(k, id)); if (k !== undefined) { HOTBAR_COUNT[i] = n; moveTo(i, k); return; } }
+  if (n === HOTBAR_COUNT[i]) slotNote('No room');
+  if (n) HOTBAR_COUNT[i] = n; else clearSlot(i);
+}
+function moveTo(i, k) {   // all of slot i into empty slot k
+  if (i === BACK_SLOT) packBack();
+  swapSlots(i, k);
+  if (k === BACK_SLOT) unpackBack();
+  if (i === BELT_SLOT || k === BELT_SLOT) fitBelt();
+}
+// Sort (survival): pockets and the backpack together. The same things join up into full stacks, then go in the creative tabs'
+// order (Building, Natural ... Machines), then by name, fullest first. Exactly as the desktop version.
+function sortPockets() {
+  if (held) return;
+  const slots = [], loose = new Map(), things = [];
+  for (let k = POCKET0; k < TOOL0; k++) if (slotOpen(k)) slots.push(k);
+  for (const k of slots) {
+    const id = HOTBAR[k];
+    if (!id) continue;
+    if (stackMax(id) > 1 && !HOTBAR_DATA[k] && !HOTBAR_WEAR[k]) loose.set(id, (loose.get(id) || 0) + HOTBAR_COUNT[k]);
+    else things.push({ id, n: HOTBAR_COUNT[k], wear: HOTBAR_WEAR[k], data: HOTBAR_DATA[k] });
+  }
+  for (const [id, n] of loose) for (let left = n; left > 0; left -= stackMax(id)) things.push({ id, n: Math.min(stackMax(id), left), wear: 0, data: null });
+  const name = id => BLOCKS[id].name;
+  things.sort((a, b) => tabOf(a.id) - tabOf(b.id) || (name(a.id) < name(b.id) ? -1 : name(a.id) > name(b.id) ? 1 : 0) || b.n - a.n);
+  const was = slots.map(k => [HOTBAR[k], HOTBAR_COUNT[k], HOTBAR_WEAR[k], HOTBAR_DATA[k]]);
+  slots.forEach(clearSlot);
+  for (const t of things) {
+    const k = slots.find(k => !HOTBAR[k] && fits(k, t.id));   // (a backpack can't go in a backpack's slots)
+    if (k === undefined) { slots.forEach((k, j) => { [HOTBAR[k], HOTBAR_COUNT[k], HOTBAR_WEAR[k], HOTBAR_DATA[k]] = was[j]; }); slotNote('No room to sort'); return; }
+    HOTBAR[k] = t.id; HOTBAR_COUNT[k] = t.n; HOTBAR_WEAR[k] = t.wear; HOTBAR_DATA[k] = t.data;
+  }
+  slotsChanged();
+}
+document.getElementById('inv-sort').addEventListener('click', sortPockets);
+// throw n of something out in front of you (it can't be picked straight back up)
+function throwOut(id, n, wear = 0, data = null) {
+  const fx = player.x - Math.sin(player.yaw) * 1.2, fz = player.z - Math.cos(player.yaw) * 1.2;
+  for (let k = n; k > 0; k--) Object.assign(dropItem(id, fx, player.y + 1.2, fz), { age: -1, wear, data });
+}
+// Q: one from slot i, or (Ctrl+Q / Shift+Q) all of it. Not in a friend's world (things on the ground there are their game's).
+function dropFrom(i, all) {
+  if (!HOTBAR[i]) return;
+  if (Net.client) { (invOpen ? slotNote : showNote)("You can't throw things out in a friend's world yet"); return; }
+  throwSlot(i, all ? HOTBAR_COUNT[i] : 1);
+  if (invOpen) showTip();
+}
+function dropHeld() {
+  if (!held) return;
+  if (Net.client) { slotNote("You can't throw things out in a friend's world yet"); return; }
+  throwOut(held.id, held.n, held.wear, held.data); held = null;
+  slotsChanged();
+}
+// closing with a stack held: back where it came from (if that's still free), otherwise into your slots as if you'd picked it
+// up; what doesn't fit drops in front of you (in a friend's world nothing can be dropped: then it stays held, and the
+// inventory stays open)
+function stowHeld() {
+  if (!held) return true;
+  const f = held.from;
+  if (f >= 0 && takesHeld(f)) putIn(f, Math.min(held.n, stackMax(held.id) - (HOTBAR[f] ? HOTBAR_COUNT[f] : 0)));
+  while (held && giveItem(held.id, held.wear, held.data)) if (--held.n <= 0) held = null;
+  if (held && !Net.client) { throwOut(held.id, held.n, held.wear, held.data); held = null; }
+  slotsChanged();
+  return !held;
+}
+// what you carry, for the save: a stack held on the cursor counts as back where it came from (or in the first free slot)
+function carried() {
+  const a = { hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), wear: HOTBAR_WEAR.slice(), data: HOTBAR_DATA.slice() };
+  if (!held) return a;
+  const k = [held.from, ...storeSlots()].find(k => k >= 0 && k !== BACK_SLOT && slotOpen(k) && !a.hotbar[k] && fits(k, held.id));
+  if (k !== undefined) { a.hotbar[k] = held.id; a.counts[k] = held.n; a.wear[k] = held.wear; a.data[k] = held.data; }
+  return a;
+}
 // ---- Offhand: R picks the next offhand slot, F swaps it with the selected hotbar slot; right-click uses it ----
 const offhandEl = document.getElementById('offhand');
 const offIcon = document.createElement('canvas'); offIcon.width = offIcon.height = TILE;
 const offLabel = document.createElement('span'), offCountEl = document.createElement('span'); offCountEl.className = 'count';
 offhandEl.append(offIcon, offLabel, offCountEl);
-if (SURVIVAL) { document.getElementById('offhand-box').style.display = 'block'; layoutHearts(); }
+var toolRowEl = document.getElementById('tool-row'), toolRowSlots = [];   // (var: drawHotbarIcons can run before this line)
+var autoTool = -1, autoToolId = 0;
+if (SURVIVAL) { document.getElementById('offhand-box').style.display = 'block'; toolRowEl.style.display = 'flex'; layoutHearts(); }   // (the tool row fills in with the hotbar: see drawHotbarIcons)
+// ---- the tool row (survival): what's in each of your tool slots, with its wear bar; the one last picked for you (a
+// left-click whose hand didn't hold the right kind of tool) is framed, until another one is, or it isn't there any more ----
+function drawToolRow() {
+  if (!toolRowSlots) return;
+  if (!SURVIVAL) return;
+  const n = toolCount();
+  if (autoTool >= 0 && HOTBAR[autoTool] !== autoToolId) autoTool = -1;   // (it broke, or was moved)
+  let resized = false;
+  while (toolRowSlots.length < n) {
+    const el = document.createElement('div'); el.className = 'slot';
+    const icon = document.createElement('canvas'); icon.width = icon.height = TILE;
+    const wear = document.createElement('div'); wear.className = 'wear'; wear.append(document.createElement('i'));
+    el.append(icon, wear); toolRowEl.append(el); toolRowSlots.push({ el, icon, wear }); resized = true;
+  }
+  toolRowSlots.forEach((sl, k) => {
+    const i = TOOL0 + k, id = HOTBAR[i];
+    if ((sl.el.style.display === 'none') !== (k >= n)) { sl.el.style.display = k < n ? '' : 'none'; resized = true; }
+    if (k >= n) return;
+    drawIcon(sl.icon, id);
+    const max = maxWear(id), left = max ? 1 - HOTBAR_WEAR[i] / max : 1;
+    sl.wear.style.display = max && HOTBAR_WEAR[i] > 0 ? 'block' : 'none';
+    if (max) { sl.wear.firstChild.style.width = Math.max(1, Math.round(left * 24)) + 'px'; sl.wear.firstChild.style.background = `hsl(${Math.round(left * 120)}, 90%, 45%)`; }
+    sl.el.classList.toggle('sel', i === autoTool);
+  });
+  if (resized) layoutHearts();
+}
+// a click used slot i for you: frame it if it's a tool slot (the hand's own tool doesn't count)
+function toolPicked(i) {
+  if (i < TOOL0 || i >= OFF0 || !HOTBAR[i]) return;
+  if (autoTool !== i || autoToolId !== HOTBAR[i]) { autoTool = i; autoToolId = HOTBAR[i]; drawToolRow(); }
+}
 function drawOffhand() {
   if (!SURVIVAL) return;
   const i = OFF0 + offSel, id = HOTBAR[i];
@@ -7040,15 +7684,18 @@ function drawHotbarIcons() {
     if (n) document.getElementById('gear-pack-title').textContent = `${BLOCKS[HOTBAR[BACK_SLOT]].name} (${n} slots)`;
   }
   drawOffhand();
+  drawToolRow();
+  drawArmorBar();
   refreshRecipes();   // (what you can craft depends on what you carry)
 }
-// survival: right-click a hotbar slot (inventory open) to throw that stack out in front of you
-function throwSlot(i) {
+// survival: throw n of slot i (all of it, if not said) out in front of you
+function throwSlot(i, n = HOTBAR_COUNT[i]) {
   if (!HOTBAR[i]) return;
   if (Net.client) { invName.textContent = "You can't throw things out in a friend's world yet"; return; }
+  n = Math.max(1, Math.min(n, HOTBAR_COUNT[i] || 1));
+  if (n < (HOTBAR_COUNT[i] || 1)) { throwOut(HOTBAR[i], n); HOTBAR_COUNT[i] -= n; saveHotbar(); drawHotbarIcons(); return; }
   if (i === BACK_SLOT) packBack();   // (a backpack keeps what was in it)
-  const fx = player.x - Math.sin(player.yaw) * 1.2, fz = player.z - Math.cos(player.yaw) * 1.2;
-  for (let n = HOTBAR_COUNT[i]; n > 0; n--) Object.assign(dropItem(HOTBAR[i], fx, player.y + 1.2, fz), { age: -1, wear: HOTBAR_WEAR[i], data: HOTBAR_DATA[i] });   // (can't be picked straight back up)
+  throwOut(HOTBAR[i], n, HOTBAR_WEAR[i], HOTBAR_DATA[i]);
   setSlot(i, 0);
   if (i === BELT_SLOT) fitBelt();
   sendGear();
@@ -7092,77 +7739,107 @@ function wearTool(cost) {
 
 // ===================== Inventory (E) =====================
 const invEl = document.getElementById('inventory'), invGrid = document.getElementById('inv-grid'), invName = document.getElementById('inv-name');
-const invIcons = [];
-// Creative: each block once, then the items. A block with other forms (pieces, slabs, stairs...) has a + on it:
-// click the + to see them all in a row underneath.
-const INV_LIST = ITEMS.concat(gameMode === 'survival' ? [] : [STICK, ROCK, CRUDE_AXE, CLAY_BALL, BRICK, FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, SNOWBALL, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, ...TOOLS, ...PACK_ITEMS, ...GEAR_ITEMS]);
-const variantsOf = b => SPLITTABLE.includes(b)
-  ? ['piece', 'slab', 'stairs', 'quarter', 'vslab', 'vstairs', 'vquarter'].map(f => formItem(f, b))
-  : b === TORCH ? [SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH] : [];   // (the Torch's + shows its other kinds)
-const invVariants = document.getElementById('inv-variants');
-let openVariants = 0, openPlus = null;
+const invIcons = [];   // the creative list's pictures: [canvas, id, drawn yet]
+// ---- The creative inventory: nine tabs, in this order; each block or item is in one of them (anything not listed goes in
+// Building). Shapes has every form of every block that has them (piece, slab, stairs, quarter, then the vertical ones),
+// block by block. Survival's Sort sorts by this order too. The search box above them finds things (any part of the name, in
+// any case) from all the tabs at once. Exactly as the desktop version.
+const WOOD_SETS = [[4, 61, 7, 5], [FIR_LOG, STRIPPED_FIR_LOG, FIR_PLANKS, FIR_LEAVES], [PALM_LOG, STRIPPED_PALM_LOG, PALM_PLANKS, PALM_LEAVES],
+  [WILLOW_LOG, STRIPPED_WILLOW_LOG, WILLOW_PLANKS, WILLOW_LEAVES]];   // each wood's Log, Stripped Log, Planks and Leaves
+const FORM_ORDER = ['piece', 'slab', 'stairs', 'quarter', 'vslab', 'vstairs', 'vquarter'];
+const INV_TABS = [
+  ['Building', [8, ...deepShown(8), 9, ...deepShown(9), 69, ...deepShown(69), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 10,
+    SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS, ...FIRECLAY_BLOCKS]],
+  ['Natural', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, ...deepShown(3), ...ORES, ...deepOresShown(), 6, 97, 98, 58, MUD, PEAT, 99, 11, 63,
+    FIRECLAY, SNOW, SNOW_BLOCK, WATER, BEDROCK]],
+  ['Wood', WOOD_SETS.flat()],
+  ['Shapes', SPLITTABLE.filter(b => TALL_WORLDS || !DEEP_BLOCKS.includes(b)).flatMap(b => FORM_ORDER.map(f => formItem(f, b)))],
+  ['Light & Decoration', [TORCH, SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH, ...FLOWERS]],
+  ['Tools & Armor', [CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
+  ['Food', Object.keys(BLOCKS).map(Number).filter(id => BLOCKS[id] && BLOCKS[id].food)],
+  ['Materials', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...Object.values(CHUNK), ...Object.values(METAL_BRICK), STEEL_SCRAP,
+    BONE, BONE_ASH, GLOOM_WISP, FIRE_ESSENCE, LEATHER, ...DYE, GRAIN, GRAIN_SEEDS, FLOUR, SNOWBALL]],
+  ['Machines', [CRAFTING_BENCH, CUTTER, FURNACE, FOUNDRY]],
+];
+const TAB_OF = new Map();
+INV_TABS.forEach(([, ids], k) => ids.forEach(id => { if (!TAB_OF.has(id)) TAB_OF.set(id, k); }));
+for (const id of ITEMS) if (!TAB_OF.has(id)) { INV_TABS[0][1].push(id); TAB_OF.set(id, 0); }   // (a block left out of the lists: Building)
+const tabOf = id => TAB_OF.has(id) ? TAB_OF.get(id) : isPiece(id) || formOf(id) ? 3 : 0;
+// creative: every block and item, tab by tab (survival has no list: you only have what you collected)
+const INV_LIST = SURVIVAL ? [] : [...new Set(INV_TABS.flatMap(([, ids]) => ids))].filter(id => BLOCKS[id]);
+const INV_SET = new Set(INV_LIST);
+const invSearch = document.getElementById('inv-search'), invTabsEl = document.getElementById('inv-tabs');
+let invTab = 0;
 function invSlot(id, parent) {
   const slot = document.createElement('div');
   slot.className = 'slot';
   const c = document.createElement('canvas'); c.width = c.height = TILE;
-  invIcons.push([c, id]);
-  drawIcon(c, id);
+  slot._icon = [c, id, false]; invIcons.push(slot._icon);
   slot.append(c);
   slot.draggable = true;
   slot.addEventListener('click', () => setSlot(selected, id));          // into the selected hotbar slot
   slot.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', 'item:' + id));
-  slot.addEventListener('mouseenter', () => { invName.textContent = BLOCKS[id].name; });
-  slot.addEventListener('mouseleave', () => { invName.textContent = ''; });
+  itemHover(slot, () => id);
   parent.append(slot);
   return slot;
 }
-function showVariants(b, plus) {
-  if (openPlus) openPlus.classList.remove('open');
-  if (!b) { openVariants = 0; openPlus = null; invVariants.textContent = ''; invVariants.style.display = 'none'; return; }
-  invVariants.textContent = '';
-  if (openVariants === b || !b) { openVariants = 0; openPlus = null; invVariants.style.display = 'none'; return; }
-  openVariants = b; openPlus = plus; plus.classList.add('open');
-  const label = document.createElement('div'); label.className = 'var-label'; label.textContent = BLOCKS[b].name;
-  invVariants.append(label);
-  for (const id of [b, ...variantsOf(b)]) invSlot(id, invVariants);
-  invVariants.style.display = '';
-}
-// the tabs along the top of the creative inventory (anything not listed goes in Building Blocks)
-const INV_TABS = [
-  ['Building Blocks', [7, 61, FIR_PLANKS, STRIPPED_FIR_LOG, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_PLANKS, STRIPPED_WILLOW_LOG, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS, 8, ...deepShown(8), 9, ...deepShown(9), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 69, ...deepShown(69), 10, 22, CRAFTING_BENCH, CUTTER, FURNACE, ...FIRECLAY_BLOCKS, FOUNDRY]],
-  ['Natural Blocks', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, ...deepShown(3), ...ORES, 4, 5, FIR_LOG, FIR_LEAVES, PALM_LOG, PALM_LEAVES, WILLOW_LOG, WILLOW_LEAVES, 6, 97, 98, 58, MUD, PEAT, 99, 11, 63, FIRECLAY, ...FLOWERS, WATER]],
-  ['Items', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...PACK_ITEMS.slice(0, 12), FIRE_ESSENCE, BONE, BONE_ASH, GLOOM_WISP, GRAIN_SEEDS, GRAIN, FLOUR, BREAD, DATES, SNOWBALL, LEATHER, RAW_MEAT, COOKED_MEAT, ...DYE, CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
-];
-const tabOf = id => Math.max(0, INV_TABS.findIndex(([, ids]) => ids.includes(id)));
-let invTab = 0;
-const invTabsEl = document.getElementById('inv-tabs');
 INV_TABS.forEach(([name], k) => {
   const b = document.createElement('button'); b.textContent = name;
   b.addEventListener('click', () => showInvTab(k));
   invTabsEl.append(b);
 });
-function showInvTab(k) {
-  invTab = k;
-  [...invTabsEl.children].forEach((b, j) => b.classList.toggle('on', j === k));
-  for (const s of invGrid.children) s.style.display = +s.dataset.tab === k ? '' : 'none';
-  showVariants(0);   // (close any open row of forms)
+// only the pictures you can see are drawn (Shapes alone has hundreds), each one once
+function drawShownIcons() { for (const s of invGrid.children) if (s.style.display !== 'none' && !s._icon[2]) { drawIcon(s._icon[0], s._icon[1]); s._icon[2] = true; } }
+// the list shows the picked tab, or (with something in the search box) everything from all the tabs whose name has it in
+function filterInv() {
+  const q = invSearch.value.trim().toLowerCase();
+  [...invTabsEl.children].forEach((b, j) => b.classList.toggle('on', !q && j === invTab));
+  let found = 0;
+  for (const s of invGrid.children) {
+    const on = q ? BLOCKS[s._icon[1]].name.toLowerCase().includes(q) : +s.dataset.tab === invTab;
+    s.style.display = on ? '' : 'none'; found += on;
+  }
+  invName.textContent = q && !found ? 'Nothing found' : '';
+  invGrid.scrollTop = 0;
+  drawShownIcons();
 }
-// each tab lists its blocks in the order above
-INV_LIST.sort((a, b) => tabOf(a) - tabOf(b) || INV_TABS[tabOf(a)][1].indexOf(a) - INV_TABS[tabOf(b)][1].indexOf(b));
-INV_LIST.forEach(id => {
-  const slot = invSlot(id, invGrid);
-  slot.dataset.tab = tabOf(id);
-  if (!variantsOf(id).length) return;
-  const plus = document.createElement('button'); plus.className = 'plus'; plus.title = 'Show the other forms';
-  plus.addEventListener('click', e => { e.stopPropagation(); showVariants(id, plus); });
-  plus.addEventListener('mousedown', e => e.stopPropagation());
-  slot.append(plus);
-});
+function showInvTab(k) { invTab = k; invSearch.value = ''; filterInv(); }
+// a search box: Enter is done, Esc closes the screen (and typing never moves you: see the keys)
+function searchKeys(e) {
+  if (e.code === 'Enter') e.target.blur();
+  if (e.code === 'Escape') { e.target.blur(); if (howtoOpen) closeHowTo(); else if (invOpen) setInventory(false); }
+}
+invSearch.addEventListener('input', filterInv);
+invSearch.addEventListener('keydown', searchKeys);
+INV_LIST.forEach(id => { invSlot(id, invGrid).dataset.tab = tabOf(id); });
 showInvTab(0);
-// survival: no picking blocks from a list; you only have what's in your hotbar
+// Clear hotbar (creative); a hotbar slot dragged back onto the list or the tabs is emptied too
+document.getElementById('inv-clear').addEventListener('click', () => { for (let i = 0; i < 10; i++) setSlot(i, 0); invName.textContent = 'Hotbar cleared'; });
+for (const el of [invGrid, invTabsEl]) {
+  el.addEventListener('dragover', e => { if (invOpen) e.preventDefault(); });
+  el.addEventListener('drop', e => { e.preventDefault(); const d = e.dataTransfer.getData('text/plain'); if (d.startsWith('slot:') && +d.slice(5) < 10) setSlot(+d.slice(5), 0); });
+}
+// survival: no picking blocks from a list; you only have what you collected
 if (SURVIVAL) {
-  invGrid.style.display = invTabsEl.style.display = 'none';
-  document.getElementById('inv-hint').textContent = 'Survival: break blocks to collect them · click a recipe to craft it (tools, armor and gear need a Crafting Bench)\ndrag slots to move or stack them · right-click a slot to throw it out · E to close';
+  for (const id of ['inv-search', 'inv-tabs', 'inv-grid', 'inv-creative-bar']) document.getElementById(id).style.display = 'none';
+  document.getElementById('inv-hint').textContent = 'Survival: break blocks to collect them · click a recipe to craft it (tools, armor and gear need a Crafting Bench)\nclick a slot to pick up or put down · right-click: half, or one · drag to share out · double-click gathers · shift-click moves · Q drops · R: how to make · E to close';
+}
+// ---- Middle-click: pick block. Creative: the block you aim at goes in your hotbar (the slot that already has it is picked,
+// otherwise it goes in the selected slot): the piece you aim at for pieces, a snowlogged block's own block, a torch for a
+// torch. Survival: only picks the hotbar slot that already holds it (or what it drops). Exactly as the desktop version.
+function pickCandidates(hit) {
+  if (hit.slot !== undefined) { const a = pieceMap.get(idx(hit.x, hit.y, hit.z)); return a && a[hit.slot] ? [formItem('piece', spotBlock(a[hit.slot]))] : []; }
+  const b = plainOf(getBlock(hit.x, hit.y, hit.z));
+  return [b, isSnow(b) ? SNOW : 0, isWater(b) ? WATER : 0, BLOCKS[b] && BLOCKS[b].drop, dropFor(b)].filter(Boolean);
+}
+function pickBlock() {
+  const hit = raycast();
+  if (!hit) return;
+  const ids = pickCandidates(hit), hot = HOTBAR.slice(0, 10);
+  if (SURVIVAL) { const id = ids.find(id => hot.includes(id)); if (id) selectSlot(hot.indexOf(id)); return; }
+  const id = ids.find(id => INV_SET.has(id));
+  if (!id) return;
+  if (hot.includes(id)) selectSlot(hot.indexOf(id)); else setSlot(selected, id);
 }
 // ===================== Crafting Bench (right-click one) =====================
 // Pick a block to put on the bench; it splits into 8 pieces, which you click to take into your hotbar.
@@ -7179,9 +7856,9 @@ SPLITTABLE.filter(id => TALL_WORLDS || !DEEP_BLOCKS.includes(id)).forEach(id => 
   const c = document.createElement('canvas'); c.width = c.height = TILE;
   benchIcons.push([c, id]);
   slot.append(c);
+  slot._id = id;
   slot.addEventListener('click', () => { benchBlock = id; drawBench(); });
-  slot.addEventListener('mouseenter', () => { benchName.textContent = BLOCKS[id].name; });
-  slot.addEventListener('mouseleave', () => { benchName.textContent = ''; });
+  itemHover(slot, () => id);
   document.getElementById('bench-grid').append(slot);
 });
 // what the bench cuts the block into: [name, item id offset, blocks used, how many you get]
@@ -7201,13 +7878,32 @@ for (const k in BENCH_MODES) {
   document.getElementById('bench-modes').append(b);
 }
 const benchOutOf = (mode, b) => formItem(mode === 'pieces' ? 'piece' : mode, b);   // what this bench mode makes from block b
+// the Cutter's search box (any part of a block's name) and, in survival, "Can make now" (the blocks you carry enough of for the
+// shape picked); under it, how many of the block the shape needs and how many you have
+const benchSearch = document.getElementById('bench-search'), benchCanEl = document.getElementById('bench-can');
+let benchCan = false;
+function filterBench() {
+  const q = benchSearch.value.trim().toLowerCase(), use = BENCH_MODES[benchMode][2];
+  for (const s of document.getElementById('bench-grid').children)
+    s.style.display = (!q || BLOCKS[s._id].name.toLowerCase().includes(q)) && (!benchCan || countOf(s._id) >= use) ? '' : 'none';
+}
+benchSearch.addEventListener('input', filterBench);
+benchSearch.addEventListener('keydown', searchKeys);
+benchCanEl.addEventListener('click', () => { benchCan = !benchCan; benchCanEl.classList.toggle('on', benchCan); filterBench(); });
+if (!SURVIVAL) benchCanEl.style.display = 'none';
+itemHover(benchIn, () => benchBlock);
+itemHover(document.getElementById('bench-out'), () => benchBlock ? benchOutOf(benchMode, benchBlock) : 0);
 function drawBench() {
   benchIcons.forEach(([c, id]) => drawIcon(c, id));
   drawIcon(benchIn, benchBlock);
-  const [, , , n] = BENCH_MODES[benchMode];
+  const [, , use, n] = BENCH_MODES[benchMode];
   drawIcon(benchOut, benchBlock ? benchOutOf(benchMode, benchBlock) : 0);
   document.getElementById('bench-count').textContent = benchBlock && !(benchMode === 'pieces' && infinitePiece(formItem('piece', benchBlock))) ? n : '';
   for (const b of document.getElementById('bench-modes').children) b.classList.toggle('on', b.dataset.mode === benchMode);
+  const need = document.getElementById('bench-need'), have = benchBlock ? countOf(benchBlock) : 0;
+  need.textContent = SURVIVAL && benchBlock ? `Needs ${use}, you have ${have}` : '';
+  need.classList.toggle('short', have < use);
+  filterBench();
 }
 document.getElementById('bench-out').addEventListener('click', () => {
   if (!benchBlock) return;
@@ -7248,7 +7944,7 @@ let benchIsCutter = false;
 function openBench(cutter) {
   benchIsCutter = cutter;
   benchEl.querySelector('h2').textContent = cutter ? 'Cutter' : 'Crafting Bench';
-  for (const id of ['bench-row', 'bench-modes', 'bench-hint']) document.getElementById(id).style.display = cutter ? '' : 'none';
+  for (const id of ['bench-cut-bar', 'bench-row', 'bench-need', 'bench-modes', 'bench-hint']) document.getElementById(id).style.display = cutter ? '' : 'none';
   document.getElementById('bench-crafting').style.display = !cutter && SURVIVAL ? '' : 'none';
   document.getElementById('bench-craft-hint').style.display = cutter ? 'none' : '';
   benchName.textContent = '';
@@ -7302,6 +7998,7 @@ const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1, [FIR_LOG]: 4, [STRIPPED_FIR_LOG]: 
 const furnaceEl = document.getElementById('furnace'), furnaceName = document.getElementById('furnace-name');
 const furnaceFuel = document.createElement('canvas'); furnaceFuel.width = furnaceFuel.height = TILE;
 document.getElementById('furnace-fuel').append(furnaceFuel);
+itemHover(document.getElementById('furnace-fuel'), () => SURVIVAL && furnaces.get(furnaceAt) ? furnaces.get(furnaceAt).fuel : 0);
 let furnaceAt = -1;   // the open furnace (world index)
 const furnaceOf = i => { if (!furnaces.has(i)) furnaces.set(i, { fuel: 0, fuelN: 0, heat: 0, queue: [], t: 0, burning: false, done: {} }); return furnaces.get(i); };
 // what the furnace has made waits inside it ({id: how many}, no limit) until you take it
@@ -7313,7 +8010,7 @@ function drawFurnaceOut() {
     const s = document.createElement('div'); s.className = 'slot';
     const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, +id);
     const k = document.createElement('span'); k.className = 'count'; k.textContent = n > 1 ? n : '';
-    s.append(c, k); s.title = `${BLOCKS[id].name} (click to take)`;
+    s.append(c, k); itemHover(s, () => +id);
     s.addEventListener('click', () => {
       const g = furnaces.get(furnaceAt); if (!g || !g.done[id]) return;
       let took = 0;
@@ -7347,8 +8044,9 @@ function drawFurnace() {
   list.textContent = '';
   for (const r of SMELTS) {
     if ((r.at || 'kiln') !== stationOf(furnaceAt)) continue;
-    const b = document.createElement('button'); b.className = 'recipe'; b.disabled = SURVIVAL && smeltNeeds(r).some(([id, n]) => countOf(id) < n);
+    const b = document.createElement('button'); b.className = 'recipe' + (SURVIVAL && smeltNeeds(r).some(([id, n]) => countOf(id) < n) ? ' off' : '');
     const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, r.out);
+    itemHover(b, () => r.out);
     const txt = document.createElement('div');
     const nm = document.createElement('div'); nm.textContent = BLOCKS[r.out].name;
     const nd = document.createElement('div'); nd.className = 'needs'; nd.textContent = `${smeltNeeds(r).map(([id, n]) => `${n} ${BLOCKS[id].name}`).join(' + ')} · ${SMELT_TIME} seconds`;
@@ -7668,6 +8366,7 @@ const RECIPES = [
   // Fireclay, like Clay; and the Foundry's blocks
   { out: FIRECLAY_BALL, n: 4, needs: [[FIRECLAY, 1]], at: 'hand' },                           // Fireclay -> 4 Fireclay Balls
   { out: FIRECLAY, n: 1, needs: [[FIRECLAY_BALL, 4]], at: 'hand' },                           // 4 Fireclay Balls packed back into Fireclay
+  { out: FIRECLAY, n: 1, needs: [[63, 1], [6, 1], [11, 1]], at: 'bench' },                     // Clay + Sand + Gravel mixed into Fireclay
   { out: FIRECLAY_BRICKS, n: 1, needs: [[FIRECLAY_BRICK, 4]], at: 'bench' },                   // 4 Fireclay Bricks -> Fireclay Bricks (block)
   { out: FIRECLAY_CASING, n: 1, needs: [[FIRECLAY_BRICK, 4], [FIRECLAY_TERRACOTTA, 1]], at: 'bench' },   // the Foundry's walls
   { out: CHISELED_FIRECLAY, n: 1, needs: [[FIRECLAY_TERRACOTTA, 1]], at: 'bench', tool: 'pickaxe' },   // carved
@@ -7723,39 +8422,123 @@ function craft(r) {
   Sound.place(r.needs[0][0]);
   return true;
 }
-// fill a recipe list: the ones you can make right now first
-function drawRecipes(listEl, atBench, nameEl) {
-  listEl.textContent = '';
-  const can = canCraft;
-  const list = RECIPES.filter(r => (atBench || r.at === 'hand') && (!r.colour || r.needs.some(([id]) => countOf(id) > 0))).sort((a, b) => can(b) - can(a));
-  for (const r of list) {
-    const b = document.createElement('button'); b.className = 'recipe'; b.disabled = !can(r);
-    const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, r.out);
-    const txt = document.createElement('div');
-    const nm = document.createElement('div'); nm.textContent = (r.n > 1 ? r.n + ' ' : '') + BLOCKS[r.out].name;
-    const nd = document.createElement('div'); nd.className = 'needs'; nd.textContent = r.needs.map(([id, k]) => `${k} ${BLOCKS[id].name}`).join(' + ') + (r.axe ? ', with an axe' : '') + (r.tool ? `, with a ${r.tool}` : '');
-    txt.append(nm, nd); b.append(c, txt);
-    b.addEventListener('click', () => {
-      const ok = craft(r);
-      nameEl.textContent = ok ? `Made ${nm.textContent}` : ok === null ? 'No room in your hotbar' : '';
-      drawRecipes(listEl, atBench, nameEl);
-    });
-    listEl.append(b);
+// ---- The recipe lists (the inventory's, by hand, and the Crafting Bench's): a search box (the name of what it makes, or of
+// an ingredient) and "Can make now" (off at first); the ones you can make right now come first. Each recipe shows its
+// ingredients' pictures with how many you have / need (red when you're short), and "Missing: ..." under it. Click a recipe to
+// make it; click an ingredient's picture to see how to make that. Exactly as the desktop version.
+const recipeViews = new Map();   // a recipe list -> { q: what's typed in its search box, can: "Can make now" }
+const toolName = t => t === 'axe' ? 'an axe' : 'a ' + t;
+function recipeRow(r, onCraft) {
+  const b = document.createElement('button'); b.className = 'recipe' + (canCraft(r) ? '' : ' off');
+  const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, r.out);
+  const txt = document.createElement('div');
+  const nm = document.createElement('div'); nm.textContent = (r.n > 1 ? r.n + ' ' : '') + BLOCKS[r.out].name;
+  const ings = document.createElement('div'); ings.className = 'ings';
+  const missing = [];
+  for (const [id, k] of r.needs) {
+    const have = countOf(id), s = document.createElement('span'); s.className = 'ing' + (have < k ? ' short' : '');
+    const ic = document.createElement('canvas'); ic.width = ic.height = TILE; drawIcon(ic, id);
+    s.append(ic, document.createTextNode(`${have}/${k}`));
+    itemHover(s, () => id);
+    s.addEventListener('click', e => { e.stopPropagation(); showHowTo(id); });
+    ings.append(s);
+    if (have < k) missing.push(`${k - have} ${BLOCKS[id].name}`);
   }
+  const tool = r.axe ? 'axe' : r.tool;
+  if (tool) {
+    const has = HOTBAR.some(id => BLOCKS[id] && BLOCKS[id].tool === tool);
+    const t = document.createElement('span'); t.className = 'tool-note' + (has ? '' : ' short'); t.textContent = 'with ' + toolName(tool);
+    ings.append(t);
+    if (!has) missing.push(toolName(tool));
+  }
+  txt.append(nm, ings);
+  if (missing.length) { const m = document.createElement('div'); m.className = 'missing'; m.textContent = 'Missing: ' + missing.join(', '); txt.append(m); }
+  b.append(c, txt);
+  itemHover(b, () => r.out);
+  b.addEventListener('click', () => onCraft(nm.textContent));
+  return b;
+}
+function drawRecipes(listEl, atBench, nameEl) {
+  const v = recipeViews.get(listEl) || { q: '', can: false }, q = v.q.trim().toLowerCase(), top = listEl.scrollTop;
+  const named = id => BLOCKS[id].name.toLowerCase().includes(q);
+  listEl.textContent = '';
+  const list = RECIPES.filter(r => (atBench || r.at === 'hand') && (!r.colour || r.needs.some(([id]) => countOf(id) > 0)) && (!v.can || canCraft(r)) &&
+    (!q || named(r.out) || r.needs.some(([id]) => named(id)))).sort((a, b) => canCraft(b) - canCraft(a));
+  for (const r of list) listEl.append(recipeRow(r, name => {
+    const ok = craft(r);
+    nameEl.textContent = ok ? `Made ${name}` : ok === null ? 'No room in your hotbar' : '';
+    drawRecipes(listEl, atBench, nameEl);
+  }));
+  if (!list.length) { const d = document.createElement('div'); d.className = 'recipe-none'; d.textContent = v.can ? 'Nothing you can make right now' : 'No recipes found'; listEl.append(d); }
+  listEl.scrollTop = top;
 }
 const invRecipes = document.getElementById('inv-recipes'), benchRecipes = document.getElementById('bench-recipes');
+function recipeControls(listEl, searchId, canId, redraw) {
+  const v = { q: '', can: false }, s = document.getElementById(searchId), c = document.getElementById(canId);
+  recipeViews.set(listEl, v);
+  s.addEventListener('input', () => { v.q = s.value; listEl.scrollTop = 0; redraw(); });
+  s.addEventListener('keydown', searchKeys);
+  c.addEventListener('click', () => { v.can = !v.can; c.classList.toggle('on', v.can); listEl.scrollTop = 0; redraw(); });
+}
+recipeControls(invRecipes, 'inv-rsearch', 'inv-can', () => drawRecipes(invRecipes, false, invName));
+recipeControls(benchRecipes, 'bench-rsearch', 'bench-can-r', () => drawRecipes(benchRecipes, true, benchName));
+// ---- How to make: R while pointing at any item (or a click on an ingredient's picture) lists every way to make it, each
+// titled with where: By hand, Crafting Bench (with an axe / a pickaxe when it needs one), Cutter, Kiln or Foundry; each with
+// its ingredients' pictures and counts, then "makes N". Nothing: "Can't be made: found in the world". Click an ingredient to
+// see how to make that; Back or Esc closes it. Exactly as the desktop version.
+const howtoEl = document.getElementById('howto'), howtoList = document.getElementById('howto-list'), howtoIcon = document.getElementById('howto-icon');
+function waysToMake(id) {
+  const ways = [], tool = r => r.axe ? ' (with an axe)' : r.tool ? ` (with ${toolName(r.tool)})` : '';
+  for (const r of RECIPES) if (r.out === id) ways.push([(r.at === 'hand' ? 'By hand' : 'Crafting Bench') + tool(r), r.needs, r.n]);
+  const mode = isPiece(id) ? 'pieces' : formOf(id), from = isPiece(id) ? BLOCKS[id].piece : formOf(id) ? BLOCKS[id].of : 0;
+  if (from && BENCH_MODES[mode]) ways.push(['Cutter', [[from, BENCH_MODES[mode][2]]], BENCH_MODES[mode][3]]);
+  for (const r of SMELTS) if (r.out === id) ways.push([r.at === 'foundry' ? 'Foundry' : 'Kiln', smeltNeeds(r), 1]);
+  return ways;
+}
+function showHowTo(id) {
+  if (!BLOCKS[id]) return;
+  howtoOpen = true;
+  drawIcon(howtoIcon, id);
+  document.getElementById('howto-title').textContent = `How to make ${BLOCKS[id].name}`;
+  howtoList.textContent = '';
+  const ways = waysToMake(id);
+  if (!ways.length) { const d = document.createElement('div'); d.className = 'howto-none'; d.textContent = "Can't be made: found in the world"; howtoList.append(d); }
+  for (const [where, needs, n] of ways) {
+    const row = document.createElement('div'); row.className = 'howto-row';
+    const w = document.createElement('div'); w.className = 'where'; w.textContent = where;
+    const ings = document.createElement('div'); ings.className = 'ings';
+    for (const [nid, k] of needs) {
+      const s = document.createElement('span'); s.className = 'ing';
+      const c = document.createElement('canvas'); c.width = c.height = TILE; drawIcon(c, nid);
+      s.append(c, document.createTextNode(k));
+      itemHover(s, () => nid);
+      s.addEventListener('click', () => showHowTo(nid));
+      ings.append(s);
+    }
+    const mk = document.createElement('span'); mk.className = 'makes'; mk.textContent = `makes ${n}`;
+    ings.append(mk); row.append(w, ings); howtoList.append(row);
+  }
+  howtoEl.style.display = 'flex';
+  howtoEl.querySelector('.panel').scrollTop = 0;
+  tipFor = null; showTip();
+}
+function closeHowTo() { howtoOpen = false; howtoEl.style.display = 'none'; showTip(); }
+document.getElementById('howto-back').addEventListener('click', closeHowTo);
+howtoEl.addEventListener('mousedown', e => { if (e.target === howtoEl) closeHowTo(); });
 // redraw whichever list is open (after crafting, or when your hotbar changes)
 function refreshRecipes() {
   if (!SURVIVAL || !invOpen) return;
   if (invEl.style.display !== 'none') drawRecipes(invRecipes, false, invName);
   if (benchEl.style.display !== 'none' && !benchIsCutter) drawRecipes(benchRecipes, true, benchName);
+  if (benchEl.style.display !== 'none' && benchIsCutter) drawBench();
   if (furnaceEl.style.display !== 'none') drawFurnace();
 }
 if (SURVIVAL) document.getElementById('inv-crafting').style.display = '';   // (the Crafting Bench's list shows when you open one: see openBench)
 
-function drawInventoryIcons() { invIcons.forEach(([c, id]) => drawIcon(c, id)); }
+function drawInventoryIcons() { for (const e of invIcons) e[2] = false; drawShownIcons(); }
 // panel: which screen to show (the inventory, or the Crafting Bench); both pause the game the same way
 function setInventory(open, panel = invEl) {
+  if (!open && invOpen && !stowHeld()) { slotNote('No room: put it down first'); return; }   // (a stack held on the cursor goes back first)
   invOpen = open;
   invEl.style.display = open && panel === invEl ? 'flex' : 'none';
   benchEl.style.display = open && panel === benchEl ? 'flex' : 'none';
@@ -7763,16 +8546,24 @@ function setInventory(open, panel = invEl) {
   if (!open || panel !== furnaceEl) { furnaceAt = -1; furnaceName.textContent = ''; }
   hotbarEl.classList.toggle('open', open);
   invName.textContent = '';
+  if (!open) {
+    if (howtoOpen) closeHowTo();
+    drag = null;
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') document.activeElement.blur();   // (no keys go to a search box once you play)
+  }
+  tipFor = null; showTip(); drawHeld();
   refreshRecipes();
   for (const k in keys) keys[k] = false;
   if (open) { document.exitPointerLock(); overlay.style.display = 'none'; }
   else lockPointer();
 }
+// survival: clicking outside the panel (on the dimmed game) with a stack held drops it in front of you
+for (const el of [invEl, benchEl, furnaceEl]) el.addEventListener('mousedown', e => { if (e.target === el && SURVIVAL && held) dropHeld(); });
 
 drawHotbarIcons(); drawInventoryIcons();
-loadCustomTextures(() => { rebuildGpuAtlas(); tex.needsUpdate = true; drawHotbarIcons(); drawInventoryIcons(); });
+loadCustomTextures(() => { rebuildGpuAtlas(); tex.needsUpdate = true; if (drawIcon.cache) drawIcon.cache.clear(); drawHotbarIcons(); drawInventoryIcons(); });
 function selectSlot(i) {
-  selected = i;
+  selected = i; handShown = HOTBAR[i];
   if (!clicking) act = i;
   [...hotbarEl.children].forEach((s, j) => s.classList.toggle('sel', j === i));
   nameEl.textContent = HOTBAR[i] ? BLOCKS[HOTBAR[i]].name : 'Empty';
@@ -8042,7 +8833,7 @@ function gatherSave() {
     player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health,
               gloom: player.gloom, darkTime: player.darkTime, lightTime: player.lightTime },
     time: timeOfDay,
-    hotbar: HOTBAR.slice(), counts: HOTBAR_COUNT.slice(), wear: HOTBAR_WEAR.slice(), data: HOTBAR_DATA.slice(), offSel, selected,
+    ...carried(), offSel, selected,   // (hotbar, counts, wear, data: with a stack held on the cursor counted as put back)
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health, ...(m.layer > 1 ? { layer: m.layer } : {}),
       ...(MOB_TYPES[m.type].cow ? { baby: m.baby, fed: m.fed, happy: Math.round(m.happy), room: m.room, mateCool: Math.round(m.mateCool) } : {}) })),
     drops: drops.map(d => ({ id: d.id, x: d.x, y: d.y, z: d.z, age: d.age, ...(d.wear ? { wear: d.wear } : {}), ...(d.data ? { data: d.data } : {}), ...(d.keep ? { keep: true } : {}) })),
@@ -8814,7 +9605,8 @@ document.getElementById('new-create').addEventListener('click', async () => {
 
 // ===================== Game loop =====================
 // frames stop when the game is in the background, so a timer keeps queuing the next loop of the song
-setInterval(() => Sound.music(nightMusic ? 'night' : 'day'), 500);
+// (no music in the main menu, which has no world, nor once you've quit: see leaveWorld)
+setInterval(() => { if (!MENU_ONLY && !leavingWorld) Sound.music(nightMusic ? 'night' : 'day'); }, 500);
 const infoEl = document.getElementById('info');
 const underwaterEl = document.createElement('div');
 underwaterEl.style.cssText = 'position:fixed;inset:0;pointer-events:none;background:rgba(20,70,190,0.28);display:none';
@@ -8826,6 +9618,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
+  if (leavingWorld) { renderer.render(scene, camera); return; }   // quitting: the world stands still until the page reloads
   if (MENU_ONLY) {   // the main menu, with no world: just the panorama (or the sky, without its pictures)
     panorama(dt);
     if (pano.ready) renderer.render(pano.scene, pano.cam); else renderer.render(scene, camera);

@@ -58,6 +58,8 @@ public partial class Main : Node3D
 			DisplayServer.WindowSetPosition(usable.Position + (usable.Size - want) / 2 + new Vector2I(0, 16));
 		}
 		Atlas.Build();
+		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--atlasdump=")) is { } ad) { Atlas.Dump(ad[12..]); SetProcess(false); GetTree().Quit(); return; }   // (testing)
+		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--sheetcheck=")) is { } sc) { Atlas.SheetCheck(sc[13..]); SetProcess(false); GetTree().Quit(); return; }   // (testing)
 		Skin.Load();   // your font and gui_atlas.png, for every menu and label
 		blockMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://src/blocks.gdshader") };
 		waterMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://src/water.gdshader"), RenderPriority = 1 };
@@ -104,6 +106,7 @@ public partial class Main : Node3D
 	void StartPlaying()
 	{
 		ready = true;
+		stages.Clear(); foreach (var (m, _) in cracks.Values) if (GodotObject.IsInstanceValid(m)) m.QueueFree(); cracks.Clear();   // (a new world: no blocks half broken)
 		loading.Visible = false;
 		mesher = new ChunkMesher(world);
 		player = new Player(world);
@@ -115,8 +118,8 @@ public partial class Main : Node3D
 		world.NoWater = netClient;   // (in a joined game the host's game runs the water)
 		drops.Client = netClient; drops.AskPickup = d => hostConn?.Send(new Dictionary<string, object> { ["t"] = "pickup", ["k"] = d.K });
 		world.BlockChanged = (i, old, now, _) => { NetBlockChanged(i, now); if (Blocks.IsFurnace(old) && !Blocks.IsFurnace(now)) { if (kilnAt == i) CloseInventory(); kilns.Empty(i, Collect); } };
-		BuildHud();
-		BuildLifeUi();
+		BuildHud(); BuildTips(); BuildHeld();
+		BuildLifeUi(); BuildArmorBar();
 		InitMobs();
 		world.ChunksChanged = set => { lock (dirty) foreach (int c in set) dirty.Add(c); };
 		world.NearbyRebuild = (x, y, z) =>
@@ -164,6 +167,8 @@ public partial class Main : Node3D
 		NetUpdate(dt);
 		Atlas.SpinSaw(delta);   // (the Cutter's saw blade)
 		if (current == null) { MenuOnly(dt); return; }
+		PlaceToolRow(); PlaceTip(); UpdateHeld();
+		if (ready) { HoldToBreak(dt); UpdateCracks(dt); }
 		if (!ready)
 		{
 			if (genTask.IsFaulted) { loading.Text = "Couldn't make the world:\n" + genTask.Exception?.InnerException?.Message; return; }
@@ -371,7 +376,7 @@ public partial class Main : Node3D
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -423,8 +428,8 @@ public partial class Main : Node3D
 			inv.SetSlot(0, Blocks.Dirt, 20); inv.SetSlot(1, Blocks.Tools[1]);
 		}
 		if (args.Contains("--inventory") && !invOpen && !menuOpen) OpenPanel(invPanel);   // (test: the inventory open)
-		var varArg = args.FirstOrDefault(a => a.StartsWith("--variants="));   // (test: a block's other forms shown under the grid)
-		if (varArg != null && invOpen && openVariants == 0) ShowVariants(int.Parse(varArg[11..]), null);
+		var varArg = args.FirstOrDefault(a => a.StartsWith("--search="));   // (test: the creative inventory searching for this)
+		if (varArg != null && invOpen && creativeSearch != null && creativeSearch.Text == "") { creativeSearch.Text = varArg[9..].Replace("_", " "); ShowCreative(); }
 		var pressArg = args.FirstOrDefault(a => a.StartsWith("--press="));   // (test: hold this key down, e.g. --press=Left)
 		if (pressArg != null && !menuOpen && !Input.IsPhysicalKeyPressed(Enum.Parse<Key>(pressArg[8..])))
 			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Enum.Parse<Key>(pressArg[8..]), Pressed = true });
@@ -784,6 +789,240 @@ public partial class Main : Node3D
 			world.SetBlock(x0, y, z0, 0); RemoveMob(cow);
 		}
 		if (throwTested && !throwShown && shotTimer > 1.2f) { throwShown = true; var e = player.EyePos; MakeRock(e + new Vector3(-0.35f, 0, -1.4f)).V = new Vector3(0, 3, 0); MakeRock(e + new Vector3(0.35f, 0, -1.4f), Blocks.Snowball).V = new Vector3(0, 3, 0); }   // (thrown things to look at)
+		if (args.Contains("--hudtest") && !hudTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (test, survival: the Fireclay recipe, the tool row beside the hotbar and its highlight, cows' hearts in the dark)
+			hudTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			var fc = new Inventory(true); fc.Give(63); fc.Give(Blocks.Sand); fc.Give(11);
+			Check("Clay + Sand + Gravel make Fireclay at the bench", Inventory.Recipes.Any(r => r.Out == Blocks.Fireclay && r.At == "bench" && fc.CanCraft(r)));
+			inv.SetSlot(Inventory.BeltSlot, Blocks.Belts[1]);
+			inv.SetSlot(Inventory.Tool0, Blocks.Tools[1]); inv.SetSlot(Inventory.Tool0 + 2, Blocks.CrudeAxe, 1, 10); inv.SetSlot(Inventory.Tool0 + 4, 649 + 1, 1, 200);
+			SelectSlot(0);
+			Check("the tool row shows a slot for each tool slot", toolSlots.Count(s => s.Visible) == inv.ToolCount && inv.ToolCount > 5);
+			UsedToolSlot(Inventory.Tool0 + 2, Blocks.CrudeAxe);
+			Check("the tool picked for you is highlighted", toolSlots[2].Selected && toolSlots.Count(s => s.Selected) == 1);
+			UsedToolSlot(inv.Selected, inv.Held);
+			Check("using what's in your hand leaves the highlight", toolSlots[2].Selected);
+			inv.SetSlot(Inventory.Tool0 + 2, 0);
+			Check("it goes when the tool leaves its slot", toolSlots.All(s => !s.Selected));
+			inv.SetSlot(Inventory.Tool0 + 2, Blocks.CrudeAxe, 1, 10); UsedToolSlot(Inventory.Tool0 + 4, 649 + 1);
+			// a cow's heart deep underground at night is dark, one in the open at noon is bright
+			int x = (int)player.Pos.X, z = (int)player.Pos.Z, top = world.Heights[z * World.WX + x];
+			sky.TimeOfDay = 0.0f; AddHeart(new Vector3(x + 0.5f, top - 12.5f, z + 0.5f));
+			var dark = (Vector3)hearts[^1].Mat.GetShaderParameter("light");
+			sky.TimeOfDay = 0.5f; AddHeart(new Vector3(x + 0.5f, top + 3.5f, z + 0.5f));
+			var lit = (Vector3)hearts[^1].Mat.GetShaderParameter("light");
+			Check($"hearts take the light where they are (cave {dark.X:0.00}, open {lit.X:0.00})", dark.X < 0.3f && lit.X > 0.7f);
+			sky.TimeOfDay = 0.3f;
+			for (int k = 0; k < 6; k++) AddHeart(player.EyePos + new Vector3(-0.6f + k * 0.25f, -0.2f, -1.6f), k * 0.15f);   // (to look at)
+		}
+		if (args.Contains("--heldtest") && !heldTested && !menuOpen && inv.Survival && shotTimer > 0.5f)
+		{   // (test, survival: the held stack, shift-click, Sort, the creative tabs, How to make, the Cutter's search, the pause
+			//  screen and settings, the armor bar and the tool row's place)
+			heldTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			void Empty() { for (int k = 0; k < Inventory.NS; k++) if (k != Inventory.BackSlot && k != Inventory.BeltSlot) inv.SetSlot(k, 0); ClearHeld(); }
+			int P = Blocks.Planks, St = Blocks.Stone, max = Blocks.StackMaxOf(P), p0 = Inventory.Pocket0;
+			Empty();
+			inv.SetSlot(0, P, 10); PickUp(0, inv.Count[0]);
+			Check("click picks up the whole stack", heldId == P && heldN == 10 && inv.Id[0] == 0);
+			PutDown(p0);
+			Check("click again puts it down", heldId == 0 && inv.Id[p0] == P && inv.Count[p0] == 10);
+			PickUp(p0, (inv.Count[p0] + 1) / 2);
+			Check("right-click picks up half (the bigger half)", heldN == 5 && inv.Count[p0] == 5);
+			PutOne(p0 + 1);
+			Check("right-click with a stack held puts down one", heldN == 4 && inv.Id[p0 + 1] == P && inv.Count[p0 + 1] == 1);
+			spreading = true; spreadBtn = MouseButton.Left; spreadSlots.Clear(); spreadSlots.AddRange(new[] { p0 + 2, p0 + 3 }); EndSpread();
+			Check("a left drag shares the held stack out evenly", heldId == 0 && inv.Count[p0 + 2] == 2 && inv.Count[p0 + 3] == 2);
+			PickUp(p0, inv.Count[p0]);   // (5 held)
+			spreading = true; spreadBtn = MouseButton.Right; spreadSlots.Clear(); spreadSlots.AddRange(new[] { p0 + 4, p0 + 5, p0 + 6 }); EndSpread();
+			Check("a right drag puts one in each", heldN == 2 && inv.Count[p0 + 4] == 1 && inv.Count[p0 + 5] == 1 && inv.Count[p0 + 6] == 1);
+			inv.SetSlot(1, St, 3); PutDown(1);
+			Check("putting down on a different item swaps them", heldId == St && heldN == 3 && inv.Id[1] == P && inv.Count[1] == 2);
+			ReturnHeld(false);
+			Check("closing puts the held stack back", heldId == 0 && inv.CountOf(St) == 3);
+			PickUp(p0 + 1, 1); Gather();
+			Check("double-click gathers the same item", heldN == 10 && inv.CountOf(P) == 0);
+			Empty();
+			int pick = Blocks.Tools.First(t => Blocks.B[t].Tool == "pickaxe"), helmet = Blocks.GearItems.First(g => Blocks.B[g].Armor == 0);
+			inv.SetSlot(p0, pick); QuickMove(p0);
+			Check("shift-click from pockets: a tool goes to a free tool slot first", inv.Id[Inventory.Tool0] == pick && inv.Id[p0] == 0);
+			inv.SetSlot(3, helmet); QuickMove(3);
+			Check("shift-click from the hotbar: armor goes on", inv.Id[Inventory.Armor0] == helmet && inv.Id[3] == 0);
+			QuickMove(Inventory.Armor0);
+			Check("shift-click from a gear slot: to the hotbar", inv.Id[0] == helmet);
+			inv.SetSlot(5, P, 5); inv.SetSlot(p0 + 3, P, 10); QuickMove(p0 + 3);
+			Check("shift-click from pockets tops up the hotbar's stack first", inv.Count[5] == 15 && inv.Id[p0 + 3] == 0);
+			QuickMove(5);
+			Check("shift-click from the hotbar goes to the pockets", inv.Id[5] == 0 && inv.Id[p0] == P && inv.Count[p0] == 15);
+			Empty();
+			inv.SetSlot(p0 + 5, Blocks.Stick, 3); inv.SetSlot(p0 + 1, P, 7); inv.SetSlot(p0 + 8, Blocks.Cobblestone, 4); inv.SetSlot(p0 + 2, P, max - 2);
+			SortPockets();
+			Check("Sort: same items merged, in the tabs' order (Building, Wood, ..., Materials), fullest first",
+				inv.Id[p0] == Blocks.Cobblestone && inv.Id[p0 + 1] == P && inv.Count[p0 + 1] == max && inv.Id[p0 + 2] == P && inv.Count[p0 + 2] == 5 && inv.Id[p0 + 3] == Blocks.Stick && inv.Id[p0 + 4] == 0);
+			Empty();
+			Check("Hearts in a tooltip: 2 -> 0.5, 4 -> 1, 6 -> 1.5", Hearts(2) == "0.5" && Hearts(4) == "1" && Hearts(6) == "1.5");
+			Check("every creative block and item is in a tab", AllCreative().All(i => TabPlace(i).at != int.MaxValue) && CreativeTabs.Length == 9);
+			ShowHowTo(Blocks.FormItem("stairs", Blocks.Stone));
+			Check("How to make Stone Stairs: the Cutter, 3 Stone make 4", howPanel.Visible && howTitle.Text == "How to make Stone Stairs" && howList.GetChildren().Count(c => !c.IsQueuedForDeletion()) == 1);
+			ShowHowTo(Blocks.Grass);
+			Check("How to make Grass: can't be made", howList.GetChildren().Where(c => !c.IsQueuedForDeletion()).OfType<Label>().Any(l => l.Text.StartsWith("Can't be made")));
+			CloseInventory();
+			Check("closing How to make closes the screen", !howPanel.Visible && !invOpen);
+			cutSearch.Text = "oak"; FilterCutter();
+			Check("the Cutter's search finds only what matches", cutSlots.Where(c => c.s.Visible).All(c => Blocks.B[c.id].Name.ToLowerInvariant().Contains("oak")) && cutSlots.Any(c => c.s.Visible));
+			cutSearch.Text = ""; cutCan.ButtonPressed = true; FilterCutter();
+			Check("the Cutter's \"Can make now\" shows nothing when you have no blocks", cutSlots.All(c => !c.s.Visible));
+			cutCan.ButtonPressed = false; FilterCutter();
+			Check("the pause screen has all its buttons (Save & quit was missing)", quitBtn.IsInsideTree() && discardBtn.IsInsideTree() && saveBtn.IsInsideTree());
+			Check("Settings in four tabs: Video, Sound, Controls, Game", settingsPages.Select(p => p.tab.Text).SequenceEqual(new[] { "Video", "Sound", "Controls", "Game" }));
+			int Piece(int k) => Blocks.GearItems.First(g => Blocks.B[g].Armor == k && Blocks.B[g].Material == "iron");
+			int Wear(params int[] ks) { for (int k = 0; k < 4; k++) inv.SetSlot(Inventory.Armor0 + k, ks.Contains(k) ? Piece(k) : 0); DrawArmorBar(); return ArmorQuarters(inv.ArmorBlock()); }
+			string Icons() => string.Join(",", Enumerable.Range(0, HEARTS).Select(j => ArmorIconQuarters(j)));   // (quarters in each icon, left to right)
+			Check("armor bar quarters: helmet 4, chest 8, legs 5, boots 3, full set 20, chest + legs 13, none 0",
+				Wear(0) == 4 && Wear(1) == 8 && Wear(2) == 5 && Wear(3) == 3 && Wear(0, 1, 2, 3) == 20 && Wear(1, 2) == 13 && Wear() == 0);
+			Check("the armor bar mirrors the hearts: as many, shown (empty) with no armor on", armorShown && armorIcons.Length == HEARTS && armorIcons.All(t => t.Texture == armorPics[0]));
+			Wear(0);
+			Check($"a helmet: the rightmost icon full, the rest empty ({Icons()})", Icons() == "0,0,0,0,4" && armorIcons[HEARTS - 1].Texture == armorPics[4] && armorIcons.All(t => !t.FlipH));
+			Wear(2);
+			Check($"leggings: one and a quarter from the right, drawn as they are ({Icons()})", Icons() == "0,0,0,1,4" && armorIcons[HEARTS - 2].Texture == armorPics[1] && !armorIcons[HEARTS - 2].FlipH);
+			Wear(3);
+			Check($"boots: three quarters ({Icons()})", Icons() == "0,0,0,0,3" && armorIcons[HEARTS - 1].Texture == armorPics[3]);
+			Wear(1, 2);   // (left on, to see where the bar goes)
+			Check($"chest + legs: three and a quarter ({Icons()})", Icons() == "0,1,4,4,4" && armorIcons[1].Texture == armorPics[1]);
+		}
+		if (args.Contains("--heldtest") && heldTested && !heldPlaced && shotTimer > 1.5f)
+		{   // (a frame later: where the tool row and armor bar went)
+			heldPlaced = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			var bar = hotBarBox.GetGlobalRect();
+			if (toolRow.Position.Y > bar.Position.Y) Check("the tool row sits 4 from the hotbar", Math.Abs(toolRow.Position.X - (bar.End.X + 4)) < 0.5f);
+			else Check("the tool row sits over the hotbar's right end, 4 above the armor bar", Math.Abs(toolRow.GetGlobalRect().End.X - bar.End.X) < 0.5f && Math.Abs(armorBar.GetGlobalRect().Position.Y - 4 - toolRow.GetGlobalRect().End.Y) < 0.5f);
+			Check("the offhand slot sits 4 from the hotbar", Math.Abs(hotBarBox.GetGlobalRect().Position.X - offBox.GetGlobalRect().End.X - 4) < 0.5f);
+			var hr = heartsRect.GetGlobalRect(); var ar = armorBar.GetGlobalRect();
+			Check($"the armor bar: the hearts' size and line, its right end at the hotbar's (hearts {hr}, armor {ar}, hotbar {bar})",
+				ar.Size == hr.Size && Math.Abs(ar.Position.Y - hr.Position.Y) < 0.5f && Math.Abs(ar.End.X - bar.End.X) < 0.5f && Math.Abs(hr.Position.X - bar.Position.X) < 0.5f);
+		}
+		if (args.Contains("--stagetest") && !stageTested && !StageBreakingOn && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (test, survival, stage breaking held back: everything breaks as in Beta 0.1.2.0, and new worlds are land 1)
+			stageTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int Tool(string kind, string mat) => Blocks.Tools.First(t => Blocks.B[t].Tool == kind && Blocks.B[t].Material == mat);
+			int x0 = (int)player.Pos.X + 3, z0 = (int)player.Pos.Z + 3, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -1; dx < 14; dx++) for (int dz = -1; dz < 8; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 9; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			void Grow(int x, int yy, int z, int b) { world.SetBlock(x, yy, z, b); world.Edits.Remove(World.Idx(x, yy, z)); }   // (as if the world grew it)
+			void Aim(int x, int yy, int z) { player.Pos = new Vector3(x + 0.5f, yy + 1.2f, z + 0.5f); player.Flying = true; player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0; }
+			void Hold(int id) { inv.SetSlot(0, id); SelectSlot(0); for (int k = Inventory.Tool0; k < Inventory.Off0; k++) inv.SetSlot(k, 0); }
+			void AimSide(int x, int yy, int z) { player.Pos = new Vector3(x + 0.5f, yy - 1, z + 1.8f); player.Flying = true; player.Pitch = 0; player.Yaw = 0; }   // (from the side, level with it)
+			int Swings(int x, int yy, int z, int max = 40, bool side = false) { int b = world.GetBlock(x, yy, z), n = 0; if (side) AimSide(x, yy, z); else Aim(x, yy, z); while (world.GetBlock(x, yy, z) == b && n < max) { inv.Act = -1; Break(); n++; } return n; }
+			int Dropped(int id) => drops.All.Where(d => d.Id == id).Count();
+			void Clear() { foreach (var d in drops.All.ToArray()) drops.Remove(d); }
+			Grow(x0, y, z0, Blocks.Stone); Hold(0); Aim(x0, y, z0); Break();
+			Check("OFF: Stone by hand needs a pickaxe", world.GetBlock(x0, y, z0) == Blocks.Stone);
+			Clear(); Hold(Tool("pickaxe", "stone"));
+			Check("OFF: Stone: 1 click with a stone pickaxe, 1 Cobblestone", Swings(x0, y, z0) == 1 && Dropped(8) == 1);
+			Grow(x0 + 1, y, z0, Blocks.Strata + 6);
+			Check("OFF: layer-8 Stone is too deep for a stone pickaxe", Swings(x0 + 1, y, z0, 3) == 3 && world.GetBlock(x0 + 1, y, z0) == Blocks.Strata + 6);
+			Grow(x0 + 3, y, z0, Blocks.IronOre); Hold(Tool("pickaxe", "iron")); Clear();
+			Check("OFF: Iron Ore: 1 click, 1 Chunk", Swings(x0 + 3, y, z0) == 1 && Dropped(Blocks.Chunk["iron"]) == 1);
+			int deep = Blocks.DeepOreOf(1, 8); Grow(x0 + 4, y, z0, deep);
+			Check("OFF: layer-8 Iron Ore is too deep for an iron pickaxe", Swings(x0 + 4, y, z0, 3) == 3 && world.GetBlock(x0 + 4, y, z0) == deep);
+			Hold(Tool("pickaxe", "steel")); Clear();
+			Check("OFF: layer-8 Iron Ore with a steel pickaxe: 1 click, 1 Chunk", Swings(x0 + 4, y, z0) == 1 && Dropped(Blocks.Chunk["iron"]) == 1);
+			Grow(x0 + 9, y, z0, Blocks.Sandstone); Hold(0); Clear(); Aim(x0 + 9, y, z0); Break();
+			Check("OFF: Sandstone by hand needs a pickaxe (as in desktop's Beta 0.1.2.0)", world.GetBlock(x0 + 9, y, z0) == Blocks.Sandstone);
+			Hold(Tool("pickaxe", "stone"));
+			Check("OFF: Sandstone: 1 click with a pickaxe, gives itself (the drop fix stays)", Swings(x0 + 9, y, z0) == 1 && Dropped(Blocks.Sandstone) == 1);
+			Grow(x0, y, z0 + 2, Blocks.Log); Hold(0);
+			Check("OFF: a log by hand needs an axe", Swings(x0, y, z0 + 2, 3) == 3 && world.GetBlock(x0, y, z0 + 2) == Blocks.Log);
+			void Tree(int tx, int tz) { for (int u = 0; u < 4; u++) Grow(tx, y + u, tz, Blocks.Log); for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) for (int u = 3; u <= 4; u++) if (world.GetBlock(tx + dx, y + u, tz + dz) == 0) Grow(tx + dx, y + u, tz + dz, Blocks.Leaves); }
+			Tree(x0 + 5, z0 + 5); Hold(Tool("axe", "steel")); Clear();
+			int clicks = Swings(x0 + 5, y, z0 + 5, side: true);
+			if (!TreeFellingOn) Check("OFF: a tree's bottom log: 1 click, and the tree stays up", clicks == 1 && world.GetBlock(x0 + 5, y + 1, z0 + 5) == Blocks.Log && Dropped(Blocks.Log) == 1);
+			else
+			{   // felling on its own (stage breaking off): an axe breaks the bottom log in one click, as always, and the tree comes down
+				Check($"FELLING ALONE: a tree's bottom log, 1 click with an axe, fells the tree ({Dropped(Blocks.Log)} logs)", clicks == 1 && Enumerable.Range(0, 6).All(u => world.GetBlock(x0 + 5, y + u, z0 + 5) == 0) && world.GetBlock(x0 + 4, y + 3, z0 + 5) == 0 && Dropped(Blocks.Log) == 4);
+				Tree(x0 + 9, z0 + 5); Swings(x0 + 9, y + 1, z0 + 5, side: true);
+				Check("FELLING ALONE: breaking a middle log fells nothing", world.GetBlock(x0 + 9, y + 2, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 9, y, z0 + 5) == Blocks.Log);
+				Tree(x0 + 1, z0 + 5); world.SetBlock(x0 + 1, y + 4, z0 + 5, Blocks.Log);   // (a log put down on top)
+				Swings(x0 + 1, y, z0 + 5, side: true);
+				Check("FELLING ALONE: a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
+			}
+			Check("OFF: nothing half broken, no cracks", stages.Count == 0);
+			Check($"new worlds are land {(World.OreSpreadOn ? 2 : 1)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 2 : 1) && current.Land == World.NewLand);
+		}
+		if (args.Contains("--stagetest") && !stageTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (test, survival: stage breaking of Stone, ores and logs, natural or put down, and tree felling)
+			stageTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int Tool(string kind, string mat) => Blocks.Tools.First(t => Blocks.B[t].Tool == kind && Blocks.B[t].Material == mat);
+			int x0 = (int)player.Pos.X + 3, z0 = (int)player.Pos.Z + 3, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -1; dx < 14; dx++) for (int dz = -1; dz < 8; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 9; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			void Grow(int x, int yy, int z, int b) { world.SetBlock(x, yy, z, b); world.Edits.Remove(World.Idx(x, yy, z)); }   // (as if the world grew it)
+			void Aim(int x, int yy, int z) { player.Pos = new Vector3(x + 0.5f, yy + 1.2f, z + 0.5f); player.Flying = true; player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0; }
+			void Hold(int id) { inv.SetSlot(0, id); SelectSlot(0); for (int k = Inventory.Tool0; k < Inventory.Off0; k++) inv.SetSlot(k, 0); }
+			void AimSide(int x, int yy, int z) { player.Pos = new Vector3(x + 0.5f, yy - 1, z + 1.8f); player.Flying = true; player.Pitch = 0; player.Yaw = 0; }   // (from the side, level with it)
+			int Swings(int x, int yy, int z, int max = 40, bool side = false) { int b = world.GetBlock(x, yy, z), n = 0; if (side) AimSide(x, yy, z); else Aim(x, yy, z); while (world.GetBlock(x, yy, z) == b && n < max) { inv.Act = -1; Break(); n++; } return n; }
+			int Dropped(int id) => drops.All.Where(d => d.Id == id).Count();
+			void Clear() { foreach (var d in drops.All.ToArray()) drops.Remove(d); }
+			// Stone
+			Grow(x0, y, z0, Blocks.Stone); Hold(0); Aim(x0, y, z0); Break(); Break();
+			Check("natural Stone by hand: nothing happens", world.GetBlock(x0, y, z0) == Blocks.Stone);
+			Clear(); Hold(Tool("pickaxe", "stone"));
+			Check("natural Stone: 4 swings with a stone pickaxe, 1 Cobblestone", Swings(x0, y, z0) == 4 && Dropped(8) == 1);
+			Grow(x0 + 1, y, z0, Blocks.Strata + 6); Clear();
+			Check("natural layer-8 Stone: 32 swings with a stone pickaxe (no longer too deep)", Swings(x0 + 1, y, z0) == 32 && Dropped(Blocks.DeepCobble + 6) == 1);
+			Grow(x0 + 2, y, z0, Blocks.Strata + 6); Hold(Tool("pickaxe", "steel"));
+			Check("layer-8 Stone: 1 swing with a steel pickaxe", Swings(x0 + 2, y, z0) == 1);
+			// ores
+			Grow(x0 + 3, y, z0, Blocks.IronOre); Hold(Tool("pickaxe", "iron")); Clear();
+			Check("Iron Ore: 1 swing with an iron pickaxe, 1 Chunk", Swings(x0 + 3, y, z0) == 1 && Dropped(Blocks.Chunk["iron"]) == 1);
+			int deep = Blocks.DeepOreOf(1, 8); Grow(x0 + 4, y, z0, deep); Clear();
+			Check($"layer-8 Iron Ore ({deep}): 8 swings with an iron pickaxe, 8 Chunks", deep == 483 && Swings(x0 + 4, y, z0) == 8 && Dropped(Blocks.Chunk["iron"]) == 8);
+			Grow(x0 + 5, y, z0, deep); Hold(Tool("pickaxe", "stone"));
+			Check("layer-8 Iron Ore: a stone pickaxe can't", Swings(x0 + 5, y, z0, 5) == 5 && world.GetBlock(x0 + 5, y, z0) == deep);
+			// put down: the old way
+			world.SetBlock(x0 + 6, y, z0, Blocks.Stone); Clear();
+			Check("put-down Stone: 1 click", Swings(x0 + 6, y, z0) == 1 && Dropped(8) == 1);
+			world.SetBlock(x0 + 7, y, z0, Blocks.Strata + 6);
+			Check("put-down layer-8 Stone: too deep for a stone pickaxe", Swings(x0 + 7, y, z0, 3) == 3 && world.GetBlock(x0 + 7, y, z0) == Blocks.Strata + 6);
+			world.SetBlock(x0 + 8, y, z0, deep); Hold(Tool("pickaxe", "steel")); Clear();
+			Check("put-down deep ore: 1 click, 1 Chunk", Swings(x0 + 8, y, z0) == 1 && Dropped(Blocks.Chunk["iron"]) == 1);
+			Grow(x0 + 9, y, z0, Blocks.Sandstone); Hold(Tool("pickaxe", "stone")); Clear();
+			Check("natural Sandstone: 4 swings, gives itself", Swings(x0 + 9, y, z0) == 4 && Dropped(Blocks.Sandstone) == 1);
+			Grow(x0 + 10, y, z0, 65);
+			Check("natural Terracotta: 4 swings", Swings(x0 + 10, y, z0) == 4);
+			// logs
+			Grow(x0, y, z0 + 2, Blocks.Log); Hold(0); Clear();
+			Check("a natural log: 8 swings by hand, gives the log", Swings(x0, y, z0 + 2) == 8 && Dropped(Blocks.Log) == 1);
+			Grow(x0 + 1, y, z0 + 2, Blocks.Log); Hold(Tool("axe", "stone"));
+			Check("a natural log: 2 swings with a stone axe", Swings(x0 + 1, y, z0 + 2) == 2);
+			world.SetBlock(x0 + 2, y, z0 + 2, Blocks.Log); Hold(0);
+			Check("a put-down log by hand: needs an axe", Swings(x0 + 2, y, z0 + 2, 3) == 3 && world.GetBlock(x0 + 2, y, z0 + 2) == Blocks.Log);
+			// a tree: trunk of 4 with a crown of leaves; breaking its bottom log fells it all
+			void Tree(int tx, int tz) { for (int u = 0; u < 4; u++) Grow(tx, y + u, tz, Blocks.Log); for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) for (int u = 3; u <= 4; u++) if (world.GetBlock(tx + dx, y + u, tz + dz) == 0) Grow(tx + dx, y + u, tz + dz, Blocks.Leaves); }
+			Tree(x0 + 5, z0 + 5); Hold(Tool("axe", "steel")); Clear(); felled = 0;
+			Swings(x0 + 5, y, z0 + 5, side: true);
+			bool gone = Enumerable.Range(0, 6).All(u => world.GetBlock(x0 + 5, y + u, z0 + 5) == 0 && world.GetBlock(x0 + 4, y + 3, z0 + 5) == 0);
+			if (!TreeFellingOn) Check("STAGES ALONE: a tree's bottom log comes out, the tree stays up", world.GetBlock(x0 + 5, y, z0 + 5) == 0 && world.GetBlock(x0 + 5, y + 1, z0 + 5) == Blocks.Log);
+			else {
+			Check($"breaking a tree's bottom log fells the tree ({felled} more blocks, {Dropped(Blocks.Log)} logs)", gone && Dropped(Blocks.Log) == 4);
+			Tree(x0 + 9, z0 + 5); Swings(x0 + 9, y + 1, z0 + 5, side: true);
+			Check("breaking a middle log fells nothing", world.GetBlock(x0 + 9, y + 2, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 9, y, z0 + 5) == Blocks.Log);
+			for (int u = 0; u < 3; u++) Grow(x0 + 12, y + u, z0 + 5, Blocks.Log);
+			Swings(x0 + 12, y, z0 + 5, side: true);
+			Check("a pile of logs with no leaves stays up", world.GetBlock(x0 + 12, y + 1, z0 + 5) == Blocks.Log);
+			Tree(x0 + 1, z0 + 5); world.SetBlock(x0 + 1, y + 4, z0 + 5, Blocks.Log);   // (a log put down on top)
+			Swings(x0 + 1, y, z0 + 5, side: true);
+			Check("a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
+			}   // (felling on)
+			Check($"new worlds are land {(World.OreSpreadOn ? 2 : 1)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 2 : 1) && current.Land == World.NewLand);
+			// half broken, to look at
+			Grow(x0 + 3, y, z0 + 4, Blocks.Stone); Hold(Tool("pickaxe", "stone")); Aim(x0 + 3, y, z0 + 4); Break(); Break();
+			Grow(x0 + 4, y, z0 + 4, Blocks.Log); Hold(0); Aim(x0 + 4, y, z0 + 4); for (int k = 0; k < 7; k++) Break();
+			Check("half-broken blocks stay, with their progress", stages.Count == 2);
+			player.Pos = new Vector3(x0 + 3.5f, y + 1, z0 + 1.2f); player.Pitch = -0.45f; player.Yaw = MathF.PI;
+		}
 		if (args.Contains("--cutshapes") && !cutTested && !menuOpen)
 		{   // (test: slabs, stairs, quarters and pieces of stone, grass and terracotta to look at, and their icons in the hotbar)
 			cutTested = true;
@@ -834,20 +1073,37 @@ public partial class Main : Node3D
 			if (menuOpen) ShowMainMenu(false);
 			pauseMenu.Visible = false;
 		}
+		if (!testGear && inv.Survival && (args.Contains("--wear") || args.Contains("--tools")))
+		{   // (test: armor on, and tools in the tool slots, to see the armor bar and the tool row with)
+			testGear = true;
+			if (args.Contains("--wear"))
+				foreach (int id in Blocks.GearItems.Where(i => Blocks.Get(i)?.Armor >= 0 && Blocks.B[i].Material == "iron")) inv.SetSlot(Inventory.Armor0 + Blocks.B[id].Armor, id);
+			if (args.Contains("--tools"))
+			{
+				var tools = Blocks.Tools.Where(t => Blocks.B[t].Material == "iron").ToArray();
+				for (int k = 0; k < Math.Min(tools.Length, inv.ToolCount); k++) inv.SetSlot(Inventory.Tool0 + k, tools[k]);
+			}
+		}
 		string open = args.FirstOrDefault(a => a.StartsWith("--open="));
 		if (open is "--open=worlds" or "--open=settings" or "--open=pause" or "--open=menu" or "--open=new")
 		{
 			if (open == "--open=worlds" && !worldsPanel.Visible) ShowWorlds(true);
-			if (open == "--open=settings") ShowSettings(true);
+			if (open == "--open=settings") { ShowSettings(true); if (ArgInt("--tab=", -1) >= 0) ShowSettingsTab(ArgInt("--tab=", 0)); }
 			if (open == "--open=new" && !whatsNewPanel.Visible) whatsNewPanel.Visible = true;
-			if (open == "--open=pause" && menuOpen) { ShowMainMenu(false); Input.MouseMode = Input.MouseModeEnum.Visible; }
+			if (open == "--open=pause" && !pauseMenu.Visible) { if (menuOpen) ShowMainMenu(false); pauseMenu.Visible = true; UpdateSaveText(); Input.MouseMode = Input.MouseModeEnum.Visible; }
 		}
 		else if (open != null && !invOpen)
 		{
-			if (open == "--open=kiln") { int x = (int)player.Pos.X, y = (int)player.Pos.Y + 3, z = (int)player.Pos.Z; world.SetBlock(x, y, z, Blocks.Furnace); kilnAt = World.Idx(x, y, z); var f = kilns.Of(kilnAt); f.Queue.Add(Blocks.Brick); f.Queue.Add(Blocks.Stone); f.Done[Blocks.Terracotta] = 3; OpenPanel(kilnPanel); }
+			if (args.Contains("--stuff") && inv.Survival)   // (test: a few things in your slots, to see the recipe book with)
+			{
+				foreach (var (id, n) in new[] { (Blocks.Planks, 12), (Blocks.Stick, 5), (Blocks.Cobblestone, 9), (Blocks.Stone, 1), (Blocks.Rock, 3), (Blocks.Log, 4) })
+					for (int k = 0; k < n; k++) inv.Give(id);
+			}
+			if (open == "--open=howto") { OpenPanel(invPanel); ShowHowTo(Blocks.FormItem("stairs", Blocks.Stone)); }
+			else if (open == "--open=kiln") { int x = (int)player.Pos.X, y = (int)player.Pos.Y + 3, z = (int)player.Pos.Z; world.SetBlock(x, y, z, Blocks.Furnace); kilnAt = World.Idx(x, y, z); var f = kilns.Of(kilnAt); f.Queue.Add(Blocks.Brick); f.Queue.Add(Blocks.Stone); f.Done[Blocks.Terracotta] = 3; OpenPanel(kilnPanel); }
 			else if (open == "--open=bench") { benchBlock = Blocks.Planks; benchMode = 3; OpenBench(true); }
 			else if (open == "--open=craftbench") OpenBench(false);
-			else { if (!inv.Survival) ShowVariants(Blocks.Stone, null); OpenPanel(invPanel); }
+			else OpenPanel(invPanel);
 		}
 		lock (dirty) if (dirty.Count > 0) return;
 		shotTimer += dt;
@@ -878,7 +1134,7 @@ public partial class Main : Node3D
 			bs.Set(17, 2, 3, 0);
 			Check("chunk palette: ids past 255 and chunks with more than 256 kinds of block", ok && bs.Get(17, 2, 3) == 0 && bs.Usage().bytes > 8192);
 		}
-		// Pack & Plate: ores in the ground (gold only deep), and the counts to compare with the web version
+		// Pack & Plate: ores in the ground (gold only deep, or at every depth from Land 2), and the counts to compare with the web version
 		var oreCount = new int[5]; int goldShallow = 0;
 		for (int q = 0; q < world.Blocks.Length; q++)
 		{
@@ -887,7 +1143,8 @@ public partial class Main : Node3D
 			if (ob == Blocks.GoldOre) { var (ox, oy, oz) = World.FromIdx(q); if (world.Heights[oz * World.WX + ox] - oy < 20) goldShallow++; }
 		}
 		GD.Print("ores 142-146: " + string.Join(", ", oreCount));
-		Check("ores and fireclay are in the ground, gold only deep", oreCount.All(n => n > 0) && goldShallow == 0);
+		if (current.Land >= 2) Check("ores and fireclay are in the ground, gold at every depth (Land 2)", oreCount.All(n => n > 0) && goldShallow > 0);
+		else Check("ores and fireclay are in the ground, gold only deep", oreCount.All(n => n > 0) && goldShallow == 0);
 		Check("ores need the right pickaxe", Blocks.B[Blocks.CopperOre].Pick == Blocks.PickTier["stone"] && Blocks.B[Blocks.IronOre].Pick == Blocks.PickTier["copper"]
 			&& Blocks.B[Blocks.TinOre].Pick == Blocks.PickTier["iron"] && Blocks.B[Blocks.GoldOre].Pick == Blocks.PickTier["iron"] && Blocks.B[Blocks.IronOre].Drop == Blocks.Chunk["iron"]);
 		// the Foundry: only works when it's all built
@@ -1265,10 +1522,11 @@ public partial class Main : Node3D
 		{
 			if (invOpen || menuOpen || pauseMenu.Visible || dead) return;
 			if (!locked) { Input.MouseMode = LockMode; return; }
-			if (mb.ButtonIndex == MouseButton.Left) { inv.Act = ActSlot(mb.ButtonIndex); SwingHand(); try { Break(); } finally { inv.Act = -1; } }
+			if (mb.ButtonIndex == MouseButton.Left) { LeftClick(); holdSwing = SwingTime; }
 			else if (mb.ButtonIndex == MouseButton.Right) { inv.Act = ActSlot(mb.ButtonIndex); SwingHand(); try { Place(); } finally { inv.Act = -1; } }
 			else if (mb.ButtonIndex == MouseButton.WheelDown) SelectSlot(inv.Selected + 1);
 			else if (mb.ButtonIndex == MouseButton.WheelUp) SelectSlot(inv.Selected - 1);
+			else if (mb.ButtonIndex == MouseButton.Middle) PickBlock();
 		}
 		else if (e is InputEventKey k && k.Pressed && !k.Echo)
 		{
@@ -1276,6 +1534,7 @@ public partial class Main : Node3D
 			{   // Esc: closes whatever's open; while playing, pauses
 				if (confirm.Visible) return;
 				if (settingsPanel.Visible || worldsPanel.Visible || whatsNewPanel.Visible || multiPanel.Visible) { settingsPanel.Visible = whatsNewPanel.Visible = multiPanel.Visible = false; ShowWorlds(false); }
+				else if (howPanel?.Visible == true) howPanel.Visible = false;
 				else if (invOpen) CloseInventory();
 				else if (pauseMenu.Visible) Resume();
 				else if (!menuOpen) Input.MouseMode = Input.MouseModeEnum.Visible;
@@ -1286,7 +1545,9 @@ public partial class Main : Node3D
 			else if (k.PhysicalKeycode == Key.T && locked) sky.TimeOfDay = (sky.TimeOfDay + 0.125f) % 1;   // skip ahead 1/8 of a day
 			else if (k.PhysicalKeycode == Key.F && locked && inv.Survival) SwapOffhand();   // survival: swap the offhand item with your hand
 			else if (k.PhysicalKeycode == Key.F && locked) { player.Flying = !player.Flying; player.Vel.Y = 0; }
+			else if (k.PhysicalKeycode == Key.R && invOpen) { if (tipSlot != null && GodotObject.IsInstanceValid(tipSlot) && tipSlot.IsVisibleInTree() && tipSlot.ShownId != 0) ShowHowTo(tipSlot.ShownId); }   // R over an item: how to make it
 			else if (k.PhysicalKeycode == Key.R && inv.Survival) CycleOffhand();             // the next offhand slot
+			else if (k.PhysicalKeycode == Key.Q && inv.Survival) DropFromSlot(invOpen ? HoveredSlot() : (locked ? inv.Selected : -1), k.CtrlPressed || k.ShiftPressed);   // Q drops one, Ctrl+Q (or Shift+Q) the stack
 			else if (k.PhysicalKeycode == Key.E) { if (invOpen) CloseInventory(); else OpenPanel(invPanel); }
 			else if (k.PhysicalKeycode >= Key.Key1 && k.PhysicalKeycode <= Key.Key9) SelectSlot((int)(k.PhysicalKeycode - Key.Key1));
 			else if (k.PhysicalKeycode == Key.Key0) SelectSlot(9);

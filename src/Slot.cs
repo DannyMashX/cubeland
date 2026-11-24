@@ -15,13 +15,17 @@ public partial class Slot : Panel
 	public Action<MouseButton> Clicked;
 	public Action Hover, Leave;
 	bool sel, hot;
+	// the tooltip: what this slot shows (ShownId), its tool or armor wear if known (-1: not known), and the game's tooltip
+	public int ShownId, TipWear = -1;
+	public static Action<Slot> TipShow; public static Action TipHide;
 	readonly ColorRect wearBg, wearBar;
 
-	public Slot(int size = 44)
+	// pad: the space round the picture (6 makes a 44 slot's picture 32); bar: how long a full wear bar is
+	public Slot(int size = 44, int pad = 6, int bar = 0)
 	{
 		CustomMinimumSize = new Vector2(size, size);
-		int pic = size - 12;
-		Pic = new TextureRect { Position = new Vector2(6, 6), Size = new Vector2(pic, pic), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+		int pic = size - 2 * pad; if (bar == 0) bar = size - 12;
+		Pic = new TextureRect { Position = new Vector2(pad, pad), Size = new Vector2(pic, pic), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
 			StretchMode = TextureRect.StretchModeEnum.Scale, TextureFilter = TextureFilterEnum.Nearest, MouseFilter = MouseFilterEnum.Ignore };
 		AddChild(Pic);
 		Num = MakeLabel(new Vector2(4, 0)); AddChild(Num);
@@ -29,11 +33,11 @@ public partial class Slot : Panel
 		Count.AddThemeFontSizeOverride("font_size", 12);
 		AddChild(Count);
 		// a worn tool's bar along the bottom: what's left, green when new through yellow to red
-		wearBg = new ColorRect { Color = Colors.Black, Position = new Vector2(6, size - 7), Size = new Vector2(size - 12, 4), Visible = false, MouseFilter = MouseFilterEnum.Ignore };
-		wearBar = new ColorRect { Position = Vector2.Zero, Size = new Vector2(size - 12, 2), MouseFilter = MouseFilterEnum.Ignore };
+		wearBg = new ColorRect { Color = Colors.Black, Position = new Vector2((size - bar) / 2, size - 7), Size = new Vector2(bar, 4), Visible = false, MouseFilter = MouseFilterEnum.Ignore };
+		wearBar = new ColorRect { Position = Vector2.Zero, Size = new Vector2(bar, 2), MouseFilter = MouseFilterEnum.Ignore };
 		wearBg.AddChild(wearBar); AddChild(wearBg);
-		MouseEntered += () => { hot = true; Restyle(); Hover?.Invoke(); };
-		MouseExited += () => { hot = false; Restyle(); Leave?.Invoke(); };
+		MouseEntered += () => { hot = true; Restyle(); Hover?.Invoke(); TipShow?.Invoke(this); };
+		MouseExited += () => { hot = false; Restyle(); Leave?.Invoke(); TipHide?.Invoke(); };
 		Restyle();
 	}
 	static Label MakeLabel(Vector2 at)
@@ -46,6 +50,7 @@ public partial class Slot : Panel
 	}
 	public void Show(int id, int count = 0)
 	{
+		ShownId = id;
 		Pic.Texture = id != 0 ? Atlas.SlotIcon(id) : null;
 		// a cube icon is drawn bigger than the slot, so it's smoothed down rather than missing every other row
 		Pic.TextureFilter = Atlas.Is3DIcon(id) ? TextureFilterEnum.Linear : TextureFilterEnum.Nearest;

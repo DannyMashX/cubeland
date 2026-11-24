@@ -246,6 +246,7 @@ public class Inventory
 		// Fireclay, like Clay; and the Foundry's blocks
 		new() { Out = Blocks.FireclayBall, N = 4, Needs = new[] { (Blocks.Fireclay, 1) } },                     // Fireclay -> 4 Fireclay Balls
 		new() { Out = Blocks.Fireclay, N = 1, Needs = new[] { (Blocks.FireclayBall, 4) } },                     // 4 Fireclay Balls packed back into Fireclay
+		new() { Out = Blocks.Fireclay, N = 1, Needs = new[] { (63, 1), (Blocks.Sand, 1), (11, 1) }, At = "bench" },        // Clay + Sand + Gravel mixed into Fireclay
 		new() { Out = Blocks.FireclayBricks, N = 1, Needs = new[] { (Blocks.FireclayBrick, 4) }, At = "bench" },   // 4 Fireclay Bricks -> Fireclay Bricks (block)
 		new() { Out = Blocks.FireclayCasing, N = 1, Needs = new[] { (Blocks.FireclayBrick, 4), (Blocks.FireclayTerracotta, 1) }, At = "bench" },   // the Foundry's walls
 		new() { Out = Blocks.ChiseledFireclay, N = 1, Needs = new[] { (Blocks.FireclayTerracotta, 1) }, At = "bench", Tool = "pickaxe" },   // carved

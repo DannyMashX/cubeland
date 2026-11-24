@@ -71,7 +71,7 @@ public static class Worlds
 		name = (name ?? "").Trim(); if (name.Length > 32) name = name[..32];
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		var w = new Info { Id = Convert.ToString(now, 16) + Random.Shared.Next(0x1000, 0xffff).ToString("x"), Name = name == "" ? $"World {list.Count + 1}" : name,
-			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.ValidSize(World.TallWorlds ? 640 : size, World.TallWorlds ? 640 : 192), B = World.ValidBiomes(biomes), Land = World.LandVersion };
+			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.ValidSize(World.TallWorlds ? 640 : size, World.TallWorlds ? 640 : 192), B = World.ValidBiomes(biomes), Land = World.NewLand };
 		list.Add(w); SaveList();
 		return w;
 	}

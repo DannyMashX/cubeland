@@ -1,0 +1,18 @@
+{
+  "about": "How to cut textures/blocks/sheets/<name>.png (3 x 3 cells laid out like the block face, cell = width / 3) into pictures. Shared by build-textures.ps1 (web) and Atlas.Build (desktop). cells: picture suffix -> [column, row]; 'full' means no suffix (the plain picture <name>). compose: pictures put together from quarters (TL, TR, BL, BR) of the cell pictures; a quarter not listed stays see-through. A fully see-through cell is a picture that isn't there. A loose file with the same name wins.",
+  "grid": 3,
+  "cells": {
+    "_top_left":     [0, 0], "_top_half":    [1, 0], "_top_right":    [2, 0],
+    "_left_half":    [0, 1], "full":         [1, 1], "_right_half":   [2, 1],
+    "_bottom_left":  [0, 2], "_bottom_half": [1, 2], "_bottom_right": [2, 2]
+  },
+  "compose": {
+    "_no_top_left":     { "TR": "_right_half", "BL": "_bottom_half", "BR": "full" },
+    "_no_top_right":    { "TL": "_left_half", "BL": "full", "BR": "_bottom_half" },
+    "_no_bottom_left":  { "TL": "_top_half", "TR": "full", "BR": "_right_half" },
+    "_no_bottom_right": { "TL": "full", "TR": "_top_half", "BL": "_left_half" },
+    "_diagonal_a":      { "TL": "_top_left", "BR": "_bottom_right" },
+    "_diagonal_b":      { "TR": "_top_right", "BL": "_bottom_left" },
+    "_slab_side":       { "TL": "_top_half", "TR": "_top_half", "BL": "_bottom_half", "BR": "_bottom_half" }
+  }
+}

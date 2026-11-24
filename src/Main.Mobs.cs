@@ -1038,20 +1038,16 @@ public partial class Main
 		var h = new Vector2(v.X, v.Z); if (h.Length() > 0) h = h.Normalized() * SnowballPush;
 		player.Vel.X += h.X; player.Vel.Z += h.Y; player.Vel.Y = Math.Max(player.Vel.Y, SnowballLift);
 	}
-	// the puff of snow: little white squares flying out, falling and fading
-	class Bit { public Vector3 P, V; public float Age; public MeshInstance3D Mesh; public StandardMaterial3D Mat; }
+	// the puff of snow: little white squares flying out, falling and fading (lit and hazed like everything else)
+	class Bit { public Vector3 P, V; public float Age; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
 	readonly List<Bit> bits = new();
-	static QuadMesh bitMesh;
 	void SnowPuff(Vector3 at)
 	{
-		bitMesh ??= new QuadMesh { Size = Vector2.One * 0.08f };
 		for (int i = 0; i < 8; i++)
 		{
 			var d = new Vector3((float)rnd.NextDouble() - 0.5f, (float)rnd.NextDouble() * 0.8f, (float)rnd.NextDouble() - 0.5f).Normalized() * 1.5f;
-			var mat = new StandardMaterial3D { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(0.95f, 0.97f, 1f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-				BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled, CullMode = BaseMaterial3D.CullModeEnum.Disabled };
-			var mi = new MeshInstance3D { Mesh = bitMesh, MaterialOverride = mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = at };
-			mobRoot.AddChild(mi); bits.Add(new Bit { P = at, V = d, Mesh = mi, Mat = mat });
+			var (mi, mat) = Sprite(null, default, new Vector3(0.95f, 0.97f, 1f), 0.08f, at);
+			bits.Add(new Bit { P = at, V = d, Mesh = mi, Mat = mat });
 		}
 	}
 	void UpdateBits(float dt)
@@ -1061,7 +1057,7 @@ public partial class Main
 			b.Age += dt;
 			if (b.Age >= 0.4f) { b.Mesh.QueueFree(); bits.Remove(b); continue; }
 			b.V.Y -= 10 * dt; b.P += b.V * dt; b.Mesh.Position = b.P;
-			b.Mat.AlbedoColor = new Color(0.95f, 0.97f, 1f, 1 - b.Age / 0.4f);
+			b.Mat.SetShaderParameter("alpha", 1 - b.Age / 0.4f);
 		}
 	}
 	// is a flying thing inside a standing body (feet at f)?

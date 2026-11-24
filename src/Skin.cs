@@ -76,6 +76,7 @@ public static class Skin
 	public static IEnumerable<(string name, string path)> Pictures(string folder)
 	{
 		var seen = new HashSet<string>();
+		if (!DirAccess.DirExistsAbsolute(folder)) yield break;   // (a folder that isn't there: no pictures)
 		foreach (string f in DirAccess.GetFilesAt(folder))
 		{
 			string file = f.Replace(".import", "").Replace(".remap", "");

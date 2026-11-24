@@ -79,7 +79,7 @@ public partial class Main
 		if (sa != null)
 		{   // testing: a throwaway world that isn't in your list and never saves
 			tempWorld = true;
-			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : ArgInt("--size=", 1280), B = ArgInt("--biomescale=", 100) / 100.0, Land = HasArg("--oldland") ? 0 : World.LandVersion, Mode = HasArg("--survival") ? "survival" : "creative" };
+			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : ArgInt("--size=", 1280), B = ArgInt("--biomescale=", 100) / 100.0, Land = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--land=")) is { } la ? World.ValidLand(int.Parse(la[7..])) : HasArg("--oldland") ? 0 : World.NewLand, Mode = HasArg("--survival") ? "survival" : "creative" };
 			menuOpen = HasArg("--menu");
 			return;
 		}
@@ -141,21 +141,28 @@ public partial class Main
 		mm.AddChild(Btn("Quit game", () => { SaveWorld(); GetTree().Quit(); }));
 		mm.AddChild(Centre(Text($"{Title} {Version}", 13, 0.75f)));
 
-		// pause screen (Esc), also "Ready" when a world has just opened
+		// pause screen (Esc), also "Ready" when a world has just opened: the title and world name, a wide "Back to game",
+		// Settings / Skin / Multiplayer in a row, "Save world" with how saving goes under it, then (apart, greyer) the ways to quit
 		pauseMenu = Backdrop(0.45f);
 		var pm = Centered(pauseMenu, false);
 		pauseTitle = Centre(Text("Paused", 32)); pm.AddChild(pauseTitle);
 		worldNameLabel = Centre(Text("", 15, 0.85f)); pm.AddChild(worldNameLabel);
-		resumeBtn = Btn("Back to game", Resume); pm.AddChild(resumeBtn);
-		saveBtn = Btn("Save world", () => { savedNote.Text = SaveWorld(true) ? "Saved!" : tempWorld ? "Test worlds don't save." : "Could not save the world."; GetTree().CreateTimer(2.5).Timeout += UpdateSaveText; });
+		const int PauseW = 486; int third = (PauseW - 12) / 3;
+		Button Small(string text, Action click, int w) { var sb = Btn(text, click, w); sb.AddThemeFontSizeOverride("font_size", 18); sb.CustomMinimumSize = new Vector2(w, 40); sb.ClipText = true; sb.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis; return sb; }
+		resumeBtn = Btn("Back to game", Resume, PauseW); pm.AddChild(resumeBtn);
+		var trio = new HBoxContainer(); trio.AddThemeConstantOverride("separation", 6); pm.AddChild(trio);
+		trio.AddChild(Small("Settings", () => ShowSettings(true), third));
+		trio.AddChild(Small("Skin", OpenSkinEditor, third));
+		pauseMultiBtn = Small("Multiplayer", () => { RefreshNetUi(); multiPanel.Visible = true; }, third); trio.AddChild(pauseMultiBtn);
+		saveBtn = Btn("Save world", () => { savedNote.Text = SaveWorld(true) ? "Saved!" : tempWorld ? "Test worlds don't save." : "Could not save the world."; GetTree().CreateTimer(2.5).Timeout += UpdateSaveText; }, PauseW);
 		pm.AddChild(saveBtn);
-		pm.AddChild(Btn("Settings", () => ShowSettings(true)));
-		pm.AddChild(Btn("Skin", OpenSkinEditor));
-		pauseMultiBtn = Btn("Multiplayer", () => { RefreshNetUi(); multiPanel.Visible = true; }); pm.AddChild(pauseMultiBtn);
-		quitBtn = Btn("Save & quit to main menu", () => { if (netClient) { LeaveGame(); return; } SwitchWorld(null, false); });   // (closes the world: see PickWorld) pm.AddChild(quitBtn);
-		discardBtn = Btn("Quit without saving", () => Ask("Quit without saving?\n\nEverything you did since the last save will be lost.", () => { discarding = true; SwitchWorld(null, false); }));
-		pm.AddChild(discardBtn);
 		savedNote = Centre(Text("", 13, 0.8f)); pm.AddChild(savedNote);
+		pm.AddChild(new Control { CustomMinimumSize = new Vector2(0, 14) });
+		var quits = new VBoxContainer { Modulate = new Color(0.78f, 0.78f, 0.78f) }; quits.AddThemeConstantOverride("separation", 6); pm.AddChild(quits);
+		quitBtn = Small("Save & quit to main menu", () => { if (netClient) { LeaveGame(); return; } SwitchWorld(null, false); }, PauseW);   // (closes the world: see PickWorld)
+		quits.AddChild(quitBtn);
+		discardBtn = Small("Quit without saving", () => Ask("Quit without saving?\n\nEverything you did since the last save will be lost.", () => { discarding = true; SwitchWorld(null, false); }), PauseW);
+		quits.AddChild(discardBtn);
 		newerNote = Centre(Text("", 13)); newerNote.AddThemeColorOverride("font_color", new Color(1, 0.8f, 0.4f)); newerNote.AutowrapMode = TextServer.AutowrapMode.WordSmart; newerNote.CustomMinimumSize = new Vector2(420, 0); pm.AddChild(newerNote);
 
 		BuildSettings(); BuildWorlds(); BuildWhatsNew(); BuildMulti(); BuildSkinEditor();
@@ -179,47 +186,72 @@ public partial class Main
 	void RunConfirm() => onConfirm?.Invoke();
 	void RunCancel() => onCancel?.Invoke();
 
+	// Settings, in four tabs: Video, Sound, Controls (with every key), Game
+	int settingsTab; readonly List<(Button tab, Control page)> settingsPages = new();
 	void BuildSettings()
 	{
 		settingsPanel = Backdrop(0.5f);
 		var b = Centered(settingsPanel, true);
 		b.AddChild(Text("Settings", 20));
-		var grid = new GridContainer { Columns = 3 }; grid.AddThemeConstantOverride("h_separation", 14); b.AddChild(grid);
+		var tabs = new HBoxContainer(); tabs.AddThemeConstantOverride("separation", 6); b.AddChild(tabs);
+		GridContainer grid = null; VBoxContainer page = null;
+		void Page(string name)
+		{
+			page = new VBoxContainer { CustomMinimumSize = new Vector2(560, 330) }; page.AddThemeConstantOverride("separation", 6); b.AddChild(page);
+			grid = new GridContainer { Columns = 3 }; grid.AddThemeConstantOverride("h_separation", 14); grid.AddThemeConstantOverride("v_separation", 8); page.AddChild(grid);
+			var t = new Button { Text = name, ToggleMode = true, CustomMinimumSize = new Vector2(120, 34) };
+			int k = settingsPages.Count; t.Pressed += () => ShowSettingsTab(k);
+			tabs.AddChild(t); settingsPages.Add((t, page));
+		}
 		void Slider(string name, int min, int max, int step, Func<int> get, Action<int> set, string unit, Func<int, string> show = null)
 		{
-			var nl = Text(name, 15); nl.CustomMinimumSize = new Vector2(150, 0); grid.AddChild(nl);
+			var nl = Text(name, 15); nl.CustomMinimumSize = new Vector2(170, 0); grid.AddChild(nl);
 			var s = new HSlider { MinValue = min, MaxValue = max, Step = step, Value = get(), CustomMinimumSize = new Vector2(240, 24), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
 			show ??= x => x + unit;
-			var v = Text(show(get()), 15); v.CustomMinimumSize = new Vector2(90, 0);
+			var v = Text(show(get()), 15); v.CustomMinimumSize = new Vector2(110, 0);
 			s.ValueChanged += x => { set((int)x); v.Text = show((int)x); ApplySettings(); };
 			grid.AddChild(s); grid.AddChild(v);
 		}
 		void Toggle(string name, Func<string> label, Action flip)
 		{
-			var nl = Text(name, 15); nl.CustomMinimumSize = new Vector2(150, 0); grid.AddChild(nl);
+			var nl = Text(name, 15); nl.CustomMinimumSize = new Vector2(170, 0); grid.AddChild(nl);
 			var t = new Button { Text = label(), CustomMinimumSize = new Vector2(240, 32) };
 			t.Pressed += () => { flip(); t.Text = label(); ApplySettings(); };
 			grid.AddChild(t); grid.AddChild(new Control());
 		}
-		Slider("Mouse sensitivity", 20, 300, 10, () => settings.Sens, x => settings.Sens = x, "%");
+		Page("Video");
 		Slider("Field of view", 50, 110, 5, () => settings.Fov, x => settings.Fov = x, "");
 		Slider("Render distance", MinRender, MaxRender, 1, () => settings.RenderDist, x => settings.RenderDist = x, " chunks");
 		Slider("GUI scale", 0, MaxGui, 1, () => settings.Gui, x => settings.Gui = x, "", x => x == 0 ? $"Auto ({autoGui}x)" : x + "x");
-		Toggle("Sound (M)", () => settings.Muted ? "Off" : "On", () => settings.Muted = !settings.Muted);
 		Toggle("FPS and position", () => settings.Info ? "Shown" : "Hidden", () => settings.Info = !settings.Info);
-		Toggle("Auto save", () => settings.Autosave ? "On (every 30 seconds)" : "Off", () => settings.Autosave = !settings.Autosave);
-		b.AddChild(Text("Volume", 17));
-		grid = new GridContainer { Columns = 3 }; grid.AddThemeConstantOverride("h_separation", 14); b.AddChild(grid);
-		foreach (var (key, name) in new[] { ("master", "Master"), ("block", "Blocks"), ("player", "Player"), ("mob", "Mobs"), ("music", "Music") })
+		Page("Sound");
+		Toggle("Sound (M)", () => settings.Muted ? "Off" : "On", () => settings.Muted = !settings.Muted);
+		foreach (var (key, name) in new[] { ("master", "Master volume"), ("block", "Blocks"), ("player", "Player"), ("mob", "Mobs"), ("music", "Music") })
 			Slider(name, 0, 100, 5, () => settings.Vol[key], x => settings.Vol[key] = x, "%");
-		b.AddChild(Text("Controls", 17));
-		foreach (var line in new[] {
-			"WASD move · Mouse look · Space jump · Shift sprint",
-			"Left click break · Right click place · 1-9, 0 or scroll wheel pick a block · E inventory",
-			"Survival: right-click while holding chocolate to eat it and get health back",
-			"F or double-tap Space to fly in creative (Space up, Shift down) · T skips time · Esc pauses" })
-			b.AddChild(Text("•  " + line, 13, 0.85f));
-		b.AddChild(Btn("Back", () => ShowSettings(false), 160));
+		Page("Controls");
+		Slider("Mouse sensitivity", 20, 300, 10, () => settings.Sens, x => settings.Sens = x, "%");
+		var keys = new GridContainer { Columns = 2 }; keys.AddThemeConstantOverride("h_separation", 16); keys.AddThemeConstantOverride("v_separation", 3); page.AddChild(keys);
+		foreach (var (key, what) in new[] {
+			("W A S D", "move (Space jump, Shift sprint)"), ("Mouse, arrow keys", "look around"),
+			("Left click", "break (hold to keep breaking)"), ("Right click", "place, use, or eat the food you're holding"),
+			("Middle click", "pick the block you're looking at"), ("1-9, 0, scroll wheel", "pick a hotbar slot"),
+			("E", "inventory"), ("Esc", "pause"),
+			("Q", "drop one (survival)"), ("Ctrl+Q, Shift+Q", "drop the whole stack"),
+			("R", "next offhand item · over an item in a screen: how to make it"), ("F", "creative: fly (or double-tap Space) · survival: swap offhand and hand"),
+			("Shift + right click", "build against a Crafting Bench, Cutter or Kiln"), ("Shift-click", "in your inventory: move a stack across"),
+			("Double-click", "gather a stack together"), ("T · M", "skip time ahead · sound on or off") })
+		{
+			keys.AddChild(Text(key, 13)); keys.AddChild(Text(what, 13, 0.8f));
+		}
+		Page("Game");
+		Toggle("Auto save", () => settings.Autosave ? "On (every 30 seconds)" : "Off", () => settings.Autosave = !settings.Autosave);
+		var back = Btn("Back", () => ShowSettings(false), 160); back.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter; b.AddChild(back);
+		ShowSettingsTab(0);
+	}
+	void ShowSettingsTab(int k)
+	{
+		settingsTab = k;
+		for (int j = 0; j < settingsPages.Count; j++) { settingsPages[j].tab.ButtonPressed = j == k; settingsPages[j].page.Visible = j == k; }
 	}
 	void ShowSettings(bool open) { settingsPanel.Visible = open; }
 

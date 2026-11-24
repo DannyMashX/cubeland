@@ -23,12 +23,10 @@ public partial class Main
 	Slot GearSlot(int i)
 	{
 		var s = new Slot();
-		s.Clicked = b => { if (invOpen && b == MouseButton.Right) ThrowSlot(i); };
-		s.DragData = () => invOpen && inv.Id[i] != 0 ? "slot:" + i : null;
-		s.CanDrop = d => invOpen && d.StartsWith("slot:");
-		s.Dropped = d => MoveSlot(int.Parse(d[5..]), i);
-		s.Hover = () => invName.Text = inv.Id[i] != 0 ? Blocks.B[inv.Id[i]].Name : SlotName(i);
+		s.Clicked = b => { if (invOpen) SurvivalSlotPress(i, b); };   // (see Main.Held)
+		s.Hover = () => { if (inv.Id[i] == 0) invName.Text = SlotName(i); SpreadOver(i); };
 		s.Leave = () => invName.Text = "";
+		slotIndex[s] = i;
 		gearSlots[i] = s;
 		return s;
 	}
@@ -55,8 +53,9 @@ public partial class Main
 		nameLabel = Text("", 15); nameLabel.HorizontalAlignment = HorizontalAlignment.Center;
 		nameLabel.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.8f));
 		bottom.AddChild(nameLabel);
+		noteLift = new Control { MouseFilter = Control.MouseFilterEnum.Ignore }; bottom.AddChild(noteLift);   // (lifts the notes over the armor bar or a moved-up tool row)
 		var center = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-		bottom.AddChild(center);
+		bottom.AddChild(center); nameCenter = center;
 		var barBg = new PanelContainer();
 		barBg.AddThemeStyleboxOverride("panel", Skin.Panel(4, 4));   // (the hotbar is a menu box, like the web version)
 		var col = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore }; col.AddThemeConstantOverride("separation", 4);
@@ -64,13 +63,14 @@ public partial class Main
 		heartsHolder = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };   // (survival: your hearts, above the left end of the hotbar)
 		col.AddChild(heartsHolder);
 		// survival: the offhand slot to the left of the hotbar (R picks the next one, F swaps it with your hand)
-		var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore }; row.AddThemeConstantOverride("separation", 8);
+		var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore }; row.AddThemeConstantOverride("separation", 4);
 		center.RemoveChild(col); center.AddChild(row);
 		var offPanel = new PanelContainer { SizeFlagsVertical = Control.SizeFlags.ShrinkEnd, Visible = inv.Survival };
 		offPanel.AddThemeStyleboxOverride("panel", Skin.Panel(4, 4));
 		offSlot = new Slot { Interactive = false }; offPanel.AddChild(offSlot); offBox = offPanel;
 		row.AddChild(offPanel); row.AddChild(col);
 		col.AddChild(barBg);
+		hotBarBox = barBg;
 		var bar = new HBoxContainer(); bar.AddThemeConstantOverride("separation", 4);
 		barBg.AddChild(bar);
 		bottom.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4), MouseFilter = Control.MouseFilterEnum.Ignore });
@@ -81,11 +81,13 @@ public partial class Main
 			s.Clicked = b =>
 			{
 				if (!invOpen) return;
-				if (b == MouseButton.Right) { if (inv.Survival) ThrowSlot(k); else inv.SetSlot(k, 0); return; }
+				if (inv.Survival) { SurvivalSlotPress(k, b); return; }   // (survival: a stack held on the mouse, see Main.Held)
+				if (b == MouseButton.Right) { inv.SetSlot(k, 0); return; }
 				SelectSlot(k);
 			};
-			s.DragData = () => invOpen && inv.Id[k] != 0 ? "slot:" + k : null;
-			s.CanDrop = d => invOpen && (d.StartsWith("slot:") || (d.StartsWith("item:") && !inv.Survival));
+			if (inv.Survival) { slotIndex[s] = k; s.Hover = () => SpreadOver(k); }
+			s.DragData = () => invOpen && !inv.Survival && inv.Id[k] != 0 ? "slot:" + k : null;
+			s.CanDrop = d => invOpen && !inv.Survival && (d.StartsWith("slot:") || d.StartsWith("item:"));
 			s.Dropped = d =>
 			{
 				if (d.StartsWith("slot:")) MoveSlot(int.Parse(d[5..]), k);
@@ -103,7 +105,8 @@ public partial class Main
 		dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		uiLayer.AddChild(dim);
 		uiLayer.MoveChild(dim, bottom.GetIndex());   // (behind the hotbar, which you use while a screen is open)
-		invPanel = BuildInventory(); benchPanel = BuildBench(); kilnPanel = BuildKiln();
+		BuildToolRow();
+		invPanel = BuildInventory(); benchPanel = BuildBench(); kilnPanel = BuildKiln(); BuildHowTo();
 		DrawHotbar(); SelectSlot(0);
 	}
 	Control Screen(string title, out VBoxContainer body)
@@ -121,50 +124,13 @@ public partial class Main
 	}
 
 	// ===================== Inventory (E) =====================
-	// Creative: each block once, in tabs, then the items. A block with other forms (pieces, slabs, stairs...) has
-	// a + on it: click the + to see them all in a row underneath. Survival: just the recipes you can make by hand.
-	Label invName; VBoxContainer invRecipes; GridContainer invGrid; HBoxContainer invVariants; int openVariants; Button openPlus;
-	readonly List<Button> invTabButtons = new();
-	static readonly (string name, int[] ids)[] InvTabs =
-	{
-		("Building Blocks", new[] { 7, 61, Blocks.FirPlanks, Blocks.StrippedFirLog, Blocks.PalmPlanks, Blocks.StrippedPalmLog, Blocks.WillowPlanks, Blocks.StrippedWillowLog, Blocks.SandstoneBricks, Blocks.ChiseledSandstone, Blocks.SmoothSandstone, Blocks.MudBricks, 8 }.Concat(Blocks.DeepShown(8)).Append(9).Concat(Blocks.DeepShown(9)).Append(64).Concat(Blocks.ColourBricks).Append(65).Concat(Blocks.ColourTerracotta).Append(67).Concat(Blocks.ColourChiseled)
-			.Append(69).Concat(Blocks.DeepShown(69)).Concat(new[] { 10, 22, Blocks.CraftingBench, Blocks.Cutter, Blocks.Furnace }).Concat(Blocks.FireclayBlocks).Append(Blocks.Foundry).ToArray()),
-		("Natural Blocks", new[] { 1, 2, 3 }.Concat(Blocks.DeepShown(3)).Concat(Blocks.Ores).Concat(new[] { 4, 5, Blocks.FirLog, Blocks.FirLeaves, Blocks.PalmLog, Blocks.PalmLeaves, Blocks.WillowLog, Blocks.WillowLeaves, 6, Blocks.Sandstone, Blocks.SnowyGrass, Blocks.SwampGrass, Blocks.Mud, Blocks.Peat, Blocks.Ice, 11, 63, Blocks.Fireclay }).Concat(Blocks.Flowers).Append(Blocks.Water).Concat(Blocks.Soils).ToArray()),
-		("Items", new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireclayBall, Blocks.FireclayBrick, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, Blocks.SteelScrap, Blocks.SteelBrick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Dates, Blocks.Snowball, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }.Concat(Blocks.Dye).Append(Blocks.CrudeAxe).Concat(Blocks.Tools).Concat(Blocks.GearItems).ToArray()),
-	};
-	static int TabOf(int id) => Math.Max(0, Array.FindIndex(InvTabs, t => t.ids.Contains(id)));
-	static int[] VariantsOf(int b) => Array.IndexOf(Blocks.Splittable, b) >= 0
-		? new[] { "piece", "slab", "stairs", "quarter", "vslab", "vstairs", "vquarter" }.Select(f => Blocks.FormItem(f, b)).ToArray()
-		: b == Blocks.Torch ? new[] { Blocks.SmolderingTorch, Blocks.BurntTorch, Blocks.EverTorch } : Array.Empty<int>();
+	// Creative: every block and item in tabs, with a search (see Main.Creative). Survival: your slots, worked with a stack
+	// held on the mouse (see Main.Held), and the recipes you can make by hand.
+	Label invName; VBoxContainer invRecipes;
 	Control BuildInventory()
 	{
 		var scr = Screen("Inventory", out var body);
-		if (!inv.Survival)
-		{
-			var tabs = new HBoxContainer(); body.AddChild(tabs);
-			for (int k = 0; k < InvTabs.Length; k++) { int kk = k; var b = new Button { Text = InvTabs[k].name, ToggleMode = true }; b.Pressed += () => ShowInvTab(kk); tabs.AddChild(b); invTabButtons.Add(b); }
-			invGrid = new GridContainer { Columns = 9 }; invGrid.AddThemeConstantOverride("h_separation", 4); invGrid.AddThemeConstantOverride("v_separation", 4);
-			body.AddChild(invGrid);
-			var list = Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Dates, Blocks.Snowball, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat }).Concat(Blocks.Dye).Concat(Blocks.Tools).Concat(Blocks.PackItems).Concat(Blocks.GearItems)
-				.OrderBy(TabOf).ThenBy(id => Array.IndexOf(InvTabs[TabOf(id)].ids, id)).ToList();
-			foreach (int id in list)
-			{
-				var s = InvSlot(id); s.SetMeta("tab", TabOf(id)); invGrid.AddChild(s);
-				if (VariantsOf(id).Length == 0) continue;
-				// a small + tucked inside the slot's bottom-right corner, clear of the block's picture
-				var plus = new Button { Position = new Vector2(32, 32), Size = new Vector2(10, 10), TooltipText = "Show the other forms" };
-				// the + (or - once open) is two little bars, so it's exactly in the middle
-				plus.AddChild(new ColorRect { Position = new Vector2(2, 4), Size = new Vector2(6, 2), MouseFilter = Control.MouseFilterEnum.Ignore });
-				plus.AddChild(new ColorRect { Position = new Vector2(4, 2), Size = new Vector2(2, 6), MouseFilter = Control.MouseFilterEnum.Ignore });
-				foreach (var st in new[] { "normal", "hover", "pressed" }) plus.AddThemeStyleboxOverride(st, Skin.Button(st != "normal"));
-				plus.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
-				plus.Pressed += () => ShowVariants(id, plus);
-				plus.SetDeferred(Control.PropertyName.Size, new Vector2(10, 10));   // (something widens it on its way into the slot)
-				s.AddChild(plus);
-			}
-			invVariants = new HBoxContainer { Visible = false }; invVariants.AddThemeConstantOverride("separation", 4);
-			body.AddChild(invVariants);
-		}
+		if (!inv.Survival) BuildCreative(body);
 		else
 		{   // survival: your slots on the left, crafting on the right
 			var split = new HBoxContainer(); split.AddThemeConstantOverride("separation", 20);
@@ -184,7 +150,7 @@ public partial class Main
 			for (int i = Inventory.Tool0; i < Inventory.Off0; i++) tl.AddChild(GearSlot(i));
 			Head(left, "Offhand (R picks one · F swaps it with your hand · right-click uses it)"); var off = Grid(left);
 			for (int i = Inventory.Off0; i < Inventory.Armor0; i++) off.AddChild(GearSlot(i));
-			Head(left, "Pockets"); var pk = Grid(left);
+			var ph = Row(left); ph.AddChild(Text("Pockets", 12, 0.85f)); var sort = new Button { Text = "Sort" }; sort.AddThemeFontSizeOverride("font_size", Skin.Size(12)); sort.Pressed += SortPockets; ph.AddChild(sort); var pk = Grid(left);   // (Sort: pockets and backpack)
 			for (int i = Inventory.Pocket0; i < Inventory.Pack0; i++) pk.AddChild(GearSlot(i));
 			var pw = new VBoxContainer(); pw.AddThemeConstantOverride("separation", 4); left.AddChild(pw); packWrap = pw;
 			packTitle = Text("Backpack", 12, 0.85f); pw.AddChild(packTitle); var pg = Grid(pw);
@@ -195,9 +161,8 @@ public partial class Main
 		}
 		invName = Text(""); invName.CustomMinimumSize = new Vector2(0, 18); body.AddChild(invName);
 		body.AddChild(Text(inv.Survival
-			? "Survival: break blocks to collect them · click a recipe to craft it (tools, armor and gear need a Crafting Bench)\ndrag slots to move or stack them · right-click a slot to throw it out · E to close"
-			: "Click a block to put it in the selected hotbar slot, or drag it onto a slot · right-click a hotbar slot to empty it · E to close", 12, 0.65f));
-		if (!inv.Survival) ShowInvTab(0);
+			? "Click a slot to pick up its stack, click again to put it down · right-click: half, or put down one · drag a held stack to share it out\nShift-click moves a stack · double-click gathers · Q drops one, Ctrl+Q the stack · R: how to make it · E to close"
+			: "Click a block or item to put it in the selected hotbar slot, or drag it onto a slot · drag a hotbar slot back here to empty it · E to close", 12, 0.65f));
 		return scr;
 	}
 	Slot InvSlot(int id)
@@ -205,51 +170,10 @@ public partial class Main
 		var s = new Slot(); s.Show(id);
 		s.Clicked = b => { if (b == MouseButton.Left) inv.SetSlot(inv.Selected, id); };
 		s.DragData = () => "item:" + id;
-		s.Hover = () => invName.Text = Blocks.B[id].Name; s.Leave = () => invName.Text = "";
+		s.CanDrop = d => d.StartsWith("slot:");
+		s.Dropped = d => { int k = int.Parse(d[5..]); if (k < Inventory.Slots) inv.SetSlot(k, 0); };   // (a hotbar slot dragged back: emptied)
 		return s;
 	}
-	void ShowInvTab(int k)
-	{
-		for (int j = 0; j < invTabButtons.Count; j++) invTabButtons[j].ButtonPressed = j == k;
-		foreach (var c in invGrid.GetChildren()) if (c is Slot s) s.Visible = (int)s.GetMeta("tab") == k;
-		ShowVariants(0, null);
-	}
-	void ShowVariants(int b, Button plus)
-	{
-		if (openPlus != null) openPlus.GetChild<ColorRect>(1).Visible = true;
-		foreach (var c in invVariants.GetChildren()) c.QueueFree();
-		if (b == 0 || openVariants == b) { openVariants = 0; openPlus = null; invVariants.Visible = false; return; }
-		openVariants = b; openPlus = plus; if (plus != null) plus.GetChild<ColorRect>(1).Visible = false;
-		invVariants.AddChild(Text(Blocks.B[b].Name, 13, 0.8f));
-		foreach (int id in new[] { b }.Concat(VariantsOf(b))) invVariants.AddChild(InvSlot(id));
-		invVariants.Visible = true;
-	}
-	Control RecipeList(out VBoxContainer list)
-	{
-		var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(440, 230), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
-		list = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill }; list.AddThemeConstantOverride("separation", 4);
-		scroll.AddChild(list);
-		return scroll;
-	}
-	// fill a recipe list: the ones you can make right now first
-	void DrawRecipes(VBoxContainer list, bool atBench, Label name)
-	{
-		foreach (var c in list.GetChildren()) c.QueueFree();
-		foreach (var r in Inventory.Recipes.Where(r => (atBench || r.At == "hand") && (!r.Colour || r.Needs.Any(n => inv.CountOf(n.id) > 0))).OrderBy(r => inv.CanCraft(r) ? 0 : 1))
-		{
-			string title = (r.N > 1 ? r.N + " " : "") + Blocks.B[r.Out].Name;
-			var b = new Button { Text = $"{title}\n{Inventory.NeedsText(r)}", Icon = Atlas.SlotIcon(r.Out), Alignment = HorizontalAlignment.Left,
-				Disabled = !inv.CanCraft(r), TextureFilter = Atlas.Is3DIcon(r.Out) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest, ExpandIcon = true };
-			b.AddThemeConstantOverride("icon_max_width", 32);
-			b.Pressed += () =>
-			{
-				var ok = inv.Craft(r);
-				name.Text = ok == true ? $"Made {title}" : ok == null ? "No room in your hotbar" : "";
-			};
-			list.AddChild(b);
-		}
-	}
-
 	// ===================== Crafting Bench =====================
 	// Pick a block to put on the bench and what to cut it into; click what comes out to take it into your hotbar.
 	Label benchName, benchCount, benchTitle; Slot benchIn, benchOut; VBoxContainer benchRecipes; int benchBlock, benchMode;
@@ -261,14 +185,23 @@ public partial class Main
 		var scr = Screen("Crafting Bench", out var body);
 		benchTitle = FindTitle(body);
 		var row = new HBoxContainer(); row.AddThemeConstantOverride("separation", 18); body.AddChild(row);
+		// the blocks you can cut, with a search and (survival) "Can make now": only the ones you have enough of
+		var pick = new VBoxContainer(); pick.AddThemeConstantOverride("separation", 4); row.AddChild(pick);
+		var find = new HBoxContainer(); find.AddThemeConstantOverride("separation", 8); pick.AddChild(find);
+		cutSearch = new LineEdit { PlaceholderText = "Search", ClearButtonEnabled = true, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		cutCan = new CheckBox { Text = "Can make now", Visible = inv.Survival };
+		find.AddChild(cutSearch); find.AddChild(cutCan);
+		cutSearch.TextChanged += _ => FilterCutter(); cutCan.Toggled += _ => FilterCutter();
+		var gscroll = new ScrollContainer { CustomMinimumSize = new Vector2(7 * 48 + 12, 5 * 48), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+		pick.AddChild(gscroll);
 		var grid = new GridContainer { Columns = 7 }; grid.AddThemeConstantOverride("h_separation", 4); grid.AddThemeConstantOverride("v_separation", 4);
-		row.AddChild(grid);
+		gscroll.AddChild(grid);
 		foreach (int id in Blocks.Splittable.Where(b => World.TallWorlds || Array.IndexOf(Blocks.DeepBlocks, b) < 0))   // (the deep layers' stone only while tall worlds are on)
 		{
 			var s = new Slot(); s.Show(id);
 			s.Clicked = _ => { benchBlock = id; DrawBench(); };
 			s.Hover = () => benchName.Text = Blocks.B[id].Name; s.Leave = () => benchName.Text = "";
-			grid.AddChild(s);
+			grid.AddChild(s); cutSlots.Add((id, s));
 		}
 		var craft = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center }; craft.AddThemeConstantOverride("separation", 10);
 		row.AddChild(craft);
@@ -276,6 +209,7 @@ public partial class Main
 		craft.AddChild(Text("→", 22, 0.8f));
 		benchOut = new Slot(56) { SizeFlagsVertical = Control.SizeFlags.ShrinkCenter }; craft.AddChild(benchOut);
 		benchCount = benchOut.Count;
+		cutNeed = Text("", 12); cutNeed.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter; craft.AddChild(cutNeed);   // (survival: "needs 3, you have 1")
 		benchOut.Clicked = _ => { if (benchBlock != 0) benchName.Text = inv.BenchCut(benchBlock, benchMode); };
 		benchOut.Hover = () =>
 		{
@@ -317,6 +251,13 @@ public partial class Main
 		benchOut.Show(benchBlock != 0 ? Blocks.BenchOut(m.key, benchBlock) : 0);
 		benchCount.Text = benchBlock != 0 && !(m.key == "pieces" && inv.InfinitePiece(Blocks.FormItem("piece", benchBlock))) ? m.n.ToString() : "";
 		for (int k = 0; k < benchModeButtons.Count; k++) benchModeButtons[k].ButtonPressed = k == benchMode;
+		if (cutNeed != null)
+		{
+			int have = benchBlock != 0 ? inv.CountOf(benchBlock) : 0;
+			cutNeed.Text = inv.Survival && benchBlock != 0 ? $"needs {m.use}, you have {have}" : "";
+			if (have < m.use) cutNeed.AddThemeColorOverride("font_color", new Color(1, 0.45f, 0.4f)); else cutNeed.RemoveThemeColorOverride("font_color");
+		}
+		FilterCutter();
 	}
 
 	// ===================== Kiln =====================
@@ -427,6 +368,8 @@ public partial class Main
 	}
 	void CloseInventory()
 	{
+		if (heldId != 0 && !ReturnHeld(true)) { invName.Text = benchName.Text = kilnName.Text = "No room: put it down first"; return; }   // (a stack held on the mouse goes back into your slots)
+		if (howPanel?.Visible == true) howPanel.Visible = false;
 		invOpen = false; kilnAt = -1;
 		dim.Visible = false;
 		Input.MouseMode = LockMode;
@@ -440,6 +383,116 @@ public partial class Main
 		if (kilnPanel.Visible) DrawKiln();
 	}
 
+
+	// ===================== the tool row (survival) =====================
+	// The tools in your tool slots, shown beside the hotbar (or just above its right end if there's no room). Only to look at:
+	// the one last picked for you (breaking a block or hitting a mob without the right tool in your hand) is highlighted
+	// until a different one is picked, or it breaks or leaves its slot.
+	Control hotBarBox; PanelContainer toolRow; readonly Slot[] toolSlots = new Slot[Inventory.Off0 - Inventory.Tool0];
+	int autoTool = -1, autoToolId;
+	void BuildToolRow()
+	{
+		toolRow = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+		toolRow.AddThemeStyleboxOverride("panel", Skin.Panel(4, 4));
+		var r = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore }; r.AddThemeConstantOverride("separation", 4);
+		toolRow.AddChild(r);
+		for (int k = 0; k < toolSlots.Length; k++) { var s = new Slot(36, 2, 24) { Interactive = false, MouseFilter = Control.MouseFilterEnum.Ignore }; toolSlots[k] = s; r.AddChild(s); }
+		uiLayer.AddChild(toolRow);
+	}
+	void DrawToolRow()
+	{
+		if (toolRow == null) return;
+		if (autoTool >= 0 && inv.Id[autoTool] != autoToolId) autoTool = -1;   // (it broke, or went somewhere else)
+		for (int k = 0; k < toolSlots.Length; k++)
+		{
+			int i = Inventory.Tool0 + k; var s = toolSlots[k];
+			s.Visible = k < inv.ToolCount;
+			s.Show(inv.Id[i]);
+			int max = Inventory.MaxWear(inv.Id[i]);
+			s.ShowWear(max > 0 && inv.Wear[i] > 0 ? 1 - (float)inv.Wear[i] / max : -1);
+			s.TipWear = inv.Wear[i];
+			s.Selected = i == autoTool;
+		}
+		toolRow.ResetSize();
+	}
+	// a left-click used the tool in tool slot i for you
+	void UsedToolSlot(int i, int id)
+	{
+		if (i < Inventory.Tool0 || i >= Inventory.Off0 || i == inv.Selected) return;
+		autoTool = inv.Id[i] == id ? i : -1; autoToolId = id;
+		DrawToolRow(); DrawArmorBar();
+	}
+	// every frame: the tool row beside the hotbar if it fits (4 from it, and 4 from the screen's edge), otherwise above the
+	// hotbar's right end one line up (4 above the hearts' line, so above the armor bar, never over it). The armor bar mirrors
+	// the hearts: its right end at the hotbar's right end, on the hearts' line. Notes (the block's name, "Saved" ...) go above it all.
+	void PlaceToolRow()
+	{
+		if (toolRow == null || hotBarBox == null) return;
+		toolRow.Visible = inv.Survival && hotBarBox.IsVisibleInTree();
+		var bar = hotBarBox.GetGlobalRect(); float screen = toolRow.GetViewportRect().Size.X;
+		float lineH = heartsRect != null && heartsRect.IsVisibleInTree() ? heartsRect.Size.Y : armorBar != null ? armorBar.Size.Y : 0;
+		float lineTop = bar.Position.Y - 4 - lineH;   // (the top of the hearts' line)
+		float top = float.MaxValue;
+		if (armorBar != null)
+		{
+			armorBar.Visible = armorShown && hotBarBox.IsVisibleInTree();
+			if (armorBar.Visible) armorBar.Position = new Vector2(bar.End.X - armorBar.Size.X, bar.Position.Y - 4 - armorBar.Size.Y);
+		}
+		if (toolRow.Visible)
+		{
+			var size = toolRow.Size;
+			if (bar.End.X + 4 + size.X <= screen - 4) toolRow.Position = new Vector2(bar.End.X + 4, bar.End.Y - size.Y);
+			else { toolRow.Position = new Vector2(bar.End.X - size.X, lineTop - 4 - size.Y); top = toolRow.Position.Y; }
+		}
+		// the notes: lifted clear of anything above the hearts' line
+		if (noteLift != null && nameCenter != null)
+		{
+			float lift = top == float.MaxValue ? 0 : Math.Max(0, nameCenter.GetGlobalRect().Position.Y - top);
+			if (Math.Abs(noteLift.CustomMinimumSize.Y - lift) > 0.5f) noteLift.CustomMinimumSize = new Vector2(0, lift);
+		}
+	}
+
+	// ===================== the armor bar (survival) =====================
+	// The hearts' mirror: as many pictures as hearts, their size and spacing, filling from its right end inward in quarters,
+	// as the hearts do, with the share of each hit your armor takes (a full new set, half of every hit, fills it). Pictures:
+	// textures/gui/armor_full / three_quarter / half / quarter / empty; the part-filled ones are drawn flipped, so they fill
+	// from the outer (right) side, the mirror of the hearts. Shown all the time in survival (empty with no armor on), unless
+	// the pictures are missing.
+	Control armorBar; TextureRect[] armorIcons; Texture2D[] armorPics; bool armorShown;
+	Control noteLift, nameCenter;
+	void BuildArmorBar()
+	{
+		Texture2D Pic(string name) => ResourceLoader.Exists($"res://textures/gui/{name}.png") ? ResourceLoader.Load<Texture2D>($"res://textures/gui/{name}.png") : null;
+		armorPics = new[] { "armor_empty", "armor_quarter", "armor_half", "armor_three_quarter", "armor_full" }.Select(Pic).ToArray();   // (by quarters held: 0 to 4)
+		if (armorPics.Any(p => p == null) || !inv.Survival) return;
+		int scale = Math.Max(1, (int)Math.Round(18.0 / HS));   // (the hearts' scale, see BuildHearts)
+		var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false }; row.AddThemeConstantOverride("separation", (HP - HS) * scale);
+		armorIcons = new TextureRect[HEARTS];
+		for (int k = 0; k < HEARTS; k++)
+		{
+			armorIcons[k] = new TextureRect { TextureFilter = CanvasItem.TextureFilterEnum.Nearest, ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize, StretchMode = TextureRect.StretchModeEnum.Scale,
+				CustomMinimumSize = new Vector2(HS, HS) * scale, MouseFilter = Control.MouseFilterEnum.Ignore };
+			row.AddChild(armorIcons[k]);
+		}
+		armorBar = row; uiLayer.AddChild(row);
+	}
+	// how many quarters the armor bar shows (0 to 4 per heart): a full new set (which takes half of every hit) fills it
+	public static int ArmorQuarters(float block) => (int)Math.Floor(block * 8 * HEARTS + 0.5f);
+	// how many quarters icon j (from the left) holds
+	int ArmorIconQuarters(int j) => Math.Clamp(ArmorQuarters(inv.ArmorBlock()) - 4 * (HEARTS - 1 - j), 0, 4);   // (counted from the right end)
+	void DrawArmorBar()
+	{
+		if (armorBar == null) return;
+		armorShown = inv.Survival;
+		for (int j = 0; j < HEARTS; j++)
+		{
+			int q = ArmorIconQuarters(j);
+			armorIcons[j].Texture = armorPics[q];
+			armorIcons[j].FlipH = false;   // (the pictures are drawn mirrored already: filled on the right)
+		}
+		armorBar.ResetSize();
+	}
+
 	// ===================== the hotbar =====================
 	void DrawHotbar()
 	{
@@ -450,10 +503,12 @@ public partial class Main
 			sl.Show(inv.Id[i], inv.Counted(inv.Id[i]) && !inv.InfinitePiece(inv.Id[i]) ? inv.Count[i] : 0);
 			int max = Inventory.MaxWear(inv.Id[i]);   // a worn tool or piece of armor: a bar of what's left
 			sl.ShowWear(inv.Survival && max > 0 && inv.Wear[i] > 0 ? 1 - (float)inv.Wear[i] / max : -1);
+			sl.TipWear = inv.Survival ? inv.Wear[i] : -1;
 			if (i < Inventory.Slots) continue;
 			sl.Visible = inv.SlotOpen(i);
 			sl.Num.Text = inv.Id[i] == 0 ? SlotWord(i) : ""; sl.Num.Modulate = new Color(1, 1, 1, 0.4f);
 		}
+		DrawToolRow(); DrawArmorBar();
 		if (packWrap != null)
 		{
 			packWrap.Visible = inv.PackSize > 0;

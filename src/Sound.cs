@@ -34,7 +34,7 @@ public partial class Sound : Node
 		for (int k = 0; k < 8; k++) Material[Blocks.Furnace + k] = "brick";
 		foreach (int b in Blocks.NewColourBlocks) Material[b] = "brick";
 		for (int b = Blocks.Strata; b <= Blocks.DeepLast; b++) Material[b] = "rock";   // (the deep stone sets and bedrock sound like stone)
-		foreach (int b in Blocks.Ores) Material[b] = "rock";
+		foreach (int b in Blocks.Ores.Concat(Blocks.DeepOres)) Material[b] = "rock";
 		Material[Blocks.Fireclay] = "dirt";
 		for (int b = Blocks.FireclayTerracotta; b < Blocks.Foundry + 8; b++) Material[b] = "brick";   // the Fireclay blocks and the Foundry's Furnace
 		foreach (int b in Blocks.Flowers) Material[b] = "grass";

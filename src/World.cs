@@ -61,9 +61,14 @@ public partial class World
 	public const double MinBiomes = 0.5, MaxBiomes = 4;
 	public static double ValidBiomes(double b) => b >= MinBiomes && b <= MaxBiomes && Math.Abs(b * 4 - Math.Round(b * 4)) < 1e-9 ? Math.Round(b * 4) / 4 : 1;
 	// The land's version: which features a world grows with. 0 = worlds made before Beta 0.1.1.3 (they keep growing exactly as they did);
-	// 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. New worlds get LandVersion.
-	public const int LandVersion = 1;
-	public static int ValidLand(int l) => Math.Clamp(l, 0, LandVersion);
+	// 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. New worlds get NewLand.
+	public const int LandVersion = 2;   // 2 = the ores as common at every depth, and in every layer of stone (deep ores). The newest this code knows.
+	public static int ValidLand(int l) => Math.Clamp(l, 0, LandVersion);   // (a saved world keeps the land it was made with, up to the newest)
+	// The ore spread (land 2) is held back for now (until the Survival & light update): while OreSpreadReady is false, new worlds are made
+	// with land 1, as in Beta 0.1.2.0. --orespread turns it on for testing.
+	public const bool OreSpreadReady = false;
+	public static readonly bool OreSpreadOn = OreSpreadReady || System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--orespread") >= 0;
+	public static int NewLand => OreSpreadOn ? 2 : 1;
 
 	// height: 640 for tall worlds, 192 otherwise; size: how far across (see ValidSize); biomes: how big the biomes are
 	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1, int land = 0)

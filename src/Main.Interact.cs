@@ -19,7 +19,8 @@ public partial class Main
 	Player.Hit lastAim;
 	void Placed(int block) { MobNoise(lastAim.X, lastAim.Y, lastAim.Z); if (Blocks.IsWater(block)) Sound.I?.Pour(); else Sound.I?.Place(block); inv.UseOne(); }
 	// survival: logs and planks only break with an axe, stone-type blocks only with a pickaxe (true, with a note, when you can't)
-	bool NeedTool(int b0)
+	// staged: a block as the world grew it, with stage breaking on (logs by hand, deep Stone with any pickaxe); the rest the old way
+	bool NeedTool(int b0, bool staged = false)
 	{
 		int b = Blocks.Plain(b0);   // (a block standing in snow: the block itself)
 		if (!Survival) return false;
@@ -31,11 +32,17 @@ public partial class Main
 		{
 			if (!inv.Holding("pickaxe")) return Tell($"You need a pickaxe to mine {Blocks.B[b].Name}");
 			if ((Blocks.PickTier.TryGetValue(Blocks.B[inv.Held].Material ?? "", out int tier) ? tier : 0) < pick) return Tell($"You need {new[] { "", "a stone", "a copper", "an iron" }[pick]} pickaxe or better to mine {Blocks.B[b].Name}");
-			return false;
+			return TooDeep();
 		}
-		// deep stone: the pickaxe has to be good enough for this layer
-		int layer = Blocks.StoneLayer(b);
-		if (layer > 1 && inv.Holding("pickaxe") && layer > (Blocks.StrataPickaxe.TryGetValue(Blocks.B[inv.Held].Material ?? "", out int deepest) ? deepest : 0)) return Tell($"You need a better pickaxe to mine {Blocks.B[b].Name} this deep");
+		if (staged && Blocks.IsLogBlock(b)) return false;   // a tree's logs: any tool, or your hand (an axe is just quicker)
+		if (TooDeep()) return true;
+		// put-down deep Stone or deep ore: the pickaxe has to be good enough for its layer (natural ones just take more swings)
+		bool TooDeep()
+		{
+			int layer = Blocks.StoneLayer(b);
+			return !staged && layer > 1 && inv.Holding("pickaxe") && layer > (Blocks.StrataPickaxe.TryGetValue(Blocks.B[inv.Held].Material ?? "", out int deepest) ? deepest : 0)
+				&& Tell($"You need a better pickaxe to mine {Blocks.B[b].Name} this deep");
+		}
 		string kind = Array.IndexOf(Blocks.NeedsAxe, b) >= 0 ? "axe" : Array.IndexOf(Blocks.NeedsPickaxe, b) >= 0 ? "pickaxe" : null;
 		if (kind == null || inv.Holding(kind)) return false;
 		ShowNote(kind == "axe" ? $"You need an axe to cut {Blocks.B[b].Name}" : $"You need a pickaxe to mine {Blocks.B[b].Name}", 2);
@@ -133,12 +140,23 @@ public partial class Main
 		}
 		if (h.Y <= 0) return;   // the bottom of the world can't be broken
 		int hb = h.Id;
-		if (NeedTool(hb)) return;
+		bool natural = Natural(h.X, h.Y, h.Z);   // (as the world grew it: nobody has put it down or changed it)
+		bool staged = StageBreakingOn && natural;   // (stage breaking: held back for now, see StageBreakingReady)
+		if (NeedTool(hb, staged)) return;
 		int cost = BreakWear(hb);   // (the tool wears after the block is broken, so its last use still counts as that tool)
+		// Stone, ores and logs (survival): each swing breaks a few stages; the block only comes out at its last stage
+		if (Survival && staged && Blocks.Stages(hb) is int total and > 0)
+		{
+			int si = World.Idx(h.X, h.Y, h.Z), done = stages.TryGetValue(si, out var st) && st.block == hb ? st.done : 0;
+			done += Blocks.StagesPerSwing(hb, inv.Held);
+			if (done < total) { stages[si] = (hb, done); Sound.I?.Break(hb); return; }
+			stages.Remove(si);
+		}
 		// leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
 		if (Blocks.IsSnow(hb) || hb == Blocks.SnowBlock)   // snow breaks into Snowballs: 2-4 for each layer, 4 from a Snow Block
 			for (int n = hb == Blocks.SnowBlock ? 4 : Blocks.SnowballsFor(Blocks.B[hb].Layers, rnd); n > 0; n--) Collect(Blocks.Snowball, h.X, h.Y, h.Z);
 		else if (!Blocks.IsLeaves(hb) || inv.Holding("hoe")) CollectBlock(hb, h.X, h.Y, h.Z);
+		if (Survival && staged && Blocks.OreIndex(hb) >= 0) for (int n = Blocks.B[hb].Layer; n > 1; n--) Collect(DropFor(hb), h.X, h.Y, h.Z);   // (an ore in layer n gives n Chunks)
 		Sound.I?.Break(hb);
 		if (Blocks.IsLeaves(hb) && !inv.Holding("hoe") && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);
 		if (hb == Blocks.PalmLeaves && !inv.Holding("hoe") && rnd.NextDouble() < 0.25) Collect(Blocks.Dates, h.X, h.Y, h.Z);   // Palm Leaves: a 1 in 4 chance of Dates
@@ -148,6 +166,7 @@ public partial class Main
 		else if (b.Snowed > 0) world.SetBlock(h.X, h.Y, h.Z, Blocks.Snow);   // snow-logged: the torch, flower, rock or Cutter comes out, the snow stays
 		else { world.SetBlock(h.X, h.Y, h.Z, 0); world.DropTorchesAround(h.X, h.Y, h.Z, DropFor); }
 		WearTool(cost);
+		if (Survival && TreeFellingOn && natural && Blocks.IsLogBlock(hb) && !NaturalLog(h.X, h.Y - 1, h.Z)) Fell(h.X, h.Y, h.Z);   // (a tree's bottom log: the whole tree comes down)
 	}
 
 	// right-click farming: a Hoe tills Grass or Dirt, Grain Seeds are planted in tilled soil, Bone Ash fertilizes it

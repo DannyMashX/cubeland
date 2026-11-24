@@ -692,7 +692,12 @@ public class WorldGen
 		for (int y = 1; y <= SeaLevel - Blocks.StrataThick; y++)
 		{
 			byte id = (byte)(Blocks.Strata + Math.Min(Blocks.StrataLayers, 1 + (SeaLevel - y) / Blocks.StrataThick) - 2);
-			for (int i = y * slab, end = i + slab; i < end; i++) if (world[i] == 3) world[i] = id;
+			int layer = id - Blocks.Strata + 2;
+			for (int i = y * slab, end = i + slab; i < end; i++)
+			{
+				if (world[i] == 3) world[i] = id;
+				else if (Land >= 2 && Blocks.OreIndex(world[i]) is int k and >= 0) Late.Add((i, Blocks.DeepOreOf(k, layer), world[i]));   // (an ore in a deep layer: that layer's ore)
+			}
 		}
 	}
 
@@ -709,7 +714,10 @@ public class WorldGen
 		for (int o = 0; o < OreVeins.Length; o++)
 		{
 			var (ore, per, size, top, deep) = OreVeins[o];
+			bool even = Land >= 2 && ore != Blocks.Fireclay;   // (worlds from Land 2: the ores are as common at every depth, all the way down)
+			if (even) { top = 3; deep = 999; }
 			int s = 7001 + o * 10, n = (int)((long)WX * WZ * per / 10000);
+			if (even) n = (int)((long)n * WY / 192);
 			for (int k = 0; k < n; k++)
 			{
 				int x = (int)Math.Floor(Hash(k, 1, s) * WX), z = (int)Math.Floor(Hash(k, 2, s) * WZ);

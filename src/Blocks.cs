@@ -144,6 +144,31 @@ public static class Blocks
 	public static readonly int[] Ores = { CopperOre, IronOre, GoldOre, TinOre };
 	public static readonly string[] Metals = { "copper", "iron", "gold", "tin" };
 	public static readonly Dictionary<string, int> Chunk = new() { ["copper"] = 630, ["iron"] = 631, ["gold"] = 632, ["tin"] = 633 };
+	// Deep ores (worlds from Land 2): each ore in stone layers 2-8 (470-497: 470 + 7 x its place in Ores + layer - 2), in that
+	// layer's stone colours. Same pickaxe needed as the ore itself; it gives as many Chunks as its layer.
+	public const int DeepOre = 470;
+	public static int DeepOreOf(int k, int layer) => layer <= 1 ? Ores[k] : DeepOre + 7 * k + layer - 2;
+	public static int OreIndex(int b) { int k = Array.IndexOf(Ores, b); return k >= 0 ? k : b >= DeepOre && b < DeepOre + 28 ? (b - DeepOre) / 7 : -1; }
+	public static readonly int[] DeepOres = Enumerable.Range(DeepOre, 28).ToArray();
+	// ---- Stage breaking (survival): Stone, ores and logs break a few stages with each swing, and only come out at the last ----
+	public static bool IsLogBlock(int b) => Array.IndexOf(Logs, b) >= 0 || (b >= TurnedLogs && b < TurnedLogs + 16);
+	// how many stages block b has as the world grew it (0: it breaks at once, as always): Stone and ores 4 x their layer,
+	// Sandstone and Terracotta 4, logs 8. Blocks a player put down (or changed) always break at once, the old way.
+	public static int Stages(int b)
+	{
+		if (b == 3 || (b >= Strata && b < Bedrock)) return 4 * StoneLayer(b);
+		if (OreIndex(b) >= 0) return 4 * Math.Max(1, B[b].Layer);
+		if (b == Sandstone || b == 65 || Array.IndexOf(ColourTerracotta, b) >= 0) return 4;   // (Sandstone and every Terracotta)
+		return IsLogBlock(b) ? 8 : 0;
+	}
+	// stages broken by one swing of tool t (0 = your hand) at block b
+	public static int StagesPerSwing(int b, int t)
+	{
+		var d = Get(t);
+		if (IsLogBlock(b)) return d?.Tool != "axe" ? 1 : d.Material == "crude" ? 2 : d.Material == "stone" ? 4 : 8;
+		if (d?.Tool != "pickaxe") return 0;
+		return d.Material switch { "copper" => 2, "iron" => 4, "bronite" => 8, "rosium" => 16, "steel" => 32, _ => 1 };
+	}
 	public static readonly Dictionary<string, int> MetalBrick = new() { ["copper"] = 634, ["iron"] = 635, ["gold"] = 636, ["tin"] = 637, ["bronite"] = 638, ["rosium"] = 639, ["steel"] = SteelBrick };
 	public static readonly Dictionary<string, int> PickTier = new() { ["stone"] = 1, ["copper"] = 2, ["iron"] = 3, ["bronite"] = 4, ["rosium"] = 5, ["steel"] = 6 };   // how good each pickaxe is
 	public static readonly int[] FireclayBlocks = { FireclayTerracotta, FireclayBricks, FireclayCasing, ChiseledFireclay };
@@ -191,12 +216,12 @@ public static class Blocks
 	public static readonly int[] Splittable = new[] { 1, 2, 3, 8, 7, 4, 61, 5, FirPlanks, FirLog, StrippedFirLog, FirLeaves, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }.Concat(NewColourBlocks).Concat(DeepBlocks).Concat(ExtraFormBlocks).ToArray();
 	public static readonly int[] NeedsAxe = new[] { 4, 7, 61, FirLog, FirPlanks, StrippedFirLog, PalmLog, PalmPlanks, StrippedPalmLog, WillowLog, WillowPlanks, StrippedWillowLog }.Concat(Enumerable.Range(TurnedLogs, 16)).ToArray(),
 		Diggable = new[] { 1, 2, 6, 11, 63, Fireclay, 93, 94, 95, 96, Mud, Peat }.Concat(Enumerable.Range(Snow, 8)).ToArray();
-	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).Concat(DeepBlocks)
+	public static readonly int[] NeedsPickaxe = new[] { 3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, 73, 74, 75, 76, 77, 78, 79, 80 }.Concat(NewColourBlocks).Concat(DeepBlocks).Concat(DeepOres)
 		.Concat(Ores).Concat(FireclayBlocks).Concat(FoundryIds).Concat(new[] { Sandstone, SandstoneBricks, ChiseledSandstone, SmoothSandstone, MudBricks }).ToArray();
 	// Every block you can pick from the creative inventory
 	public static readonly int[] Items = new[] { new[] { 1, 2, 3 }, DeepShown(3), new[] { 8 }, DeepShown(8), new[] { 7, 60, Cutter, 4, 61, 5, FirPlanks, FirLog, StrippedFirLog, FirLeaves, 6, 9 }, DeepShown(9),
 		new[] { 12, 10, 11, 63, 64, 65, 66, 67, 68, 69 }, DeepShown(69) }.SelectMany(a => a).Concat(NewColourBlocks).Concat(Flowers)
-		.Concat(new[] { Furnace, 22, Water, Bedrock }).Concat(Ores).Append(Fireclay).Concat(FireclayBlocks).Append(Foundry)
+		.Concat(new[] { Furnace, 22, Water, Bedrock }).Concat(Ores).Concat(World.TallWorlds ? DeepOres : Array.Empty<int>()).Append(Fireclay).Concat(FireclayBlocks).Append(Foundry)
 		.Concat(new[] { PalmPlanks, PalmLog, StrippedPalmLog, PalmLeaves, WillowPlanks, WillowLog, StrippedWillowLog, WillowLeaves, SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat, Snow, SnowBlock }).ToArray();
 	public const int StackMax = 64;
 
@@ -254,7 +279,7 @@ public static class Blocks
 		// the Cutter: cuts blocks into pieces, slabs and stairs. Half a block tall, with a saw blade standing up out of it
 		// (pictures: cutter_base on the sides, the stripped log top on top, cutter_bottom underneath, cutter_saw for the blade)
 		var cutter = Def(Cutter, "Cutter", "cutter_base", "stripped_log_top", "cutter_bottom"); cutter.Shape = "half"; cutter.Transparent = true; cutter.Box = new[] { 0f, 0, 0, 1, 0.5f, 1 };
-		Def(Sandstone, "Sandstone", "sandstone", "sandstone", "sandstone");
+		Def(Sandstone, "Sandstone", "sandstone", "sandstone", "sandstone").Drop = Sandstone;   // (it gives itself)
 		Def(SnowyGrass, "Snowy Grass", "snowy_grass_side", "snow", "dirt").Drop = 2;   // (digging up any grass gives Dirt)
 		Def(Ice, "Ice", "ice", "ice", "ice").Transparent = true;
 		Def(SwampGrass, "Swamp Grass", "swamp_grass_side", "swamp_grass", "dirt").Drop = 2;
@@ -372,6 +397,12 @@ public static class Blocks
 			B[Ores[k]].Pick = new[] { 1, 2, 3, 3 }[k];
 			B[Chunk[m]] = new BlockDef { Name = M + " Chunk", T = P3(m + "_chunk"), Item = true };
 			B[MetalBrick[m]] = new BlockDef { Name = M + " Brick", T = P3(m + "_brick"), Item = true };
+			for (int n = 2; n <= StrataLayers; n++)
+			{
+				int id = DeepOreOf(k, n);
+				if (B[id] != null) throw new Exception($"Block {id} is already {B[id].Name}: it's needed for {M} Ore in layer {n}");
+				var d = Def(id, M + " Ore", $"{m}_ore_layer_{n}", $"{m}_ore_layer_{n}", $"{m}_ore_layer_{n}"); d.Drop = Chunk[m]; d.Pick = B[Ores[k]].Pick; d.Layer = n;
+			}
 		}
 		B[MetalBrick["bronite"]] = new BlockDef { Name = "Bronite Brick", T = P3("bronite_brick"), Item = true };
 		B[MetalBrick["rosium"]] = new BlockDef { Name = "Rosium Brick", T = P3("rosium_brick"), Item = true };

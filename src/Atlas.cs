@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace Cubeland;
@@ -75,17 +76,68 @@ public static class Atlas
 	static readonly Dictionary<int, int> slabSides = new();
 	public static int Quarter(int col, int row) => row == 0 ? (col == 0 ? 1 : 2) : (col == 0 ? 4 : 8);   // (col 0 left, row 0 top)
 
+	// ---- Texture sheets (textures/blocks/sheets/<picture>.png): one picture's cut-shape pictures together, 3 x 3 cells laid out
+	// like the face (cell = width / 3). textures/sheet-layout.json (shared with the web version) says which cell is which
+	// picture (<picture> + its suffix; "full" is the picture itself) and how the others are put together from quarters of
+	// those. A cell that's all see-through is a picture that isn't there. Returns the pictures by name, each 16 x 16.
+	static readonly HashSet<string> sheetBases = new();
+	static Dictionary<string, Image> CutSheets()
+	{
+		var outp = new Dictionary<string, Image>();
+		string json = FileAccess.FileExists("res://textures/sheet-layout.json") ? FileAccess.GetFileAsString("res://textures/sheet-layout.json") : null;
+		if (json == null) return outp;
+		using var doc = System.Text.Json.JsonDocument.Parse(json);
+		var root = doc.RootElement; int grid = root.GetProperty("grid").GetInt32();
+		var cells = root.GetProperty("cells").EnumerateObject().Select(p => (suffix: p.Name == "full" ? "" : p.Name, col: p.Value[0].GetInt32(), row: p.Value[1].GetInt32())).ToList();
+		var compose = root.GetProperty("compose").EnumerateObject()
+			.Select(p => (suffix: p.Name, parts: p.Value.EnumerateObject().Select(q => (corner: q.Name, from: q.Value.GetString() == "full" ? "" : q.Value.GetString())).ToList())).ToList();
+		foreach (var (sheet, path) in Pictures("res://textures/blocks/sheets"))
+		{
+			var img = LoadImage(path);
+			if (img == null) continue;
+			sheetBases.Add(sheet);
+			int cs = img.GetWidth() / grid;
+			var got = new Dictionary<string, Image>();
+			foreach (var (suffix, col, row) in cells)
+			{
+				var c = img.GetRegion(new Rect2I(col * cs, row * cs, cs, cs));
+				if (c.IsInvisible()) continue;   // (no such picture)
+				if (cs != TILE) c.Resize(TILE, TILE, Image.Interpolation.Nearest);
+				got[suffix] = c;
+			}
+			foreach (var (suffix, parts) in compose)
+			{
+				var c = Image.CreateEmpty(TILE, TILE, false, Image.Format.Rgba8); bool any = false;
+				foreach (var (corner, from) in parts)
+				{
+					if (!got.TryGetValue(from, out var src)) continue;
+					int h = TILE / 2, qx = corner[1] == 'R' ? h : 0, qy = corner[0] == 'B' ? h : 0;
+					c.BlitRect(src, new Rect2I(qx, qy, h, h), new Vector2I(qx, qy)); any = true;
+				}
+				if (any && !c.IsInvisible()) got[suffix] = c;
+			}
+			foreach (var (suffix, c) in got) outp[sheet + suffix] = c;
+		}
+		return outp;
+	}
+
 	public static void Build()
 	{
 		System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(Blocks).TypeHandle);   // (every block has asked for its pictures)
-		// the picture files, by name
-		var files = new Dictionary<string, Image>();
+		// the picture files, by name (the sheets' pictures first: a loose file with the same name takes their place)
+		var files = CutSheets();
+		var loose = new HashSet<string>();
+		foreach (string folder in new[] { "res://textures/blocks", "res://textures/items", "res://textures/blocks/shapes" })
+			foreach (var (file, _) in Pictures(folder)) loose.Add(Spellings.TryGetValue(file, out var s) ? s : file);
+		foreach (var n in files.Keys.ToArray())
+			if (loose.Contains(n)) { if (!sheetBases.Contains(n)) GD.Print($"textures: {n}.png is a loose file and on a sheet; the loose file wins"); files.Remove(n); }   // (the full pictures are kept loose for now, so no note for those)
 		// the cut-shape pictures of the pictures blocks use (each gets a place in the atlas now, before it's made)
-		foreach (var (file, _) in Pictures("res://textures/blocks/shapes"))
+		foreach (var file in loose.Concat(files.Keys).Distinct().ToArray())
+		{
 			foreach (var (shape, mask) in ShapeMasks)
 				if (file.EndsWith("_" + shape) && slotOf.TryGetValue(file[..^(shape.Length + 1)], out int baseTile)) { shapeTiles[(baseTile, mask)] = Tile(file); break; }
-		foreach (var (file, _) in Pictures("res://textures/blocks"))
-			if (file.EndsWith("_slab_side") && slotOf.TryGetValue(file[..^"_slab_side".Length], out int baseTile)) slabSides[baseTile] = Tile(file);
+			if (file.EndsWith("_slab_side") && slotOf.TryGetValue(file[..^"_slab_side".Length], out int sideOf)) slabSides[sideOf] = Tile(file);
+		}
 		foreach (string folder in new[] { "res://textures/blocks", "res://textures/items", "res://textures/blocks/shapes" })
 			foreach (var (file, path) in Pictures(folder))
 			{
@@ -117,6 +169,60 @@ public static class Atlas
 		Texture = ImageTexture.CreateFromImage(gpu);
 	}
 	static Image gpu;
+	// (testing: every picture in the atlas by name, with a fingerprint of its pixels, and which cut-shape picture each
+	// face uses; to check that a change to how the pictures are stored leaves every picture exactly as it was)
+	public static void Dump(string path)
+	{
+		var lines = new List<string>();
+		for (int t = 0; t < NT; t++)
+		{
+			var px = Image.GetRegion(new Rect2I(t * TILE, 0, TILE, TILE)).GetData();
+			ulong h = 1469598103934665603; foreach (byte b in px) h = (h ^ b) * 1099511628211;
+			lines.Add($"{names[t]} {h:x16}");
+		}
+		foreach (var ((tile, mask), t) in shapeTiles) lines.Add($"shape {names[tile]} {mask} -> {names[t]}");
+		foreach (var (tile, t) in slabSides) lines.Add($"slab_side {names[tile]} -> {names[t]}");
+		lines.Sort(StringComparer.Ordinal);
+		System.IO.File.WriteAllLines(path, lines);
+	}
+	// (testing: the old loose cut-shape files, from a backup folder, against what the sheets are cut into; pixels you can see only)
+	public static void SheetCheck(string dir)
+	{
+		var cut = CutSheets(); int same = 0, missing = 0; var bad = new List<string>();
+		foreach (string sub in new[] { dir, dir + "/shapes" })
+		{
+			if (!System.IO.Directory.Exists(sub)) continue;
+			foreach (var f in System.IO.Directory.GetFiles(sub, "*.png"))
+			{
+				string name = System.IO.Path.GetFileNameWithoutExtension(f).ToLower();
+				var old = Image.LoadFromFile(f); old.Convert(Image.Format.Rgba8);
+				if (!cut.TryGetValue(name, out var img)) { missing++; bad.Add(name + " (not on a sheet)"); continue; }
+				int diff = 0;
+				for (int y = 0; y < TILE; y++) for (int x = 0; x < TILE; x++)
+				{
+					Color a = old.GetPixel(x, y), b = img.GetPixel(x, y);
+					if ((a.A8 == 0) != (b.A8 == 0) || (a.A8 > 0 && a.ToRgba32() != b.ToRgba32())) diff++;
+				}
+				if (diff == 0) same++; else bad.Add($"{name} ({diff} pixels)");
+			}
+		}
+		// and each sheet's centre against the loose full picture (while there still is one)
+		foreach (var b in sheetBases)
+		{
+			string p = $"res://textures/blocks/{b}.png";
+			if (!ResourceLoader.Exists(p) || LoadImage(p) is not { } full) continue;
+			if (!cut.TryGetValue(b, out var c)) { bad.Add(b + " (no centre on its sheet)"); continue; }
+			int diff = 0;
+			for (int y = 0; y < TILE; y++) for (int x = 0; x < TILE; x++)
+			{
+				Color a = full.GetPixel(x, y), d = c.GetPixel(x, y);
+				if ((a.A8 == 0) != (d.A8 == 0) || (a.A8 > 0 && a.ToRgba32() != d.ToRgba32())) diff++;
+			}
+			if (diff == 0) same++; else bad.Add($"{b} centre ({diff} pixels)");
+		}
+		GD.Print($"SHEETCHECK same {same}, different or missing {bad.Count}");
+		foreach (var b in bad.Take(20)) GD.Print("  " + b);
+	}
 	const int SawFps = 10;   // (the saw blade's frames: see SawTile)
 	static double sawTime; static int sawFrame;
 	public static void SpinSaw(double dt)
