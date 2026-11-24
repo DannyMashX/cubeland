@@ -26,23 +26,13 @@ public static class Atlas
 	}
 	public static int[] Tiles(params string[] n) => Array.ConvertAll(n, Tile);
 	public static int NT => names.Count;   // how many pictures the atlas holds
+	public static bool Uses(string name) => slotOf.ContainsKey(name);   // (a picture the game asks for)
+	public static IReadOnlyList<string> Names => names;                 // (every picture, in atlas order)
 
-	// other spellings of a picture's file name
-	static readonly Dictionary<string, string> Spellings = new()
-	{
-		["grass_top"] = "grass", ["tortch_side"] = "torch_side", ["tortch_top"] = "torch_top", ["tortch_bottom"] = "torch_bottom",
-		["chisled_terracota"] = "chiseled_terracotta", ["red_chiseled_terracotta"] = "chiseled_red_terracotta",
-	};
-	// a picture whose file you haven't made (yet) borrows another one
-	static readonly Dictionary<string, string> Borrows = new()
-	{
-		// the 4 looks of Red Bricks
-		["bricks_a"] = "red_bricks", ["bricks_b"] = "red_bricks", ["bricks_c"] = "red_bricks", ["bricks_d"] = "red_bricks",
-		// the Cutter: the Crafting Bench's side, planks underneath; with no second saw frame the blade just stands still
-		["cutter_base"] = "crafting_bench_side", ["cutter_bottom"] = "planks", ["cutter_saw_frame_0"] = "cutter_saw", ["cutter_saw_1"] = "cutter_saw",
-		// biome blocks: White Terracotta (snow), the Grass pictures, or Glass (ice)
-		["snow"] = "white_terracotta", ["snowy_grass_side"] = "grass_side", ["ice"] = "glass", ["swamp_grass"] = "grass", ["swamp_grass_side"] = "grass_side",
-	};
+	// other spellings of a picture's file name (old or misspelt names that still work), and pictures whose file you haven't
+	// made yet that borrow another's until you do (that one may borrow too): data/texture-names.json
+	public static readonly Dictionary<string, string> Spellings = Nums.TextureNames.TEXTURE_SPELLINGS ?? new();
+	public static readonly Dictionary<string, string> Borrows = Nums.TextureNames.TEXTURE_BORROWS ?? new();
 
 	// the Cutter's saw blade spins: its two frames (cutter_saw, cutter_saw_1) take turns being copied into the picture it's drawn with
 	public static readonly int SawTile = Tile("cutter_saw");
@@ -154,7 +144,8 @@ public static class Atlas
 		{
 			// its own file, or the one it borrows until you make it
 			Image img = null;
-			for (string n = names[t]; n != null && img == null; n = Borrows.TryGetValue(n, out var b) ? b : null) files.TryGetValue(n, out img);
+			int hops = 0;   // (a circle of borrows with no file in it just stops after 32)
+			for (string n = names[t]; n != null && img == null && hops++ < 32; n = Borrows.TryGetValue(n, out var b) ? b : null) files.TryGetValue(n, out img);
 			if (img != null) { Image.BlitRect(img, new Rect2I(0, 0, TILE, TILE), new Vector2I(t * TILE, 0)); continue; }
 			// no picture: a plain grey-pink check, so a missing file is easy to spot
 			for (int y = 0; y < TILE; y++) for (int x = 0; x < TILE; x++)

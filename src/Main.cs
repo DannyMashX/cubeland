@@ -37,6 +37,7 @@ public partial class Main : Node3D
 	public override void _Ready()
 	{
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
+		if (DataTools()) { SetProcess(false); GetTree().Quit(); return; }   // (testing the shared data files: see Main.Data.cs)
 		// menus and the hotbar follow your Windows display scaling, like the web edition does in a browser, but always
 		// by a whole number (150% and up makes them twice as big), so every pixel of the pixel art stays the same size.
 		// --uiscale=N for testing.
@@ -58,6 +59,7 @@ public partial class Main : Node3D
 			DisplayServer.WindowSetPosition(usable.Position + (usable.Size - want) / 2 + new Vector2I(0, 16));
 		}
 		Atlas.Build();
+		_ = WorldGen.OreVeins;   // (data/worldgen.json is read here, not first in the world-making thread, so a mistake in it stops the game at load like the other files)
 		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--atlasdump=")) is { } ad) { Atlas.Dump(ad[12..]); SetProcess(false); GetTree().Quit(); return; }   // (testing)
 		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--sheetcheck=")) is { } sc) { Atlas.SheetCheck(sc[13..]); SetProcess(false); GetTree().Quit(); return; }   // (testing)
 		Skin.Load();   // your font and gui_atlas.png, for every menu and label
@@ -376,7 +378,7 @@ public partial class Main : Node3D
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -881,27 +883,29 @@ public partial class Main : Node3D
 			string Icons() => string.Join(",", Enumerable.Range(0, HEARTS).Select(j => ArmorIconQuarters(j)));   // (quarters in each icon, left to right)
 			Check("armor bar quarters: helmet 4, chest 8, legs 5, boots 3, full set 20, chest + legs 13, none 0",
 				Wear(0) == 4 && Wear(1) == 8 && Wear(2) == 5 && Wear(3) == 3 && Wear(0, 1, 2, 3) == 20 && Wear(1, 2) == 13 && Wear() == 0);
-			Check("the armor bar mirrors the hearts: as many, shown (empty) with no armor on", armorShown && armorIcons.Length == HEARTS && armorIcons.All(t => t.Texture == armorPics[0]));
+			Check("the armor bar mirrors the hearts (as many), and with no armor on it's hidden: no empty pictures", !armorShown && armorIcons.Length == HEARTS && armorIcons.All(t => t.Texture == armorPics[0]));
 			Wear(0);
-			Check($"a helmet: the rightmost icon full, the rest empty ({Icons()})", Icons() == "0,0,0,0,4" && armorIcons[HEARTS - 1].Texture == armorPics[4] && armorIcons.All(t => !t.FlipH));
+			Check($"a helmet: the armor bar shows, the rightmost icon full, the rest empty ({Icons()})", armorShown && Icons() == "0,0,0,0,4" && armorIcons[HEARTS - 1].Texture == armorPics[4] && armorIcons.All(t => !t.FlipH));
 			Wear(2);
 			Check($"leggings: one and a quarter from the right, drawn as they are ({Icons()})", Icons() == "0,0,0,1,4" && armorIcons[HEARTS - 2].Texture == armorPics[1] && !armorIcons[HEARTS - 2].FlipH);
 			Wear(3);
 			Check($"boots: three quarters ({Icons()})", Icons() == "0,0,0,0,3" && armorIcons[HEARTS - 1].Texture == armorPics[3]);
 			Wear(1, 2);   // (left on, to see where the bar goes)
+			if (args.Contains("--tools")) { var ts = Blocks.Tools.Where(t => Blocks.B[t].Material == "iron").ToArray(); for (int k = 0; k < Math.Min(ts.Length, inv.ToolCount); k++) inv.SetSlot(Inventory.Tool0 + k, ts[k]); }   // (to look at)
 			Check($"chest + legs: three and a quarter ({Icons()})", Icons() == "0,1,4,4,4" && armorIcons[1].Texture == armorPics[1]);
+			if (args.Contains("--noarmor")) { Wear(); Check("all armor off: the armor bar is hidden again", !armorShown); }   // (to see the HUD with no armor bar)
 		}
 		if (args.Contains("--heldtest") && heldTested && !heldPlaced && shotTimer > 1.5f)
 		{   // (a frame later: where the tool row and armor bar went)
 			heldPlaced = true;
-			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
-			var bar = hotBarBox.GetGlobalRect();
-			if (toolRow.Position.Y > bar.Position.Y) Check("the tool row sits 4 from the hotbar", Math.Abs(toolRow.Position.X - (bar.End.X + 4)) < 0.5f);
-			else Check("the tool row sits over the hotbar's right end, 4 above the armor bar", Math.Abs(toolRow.GetGlobalRect().End.X - bar.End.X) < 0.5f && Math.Abs(armorBar.GetGlobalRect().Position.Y - 4 - toolRow.GetGlobalRect().End.Y) < 0.5f);
-			Check("the offhand slot sits 4 from the hotbar", Math.Abs(hotBarBox.GetGlobalRect().Position.X - offBox.GetGlobalRect().End.X - 4) < 0.5f);
-			var hr = heartsRect.GetGlobalRect(); var ar = armorBar.GetGlobalRect();
-			Check($"the armor bar: the hearts' size and line, its right end at the hotbar's (hearts {hr}, armor {ar}, hotbar {bar})",
-				ar.Size == hr.Size && Math.Abs(ar.Position.Y - hr.Position.Y) < 0.5f && Math.Abs(ar.End.X - bar.End.X) < 0.5f && Math.Abs(hr.Position.X - bar.Position.X) < 0.5f);
+			CheckHudLayout();
+			// --longrow: a long tool row (a steel belt: 12 tool slots), too long for the gap between the hearts and the armor bar
+			if (args.Contains("--longrow")) { inv.SetSlot(Inventory.BeltSlot, Blocks.Belts[^1]); DrawHotbar(); }
+		}
+		if (args.Contains("--longrow") && heldPlaced && !longChecked && shotTimer > 2.2f)
+		{
+			longChecked = true;
+			CheckHudLayout();
 		}
 		if (args.Contains("--stagetest") && !stageTested && !StageBreakingOn && !menuOpen && inv.Survival && shotTimer > 0.3f)
 		{   // (test, survival, stage breaking held back: everything breaks as in Beta 0.1.2.0, and new worlds are land 1)
@@ -1118,6 +1122,31 @@ public partial class Main : Node3D
 		GetTree().Quit();
 	}
 
+	// (test) where the HUD went: the tool row, hearts and armor bar on one line 4 above the hotbar, or a tool row too long for the
+	// gap on that line and the hearts and armor bar 4 above it; the armor bar's place kept whether it shows or not (so the tool
+	// row never moves when armor goes on or off); the offhand slot 4 from the hotbar; the notes 4 above whatever is highest
+	void CheckHudLayout()
+	{
+		void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+		var bar = hotBarBox.GetGlobalRect(); var off = offBox.GetGlobalRect();
+		var tr = toolRow.GetGlobalRect(); var hr = heartsRect.GetGlobalRect(); var ar = armorBar.GetGlobalRect(); bool armor = armorBar.Visible;
+		float line = bar.Position.Y - 4, gapL = bar.Position.X + hr.Size.X + 4, gapR = bar.End.X - hr.Size.X - 4;   // (the armor bar's place: the hearts' size, at the hotbar's right end)
+		bool fits = tr.Size.X <= gapR - gapL;
+		float iconFoot = fits ? line : tr.Position.Y - 4;
+		Check($"the tool row's bottom on the line 4 above the hotbar (tool row {tr}, hotbar {bar})", Math.Abs(tr.End.Y - line) < 0.5f);
+		if (fits) Check($"a {inv.ToolCount}-slot tool row fits between the hearts and the armor bar's place: centred in the gap",
+			Math.Abs(tr.Position.X - (gapL + MathF.Round((gapR - gapL - tr.Size.X) / 2))) < 0.5f && tr.Position.X >= hr.End.X + 4 - 0.5f && tr.End.X <= gapR + 0.5f);
+		else Check($"a {inv.ToolCount}-slot tool row too long for the gap: centred over the hotbar", Math.Abs(tr.Position.X - (bar.Position.X + MathF.Round((bar.Size.X - tr.Size.X) / 2))) < 0.5f);
+		Check($"the hearts at the hotbar's left end, bottom {(fits ? "on the line" : "4 above the tool row")} (hearts {hr})", Math.Abs(hr.Position.X - bar.Position.X) < 0.5f && Math.Abs(hr.End.Y - iconFoot) < 0.5f);
+		int q = ArmorQuarters(inv.ArmorBlock());
+		if (q >= 1) Check($"armor on ({q} quarters): the armor bar shows, the hearts' size, at the hotbar's right end, level with the hearts (armor {ar})",
+			armor && ar.Size == hr.Size && Math.Abs(ar.End.X - bar.End.X) < 0.5f && Math.Abs(ar.End.Y - hr.End.Y) < 0.5f);
+		else Check("no armor: the armor bar is hidden, its place kept", !armor);
+		Check("the offhand slot sits 4 from the hotbar", Math.Abs(bar.Position.X - off.End.X - 4) < 0.5f);
+		float highest = Math.Min(tr.Position.Y, Math.Min(hr.Position.Y, off.Position.Y)); if (armor) highest = Math.Min(highest, ar.Position.Y);
+		Check($"the notes sit 4 above whatever is highest (notes bottom {nameLabel.GetGlobalRect().End.Y}, highest {highest})", Math.Abs(nameLabel.GetGlobalRect().End.Y + 4 - highest) < 0.5f);
+	}
+
 	// scripted checks of the hotbar, crafting, bench, kiln and drops (prints PASS / FAIL lines)
 	void SelfTest()
 	{
@@ -1215,6 +1244,17 @@ public partial class Main : Node3D
 		Check("the Cutter: a block made from 3 Planks + a Copper Brick at the bench", Blocks.B[Blocks.Cutter]?.Name == "Cutter" && Blocks.Items.Contains(Blocks.Cutter)
 			&& Inventory.Recipes.Any(r => r.Out == Blocks.Cutter && r.At == "bench" && r.Needs.Contains((Blocks.Planks, 3)) && r.Needs.Contains((Blocks.MetalBrick["copper"], 1))));
 		Check("the Cutter is half a block tall and its saw blade spins (frame 1, then frame 2, then frame 1)", Blocks.B[Blocks.Cutter].Shape == "half" && Atlas.SawSpins());
+		// block sounds (data/blocks.json's sound): what breaking, placing and walking on a block ask the sound engine for
+		{
+			var heard = new List<string>();
+			string Sounds(int b) { heard.Clear(); Sound.Heard = heard.Add; Sound.I?.Break(b); Sound.I?.Place(b); Sound.I?.Step(b); Sound.Heard = null; return string.Join(" ", heard); }
+			string ice = Sounds(Blocks.Ice), cutter = Sounds(Blocks.Cutter);
+			Check($"block sounds: Snowy Grass and Swamp Grass sound like Grass, Ice like Glass (Ice: {ice}), the Cutter (snowy too) like Planks (Cutter: {cutter}), Sandstone still the plain stone sound",
+				Sound.I != null && Sounds(Blocks.Grass) == "grass:dig grass:dig grass:step" && Sounds(Blocks.SnowyGrass) == Sounds(Blocks.Grass) && Sounds(Blocks.SwampGrass) == Sounds(Blocks.Grass)
+				&& ice == "shatter:dig glass:dig glass:step" && ice == Sounds(Blocks.Glass) && cutter == "wood:dig wood:dig wood:step" && cutter == Sounds(Blocks.Planks)
+				&& Blocks.WithSnow(Blocks.Cutter, 1) != Blocks.Cutter && Sounds(Blocks.WithSnow(Blocks.Cutter, 1)) == cutter
+				&& Sounds(Blocks.Sandstone) == "stone:dig stone:dig stone:step");
+		}
 		Check("crafting it works", s.Craft(axe) == true && s.CountOf(Blocks.CrudeAxe) == 1 && s.CountOf(Blocks.Rock) == 0 && s.CountOf(Blocks.Stick) == 0);
 		s.Give(Blocks.Log);
 		var planks = Inventory.Recipes.First(r => r.Out == Blocks.Planks && r.Needs[0].id == Blocks.Log);

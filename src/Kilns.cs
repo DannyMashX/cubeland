@@ -11,38 +11,17 @@ namespace Cubeland;
 // around it (FoundryBuilt). A recipe takes Needs: [(id, how many), ...] (usually just one thing).
 public class Kilns
 {
-	public const float SmeltTime = 5;
+	public static readonly float SmeltTime = Nums.N.SMELT_TIME;   // (data/numbers.json)
 	public record Smelt(int Out, (int Id, int N)[] Needs, string At = "kiln") { public int From => Needs[0].Id; }
-	static Smelt S(int o, int from, string at = "kiln") => new(o, new[] { (from, 1) }, at);
-	public static readonly Smelt[] Smelts = new[]
-	{
-		S(Blocks.Brick, Blocks.ClayBall),   // Clay Ball -> Brick (quicker than leaving it on the ground to dry)
-		S(Blocks.Terracotta, Blocks.Clay),  // Clay -> Terracotta
-		S(Blocks.Stone, Blocks.Cobblestone),// Cobblestone -> Stone
-		S(Blocks.BoneAsh, Blocks.Bone),     // Bone -> Bone Ash
-		S(Blocks.Bread, Blocks.Flour),      // Flour -> Bread
-		S(Blocks.CookedMeat, Blocks.RawMeat), // Raw Meat -> Cooked Meat
-	}.Concat(Enumerable.Range(0, World.TallWorlds ? Blocks.StrataLayers - 1 : 0).Select(k => S(Blocks.Strata + k, Blocks.DeepCobble + k)))   // a deep layer's Cobblestone -> its Stone
-	.Concat(new[]
-	{
-		S(Blocks.FireclayBrick, Blocks.FireclayBall),        // Fireclay Ball -> Fireclay Brick
-		S(Blocks.FireclayTerracotta, Blocks.Fireclay),       // Fireclay -> Fireclay Terracotta
-		S(Blocks.SmoothSandstone, Blocks.Sandstone),         // Sandstone -> Smooth Sandstone
-		S(Blocks.MudBricks, Blocks.Mud),                     // Mud -> Mud Bricks
-	})
-	// the Foundry: a Chunk -> its Brick; two metals' Bricks -> an alloy; an Iron Brick -> Steel Scrap, 4 Steel Scrap -> a Steel Brick
-	.Concat(Blocks.Metals.Select(m => S(Blocks.MetalBrick[m], Blocks.Chunk[m], "foundry")))
-	.Concat(new[]
-	{
-		new Smelt(Blocks.MetalBrick["bronite"], new[] { (Blocks.MetalBrick["copper"], 1), (Blocks.MetalBrick["tin"], 1) }, "foundry"),
-		new Smelt(Blocks.MetalBrick["rosium"], new[] { (Blocks.MetalBrick["gold"], 1), (Blocks.MetalBrick["copper"], 1) }, "foundry"),
-		S(Blocks.SteelScrap, Blocks.MetalBrick["iron"], "foundry"),
-		new Smelt(Blocks.SteelBrick, new[] { (Blocks.SteelScrap, 4) }, "foundry"),
-	}).ToArray();
-	// how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1; Peat (from the swamp) 8
-	public static readonly Dictionary<int, int> Fuel = new() { [Blocks.Log] = 4, [Blocks.StrippedLog] = 4, [Blocks.Planks] = 2, [Blocks.Stick] = 1,
-		[Blocks.FirLog] = 4, [Blocks.StrippedFirLog] = 4, [Blocks.FirPlanks] = 2, [Blocks.PalmLog] = 4, [Blocks.StrippedPalmLog] = 4, [Blocks.PalmPlanks] = 2,
-		[Blocks.WillowLog] = 4, [Blocks.StrippedWillowLog] = 4, [Blocks.WillowPlanks] = 2, [Blocks.Peat] = 8 };
+	// what each smelts, in the order the Kiln's and the Foundry's lists show them, and how many things one of each fuel smelts:
+	// data/smelting.json (the deep layers' Cobblestone -> its Stone only while tall worlds are on)
+	static readonly SmeltingData Data = GameData.Read<SmeltingData>("smelting") ?? throw new InvalidOperationException("data/smelting.json is missing or can't be read");
+	public static readonly Smelt[] Smelts = SmeltsFrom(Data, World.TallWorlds);
+	public static readonly Dictionary<int, int> Fuel = FuelFrom(Data);
+	// data/smelting.json as the game's tables (tall: with the deep layers' smelts)
+	public static Smelt[] SmeltsFrom(SmeltingData d, bool tall) => d.SMELTS.Where(s => tall || !s.tall).Select(s => new Smelt(DataKeys.IdOf(s.@out),
+		s.needs != null ? s.needs.Select(n => (DataKeys.IdOf(n[0].GetString()), n[1].GetInt32())).ToArray() : new[] { (DataKeys.IdOf(s.from), 1) }, s.at ?? "kiln")).ToArray();
+	public static Dictionary<int, int> FuelFrom(SmeltingData d) => d.FUEL.ToDictionary(kv => DataKeys.IdOf(kv.Key), kv => kv.Value);
 
 	public class Kiln
 	{

@@ -1,5 +1,5 @@
-# Packs every PNG in the textures folder (and its subfolders) plus every model .json in the model folder
-# into textures.js so the game can use them.
+# Packs every PNG in the textures folder (and its subfolders), every model .json in the model folder and every shared
+# data file in the data folder into textures.js so the game can use them.
 # Run update-textures.bat (or this script) again whenever you change a texture or model.
 #   textures\blocks\*.png and textures\items\*.png  -> named by file name       (e.g. "dirt")
 #   textures\blocks\sheets\*.png                    -> cut into its pictures    (see below)
@@ -115,6 +115,23 @@ if (Test-Path $mdir) {
     $json = (Get-Content $f.FullName -Raw) -replace "(\r?\n)+", ' '
     $lines += "  `"$($f.BaseName.ToLower())`": $json,"
     Write-Host "Packed model $($f.Name)"
+  }
+}
+$lines += '};'
+# Shared data files: every data\*.json goes in here too, as window.GAME_DATA.<file name> ("numbers" for numbers.json).
+# (In textures.js, not a file of its own, because the launcher downloads just index.html and textures.js for each web
+# version.) The desktop edition reads the same files (res://data/*.json). A file that isn't valid JSON stops the build,
+# so it can't break the game.
+Add-Type -AssemblyName System.Web.Extensions
+$lines += 'window.GAME_DATA = {'
+$ddir = Join-Path $root 'data'
+if (Test-Path $ddir) {
+  foreach ($f in Get-ChildItem $ddir -Filter *.json | Sort-Object Name) {
+    $json = ([IO.File]::ReadAllText($f.FullName)).Trim()
+    try { $null = (New-Object Web.Script.Serialization.JavaScriptSerializer).DeserializeObject($json) }
+    catch { throw "data\$($f.Name) isn't valid JSON: $($_.Exception.InnerException.Message) - textures.js was not changed." }
+    $lines += "  `"$($f.BaseName.ToLower())`": $json,"
+    Write-Host "Packed data $($f.Name)"
   }
 }
 $lines += '};'

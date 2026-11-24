@@ -1,0 +1,41 @@
+{
+  "_note": "The Kiln and the Foundry, read by both editions. Things are named by their keys (see blockKey in index.html / DataKeys.cs). Each smelt takes numbers.json's SMELT_TIME seconds.",
+  "_notes": {
+    "FUEL": "what burns in a Kiln or Foundry, and how many things one of it smelts",
+    "SMELTS": "every smelt, in the order the Kiln's and the Foundry's lists show them: out = what it makes (one); from = the one thing it takes, or needs = [[thing, how many], ...]; at = foundry (only in a built Foundry), otherwise the Kiln; tall = only while tall worlds are on (the deep layers' Cobblestone)"
+  },
+  "FUEL": {
+    "oak_log": 4, "stripped_oak_log": 4, "oak_planks": 2, "stick": 1,
+    "fir_log": 4, "stripped_fir_log": 4, "fir_planks": 2,
+    "palm_log": 4, "stripped_palm_log": 4, "palm_planks": 2,
+    "willow_log": 4, "stripped_willow_log": 4, "willow_planks": 2,
+    "peat": 8
+  },
+  "SMELTS": [
+    { "out": "brick", "from": "clay_ball" },
+    { "out": "terracotta", "from": "clay" },
+    { "out": "stone", "from": "cobblestone" },
+    { "out": "bone_ash", "from": "bone" },
+    { "out": "bread", "from": "flour" },
+    { "out": "cooked_meat", "from": "raw_meat" },
+    { "out": "stone#layer=2", "from": "cobblestone#layer=2", "tall": true },
+    { "out": "stone#layer=3", "from": "cobblestone#layer=3", "tall": true },
+    { "out": "stone#layer=4", "from": "cobblestone#layer=4", "tall": true },
+    { "out": "stone#layer=5", "from": "cobblestone#layer=5", "tall": true },
+    { "out": "stone#layer=6", "from": "cobblestone#layer=6", "tall": true },
+    { "out": "stone#layer=7", "from": "cobblestone#layer=7", "tall": true },
+    { "out": "stone#layer=8", "from": "cobblestone#layer=8", "tall": true },
+    { "out": "fireclay_brick", "from": "fireclay_ball" },
+    { "out": "fireclay_terracotta", "from": "fireclay" },
+    { "out": "smooth_sandstone", "from": "sandstone" },
+    { "out": "mud_bricks", "from": "mud" },
+    { "out": "copper_brick", "from": "copper_chunk", "at": "foundry" },
+    { "out": "iron_brick", "from": "iron_chunk", "at": "foundry" },
+    { "out": "gold_brick", "from": "gold_chunk", "at": "foundry" },
+    { "out": "tin_brick", "from": "tin_chunk", "at": "foundry" },
+    { "out": "bronite_brick", "needs": [["copper_brick", 1], ["tin_brick", 1]], "at": "foundry" },
+    { "out": "rosium_brick", "needs": [["gold_brick", 1], ["copper_brick", 1]], "at": "foundry" },
+    { "out": "steel_scrap", "from": "iron_brick", "at": "foundry" },
+    { "out": "steel_brick", "needs": [["steel_scrap", 4]], "at": "foundry" }
+  ]
+}

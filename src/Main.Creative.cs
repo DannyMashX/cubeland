@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using Godot;
 
 namespace Cubeland;
@@ -9,44 +10,41 @@ namespace Cubeland;
 // and a way to clear the hotbar. The tab order is also the order Sort puts things in (survival).
 public partial class Main
 {
-	// the tabs: (name, the item whose picture is on the tab, what's in it). Anything not listed goes in Building.
-	static (string name, int icon, int[] ids)[] creativeTabs;
-	public static (string name, int icon, int[] ids)[] CreativeTabs => creativeTabs ??= MakeTabs();   // (made when first needed, once every block is in)
-	static (string, int, int[])[] MakeTabs()
+	// the tabs, in button order: (name, what's in it): data/creative.json (the deep layers' only while tall worlds are on)
+	static (string name, int[] ids)[] creativeTabs;
+	public static (string name, int[] ids)[] CreativeTabs => creativeTabs ??=   // (made when first needed, once every block is in)
+		TabsFrom(GameData.Read<CreativeData>("creative") ?? throw new InvalidOperationException("data/creative.json is missing or can't be read"), World.TallWorlds);
+	// data/creative.json as the tabs (tall: with the deep layers' blocks and ores). Anything the creative inventory has that
+	// no tab lists goes at the end of Building.
+	public static (string name, int[] ids)[] TabsFrom(CreativeData d, bool tall)
 	{
-		var woods = new[] { (Blocks.Log, Blocks.StrippedLog, Blocks.Planks, Blocks.Leaves), (Blocks.FirLog, Blocks.StrippedFirLog, Blocks.FirPlanks, Blocks.FirLeaves),
-			(Blocks.PalmLog, Blocks.StrippedPalmLog, Blocks.PalmPlanks, Blocks.PalmLeaves), (Blocks.WillowLog, Blocks.StrippedWillowLog, Blocks.WillowPlanks, Blocks.WillowLeaves) };
-		int[] building = new[] { Blocks.Cobblestone }.Concat(Blocks.DeepShown(8)).Append(Blocks.StoneBricks).Concat(Blocks.DeepShown(9)).Append(69).Concat(Blocks.DeepShown(69))
-			.Concat(Blocks.ColourBricks.Prepend(64)).Append(65).Concat(Blocks.ColourTerracotta).Append(67).Concat(Blocks.ColourChiseled).Append(Blocks.Glass)
-			.Concat(new[] { Blocks.SandstoneBricks, Blocks.ChiseledSandstone, Blocks.SmoothSandstone, Blocks.MudBricks }).Concat(Blocks.FireclayBlocks).Distinct().ToArray();
-		int[] natural = new[] { Blocks.Grass, Blocks.Dirt }.Concat(Blocks.Soils).Append(Blocks.Stone).Concat(Blocks.DeepShown(3)).Concat(Blocks.Ores)
-			.Concat(World.TallWorlds ? Blocks.DeepOres : Array.Empty<int>())
-			.Concat(new[] { Blocks.Sand, Blocks.Sandstone, Blocks.SnowyGrass, Blocks.SwampGrass, Blocks.Mud, Blocks.Peat, Blocks.Ice, Blocks.Gravel, Blocks.Clay, Blocks.Fireclay,
-				Blocks.Snow, Blocks.SnowBlock, Blocks.Water, Blocks.Bedrock }).Distinct().ToArray();
-		int[] wood = woods.SelectMany(w => new[] { w.Item1, w.Item2, w.Item3, w.Item4 }).ToArray();
-		int[] shapes = Blocks.Splittable.Where(b => World.TallWorlds || Array.IndexOf(Blocks.DeepBlocks, b) < 0).SelectMany(b => ShapeForms.Select(f => Blocks.FormItem(f, b))).Where(i => Blocks.Get(i) != null).ToArray();
-		int[] light = new[] { Blocks.Torch, Blocks.SmolderingTorch, Blocks.BurntTorch, Blocks.EverTorch }.Concat(Blocks.Flowers).ToArray();
-		int[] tools = new[] { Blocks.CrudeAxe }.Concat(Blocks.Tools).Concat(Blocks.GearItems).ToArray();
-		int[] materials = new[] { Blocks.Stick, Blocks.Rock, Blocks.ClayBall, Blocks.Brick, Blocks.FireclayBall, Blocks.FireclayBrick }.Concat(Blocks.PackItems.Except(new[] { Blocks.FireclayBall, Blocks.FireclayBrick }))
-			.Concat(new[] { Blocks.Bone, Blocks.BoneAsh, Blocks.GloomWisp, Blocks.FireEssence, Blocks.Leather }).Concat(Blocks.Dye).Concat(new[] { Blocks.Grain, Blocks.GrainSeeds, Blocks.Flour, Blocks.Snowball }).ToArray();
-		int[] machines = { Blocks.CraftingBench, Blocks.Cutter, Blocks.Furnace, Blocks.Foundry };
-		// food: everything you can eat (that isn't somewhere else already)
-		var listed = new HashSet<int>(building.Concat(natural).Concat(wood).Concat(shapes).Concat(light).Concat(tools).Concat(materials).Concat(machines));
-		int[] food = AllCreative().Where(i => Blocks.Get(i)?.Food > 0 && !listed.Contains(i)).ToArray();
-		listed.UnionWith(food);
-		building = building.Concat(AllCreative().Where(i => !listed.Contains(i))).ToArray();   // (anything not listed)
-		return new (string, int, int[])[]
-		{
-			("Building", 64, building), ("Natural", Blocks.Grass, natural), ("Wood", Blocks.Log, wood), ("Shapes", Blocks.FormItem("stairs", Blocks.Stone), shapes),
-			("Light & Decoration", Blocks.Torch, light), ("Tools & Armor", Blocks.Tools.FirstOrDefault(t => Blocks.B[t].Tool == "pickaxe" && Blocks.B[t].Material == "iron", Blocks.CrudeAxe), tools),
-			("Food", Blocks.Bread, food), ("Materials", Blocks.Stick, materials), ("Machines", Blocks.CraftingBench, machines),
-		};
+		var tabs = d.TABS.Select(t => (t.name, ids: t.forms != null ? ShapesIn(t.forms, tall) : t.items.SelectMany(e => TabEntry(e, tall)).ToArray())).ToArray();
+		var listed = new HashSet<int>(tabs.SelectMany(t => t.ids));
+		int b = Math.Max(0, Array.FindIndex(tabs, t => t.name == "Building"));
+		tabs[b].ids = tabs[b].ids.Concat(AllCreative().Where(i => !listed.Contains(i))).ToArray();
+		return tabs;
 	}
-	static readonly string[] ShapeForms = { "piece", "slab", "stairs", "quarter", "vslab", "vstairs", "vquarter" };
-	// every block and item the creative inventory has (before the shapes)
-	static IEnumerable<int> AllCreative() => Blocks.Items.Concat(new[] { Blocks.Stick, Blocks.Rock, Blocks.CrudeAxe, Blocks.ClayBall, Blocks.Brick, Blocks.FireEssence, Blocks.Bone, Blocks.BoneAsh,
-		Blocks.GloomWisp, Blocks.GrainSeeds, Blocks.Grain, Blocks.Flour, Blocks.Bread, Blocks.Dates, Blocks.Chocolate, Blocks.Snowball, Blocks.Leather, Blocks.RawMeat, Blocks.CookedMeat,
-		Blocks.SmolderingTorch, Blocks.BurntTorch, Blocks.EverTorch }).Concat(Blocks.Dye).Concat(Blocks.Tools).Concat(Blocks.PackItems).Concat(Blocks.GearItems).Where(i => Blocks.Get(i) != null).Distinct();
+	// one of a tab's entries: a key, or a { "tall": [keys] } group (its keys are checked even while tall worlds are off)
+	public static int[] TabEntry(JsonElement e, bool tall)
+	{
+		if (e.ValueKind == JsonValueKind.String) return new[] { DataKeys.IdOf(e.GetString()) };
+		if (e.ValueKind == JsonValueKind.Object && e.EnumerateObject().Count() == 1 && e.TryGetProperty("tall", out var g) && g.ValueKind == JsonValueKind.Array)
+		{
+			var ids = g.EnumerateArray().Select(k => DataKeys.IdOf(k.ValueKind == JsonValueKind.String ? k.GetString() : null)).ToArray();
+			return tall ? ids : Array.Empty<int>();
+		}
+		throw new InvalidOperationException($"data/creative.json: a tab has {e.GetRawText()}, which isn't a key or {{ \"tall\": [keys] }}");
+	}
+	// the Shapes tab: every block the Cutter can cut, block by block, in each form (the deep layers' only while tall worlds are on)
+	public static int[] ShapesIn(string[] forms, bool tall)
+	{
+		foreach (var f in forms) if (Array.IndexOf(Blocks.Forms, f) < 0) throw new InvalidOperationException($"data/creative.json: the Shapes tab has \"{f}\", which isn't a shape");
+		return Blocks.Splittable.Where(b => tall || Array.IndexOf(Blocks.DeepBlocks, b) < 0).SelectMany(b => forms.Select(f => Blocks.FormItem(f, b))).Where(i => Blocks.Get(i) != null).ToArray();
+	}
+	// every block and item the creative inventory has (before the shapes): Items, every item row, and each kind of torch (lit,
+	// smoldering, burnt, ever: a standing one)
+	static IEnumerable<int> AllCreative() => Blocks.Items.Concat(Blocks.ItemRows).Concat(Enumerable.Range(0, 4).Select(burn => Blocks.TorchVariant(0, 1, burn)))
+		.Where(i => Blocks.Get(i) != null).Distinct();
 	// which tab an item is in (its place in the tab order, for sorting), and where in that tab
 	static Dictionary<int, (int tab, int at)> tabPlace;
 	public static (int tab, int at) TabPlace(int id)
@@ -72,7 +70,7 @@ public partial class Main
 		tabs.AddChild(flow);
 		for (int k = 0; k < CreativeTabs.Length; k++)
 		{
-			int kk = k; var (name, icon, _) = CreativeTabs[k];
+			int kk = k; string name = CreativeTabs[k].name;
 			var b = new Button { Text = name, ToggleMode = true, MouseFilter = Control.MouseFilterEnum.Pass };
 			b.Pressed += () => { creativeTab = kk; creativeSearch.Text = ""; ShowCreative(); };
 			flow.AddChild(b); creativeTabButtons.Add(b);
@@ -81,7 +79,7 @@ public partial class Main
 		var gridZone = new DropZone(); gridZone.AddChild(scroll); body.AddChild(gridZone);
 		creativeGrid = new GridContainer { Columns = CreativeCols }; creativeGrid.AddThemeConstantOverride("h_separation", 4); creativeGrid.AddThemeConstantOverride("v_separation", 4);
 		scroll.AddChild(creativeGrid);
-		foreach (var (_, _, ids) in CreativeTabs) foreach (int id in ids) if (!creativeSlots.ContainsKey(id)) { var s = InvSlot(id); creativeSlots[id] = s; creativeGrid.AddChild(s); }
+		foreach (var (_, ids) in CreativeTabs) foreach (int id in ids) if (!creativeSlots.ContainsKey(id)) { var s = InvSlot(id); creativeSlots[id] = s; creativeGrid.AddChild(s); }
 		// a hotbar slot dragged onto the tabs or the grid: it's emptied
 		foreach (var z in new[] { tabs, gridZone })
 		{

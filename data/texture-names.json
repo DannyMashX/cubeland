@@ -1,0 +1,27 @@
+{
+  "_note": "Names for the texture files, read by both editions: other spellings of a picture's file, pictures that borrow another's file until they have their own, and the names of font letters a file name can't hold.",
+  "_notes": {
+    "TEXTURE_SPELLINGS": "a file named like this (the key) is that picture (the value): old or misspelt file names that still work",
+    "TEXTURE_BORROWS": "a picture with no file of its own (the key) uses this one's (the value; that one may borrow too). Once the picture has its own file, that's used",
+    "FONT_NAMES": "a letter picture in textures/font/ named like this (the key) is this character (the value). A file named with one character (a.png, 7.png) is just that character; in the upper folder, the capital"
+  },
+  "TEXTURE_SPELLINGS": {
+    "grass_top": "grass", "tortch_side": "torch_side", "tortch_top": "torch_top", "tortch_bottom": "torch_bottom",
+    "chisled_terracota": "chiseled_terracotta", "red_chiseled_terracotta": "chiseled_red_terracotta"
+  },
+  "TEXTURE_BORROWS": {
+    "bricks_a": "red_bricks", "bricks_b": "red_bricks", "bricks_c": "red_bricks", "bricks_d": "red_bricks",
+    "cutter_base": "crafting_bench_side", "cutter_bottom": "planks", "cutter_saw_frame_0": "cutter_saw", "cutter_saw_1": "cutter_saw",
+    "snow": "white_terracotta", "snowy_grass_side": "grass_side", "ice": "glass", "swamp_grass": "grass", "swamp_grass_side": "grass_side"
+  },
+  "FONT_NAMES": {
+    "asterisk": "*", "dash": "-", "hyphen": "-", "minus": "-", "period": ".", "dot": ".", "full_stop": ".", "plus": "+",
+    "q_mark": "?", "question": "?", "question_mark": "?", "exclamation": "!", "exclamation_mark": "!", "ampersand": "&", "and": "&",
+    "caret": "^", "comma": ",", "colon": ":", "semicolon": ";", "slash": "/", "forward_slash": "/", "backslash": "\\",
+    "apostrophe": "'", "quote": "\"", "quotes": "\"", "lparen": "(", "left_paren": "(", "open_paren": "(", "rparen": ")", "right_paren": ")",
+    "close_paren": ")", "lbracket": "[", "rbracket": "]", "equals": "=", "underscore": "_", "percent": "%", "hash": "#", "at": "@",
+    "dollar": "$", "less_than": "<", "greater_than": ">", "tilde": "~", "space": " ",
+    "times": "·", "middot": "·", "middle_dot": "·",
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9"
+  }
+}

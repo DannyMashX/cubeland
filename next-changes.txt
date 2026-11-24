@@ -1,10 +1,2 @@
 # Changes for the next update, one per line. publish-update.bat shows this list when you publish,
 # puts it in the change log, then empties this file. Lines starting with # are ignored.
-New: Fireclay can be made at the Crafting Bench from Clay, Sand and Gravel
-New: in Survival, the tools in your tool slots show in a row beside the hotbar, with their wear bars, and the one last picked for you is highlighted
-Fixed: cows' hearts (and the puff from a Snowball) glowed in the dark and showed through fog
-Changed: ores match the new Stone look
-Fixed: Sandstone dropped nothing when broken in Survival
-Fixed: on the web, the world's music came back in the main menu after you quit, and mobs and sounds carried on for a moment while quitting
-Changed: each block's slab, stair, quarter and piece pictures now come from one picture sheet per block (behind the scenes; blocks look the same)
-Fixed: sand stairs showed a stray sliver of sand's middle patch

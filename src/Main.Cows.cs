@@ -17,13 +17,15 @@ namespace Cubeland;
 // - Breeding stops at CowsPerChunk cows in one 16x16 chunk (all the way up), counting calves, fat cows and the rest:
 //   no cow there mates and no calf is born. It only stops breeding: cows can still spawn or wander in past it.
 // - Leather: a cow that's had room to roam (few cows close by, for a while) gives more Leather.
-// The web game's index.html has the same rules (the COW numbers there must match these).
+// The web game's index.html has the same rules; both read the numbers from data/mobs.json.
 public partial class Main
 {
-	public const int CowsPerChunk = 8, CrowdedAt = 4, FatAt = 3, FedMax = 5;
-	const float CowHappyMax = 180, GrazeHappy = 45, GrainHappy = 90, GrazeBelow = 60, GrazeTime = 2;
-	const float MateCooldown = 300, MateCost = 60, CalfTime = 600, CalfGrainBoost = 60, NearRange = 6;
-	const int CalfHealth = 3;
+	// the cow numbers: data/mobs.json's COW (the same file the web game reads)
+	static readonly CowNumbers Cow = Nums.Mobs.COW;
+	public static readonly int CowsPerChunk = Cow.perChunk, CrowdedAt = Cow.crowdedAt, FatAt = Cow.fatAt, FedMax = Cow.fedMax;
+	static readonly float CowHappyMax = Cow.happyMax, GrazeHappy = Cow.grazeHappy, GrainHappy = Cow.grainHappy, GrazeBelow = Cow.grazeBelow, GrazeTime = Cow.grazeTime;
+	static readonly float MateCooldown = Cow.mateCooldown, MateCost = Cow.mateCost, CalfTime = Cow.calfTime, CalfGrainBoost = Cow.calfGrainBoost, NearRange = Cow.nearRange;
+	static readonly int CalfHealth = Cow.calfHealth;
 
 	// which model a cow wears: 0 = cow, 1 = calf (cowbaby), 2 = fat cow (cowfat)
 	static int CowVariant(Mob m) => m.Baby > 0 ? 1 : m.Fed >= FatAt ? 2 : 0;

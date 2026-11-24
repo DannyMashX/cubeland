@@ -18,32 +18,9 @@ public partial class Sound : Node
 	public static Sound I;
 	public static readonly Dictionary<string, float> Levels = new() { ["master"] = 1, ["block"] = 1, ["player"] = 1, ["mob"] = 1, ["music"] = 1 };
 	public static bool Muted;
-	static readonly Dictionary<int, string> Material = new()
-	{
-		[1] = "grass", [2] = "stone", [3] = "rock", [4] = "wood", [5] = "grass", [6] = "sand", [7] = "wood", [8] = "cobble", [9] = "rock", [10] = "glass", [11] = "dirt",
-		[12] = "brick", [13] = "brick", [14] = "brick", [15] = "brick", [60] = "wood", [61] = "wood", [63] = "dirt", [64] = "brick", [65] = "brick", [66] = "brick",
-		[67] = "brick", [68] = "brick", [69] = "rock",
-		[Blocks.FirLog] = "wood", [Blocks.FirPlanks] = "wood", [Blocks.StrippedFirLog] = "wood", [Blocks.FirLeaves] = "grass",
-		[Blocks.PalmLog] = "wood", [Blocks.PalmPlanks] = "wood", [Blocks.StrippedPalmLog] = "wood", [Blocks.PalmLeaves] = "grass",
-		[Blocks.WillowLog] = "wood", [Blocks.WillowPlanks] = "wood", [Blocks.StrippedWillowLog] = "wood", [Blocks.WillowLeaves] = "grass",
-		[Blocks.SandstoneBricks] = "rock", [Blocks.ChiseledSandstone] = "rock", [Blocks.SmoothSandstone] = "rock",
-		[Blocks.Mud] = "dirt", [Blocks.MudBricks] = "brick", [Blocks.Peat] = "dirt",
-	};
-	static Sound()
-	{
-		for (int k = 0; k < 8; k++) Material[Blocks.Furnace + k] = "brick";
-		foreach (int b in Blocks.NewColourBlocks) Material[b] = "brick";
-		for (int b = Blocks.Strata; b <= Blocks.DeepLast; b++) Material[b] = "rock";   // (the deep stone sets and bedrock sound like stone)
-		foreach (int b in Blocks.Ores.Concat(Blocks.DeepOres)) Material[b] = "rock";
-		Material[Blocks.Fireclay] = "dirt";
-		for (int b = Blocks.FireclayTerracotta; b < Blocks.Foundry + 8; b++) Material[b] = "brick";   // the Fireclay blocks and the Foundry's Furnace
-		foreach (int b in Blocks.Flowers) Material[b] = "grass";
-		foreach (int b in Blocks.GrainStages) Material[b] = "grass";
-		foreach (int b in Blocks.Soils) Material[b] = "stone";   // (tilled soil sounds like dirt, which now has the sharp sound; gravel has the crumbly one)
-		for (int b = Blocks.Snow; b <= Blocks.SnowBlock; b++) Material[b] = "snow";   // (the layers and the Snow Block)
-		for (int k = 0; k < 16; k++) Material[Blocks.TurnedLogs + k] = "wood";   // (logs lying on their sides)
-	}
-	static string Mat(int id) { id = Blocks.Plain(id); return Blocks.IsTorch(id) ? "wood" : Material.TryGetValue(id, out var m) ? m : "stone"; }
+	// what a block sounds like when it's dug, stepped on and put down: its sound in data/blocks.json (left out: "stone"; a
+	// snow-logged block sounds like what it holds)
+	static string Mat(int id) => Blocks.Get(Blocks.Plain(id))?.Sound ?? "stone";
 	public static string MatOf(int id) => Mat(id);
 	// (tests) how loud a made sound is at its loudest: builds one variation of "material:kind"
 	public static float Loudness(string key)
@@ -252,7 +229,7 @@ public partial class Sound : Node
 		}
 		return Buf(0.1);
 	}
-	static readonly string[] Recipes = { "grass", "leaves", "gravel", "sand", "dirt", "stone", "rock", "wood", "glass", "shatter", "cobble", "brick", "snow" };
+	public static readonly string[] Recipes = { "grass", "leaves", "gravel", "sand", "dirt", "stone", "rock", "wood", "glass", "shatter", "cobble", "brick", "snow" };
 	// stone set on stone: deep dry clack + thump + gritty scrape
 	static float[] PlaceRock(Func<double> r)
 	{
@@ -488,8 +465,10 @@ public partial class Sound : Node
 		return list[i];
 	}
 	// ch = which volume slider this sound follows: "block", "player" or "mob" (all of them also follow the master volume)
+	public static Action<string> Heard;   // (testing: each sound asked for, as "material:kind", even while muted)
 	void Play(string mat, string kind, float vol, float rate, string ch = "block")
 	{
+		Heard?.Invoke(mat + ":" + kind);
 		vol *= Levels["master"] * Levels[ch];
 		if (Muted || vol <= 0) return;
 		var s = Pick(mat + ":" + kind); if (s == null) return;

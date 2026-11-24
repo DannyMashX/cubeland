@@ -52,8 +52,7 @@ public partial class Main
 		uiLayer.AddChild(bottom);
 		nameLabel = Text("", 15); nameLabel.HorizontalAlignment = HorizontalAlignment.Center;
 		nameLabel.AddThemeColorOverride("font_shadow_color", new Color(0, 0, 0, 0.8f));
-		bottom.AddChild(nameLabel);
-		noteLift = new Control { MouseFilter = Control.MouseFilterEnum.Ignore }; bottom.AddChild(noteLift);   // (lifts the notes over the armor bar or a moved-up tool row)
+		nameLabel.MouseFilter = Control.MouseFilterEnum.Ignore; uiLayer.AddChild(nameLabel);   // (placed each frame, 4 above whatever is highest: see PlaceToolRow)
 		var center = new CenterContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
 		bottom.AddChild(center); nameCenter = center;
 		var barBg = new PanelContainer();
@@ -62,6 +61,7 @@ public partial class Main
 		center.AddChild(col);
 		heartsHolder = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };   // (survival: your hearts, above the left end of the hotbar)
 		col.AddChild(heartsHolder);
+		heartsLift = new Control { MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false }; col.AddChild(heartsLift);   // (lifts the hearts over a long tool row: see PlaceToolRow)
 		// survival: the offhand slot to the left of the hotbar (R picks the next one, F swaps it with your hand)
 		var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore }; row.AddThemeConstantOverride("separation", 4);
 		center.RemoveChild(col); center.AddChild(row);
@@ -385,7 +385,7 @@ public partial class Main
 
 
 	// ===================== the tool row (survival) =====================
-	// The tools in your tool slots, shown beside the hotbar (or just above its right end if there's no room). Only to look at:
+	// The tools in your tool slots, shown above the hotbar between the hearts and the armor bar (see PlaceToolRow). Only to look at:
 	// the one last picked for you (breaking a block or hitting a mob without the right tool in your hand) is highlighted
 	// until a different one is picked, or it breaks or leaves its slot.
 	Control hotBarBox; PanelContainer toolRow; readonly Slot[] toolSlots = new Slot[Inventory.Off0 - Inventory.Tool0];
@@ -422,44 +422,66 @@ public partial class Main
 		autoTool = inv.Id[i] == id ? i : -1; autoToolId = id;
 		DrawToolRow(); DrawArmorBar();
 	}
-	// every frame: the tool row beside the hotbar if it fits (4 from it, and 4 from the screen's edge), otherwise above the
-	// hotbar's right end one line up (4 above the hearts' line, so above the armor bar, never over it). The armor bar mirrors
-	// the hearts: its right end at the hotbar's right end, on the hearts' line. Notes (the block's name, "Saved" ...) go above it all.
+	// every frame (survival; the same as the web version), one line 4 above the hotbar:
+	//     hearts   [tool row]   armor
+	//  [R] [1][2][3][4][5][6][7][8][9][0]
+	//  - the hearts: left end at the hotbar's left end; the armor bar: right end at its right end, filling from the right;
+	//  - the tool row: bottom on the line, centred in the gap between them (4 clear of each; the armor bar counts as the
+	//    hearts' width even when it isn't showing, so nothing jumps). Too long for the gap: its bottom on the line, centred
+	//    over the hotbar, and the hearts and armor bar go up, level, 4 above it;
+	//  - notes (the block's name, "Saved" ...) 4 above whatever is highest.
+	// Offsets are rounded to whole UI units from the hotbar's left edge, so everything stays on the hotbar's pixel grid.
 	void PlaceToolRow()
 	{
-		if (toolRow == null || hotBarBox == null) return;
-		toolRow.Visible = inv.Survival && hotBarBox.IsVisibleInTree();
-		var bar = hotBarBox.GetGlobalRect(); float screen = toolRow.GetViewportRect().Size.X;
-		float lineH = heartsRect != null && heartsRect.IsVisibleInTree() ? heartsRect.Size.Y : armorBar != null ? armorBar.Size.Y : 0;
-		float lineTop = bar.Position.Y - 4 - lineH;   // (the top of the hearts' line)
-		float top = float.MaxValue;
+		if (hotBarBox == null) return;
+		var bar = hotBarBox.GetGlobalRect(); float screen = hotBarBox.GetViewportRect().Size.X;
+		float line = bar.Position.Y - 4, iconFoot = line, top = float.MaxValue;
+		Rect2? hearts = heartsRect != null && heartsRect.IsVisibleInTree() ? heartsRect.GetGlobalRect() : null;
+		float iconW = hearts?.Size.X ?? (armorBar != null ? armorBar.Size.X : 0);
+		float gapL = bar.Position.X + iconW + 4, gapR = bar.End.X - iconW - 4;
+		bool lift = false; float rowH = 0;
+		if (toolRow != null)
+		{
+			toolRow.Visible = inv.Survival && hotBarBox.IsVisibleInTree();
+			if (toolRow.Visible)
+			{
+				var size = toolRow.Size;
+				if (size.X <= gapR - gapL) toolRow.Position = new Vector2(gapL + MathF.Round((gapR - gapL - size.X) / 2), line - size.Y);
+				else
+				{
+					toolRow.Position = new Vector2(bar.Position.X + MathF.Round((bar.Size.X - size.X) / 2), line - size.Y);
+					lift = true; rowH = size.Y; iconFoot = toolRow.Position.Y - 4;
+				}
+				top = toolRow.Position.Y;
+			}
+		}
+		// the hearts go up over a long tool row: a gap its height between them and the hotbar (the column's 4 between rows does the rest)
+		if (heartsLift != null && (heartsLift.Visible != lift || (lift && Math.Abs(heartsLift.CustomMinimumSize.Y - rowH) > 0.5f)))
+		{ heartsLift.Visible = lift; heartsLift.CustomMinimumSize = new Vector2(0, rowH); }
 		if (armorBar != null)
 		{
 			armorBar.Visible = armorShown && hotBarBox.IsVisibleInTree();
-			if (armorBar.Visible) armorBar.Position = new Vector2(bar.End.X - armorBar.Size.X, bar.Position.Y - 4 - armorBar.Size.Y);
+			if (armorBar.Visible) { armorBar.Position = new Vector2(bar.End.X - armorBar.Size.X, iconFoot - armorBar.Size.Y); top = Math.Min(top, armorBar.Position.Y); }
 		}
-		if (toolRow.Visible)
+		// the notes, across the screen, 4 above the highest thing (the hotbar's column holds the hearts and the offhand slot)
+		if (nameLabel != null)
 		{
-			var size = toolRow.Size;
-			if (bar.End.X + 4 + size.X <= screen - 4) toolRow.Position = new Vector2(bar.End.X + 4, bar.End.Y - size.Y);
-			else { toolRow.Position = new Vector2(bar.End.X - size.X, lineTop - 4 - size.Y); top = toolRow.Position.Y; }
-		}
-		// the notes: lifted clear of anything above the hearts' line
-		if (noteLift != null && nameCenter != null)
-		{
-			float lift = top == float.MaxValue ? 0 : Math.Max(0, nameCenter.GetGlobalRect().Position.Y - top);
-			if (Math.Abs(noteLift.CustomMinimumSize.Y - lift) > 0.5f) noteLift.CustomMinimumSize = new Vector2(0, lift);
+			if (nameCenter != null) top = Math.Min(top, nameCenter.GetGlobalRect().Position.Y);
+			float hgt = nameLabel.GetCombinedMinimumSize().Y;
+			nameLabel.Size = new Vector2(screen, hgt);
+			nameLabel.Position = new Vector2(0, MathF.Round(top - 4 - hgt));
 		}
 	}
 
 	// ===================== the armor bar (survival) =====================
 	// The hearts' mirror: as many pictures as hearts, their size and spacing, filling from its right end inward in quarters,
 	// as the hearts do, with the share of each hit your armor takes (a full new set, half of every hit, fills it). Pictures:
-	// textures/gui/armor_full / three_quarter / half / quarter / empty; the part-filled ones are drawn flipped, so they fill
-	// from the outer (right) side, the mirror of the hearts. Shown all the time in survival (empty with no armor on), unless
-	// the pictures are missing.
+	// textures/gui/armor_full / three_quarter / half / quarter / empty; the part-filled ones are drawn already mirrored, so they fill
+	// from the outer (right) side, the mirror of the hearts. Shown in survival only while your armor gives at least a quarter
+	// (nothing on, or all of it broken: hidden, no empty pictures), unless the pictures are missing. Its place stays kept
+	// either way (see PlaceToolRow), so nothing moves when armor goes on or comes off. (The same as the web version.)
 	Control armorBar; TextureRect[] armorIcons; Texture2D[] armorPics; bool armorShown;
-	Control noteLift, nameCenter;
+	Control nameCenter, heartsLift;
 	void BuildArmorBar()
 	{
 		Texture2D Pic(string name) => ResourceLoader.Exists($"res://textures/gui/{name}.png") ? ResourceLoader.Load<Texture2D>($"res://textures/gui/{name}.png") : null;
@@ -483,7 +505,7 @@ public partial class Main
 	void DrawArmorBar()
 	{
 		if (armorBar == null) return;
-		armorShown = inv.Survival;
+		armorShown = inv.Survival && ArmorQuarters(inv.ArmorBlock()) >= 1;
 		for (int j = 0; j < HEARTS; j++)
 		{
 			int q = ArmorIconQuarters(j);

@@ -1,0 +1,193 @@
+using System;
+using System.Collections.Generic;
+using System.Text.Json;
+using Godot;
+
+namespace Cubeland;
+
+// The shared game data: data/*.json, the same files the web version reads (packed into data.js there). Each file is read
+// once, when first asked for. While a table is being moved into data/, --datacheck builds it from the file and compares
+// it with the one today's code builds (see Main.Data.cs); the old code only goes once that shows 0 differences.
+public static class GameData
+{
+	static readonly Dictionary<string, JsonElement?> files = new();
+	public static readonly JsonSerializerOptions Opts = new() { IncludeFields = true, PropertyNameCaseInsensitive = false, ReadCommentHandling = JsonCommentHandling.Disallow };
+
+	// data/NAME.json, parsed (null if there isn't one)
+	public static JsonElement? File(string name)
+	{
+		if (files.TryGetValue(name, out var e)) return e;
+		string path = $"res://data/{name}.json";
+		JsonElement? root = null;
+		if (FileAccess.FileExists(path))
+		{
+			try { using var doc = JsonDocument.Parse(FileAccess.GetFileAsString(path)); root = doc.RootElement.Clone(); }
+			catch (Exception x) { GD.PushError($"data/{name}.json can't be read: {x.Message}"); }
+		}
+		return files[name] = root;
+	}
+	// data/NAME.json as a typed table (fields named as in the file; "_note" fields are only notes)
+	public static T Read<T>(string name) where T : class => File(name) is { } r ? r.Deserialize<T>(Opts) : null;
+}
+
+// data/numbers.json: plain gameplay numbers (names as the web version's constants)
+public sealed class NumbersData
+{
+	public int STACK_MAX, LOG_STAGES, STONE_STAGES, HEARTS;
+	public float SMELT_TIME;
+	public float[][] BURN_TIMES;
+	public FarmNumbers FARM;
+	public Dictionary<string, int> DURABILITY, ARMOR_DURABILITY, PICK_TIER, STRATA_PICKAXE, PICK_STAGES, AXE_STAGES;
+	public float[] ARMOR_SHARE;
+}
+public sealed class FarmNumbers
+{
+	public float stageTime, dryRate, fertRate, revertTime;
+	public int stageHits, wetReach, fertHarvests;
+	public double seedChance;
+}
+// data/smelting.json: what burns in a Kiln or Foundry, and every smelt (things named by their keys; see DataKeys.cs)
+public sealed class SmeltingData
+{
+	public Dictionary<string, int> FUEL;
+	public SmeltEntry[] SMELTS;
+}
+public sealed class SmeltEntry
+{
+	public string @out, from, at;      // at: "foundry", or left out for the Kiln
+	public JsonElement[][] needs;      // [[key, how many], ...] in place of from
+	public bool tall;                  // only while tall worlds are on
+}
+// data/recipes.json: crafting by hand and at the Crafting Bench, and the Cutter's shapes
+public sealed class RecipesData
+{
+	public RecipeEntry[] RECIPES;
+	public CutterEntry[] CUTTER;
+}
+public sealed class RecipeEntry
+{
+	public string @out, at, tool;      // at: "hand" or "bench"; tool: also needs that tool in the hotbar
+	public int n;
+	public JsonElement[][] needs;      // [[key, how many], ...], all used up
+	public bool axe, colour, tall;     // axe: also needs an axe in the hotbar; colour: listed only while carrying an ingredient; tall: only while tall worlds are on
+}
+public sealed class CutterEntry
+{
+	public string mode, label;         // mode: "pieces", or the shape's form name (as in keys: slab:stone)
+	public int uses, makes;
+}
+// data/creative.json: the creative inventory's tabs, in button order (Sort uses the same order)
+public sealed class CreativeData
+{
+	public CreativeTab[] TABS;
+}
+public sealed class CreativeTab
+{
+	public string name;
+	public JsonElement[] items;        // keys in order, and { "tall": [keys] } groups shown only while tall worlds are on
+	public string[] forms;             // (Shapes) every block the Cutter can cut, block by block, in these forms
+}
+// data/mobs.json: every mob (in spawning order), how much stronger they are deeper down, the Gloomling's fade, and the cows
+public sealed class MobsData
+{
+	public MobEntry[] MOBS;
+	public float LAYER_BOOST;
+	public GloomFadeNumbers GLOOM_FADE;
+	public CowNumbers COW;
+}
+public sealed class MobEntry
+{
+	public string type, name, growl;
+	public int health, max, damage;
+	public float speed, sight, reach, hearing, lightRange, near, far, faint, scale = 1;
+	public bool hostile, dark, night, deep, burns, shamble, glow, curious, thrower, snuffer, cow;
+	public JsonElement[][] drops;      // [[key, fewest, most, chance]] (chance left out: always)
+}
+public sealed class GloomFadeNumbers { public float range, time; }
+public sealed class CowNumbers
+{
+	public int perChunk, crowdedAt, fatAt, fedMax, calfHealth;
+	public float happyMax, grazeHappy, grainHappy, grazeBelow, grazeTime, mateCooldown, mateCost, calfTime, calfGrainBoost, nearRange, regrowMin, regrowMax;
+}
+// data/texture-names.json: other spellings of pictures' files, pictures that borrow another's file until they have their own,
+// and the names of font letters a file name can't hold (file name -> the character)
+public sealed class TextureNamesData
+{
+	public Dictionary<string, string> TEXTURE_SPELLINGS, TEXTURE_BORROWS, FONT_NAMES;
+}
+// data/blocks.json: the blocks and items. Ids are written out (they're the save format); other blocks are named by key.
+public sealed class BlocksData
+{
+	public BlockRow[] BASE;            // the ones written out one by one
+	public BlockRow[] KILN, TORCHES, WATER, LYING_LOGS, SNOW, TOOLS, DEEP_STONE, SOILS, GRAIN, COLOURS, METALS, DEEP_ORES, FOUNDRY, GEAR, FLOWERS;   // families, every member written out (in the order the game loads them)
+	public Dictionary<string, string> FORM_NAMES;   // the forms (piece, slab, ...) in order, each with the word its items' names end in
+	public SnowyRow[] SNOWY;           // the snow-logged blocks: a torch, flower or other small thing with snow lying round it
+	public FormRow[] FORMS;            // each block you can cut (in Blocks.Splittable's order), with its piece and shape items' ids
+}
+public sealed class BlockRow
+{
+	public int id;
+	public string name, shape, drop, places, tool, material, dye;   // drop, places, dye: other blocks, by key
+	public JsonElement pictures;       // one name (every side), or [side, top, bottom] / [side, top, bottom, front]
+	public string icon;                // its hotbar picture, if not the first one
+	public bool transparent, noCollide, item, liquid, lit;
+	public float[] box;
+	public JsonElement[] handDrop;     // [key, fewest, most]
+	public int food, damage, level, layers, facing, axis, pick, layer, wi, count, burn, pack, belt, tools;
+	public int? armor;                 // gear: which piece of armor (0 helmet .. 3 boots; left out: not armor)
+	public int[] front, wall;          // [x, z] (wall: a torch leaning off a wall, the way to it; null standing)
+	public int stage;                  // Grain: its stage (desktop finds it by its place in Blocks.GrainStages; the check compares)
+	public bool soil, wet, fert;       // tilled soils (desktop: Blocks.Tilled + wet + 2 * fert; the check compares)
+	public string needs, sound;        // needs: the tool it can't be broken without ("axe", "pickaxe"); sound: its dig, step and place sound (left out: "stone")
+	public bool? shovel, leaves, inventory;   // (true, or left out) a shovel's block; leaves; you can have it in your inventory
+	public int look;                   // another look of the block it drops (Red Bricks' 13-15: 1-3)
+}
+// a SNOWY row: a snow-logged block. It's its inner block (by key) with that block's fields, then this row's own (only drop and
+// box so far), with inner and snowed 1
+public sealed class SnowyRow
+{
+	public int id;
+	public string inner, drop;
+	public float[] box;
+}
+// a FORMS row: a block you can cut (by key), and the ids of its piece and shape items (each named after the block, then
+// FORM_NAMES' word; the block's pictures)
+public sealed class FormRow
+{
+	public string of;
+	public int piece, slab, vslab, stairs, quarter, vstairs, vquarter;
+}
+// data/worldgen.json: how the land is grown (blocks by key). Changing it changes worlds already made (their untouched ground
+// is grown again from the seed every time they load), so a change needs a new land version.
+public sealed class WorldgenData
+{
+	public OreVeinRow[] ORE_VEINS;     // in the order they're grown (a row's place is in its veins' seeds)
+	public string[] BADLANDS_BANDS;    // the badlands' stripes, from the bottom up (they repeat)
+}
+// an ORE_VEINS row: veins per 10,000 columns, blocks per vein, shallowest and deepest (blocks below the surface); takesDirt: it
+// turns Dirt into its ore too; allDepths: from land 2, 3 below the surface all the way down (more in a taller world), and
+// each deep layer's stone becomes that layer's ore (true, or left out)
+public sealed class OreVeinRow
+{
+	public string ore;
+	public int per, size, top, deep;
+	public bool? takesDirt, allDepths;
+}
+public static partial class Nums
+{
+	static NumbersData n;
+	// data/numbers.json (the game can't run without it)
+	public static NumbersData N => n ??= GameData.Read<NumbersData>("numbers") ?? throw new InvalidOperationException("data/numbers.json is missing or can't be read");
+	static MobsData mobs;
+	// data/mobs.json (read when first asked for, so it doesn't matter which file's numbers ask first)
+	public static MobsData Mobs => mobs ??= GameData.Read<MobsData>("mobs") ?? throw new InvalidOperationException("data/mobs.json is missing or can't be read");
+	static BlocksData blocks;
+	// data/blocks.json
+	public static BlocksData Blocks => blocks ??= GameData.Read<BlocksData>("blocks") ?? throw new InvalidOperationException("data/blocks.json is missing or can't be read");
+	static TextureNamesData textureNames;
+	// data/texture-names.json
+	public static TextureNamesData TextureNames => textureNames ??= GameData.Read<TextureNamesData>("texture-names") ?? throw new InvalidOperationException("data/texture-names.json is missing or can't be read");
+	static WorldgenData worldgen;
+	// data/worldgen.json
+	public static WorldgenData Worldgen => worldgen ??= GameData.Read<WorldgenData>("worldgen") ?? throw new InvalidOperationException("data/worldgen.json is missing or can't be read");
+}

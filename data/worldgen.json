@@ -1,0 +1,18 @@
+{
+  "_note": "How the land is grown, read by both editions (web: packed into textures.js by build-textures.ps1; desktop: res://data/worldgen.json). Blocks are named by their keys. Careful: a world's ground that nobody has changed is grown again from its seed every time it loads, so changing anything here changes worlds already made, not just new ones (a change like that needs a new land version in the code).",
+  "_notes": {
+    "ORE_VEINS": "veins of ore in the ground, grown in this order (a row's place picks its veins' random numbers, so moving a row moves every vein in every world). per: veins for each 10,000 columns of land; size: blocks in a vein; top, deep: its shallowest and deepest, in blocks below the surface. A vein is a short random walk that turns the Stone it passes through into its ore. takesDirt: it turns Dirt into its ore too. allDepths: in worlds from land 2 on, it ignores top and deep (3 below the surface all the way down, as common at every depth, with more veins in a taller world) and turns each deeper layer's stone into that layer's ore (so the ore needs deep versions); older worlds keep top and deep",
+    "BADLANDS_BANDS": "the badlands' stripes of Terracotta, from the bottom of the world up (they repeat)"
+  },
+  "ORE_VEINS": [
+    { "ore": "copper_ore", "per": 110, "size": 8, "top": 3, "deep": 999, "allDepths": true },
+    { "ore": "tin_ore", "per": 90, "size": 6, "top": 3, "deep": 999, "allDepths": true },
+    { "ore": "iron_ore", "per": 70, "size": 6, "top": 10, "deep": 999, "allDepths": true },
+    { "ore": "gold_ore", "per": 18, "size": 4, "top": 28, "deep": 999, "allDepths": true },
+    { "ore": "fireclay", "per": 20, "size": 20, "top": 4, "deep": 20, "takesDirt": true }
+  ],
+  "BADLANDS_BANDS": [
+    "terracotta", "terracotta", "orange_terracotta", "orange_terracotta", "orange_terracotta", "terracotta", "yellow_terracotta", "terracotta", "terracotta", "red_terracotta",
+    "red_terracotta", "terracotta", "white_terracotta", "terracotta", "orange_terracotta", "terracotta", "terracotta", "pink_terracotta", "terracotta"
+  ]
+}

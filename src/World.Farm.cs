@@ -10,8 +10,8 @@ namespace Cubeland;
 // Only the host runs the timers (TickTimers isn't called in a friend's world); the block changes sync as usual.
 public partial class World
 {
-	public const float StageTime = 40, DryRate = 0.5f, FertRate = 1.6f, RevertTime = 180;
-	public const int WetReach = 5, FertHarvests = 2;
+	public static readonly float StageTime = Nums.N.FARM.stageTime, DryRate = Nums.N.FARM.dryRate, FertRate = Nums.N.FARM.fertRate, RevertTime = Nums.N.FARM.revertTime;   // (data/numbers.json)
+	public static readonly int WetReach = Nums.N.FARM.wetReach, FertHarvests = Nums.N.FARM.fertHarvests;
 	static int Up => WX * WZ;   // (one block up, in world index steps)
 	public readonly Dictionary<int, float> Crops = new();      // growing crop spot -> lucky ticks it has had in this stage (see StageChance)
 	public readonly HashSet<int> Soils = new();
@@ -19,14 +19,14 @@ public partial class World
 	readonly Dictionary<int, float> soilIdle = new();
 	// grass a cow ate: Dirt spot -> seconds until it's Grass again (if nothing has been put on it)
 	public readonly Dictionary<int, float> Grazed = new();
-	public const float RegrowMin = 120, RegrowMax = 300;
+	public static readonly float RegrowMin = Nums.Mobs.COW.regrowMin, RegrowMax = Nums.Mobs.COW.regrowMax;   // (data/mobs.json's COW)
 	float farmTimer, wetTimer;
 	readonly System.Random farmRnd = new();
 
 	// Random growth: every second each crop has a small chance of a lucky tick, and StageHits lucky ticks take it to its
 	// next stage. On average a stage still takes StageTime / GrowRate seconds, but some plants get ahead and some lag a
 	// little, so a field doesn't all ripen at the same moment. (Needing 3 ticks, not 1, keeps the randomness gentle.)
-	public const int StageHits = 3;
+	public static readonly int StageHits = Nums.N.FARM.stageHits;
 	public static float StageChance(float rate, float step) => System.Math.Min(1, step * rate * StageHits / StageTime);
 
 	// keeps the lists above up to date when a block changes (loading: while a save is being put back)

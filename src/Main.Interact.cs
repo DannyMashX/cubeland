@@ -8,11 +8,12 @@ public partial class Main
 {
 	bool Survival => inv.Survival;
 	bool ShiftDown => Input.IsPhysicalKeyPressed(Key.Shift);
+	static double SeedChance => Nums.N.FARM.seedChance;   // (tilling Grass: the chance of turning up a Grain Seed; data/numbers.json)
 
 	// survival: what breaking a block gives you
 	static int DropFor(int b) =>
 		Blocks.Get(b) is { } d && d.Drop > 0 ? d.Drop : Blocks.IsTorch(b) ? Blocks.TorchDrop(b) :
-		Array.IndexOf(Blocks.BrickVariants, b) >= 0 ? Blocks.BrickVariants[0] : Array.IndexOf(Blocks.Items, b) >= 0 && !Blocks.IsWater(b) ? b : 0;
+		Array.IndexOf(Blocks.Items, b) >= 0 && !Blocks.IsWater(b) ? b : 0;   // (Red Bricks' other looks drop Red Bricks: their drop)
 	void Collect(int id, int x, int y, int z) { if (!Survival || id == 0 || Blocks.Get(id) == null) return; if (netClient) { inv.Give(id); return; } drops.Add(id, x + 0.5f, y + 0.3f, z + 0.5f); }
 	void UseOne() => inv.UseOne();
 	// a block went down: its sound, and one used up
@@ -43,7 +44,7 @@ public partial class Main
 			return !staged && layer > 1 && inv.Holding("pickaxe") && layer > (Blocks.StrataPickaxe.TryGetValue(Blocks.B[inv.Held].Material ?? "", out int deepest) ? deepest : 0)
 				&& Tell($"You need a better pickaxe to mine {Blocks.B[b].Name} this deep");
 		}
-		string kind = Array.IndexOf(Blocks.NeedsAxe, b) >= 0 ? "axe" : Array.IndexOf(Blocks.NeedsPickaxe, b) >= 0 ? "pickaxe" : null;
+		string kind = NeededTool(b);
 		if (kind == null || inv.Holding(kind)) return false;
 		ShowNote(kind == "axe" ? $"You need an axe to cut {Blocks.B[b].Name}" : $"You need a pickaxe to mine {Blocks.B[b].Name}", 2);
 		return true;
@@ -54,13 +55,16 @@ public partial class Main
 		int id = DropFor(b); var hand = Blocks.Get(b)?.HandDrop;
 		if (Survival && hand != null && !inv.Holding("shovel"))   // (Fireclay by hand: a few Fireclay Balls)
 			for (int n = hand[1] + rnd.Next(hand[2] - hand[1] + 1); n > 0; n--) Collect(hand[0], x, y, z);
-		else if (Survival && Array.IndexOf(Blocks.Diggable, b) >= 0 && !inv.Holding("shovel") && Blocks.Get(Blocks.PieceItem + id) != null)
+		else if (Survival && Diggable(b) && !inv.Holding("shovel") && Blocks.Get(Blocks.PieceItem + id) != null)
 			for (int n = 1 + rnd.Next(8); n > 0; n--) Collect(Blocks.PieceItem + id, x, y, z);
 		else Collect(id, x, y, z);
 	}
+	// the tool block b can't be broken without in survival ("axe", "pickaxe"; null: any)
+	static string NeededTool(int b) => Blocks.Get(b)?.Needs;
+	// a shovel is block b's tool (and dug by hand it comes up as pieces, if it has a piece item)
+	static bool Diggable(int b) => Blocks.Get(b)?.Shovel == true;
 	// the tool each block is meant for (null: none in particular)
-	static string RightTool(int b) => (b = Blocks.Plain(b)) < 0 ? null : Array.IndexOf(Blocks.NeedsAxe, b) >= 0 ? "axe" : Array.IndexOf(Blocks.NeedsPickaxe, b) >= 0 || Blocks.Get(b)?.Pick > 0 ? "pickaxe"
-		: Array.IndexOf(Blocks.Diggable, b) >= 0 ? "shovel" : Blocks.IsLeaves(b) ? "hoe" : null;
+	static string RightTool(int b) => (b = Blocks.Plain(b)) < 0 ? null : NeededTool(b) ?? (Blocks.Get(b)?.Pick > 0 ? "pickaxe" : Diggable(b) ? "shovel" : Blocks.IsLeaves(b) ? "hoe" : null);
 	// breaking block b with what you're holding: 1, or 2 with the wrong tool
 	int BreakWear(int b) { string k = RightTool(b); return k == null || inv.Holding(k) ? 1 : 2; }
 	// use up some of the selected tool; it breaks when it's used up
@@ -182,7 +186,7 @@ public partial class Main
 			if (Blocks.IsFlower(above)) { Collect(above, x, y + 1, z); world.SetBlock(x, y + 1, z, 0); }
 			world.SetBlock(x, y, z, Blocks.Tilled);
 			Sound.I?.Place(Blocks.Dirt); MobNoise(x, y, z); WearTool(1);
-			if (Blocks.IsGrassy(hb) && rnd.NextDouble() < 1.0 / 6) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
+			if (Blocks.IsGrassy(hb) && rnd.NextDouble() < SeedChance) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
 			return true;
 		}
 		if (held == Blocks.GrainSeeds)

@@ -603,7 +603,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
-<script src="textures.js?v=beta-0.1.2.0"></script>
+<!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
+<script src="textures.js?v=beta-0.1.3.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -611,7 +612,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.2.0';
+const GAME_VERSION = 'Beta 0.1.3.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -624,6 +625,25 @@ function compareVersions(a, b) {
   for (let k = 0; k < 5; k++) if ((pa[k] || 0) !== (pb[k] || 0)) return (pa[k] || 0) - (pb[k] || 0);
   return 0;
 }
+// ===================== Shared data files =====================
+// The game's tables that both editions share are in data/*.json (the desktop version reads the same files), packed into
+// textures.js (window.GAME_DATA) by update-textures.bat. Change a number there, not here.
+//   numbers.json: plain gameplay numbers (stack size, smelt time, torch burn times, farming, durability, armor, pickaxe
+//   tiers, stage breaking, hearts)
+//   smelting.json: the Kiln's and Foundry's fuel and smelts
+//   recipes.json: crafting (by hand and at the Crafting Bench) and the Cutter's shapes
+//   creative.json: the creative inventory's tabs and what's in each
+//   mobs.json: the mobs' stats, and the numbers for deeper mobs, the Gloomling's fading and cows
+//   texture-names.json: other spellings of texture files, pictures that borrow another's file, and font letters' names
+//   blocks.json: every block and item (see BLOCK_DATA)
+//   worldgen.json: the ore veins and the badlands' stripes of Terracotta
+// Tables name blocks and items by their keys (see blockKey): idOf(key) is the id.
+function gameData(name) {
+  const d = (window.GAME_DATA || {})[name];
+  if (!d) throw new Error(`The game's data (in textures.js) has no ${name}: run update-textures.bat`);
+  return d;
+}
+const NUMBERS = gameData('numbers');
 
 // ===================== Worlds (saves) =====================
 // The same seed always grows the same terrain, so a save only needs the seed plus what you changed.
@@ -840,6 +860,8 @@ const P = (...names) => names.map(tile);   // a block's pictures: side, top, bot
 const P3 = name => P(name, name, name);    // the same picture on every side
 
 // ===================== Blocks =====================
+// a name as it's written in keys (see blockKey): lower case, with _ between words
+const keySlug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 // t = [side, top, bottom] pictures (their places in the texture atlas: see tile)
 // Fir: the snowy biome's wood (Oak is the original wood: 4, 5, 7 and 61)
 const FIR_LOG = 251, FIR_LEAVES = 252, FIR_PLANKS = 253, STRIPPED_FIR_LOG = 254;
@@ -853,81 +875,50 @@ const DATES = 705;   // food, from Palm Leaves
 // items are 2000 + 7 x (the block's place in this list) + the form, like the deep stone sets (see formItem). (Only ever add to the end of this list.)
 const EXTRA_FORM_ITEM = 2000, EXTRA_FORM_BLOCKS = [97, PALM_LOG, PALM_LEAVES, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_LOG, WILLOW_LEAVES, WILLOW_PLANKS, STRIPPED_WILLOW_LOG,
   SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT];
-const isLeaves = b => b === 5 || b === FIR_LEAVES || b === PALM_LEAVES || b === WILLOW_LEAVES;
-const BLOCKS = {
-  1:  { name: 'Grass',       t: P('grass_side', 'grass', 'dirt') },
-  2:  { name: 'Dirt',        t: P3('dirt') },
-  3:  { name: 'Stone',       t: P3('stone') },
-  4:  { name: 'Oak Log',     t: P('log_side', 'log_top', 'log_top') },
-  5:  { name: 'Oak Leaves',  t: P3('leaves'), transparent: true },
-  6:  { name: 'Sand',        t: P3('sand') },
-  7:  { name: 'Oak Planks',  t: P3('planks') },
-  8:  { name: 'Cobblestone', t: P3('cobblestone') },
-  9:  { name: 'Stone Bricks', t: P3('stone_bricks') },
-  10: { name: 'Glass',       t: P3('glass'), transparent: true },
-  11: { name: 'Gravel',      t: P3('gravel') },
-  // Red Bricks: one block in the hotbar, but each placed brick is a random one of these 4 looks
-  12: { name: 'Red Bricks',  t: P3('bricks_a') },
-  13: { name: 'Red Bricks',  t: P3('bricks_b') },
-  14: { name: 'Red Bricks',  t: P3('bricks_c') },
-  15: { name: 'Red Bricks',  t: P3('bricks_d') },
-  // (16-21 were ores, now removed from the game; those numbers are left unused)
-  // (22-41 are torches and 50-57 water, see below)
-  // Biomes: Sandstone (under desert sand), Snowy Grass (snowy lands), Ice (their frozen seas and lakes), Swamp Grass (swamps)
-  97: { name: 'Sandstone',   t: P3('sandstone'), drop: 97 },   // (breaking it gives Sandstone)
-  98: { name: 'Snowy Grass', t: P('snowy_grass_side', 'snow', 'dirt') },
-  99: { name: 'Ice',         t: P3('ice'), transparent: true },
-  58: { name: 'Swamp Grass', t: P('swamp_grass_side', 'swamp_grass', 'dirt') },
-  60: { name: 'Crafting Bench', t: P('crafting_bench_side', 'crafting_bench_top', 'planks') },   // bottom is planks
-  // the Cutter: cuts blocks into pieces, slabs and stairs. Half a block tall (shape 'half': drawn, walked on and aimed at like a bottom slab).
-  // Pictures: cutter_base on the sides (its bottom half), the stripped log top on top, cutter_bottom underneath, and cutter_saw for its blade.
-  159: { name: 'Cutter', t: P('cutter_base', 'stripped_log_top', 'cutter_bottom'), shape: 'half', transparent: true, box: [0, 0, 0, 1, 0.5, 1] },
-  61: { name: 'Stripped Oak Log',  t: P('stripped_log_side', 'stripped_log_top', 'stripped_log_top') },
-  // Fir (the snowy biome's trees)
-  [FIR_LOG]:          { name: 'Fir Log',          t: P('fir_log_side', 'fir_log_top', 'fir_log_top') },
-  [FIR_LEAVES]:       { name: 'Fir Leaves',       t: P3('fir_leaves'), transparent: true },
-  [FIR_PLANKS]:       { name: 'Fir Planks',       t: P3('fir_planks') },
-  [STRIPPED_FIR_LOG]: { name: 'Stripped Fir Log', t: P('stripped_fir_log_side', 'stripped_fir_log_top', 'stripped_fir_log_top') },
-  // Palm (the desert's trees) and Willow (the swamp's)
-  [PALM_LOG]:            { name: 'Palm Log',            t: P('palm_log_side', 'palm_log_top', 'palm_log_top') },
-  [PALM_LEAVES]:         { name: 'Palm Leaves',         t: P3('palm_leaves'), transparent: true },
-  [PALM_PLANKS]:         { name: 'Palm Planks',         t: P3('palm_planks') },
-  [STRIPPED_PALM_LOG]:   { name: 'Stripped Palm Log',   t: P('stripped_palm_log_side', 'stripped_palm_log_top', 'stripped_palm_log_top') },
-  [WILLOW_LOG]:          { name: 'Willow Log',          t: P('willow_log_side', 'willow_log_top', 'willow_log_top') },
-  [WILLOW_LEAVES]:       { name: 'Willow Leaves',       t: P3('willow_leaves'), transparent: true },
-  [WILLOW_PLANKS]:       { name: 'Willow Planks',       t: P3('willow_planks') },
-  [STRIPPED_WILLOW_LOG]: { name: 'Stripped Willow Log', t: P('stripped_willow_log_side', 'stripped_willow_log_top', 'stripped_willow_log_top') },
-  // the desert's building stone and the swamp's ground
-  [SANDSTONE_BRICKS]:    { name: 'Sandstone Bricks',    t: P3('sandstone_bricks') },
-  [CHISELED_SANDSTONE]:  { name: 'Chiseled Sandstone',  t: P3('chiseled_sandstone') },
-  [SMOOTH_SANDSTONE]:    { name: 'Smooth Sandstone',    t: P3('smooth_sandstone') },
-  [MUD]:                 { name: 'Mud',                 t: P3('mud') },
-  [MUD_BRICKS]:          { name: 'Mud Bricks',          t: P3('mud_bricks') },
-  [PEAT]:                { name: 'Peat',                t: P3('peat') },
-  // a rock lying flat on the ground (your rock picture, turned a random way); breaking it gives you a Rock to carry
-  // box: the part you can aim at and hit (inside the block space)
-  62: { name: 'Rock', t: P3('rock'), transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
-  // clay and what it's made into
-  63: { name: 'Clay',                    t: P3('clay') },   // soil family (with Dirt, Gravel and Sand)
-  64: { name: 'Bricks',                  t: P3('bricks') },   // made from Brick items
-  65: { name: 'Terracotta',              t: P3('terracotta') },
-  66: { name: 'Red Terracotta',          t: P3('red_terracotta') },
-  67: { name: 'Chiseled Terracotta',     t: P3('chiseled_terracotta') },
-  68: { name: 'Chiseled Red Terracotta', t: P3('chiseled_red_terracotta') },
-  69: { name: 'Chiseled Stone',          t: P3('chiseled_stone') },
-  // (70 is pieces, see below)
-  // a Clay Ball lying on the ground, drying; after DRY_TIME it turns into a Brick lying there
-  71: { name: 'Clay Ball', t: P3('clay_ball'), transparent: true, noCollide: true, shape: 'flat', box: [0.15, 0, 0.15, 0.85, 0.12, 0.85] },
-  72: { name: 'Brick',     t: P3('brick'), transparent: true, noCollide: true, shape: 'flat', box: [0.1, 0, 0.1, 0.9, 0.12, 0.9] },
-};
+const isLeaves = b => !!(BLOCKS[b] && BLOCKS[b].leaves);
+// The blocks and items are in data/blocks.json, a table for the ones written out one by one (BASE) and one for each family
+// (the Kiln, water, the coloured blocks...: what each field means is in the file's notes), each loaded where its family is below.
+// pictures: one name for every side, or [side, top, bottom] (and front); t here is their places in the atlas (icon too). The
+// blocks a row names (drop, places, handDrop, dye) are keys, found among the rows loaded so far.
+const BLOCK_DATA = gameData('blocks');
+const BLOCKS = {};
+const blockRows = new Map();   // every row loaded so far: id -> its row
+let rowIds = new Map();        // key -> id, among those rows (0: more than one has that key, so it can't be named)
+// a row's key, the same as blockKey gives its block (a flat block that drops the item with its name is "name#placed")
+function rowKey(r) {
+  if (r.snowed) return 'snowy:' + r.inner;
+  if (r.form) return r.form + ':' + r.of;
+  if (r.item && r.piece) return 'piece:' + r.piece;
+  const k = keySlug(r.name), s = keyStates(r);
+  if (r.shape === 'flat' && r.drop === k && [...blockRows.values()].some(o => o.item && keySlug(o.name) === k)) s.push('placed');
+  return k + (s.length ? '#' + s.join(',') : '');
+}
+// the id of the row with key k, which block `by` names
+function rowIdFor(k, by) {
+  if (!rowIds.get(k)) throw new Error(`The game's data (data/blocks.json): block ${by} names "${k}", which ${rowIds.has(k) ? 'is the key of more than one block' : "isn't one of its blocks"}`);
+  return rowIds.get(k);
+}
+function addBlockRows(rows) {
+  for (const row of rows) {
+    const { id, name, pictures, icon, ...r } = row;
+    if (BLOCKS[id]) throw new Error(`The game's data (data/blocks.json) has block ${id} twice`);
+    BLOCKS[id] = { name, t: typeof pictures === 'string' ? P3(pictures) : P(...pictures), ...r };
+    if (icon !== undefined) BLOCKS[id].icon = tile(icon);
+    blockRows.set(id, row);
+  }
+  rowIds = new Map();
+  for (const r of blockRows.values()) { const k = rowKey(r); rowIds.set(k, rowIds.has(k) ? 0 : r.id); }
+  for (const r of rows) {
+    const b = BLOCKS[r.id];
+    for (const f of ['drop', 'places', 'dye', 'piece', 'of', 'inner']) if (r[f] !== undefined) b[f] = rowIdFor(r[f], r.id);
+    if (r.handDrop) b.handDrop = [rowIdFor(r.handDrop[0], r.id), r.handDrop[1], r.handDrop[2]];
+  }
+}
+addBlockRows(BLOCK_DATA.BASE);
 // Kiln (called FURNACE / furnace in the code; the player sees "Kiln"): 73-76 unlit, 77-80 lit (burning). Each faces one way: its front picture is on the side that faced you
-// when you put it down. t = [side, top (the Bricks picture), bottom, front]
-const FURNACE = 73, FURNACE_FRONTS = [[0, 1], [1, 0], [0, -1], [-1, 0]];   // [x, z] direction the front faces
-FURNACE_FRONTS.forEach((front, k) => {
-  BLOCKS[FURNACE + k] = { name: 'Kiln', t: P('kiln_side', 'bricks', 'kiln_bottom', 'kiln_front'), front, facing: k, drop: FURNACE };
-  BLOCKS[FURNACE + 4 + k] = { name: 'Kiln', t: P('kiln_side', 'bricks', 'kiln_bottom', 'kiln_front_on'), front, facing: k, lit: true, drop: FURNACE };
-});
-BLOCKS[FURNACE].icon = tile('kiln_front');   // its hotbar picture: the front
+// when you put it down. t = [side, top (the Bricks picture), bottom, front]; its hotbar picture (icon) is the front. (data/blocks.json KILN)
+const FURNACE = 73, FURNACE_FRONTS = [[0, 1], [1, 0], [0, -1], [-1, 0]];   // [x, z] direction the front faces (FURNACE + facing; + 4 when lit)
+addBlockRows(BLOCK_DATA.KILN);
 const isFurnace = id => (id >= FURNACE && id < FURNACE + 8) || isFoundry(id);   // a Kiln or the Foundry's Furnace (they work the same way)
 const furnaceBase = id => isFoundry(id) ? FOUNDRY : FURNACE;   // its first (unlit, facing 0) id
 const drying = new Map();     // world index of a Clay Ball on the ground -> seconds until it's a Brick
@@ -938,41 +929,19 @@ const furnaces = new Map();   // world index of a furnace -> what's in it (see F
 // Torches burn down: lit -> smoldering (half the light) -> burnt (no light), after a random time at each stage.
 // burn: 0 = lit, 1 = smoldering, 2 = burnt, 3 = Ever Torch. Lit = 22-41 (above), smoldering = 81-92, burnt = 170-181, ever = 182-193 (only the
 // counts that fit: 1-4 standing, 1-2 on a wall). Right-click a smoldering torch with a lit one to light it again.
-// Breaking any torch (or water washing it off) gives you a Burnt Torch.
+// Breaking any torch (or water washing it off) gives you a Burnt Torch. An Ever Torch (burn 3) is a Torch + Fire Essence:
+// it stays lit forever, with fire essence sparks rising off it. (data/blocks.json TORCHES: wall, wi = its place in
+// TORCH_WALLS, count, burn)
 const TORCH = 22;
 const TORCH_WALLS = [null, [-1, 0], [1, 0], [0, -1], [0, 1]];   // null = standing; otherwise the direction of the wall
-const TORCH_IDS = {};
-const TORCH_STATES = [
-  { name: 'Torch', t: P('torch_side', 'torch_top', 'torch_bottom') },
-  { name: 'Smoldering Torch', t: P('smoldering_torch_side', 'smoldering_torch_top', 'torch_bottom') },
-  { name: 'Burnt Torch', t: P('burnt_torch_side', 'burnt_torch_top', 'torch_bottom') },
-  { name: 'Ever Torch', t: P('torch_side', 'torch_top', 'torch_bottom') },   // burn 3: a Torch + Fire Essence; stays lit forever, with fire essence sparks rising off it
-];
-{
-  let next = 27;
-  TORCH_WALLS.forEach((wall, wi) => {
-    for (let n = 1; n <= 4; n++) {
-      const id = n === 1 ? 22 + wi : next++;
-      BLOCKS[id] = { name: 'Torch', t: TORCH_STATES[0].t, transparent: true, shape: 'torch', noCollide: true, wall, wi, count: n, burn: 0 };
-      TORCH_IDS['0:' + wi + ':' + n] = id;
-    }
-  });
-  [81, 170, 182].forEach((first, k) => {
-    const burn = k + 1, s = TORCH_STATES[burn];
-    let id = first;
-    TORCH_WALLS.forEach((wall, wi) => {
-      for (let n = 1; n <= (wi ? 2 : 4); n++) {
-        BLOCKS[id] = { name: s.name, t: s.t, transparent: true, shape: 'torch', noCollide: true, wall, wi, count: n, burn };
-        TORCH_IDS[burn + ':' + wi + ':' + n] = id++;
-      }
-    });
-  });
-}
+addBlockRows(BLOCK_DATA.TORCHES);
+const TORCH_IDS = {};   // "burn:wi:count" -> the torch (see torchVariant)
+for (const r of BLOCK_DATA.TORCHES) TORCH_IDS[r.burn + ':' + r.wi + ':' + r.count] = r.id;
 const SMOLDERING_TORCH = 81, BURNT_TORCH = 170, EVER_TORCH = 182;   // (standing x1: also what you carry; Ever Torches are 182-193)
 // what a torch gives you when it's broken, falls off or is washed away: it goes out (an Ever Torch stays an Ever Torch)
 const torchDrop = id => BLOCKS[id].burn === 3 ? EVER_TORCH : BURNT_TORCH;
 // how long a torch stays at each stage, in seconds: lit 15-25 minutes, then smoldering 5-10 minutes
-const BURN_TIMES = [[900, 1500], [300, 600]];
+const BURN_TIMES = NUMBERS.BURN_TIMES;   // [[900, 1500], [300, 600]]
 const burnTime = burn => { const [lo, hi] = BURN_TIMES[burn]; return lo + Math.random() * (hi - lo); };
 const torchBurn = new Map();   // world index of a lit or smoldering torch spot -> seconds until it burns down a stage
 // farming (Till & Tend, see farmChanged)
@@ -983,21 +952,21 @@ const soilIdle = new Map();   // world index of dry, empty tilled soil -> second
 const burnsDown = id => isTorch(id) && BLOCKS[id].burn < 2;   // lit or smoldering (burnt is done; Ever Torches never burn down)
 const isTorch = id => !!(BLOCKS[id] && BLOCKS[id].shape === 'torch');
 // Water: see-through, you swim in it, and it flows. 50 = still water (lakes and seas, or water you place);
-// 51-57 = flowing water, one step weaker for each block it runs from the still water (it stops after 7).
+// 51-57 = flowing water, one step weaker for each block it runs from the still water (it stops after 7). WATER + level (data/blocks.json WATER)
 const WATER = 50;
-for (let l = 0; l <= 7; l++) BLOCKS[WATER + l] = { name: 'Water', t: P3('water'), transparent: true, noCollide: true, liquid: true, level: l };
+addBlockRows(BLOCK_DATA.WATER);
 // Logs lie the way you put them down: on the top or bottom of something they stand upright; on a side they lie pointing
 // out from it. Each kind of log has two lying blocks (360-375): 360 + 2k along x, 361 + 2k along z, k its place in LOGS.
-// (They're numbered over 255, so the world's growing puts them in after it's packed: see `late`.)
+// (They're numbered over 255, so the world's growing puts them in after it's packed: see `late`.) (data/blocks.json LYING_LOGS)
 const LOGS = [4, 61, FIR_LOG, STRIPPED_FIR_LOG, PALM_LOG, STRIPPED_PALM_LOG, WILLOW_LOG, STRIPPED_WILLOW_LOG], TURNED_LOGS = 360;
 const turned = (log, axis) => { const k = LOGS.indexOf(log); return k < 0 || !axis ? log : TURNED_LOGS + 2 * k + axis - 1; };
-for (const log of LOGS) for (let axis = 1; axis <= 2; axis++) BLOCKS[turned(log, axis)] = { name: BLOCKS[log].name, t: BLOCKS[log].t, axis, drop: log };
+addBlockRows(BLOCK_DATA.LYING_LOGS);
 // Snow: Snow (380-386) lies in layers, 1 to 7 deep (each an eighth of a block); putting Snow on Snow adds a layer, and an
 // 8th layer makes it a Snow Block (387). Only the 2nd layer up is solid (you sink into the first). It falls off whatever
 // it was lying on if that goes. Breaking it gives you a Snow for each layer. Snowy lands are covered in one layer.
+// SNOW + layers - 1 (data/blocks.json SNOW)
 const SNOW = 380, SNOW_BLOCK = 387, isSnow = b => b >= SNOW && b < SNOW_BLOCK;
-for (let n = 1; n < 8; n++) BLOCKS[SNOW + n - 1] = { name: 'Snow', t: P3('snow'), shape: 'snow', layers: n, transparent: true, noCollide: n === 1, box: [0, 0, 0, 1, n / 8, 1], drop: SNOW };
-BLOCKS[SNOW_BLOCK] = { name: 'Snow Block', t: P3('snow') };
+addBlockRows(BLOCK_DATA.SNOW);
 const isWater = id => id >= WATER && id <= WATER + 7;
 // how high the water's surface sits in its block (water with more water on top fills the whole block)
 const waterHeight = (id, above) => isWater(above) ? 1 : id === WATER ? 0.875 : Math.max(0.15, 0.875 * (8 - (id - WATER)) / 8);
@@ -1007,31 +976,17 @@ const wallIndex = (dx, dz) => TORCH_WALLS.findIndex(w => w && w[0] === dx && w[1
 // Items: things you carry but can't place (ids 200+). They share the block list so icons and names work the same way.
 // They aren't in the inventory: you get them from drops, and they stack in the hotbar.
 const CHOCOLATE = 200;
-BLOCKS[CHOCOLATE] = { name: 'Chocolate', t: P3('chocolate'), item: true, food: 4 };   // food: eating it heals 1 heart (survival; in quarter hearts)
 const isItem = id => !!(BLOCKS[id] && BLOCKS[id].item);
 // Stick and tools, from your pictures in textures/items. Tools don't stack.
 // damage = how much a hit takes off a mob (a hand or any other item does 1)
 // Ids: stick 201, stone tools 207-211. (202-206 were the wooden tools, now removed; those numbers stay unused
 // so saved worlds still have the right tools.)
 const STICK = 201;
-BLOCKS[STICK] = { name: 'Stick', t: P3('stick'), item: true };
-const TOOLS = [];
 // Metal tools (Pack & Plate): ids 644-668 (copper, iron, bronite, rosium, steel), 5 each in the same order; pictures <metal>_axe, <metal>_pickaxe...
-[['stone', 'Stone', 3, 207], ['copper', 'Copper', 4, 644], ['iron', 'Iron', 5, 649], ['bronite', 'Bronite', 6, 654],
- ['rosium', 'Rosium', 7, 659], ['steel', 'Steel', 8, 664]].forEach(([key, label, swordDamage, firstId]) => {
-  ['Axe', 'Pickaxe', 'Shovel', 'Sword', 'Hoe'].forEach((kind, k) => {
-    const id = firstId + k;
-    BLOCKS[id] = { name: `${label} ${kind}`, t: P3(key + '_' + kind.toLowerCase()), item: true, tool: kind.toLowerCase(), material: key,
-      damage: kind === 'Sword' ? swordDamage : kind === 'Axe' ? swordDamage - 1 : 1 };
-    TOOLS.push(id);
-  });
-});
+addBlockRows(BLOCK_DATA.TOOLS);   // (data/blocks.json TOOLS: tool = which kind, material, damage)
 // Rock (212): picked up from the ground near beaches; can be put back down (places: the block it puts down).
 // Crude Axe (213): 2 Rocks + a Stick, made in the inventory. (214 was the Crude Pickaxe, now removed; the number stays unused.)
 const ROCK = 212, ROCK_BLOCK = 62, CRUDE_AXE = 213;
-BLOCKS[ROCK] = { name: 'Rock', t: P3('rock'), item: true, places: ROCK_BLOCK };
-BLOCKS[ROCK_BLOCK].drop = ROCK;
-BLOCKS[3].drop = 8;   // mining Stone gives Cobblestone
 // Strata (640-tall worlds): from sea level down, a new layer of stone every 64 blocks, down to bedrock at the very bottom.
 // Layer 1 is the normal Stone (and everything above sea level); layers 2-8 are blocks 113-119, each darker and harder:
 // past a few layers, only a better pickaxe can mine it (see STRATA_PICKAXE). All of them are called Stone. Bedrock (120) can't be broken in survival (and nothing can break the bottom layer of the world).
@@ -1043,38 +998,20 @@ const DEEP_COBBLE = 121, DEEP_BRICKS = 128, DEEP_CHISELED = 135;
 const DEEP_SET = { 3: STRATA, 8: DEEP_COBBLE, 9: DEEP_BRICKS, 69: DEEP_CHISELED };   // a normal stone-set block -> its layer-2 version
 const deepRow = b => Array.from({ length: STRATA_LAYERS - 1 }, (_, k) => DEEP_SET[b] + k);   // its versions in layers 2, 3, ...
 const deepShown = b => TALL_WORLDS ? deepRow(b) : [];   // the same, but only while tall worlds are on (for the inventory and recipes)
-for (let n = 2; n <= STRATA_LAYERS; n++) {
-  const k = n - 2;
-  BLOCKS[STRATA + k] = { name: 'Stone', t: P3('stone_layer_' + n), drop: DEEP_COBBLE + k, layer: n };
-  BLOCKS[DEEP_COBBLE + k] = { name: 'Cobblestone', t: P3('cobblestone_layer_' + n), layer: n };
-  BLOCKS[DEEP_BRICKS + k] = { name: 'Stone Bricks', t: P3('stone_bricks_layer_' + n), layer: n };
-  BLOCKS[DEEP_CHISELED + k] = { name: 'Chiseled Stone', t: P3('chiseled_stone_layer_' + n), layer: n };
-}
+addBlockRows(BLOCK_DATA.DEEP_STONE);   // (data/blocks.json DEEP_STONE)
 const DEEP_BLOCKS = [3, 8, 9, 69].flatMap(deepRow);
 // what a piece, slab or stairs of this block gives when broken (Stone, deep or not, gives its Cobblestone)
 const stoneDropOf = b => b === 3 || (b >= STRATA && b < BEDROCK) ? BLOCKS[b].drop : b;
-BLOCKS[BEDROCK] = { name: 'Bedrock', t: P3('bedrock') };
 const stoneLayer = b => b === 3 ? 1 : (BLOCKS[b] && BLOCKS[b].layer) || 0;
 // the deepest layer each pickaxe can mine, by what it's made of (copper and up are still to come)
-const STRATA_PICKAXE = { stone: 2, copper: 3, iron: 4, bronite: 6, rosium: 7, steel: 8 };
-BLOCKS[1].drop = 2;   // digging up Grass gives Dirt
-BLOCKS[98].drop = BLOCKS[58].drop = 2;   // and Snowy Grass and Swamp Grass give Dirt too
-BLOCKS[CRUDE_AXE] = { name: 'Crude Axe', t: P3('crude_axe'), item: true, tool: 'axe', material: 'crude', damage: 1 };
+const STRATA_PICKAXE = NUMBERS.STRATA_PICKAXE;   // stone 2, copper 3, iron 4, bronite 6, rosium 7, steel 8
 // Clay Ball (215): put it down on the ground and it dries into a Brick (216) in DRY_TIME seconds, which you pick up.
 const CLAY_BALL = 215, BRICK = 216, CLAY_BALL_BLOCK = 71, BRICK_BLOCK = 72, DRY_TIME = 120;
-BLOCKS[CLAY_BALL] = { name: 'Clay Ball', t: P3('clay_ball'), item: true, places: CLAY_BALL_BLOCK };
-BLOCKS[BRICK] = { name: 'Brick', t: P3('brick'), item: true };
 // Fire Essence: 1 in 20 Grrs drop one. Right-click while holding it to lift all your gloom at once (see Gloom)
 const FIRE_ESSENCE = 217;
-BLOCKS[FIRE_ESSENCE] = { name: 'Fire Essence', t: P3('fire_essence'), item: true };
-BLOCKS[CLAY_BALL_BLOCK].drop = CLAY_BALL;
-BLOCKS[BRICK_BLOCK].drop = BRICK;
 // Fear & Foes: a Skeleton drops Bones (burn one in the Kiln for Bone Ash, which makes White Dye); a Gloomling beaten in the
 // dark leaves a Gloom Wisp (which makes Black Dye). Items 620+ (600-611 are the dyes).
 const BONE = 620, BONE_ASH = 621, GLOOM_WISP = 622;
-BLOCKS[BONE] = { name: 'Bone', t: P3('bone'), item: true };
-BLOCKS[BONE_ASH] = { name: 'Bone Ash', t: P3('bone_ash'), item: true };
-BLOCKS[GLOOM_WISP] = { name: 'Gloom Wisp', t: P3('gloom_wisp'), item: true };
 // ---- Till & Tend: farming Grain ----
 // Use a Hoe on Grass or Dirt (with nothing on top) to till it. Tilling Grass sometimes turns up Grain Seeds.
 // Plant Grain Seeds on tilled soil; the Grain grows through 8 stages (42-49), and the last one is ripe: break it for
@@ -1086,24 +1023,11 @@ BLOCKS[GLOOM_WISP] = { name: 'Gloom Wisp', t: P3('gloom_wisp'), item: true };
 const GRAIN_SEEDS = 623, GRAIN = 624, FLOUR = 625, BREAD = 626;
 const TILLED = 93, WET_TILLED = 94, FERTILIZED = 95, WET_FERTILIZED = 96;
 const GRAIN_STAGES = [42, 43, 44, 45, 46, 47, 48, 49], GRAIN_RIPE = 49;
-const FARM = { stageTime: 40, stageHits: 3, dryRate: 0.5, fertRate: 1.6, wetReach: 5, fertHarvests: 2, revertTime: 180, seedChance: 1 / 6 };
-BLOCKS[GRAIN_SEEDS] = { name: 'Grain Seeds', t: P3('grain_seeds'), item: true };
-BLOCKS[GRAIN] = { name: 'Grain', t: P3('grain'), item: true };
-BLOCKS[FLOUR] = { name: 'Flour', t: P3('flour'), item: true };
-BLOCKS[BREAD] = { name: 'Bread', t: P3('bread'), item: true, food: 6 };
-BLOCKS[DATES] = { name: 'Dates', t: P3('dates'), item: true, food: 3 };
+const FARM = NUMBERS.FARM;   // stageTime 40, stageHits 3, dryRate 0.5, fertRate 1.6, wetReach 5, fertHarvests 2, revertTime 180, seedChance 1/6
 // cows: Leather (more from a cow with room to roam), Raw Meat (more from a well-fed cow) -> Cooked Meat in the Kiln
 const LEATHER = 627, RAW_MEAT = 628, COOKED_MEAT = 629;
-BLOCKS[LEATHER] = { name: 'Leather', t: P3('leather'), item: true };
-BLOCKS[RAW_MEAT] = { name: 'Raw Meat', t: P3('raw_meat'), item: true, food: 2 };
-BLOCKS[COOKED_MEAT] = { name: 'Cooked Meat', t: P3('cooked_meat'), item: true, food: 8 };
-[['Tilled Dirt', 'tilled_dirt'], ['Wet Tilled Dirt', 'wet_tilled_dirt'], ['Fertilized Dirt', 'fertilized_dirt'], ['Wet Fertilized Dirt', 'wet_fertilized_dirt']].forEach(([name, top], k) => {
-  BLOCKS[TILLED + k] = { name, t: P('dirt', top, 'dirt'), drop: 2, soil: true, wet: k % 2 === 1, fert: k >= 2 };   // (t: side, top, bottom)
-});
-GRAIN_STAGES.forEach((id, k) => {
-  BLOCKS[id] = { name: 'Grain', t: P3('grain_stage_' + k), transparent: true, noCollide: true, shape: 'plant',
-    box: [0.15, 0, 0.15, 0.85, 0.15 + k * 0.12, 0.85], drop: k === 7 ? GRAIN : GRAIN_SEEDS, stage: k };
-});
+addBlockRows(BLOCK_DATA.SOILS);   // (soilId below)
+addBlockRows(BLOCK_DATA.GRAIN);   // (GRAIN_STAGES[stage])
 const isSoil = id => !!(BLOCKS[id] && BLOCKS[id].soil);
 const isCrop = id => id >= GRAIN_STAGES[0] && id <= GRAIN_RIPE;
 // the soil block with this wetness and fertilizer
@@ -1120,14 +1044,7 @@ const COLOUR_CHISELED = COLOURS.map((c, k) => k ? 228 + k : 68);
 const COLOUR_BRICKS = COLOURS.map((c, k) => k ? 239 + k : 12);
 const DYE = COLOURS.map((c, k) => 600 + k);
 const dyeOf = c => DYE[COLOURS.indexOf(c)];
-COLOURS.forEach((c, k) => {
-  const C = colourName(c);
-  BLOCKS[DYE[k]] = { name: `${C} Dye`, t: P3(c + '_dye'), item: true };
-  if (!k) return;   // (red's blocks are above)
-  BLOCKS[COLOUR_TERRACOTTA[k]] = { name: `${C} Terracotta`, t: P3(c + '_terracotta') };
-  BLOCKS[COLOUR_CHISELED[k]] = { name: `Chiseled ${C} Terracotta`, t: P3(c + '_chiseled_terracotta') };
-  BLOCKS[COLOUR_BRICKS[k]] = { name: `${C} Bricks`, t: P3(c + '_bricks') };
-});
+addBlockRows(BLOCK_DATA.COLOURS);   // (the dyes, and the other 11 colours' blocks: red's are in BASE)
 const NEW_COLOUR_BLOCKS = [...COLOUR_TERRACOTTA.slice(1), ...COLOUR_CHISELED.slice(1), ...COLOUR_BRICKS.slice(1)];
 // ---- Pack & Plate: ores, Fireclay and the Foundry ----
 // Ores (142-145) lie in veins in the stone (see placeOres). Mining one gives its Chunk, and needs a good enough pickaxe
@@ -1143,42 +1060,16 @@ const METALS = ['copper', 'iron', 'gold', 'tin'];
 const CHUNK = { copper: 630, iron: 631, gold: 632, tin: 633 };
 const METAL_BRICK = { copper: 634, iron: 635, gold: 636, tin: 637, bronite: 638, rosium: 639, steel: 641 };
 const STEEL_SCRAP = 640, STEEL_BRICK = 641, FIRECLAY_BALL = 642, FIRECLAY_BRICK = 643;
-const PICK_TIER = { stone: 1, copper: 2, iron: 3, bronite: 4, rosium: 5, steel: 6 };   // how good each pickaxe is
-METALS.forEach((m, k) => {
-  const M = colourName(m);
-  BLOCKS[ORES[k]] = { name: `${M} Ore`, t: P3(m + '_ore'), drop: CHUNK[m], pick: [1, 2, 3, 3][k] };
-  BLOCKS[CHUNK[m]] = { name: `${M} Chunk`, t: P3(m + '_chunk'), item: true };
-  BLOCKS[METAL_BRICK[m]] = { name: `${M} Brick`, t: P3(m + '_brick'), item: true };
-});
+const PICK_TIER = NUMBERS.PICK_TIER;   // how good each pickaxe is: stone 1, copper 2, iron 3, bronite 4, rosium 5, steel 6
+addBlockRows(BLOCK_DATA.METALS);   // (the ores, chunks and bricks, by METALS' order)
 // Deep ores (470-497): each ore in each deeper layer of stone (2-8), in that layer's colours; the same pickaxe needed,
 // and breaking one gives a Chunk for each layer down (see collectBlock). id = 470 + ore * 7 + layer - 2 (ORES order).
-const DEEP_ORE = 470, DEEP_ORES = [];
+const DEEP_ORE = 470;
 const oreIn = (ore, n) => n <= 1 ? ore : DEEP_ORE + ORES.indexOf(ore) * 7 + n - 2;   // ore in layer n
-METALS.forEach((m, k) => {
-  for (let n = 2; n <= STRATA_LAYERS; n++) {
-    const id = DEEP_ORE + k * 7 + n - 2;
-    BLOCKS[id] = { name: `${colourName(m)} Ore`, t: P3(`${m}_ore_layer_${n}`), drop: CHUNK[m], pick: BLOCKS[ORES[k]].pick, layer: n };
-    DEEP_ORES.push(id);
-  }
-});
+const DEEP_ORES = ORES.flatMap(ore => Array.from({ length: STRATA_LAYERS - 1 }, (_, k) => oreIn(ore, k + 2)));   // (each ore's, layers 2-8)
+addBlockRows(BLOCK_DATA.DEEP_ORES);   // (data/blocks.json DEEP_ORES)
 const deepOresShown = () => TALL_WORLDS ? DEEP_ORES : [];
-BLOCKS[METAL_BRICK.bronite] = { name: 'Bronite Brick', t: P3('bronite_brick'), item: true };
-BLOCKS[METAL_BRICK.rosium] = { name: 'Rosium Brick', t: P3('rosium_brick'), item: true };
-BLOCKS[STEEL_SCRAP] = { name: 'Steel Scrap', t: P3('steel_scrap'), item: true };
-BLOCKS[STEEL_BRICK] = { name: 'Steel Brick', t: P3('steel_brick'), item: true };
-BLOCKS[FIRECLAY_BALL] = { name: 'Fireclay Ball', t: P3('fireclay_ball'), item: true };
-BLOCKS[FIRECLAY_BRICK] = { name: 'Fireclay Brick', t: P3('fireclay_brick'), item: true };
-// handDrop: dug without a shovel it gives [item, fewest, most] of that instead of the block
-BLOCKS[FIRECLAY] = { name: 'Fireclay', t: P3('fireclay'), handDrop: [FIRECLAY_BALL, 1, 4] };
-BLOCKS[FIRECLAY_TERRACOTTA] = { name: 'Fireclay Terracotta', t: P3('fireclay_terracotta') };
-BLOCKS[FIRECLAY_BRICKS] = { name: 'Fireclay Bricks', t: P3('fireclay_bricks') };
-BLOCKS[FIRECLAY_CASING] = { name: 'Fireclay Casing', t: P3('fireclay_casing') };
-BLOCKS[CHISELED_FIRECLAY] = { name: 'Chiseled Fireclay', t: P3('chiseled_fireclay') };
-FURNACE_FRONTS.forEach((front, k) => {
-  BLOCKS[FOUNDRY + k] = { name: 'Furnace', t: P('fireclay_casing', 'fireclay_bricks', 'furnace_bottom', 'furnace_front'), front, facing: k, drop: FOUNDRY };
-  BLOCKS[FOUNDRY + 4 + k] = { name: 'Furnace', t: P('fireclay_casing', 'fireclay_bricks', 'furnace_bottom', 'furnace_front_on'), front, facing: k, lit: true, drop: FOUNDRY };
-});
-BLOCKS[FOUNDRY].icon = tile('furnace_front');
+addBlockRows(BLOCK_DATA.FOUNDRY);   // (FOUNDRY + facing; + 4 when lit, like the Kiln)
 const isFoundry = id => id >= FOUNDRY && id < FOUNDRY + 8;
 const FIRECLAY_BLOCKS = [FIRECLAY_TERRACOTTA, FIRECLAY_BRICKS, FIRECLAY_CASING, CHISELED_FIRECLAY];
 // Armor (helmet, chestplate, leggings, boots), Backpacks and Utility Belts, one of each per material.
@@ -1187,29 +1078,18 @@ const GEAR_TIERS = ['leather', 'copper', 'iron', 'bronite', 'rosium', 'steel'];
 const ARMOR_PIECES = ['helmet', 'chestplate', 'leggings', 'boots'];
 const ARMOR_ITEM = (t, k) => 669 + t * 4 + k;    // 669-692
 const BACKPACKS = GEAR_TIERS.map((m, t) => 693 + t), BELTS = GEAR_TIERS.map((m, t) => 699 + t);   // 693-698, 699-704
-const ARMOR_DURABILITY = { leather: 100, copper: 200, iron: 300, bronite: 450, rosium: 600, steel: 900 };   // hits each piece takes
-const PACK_SLOTS = [5, 10, 15, 20, 30, 40], BELT_SLOTS = [1, 2, 3, 5, 7, 9];
-const ARMOR_ITEMS = [];
-GEAR_TIERS.forEach((m, t) => {
-  const M = colourName(m);
-  ARMOR_PIECES.forEach((piece, k) => {
-    BLOCKS[ARMOR_ITEM(t, k)] = { name: `${M} ${colourName(piece)}`, t: P3(m + '_' + piece), item: true, armor: k, material: m };
-    ARMOR_ITEMS.push(ARMOR_ITEM(t, k));
-  });
-  BLOCKS[BACKPACKS[t]] = { name: `${M} Backpack`, t: P3(m + '_backpack'), item: true, pack: PACK_SLOTS[t], material: m };
-  BLOCKS[BELTS[t]] = { name: `${M} Utility Belt`, t: P3(m + '_utility_belt'), item: true, belt: BELT_SLOTS[t], tools: t + 2, material: m };
-});
+const ARMOR_DURABILITY = NUMBERS.ARMOR_DURABILITY;   // hits each piece takes: leather 100, copper 200, iron 300, bronite 450, rosium 600, steel 900
+// (data/blocks.json GEAR: armor = which piece; a backpack's pack = the slots it adds; a belt's belt and tools = its offhand
+// and tool slots; material = the tier)
+addBlockRows(BLOCK_DATA.GEAR);
+const ARMOR_ITEMS = GEAR_TIERS.flatMap((m, t) => ARMOR_PIECES.map((p, k) => ARMOR_ITEM(t, k)));
 const GEAR_ITEMS = [...ARMOR_ITEMS, ...BACKPACKS, ...BELTS];
 const isGear = id => !!(BLOCKS[id] && (BLOCKS[id].armor !== undefined || BLOCKS[id].pack || BLOCKS[id].belt));
-const PACK_ITEMS = [...Object.values(CHUNK), 634, 635, 636, 637, 638, 639, STEEL_SCRAP, STEEL_BRICK, FIRECLAY_BALL, FIRECLAY_BRICK];
 // Flowers: grow in small patches on grass. You walk through them, pick them by hand, and can plant them again on grass or dirt.
 // shape 'plant': the picture twice, standing up and crossed like an X
 const FLOWER_COLOURS = ['red', 'yellow', 'aqua', 'indigo', 'magenta'];
 const FLOWERS = FLOWER_COLOURS.map((c, k) => 194 + k);
-FLOWER_COLOURS.forEach((c, k) => {
-  BLOCKS[FLOWERS[k]] = { name: `${colourName(c)} Flower`, t: P3(c + '_flower'), transparent: true, noCollide: true, shape: 'plant',
-    box: [0.25, 0, 0.25, 0.75, 0.7, 0.75], dye: dyeOf(c) };
-});
+addBlockRows(BLOCK_DATA.FLOWERS);   // (dye: the Dye each one makes)
 const isFlower = id => FLOWERS.includes(id);
 const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // Survival digging rules:
@@ -1218,20 +1098,15 @@ const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // The soil family (Dirt, Grass, Sand, Gravel and Clay) can be dug by hand, but then gives 1-8 pieces instead of
 // the whole block (a shovel gets you the whole block). Grass gives Dirt.
 // Bricks, Terracotta, the chiseled blocks and the Furnace count as stone-type too.
-const NEEDS_AXE = [4, 7, 61, FIR_LOG, FIR_PLANKS, STRIPPED_FIR_LOG, PALM_LOG, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_LOG, WILLOW_PLANKS, STRIPPED_WILLOW_LOG, ...Array.from({ length: 16 }, (_, k) => TURNED_LOGS + k)],
-  DIGGABLE = [1, 2, 6, 11, 63, FIRECLAY, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, MUD, PEAT, ...Array.from({ length: 8 }, (_, k) => SNOW + k)];
-const NEEDS_PICKAXE = [3, 8, 9, 12, 13, 14, 15, 64, 65, 66, 67, 68, 69, FURNACE, FURNACE + 1, FURNACE + 2, FURNACE + 3, FURNACE + 4, FURNACE + 5, FURNACE + 6, FURNACE + 7, ...NEW_COLOUR_BLOCKS, ...DEEP_BLOCKS,
-  ...ORES, ...FIRECLAY_BLOCKS, ...Array.from({ length: 8 }, (_, k) => FOUNDRY + k), 97, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS];
+// (Which blocks: data/blocks.json's needs, axe or pickaxe, and shovel, the soil family.)
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
 const holding = kind => !!(BLOCKS[HOTBAR[act]] && BLOCKS[HOTBAR[act]].tool === kind);
 const stackMax = id => isTool(id) || isGear(id) ? 1 : STACK_MAX;
-const BRICK_VARIANTS = [12, 13, 14, 15];
 // ---- Pieces: every cube block can be split into 8 pieces (an eighth of a block each: half as wide, tall and deep)
 // at the Crafting Bench. Pieces are placed one at a time, and one block space can hold pieces of different blocks.
 // A space holding pieces is block 70 in the world; which block fills each of its 8 spots is kept in pieceMap.
 // Spot number = x + y*2 + z*4, where x, y and z are 0 (low half) or 1 (high half) of the block space.
 const PIECES = 70, CRAFTING_BENCH = 60, CUTTER = 159;
-BLOCKS[PIECES] = { name: 'Pieces', t: P3('stone'), transparent: true, shape: 'pieces' };
 // Snowlogging: a block you can walk through or that isn't a whole block (a torch of any kind, wall and count, a flower, a
 // space of pieces: slabs, stairs, quarters..., the Cutter, a Rock, Clay Ball or Brick) can have one layer of Snow in its
 // space too, never more. Put Snow on one, or one of them into a layer of snow, and both stay. Each is its own block, the
@@ -1240,16 +1115,14 @@ BLOCKS[PIECES] = { name: 'Pieces', t: P3('stone'), transparent: true, shape: 'pi
 // it takes the block (or the piece you aimed at) and leaves the snow. Exactly as the desktop version.
 const SNOW_LOGGED_1 = 400, PIECES_IN_SNOW = 388;
 const SNOW_LOGGABLE = [...new Set(Object.values(TORCH_IDS))].concat(FLOWERS).sort((a, c) => a - c);
-const snowLoggedIds = new Map();   // the plain block -> it with snow round it
-[...SNOW_LOGGABLE.map((inner, k) => [inner, SNOW_LOGGED_1 + k]), [PIECES, PIECES_IN_SNOW], [CUTTER, 389], [62, 390], [71, 391], [72, 392]].forEach(([inner, id]) => {
-  const b = BLOCKS[inner];
-  if (BLOCKS[id]) throw new Error(`Block ${id} is already ${BLOCKS[id].name}: it's needed for a snowlogged ${b.name}`);
-  const d = { ...b, inner, snowed: 1 };
-  if (!d.drop && !isTorch(inner) && inner !== PIECES) d.drop = inner;   // (breaking it gives what it holds, not the snowlogged block)
-  if (d.box && d.box[4] < 1 / 8) d.box = [d.box[0], d.box[1], d.box[2], d.box[3], 1 / 8, d.box[5]];
-  BLOCKS[id] = d;
-  snowLoggedIds.set(inner, id);
-});
+// data/blocks.json SNOWY: each is the block it holds (inner) with snowed: 1, and whatever it has of its own (what breaking it
+// gives, a box at least as high as the snow). These are their rows, for addBlockRows.
+function snowyRows(rows) {
+  // (not inventory: you never hold one, you hold what it holds)
+  return rows.map(({ id, inner, ...own }) => { const { id: _, inventory: __, ...b } = blockRows.get(rowIdFor(inner, id)); return { ...b, ...own, id, inner, snowed: 1 }; });
+}
+addBlockRows(snowyRows(BLOCK_DATA.SNOWY));
+const snowLoggedIds = new Map(BLOCK_DATA.SNOWY.map(r => [BLOCKS[r.id].inner, r.id]));   // the plain block -> it with snow round it
 const snowIn = b => BLOCKS[b] && BLOCKS[b].snowed || 0;                       // how many layers of snow are round it (0 or 1)
 const plainOf = b => BLOCKS[b] && BLOCKS[b].inner || b;                       // the block without its snow
 const canSnowLog = b => snowLoggedIds.has(plainOf(b));
@@ -1258,7 +1131,6 @@ const withSnow = (b, n) => { const p = plainOf(b); return !(n > 0) ? p : snowLog
 const isPieces = b => b === PIECES || b === PIECES_IN_SNOW;
 // Snowballs: breaking snow gives 2-4 for each layer (a Snow Block: 4). 4 make a Snow Block, which makes 8 Snow.
 const SNOWBALL = 706;
-BLOCKS[SNOWBALL] = { name: 'Snowball', t: P3('snowball'), item: true };
 function dropSnowballs(layers, x, y, z) { for (let n = layers; n > 0; n--) for (let k = 2 + Math.floor(Math.random() * 3); k > 0; k--) collect(SNOWBALL, x, y, z); }
 // (knocked off: the snow round it drops too)
 const dropSnowOf = (b, x, y, z) => dropSnowballs(snowIn(b), x, y, z);
@@ -1278,8 +1150,9 @@ function newSpotValue(a, id) {
 }
 // a piece is an item you carry (ids 100+): the piece of block b is 100 + b
 const PIECE_ITEM = 100;
-// cube blocks that can be cut into pieces, slabs and stairs (not torches, water, the Crafting Bench or the Furnace)
-const SPLITTABLE = [1, 2, 3, 8, 7, 4, 61, 5, FIR_PLANKS, FIR_LOG, STRIPPED_FIR_LOG, FIR_LEAVES, 6, 9, 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...NEW_COLOUR_BLOCKS, ...DEEP_BLOCKS, ...EXTRA_FORM_BLOCKS];
+// cube blocks that can be cut into pieces, slabs and stairs (not torches, water, the Crafting Bench or the Furnace): data/blocks.json
+// FORMS, in its order
+const SPLITTABLE = BLOCK_DATA.FORMS.map(r => rowIdFor(r.of, 'FORMS'));
 // The deep stone sets' piece, slab, stairs... items can't use 100 + b and 1000 + b (those numbers clash with other blocks'),
 // so theirs are 1800 + 7 x (the block's place in DEEP_BLOCKS) + (piece 0, slab 1, vslab 2, stairs 3, quarter 4, vstairs 5, vquarter 6).
 const FORMS = ['piece', 'slab', 'vslab', 'stairs', 'quarter', 'vstairs', 'vquarter'], DEEP_FORM_ITEM = 1800;
@@ -1290,7 +1163,6 @@ function formItem(form, b) {
   return i >= 0 ? DEEP_FORM_ITEM + 7 * i + FORMS.indexOf(form) : e >= 0 ? EXTRA_FORM_ITEM + 7 * e + FORMS.indexOf(form)
     : (form === 'piece' ? PIECE_ITEM : SHAPE_ITEM[form]) + b;
 }
-for (const b of SPLITTABLE) BLOCKS[formItem('piece', b)] = { name: BLOCKS[b].name + ' Piece', t: BLOCKS[b].t, item: true, piece: b };
 const isPiece = id => !!(BLOCKS[id] && BLOCKS[id].piece);
 // ---- Slabs, stairs and vertical slabs: made of pieces ----
 // A slab is 4 pieces of one block filling the bottom or top half of a space, a vertical slab 4 filling one side,
@@ -1312,10 +1184,69 @@ const SHAPE_MASKS = {
 const shapeOfMask = m => Object.keys(SHAPE_MASKS).find(k => SHAPE_MASKS[k].includes(m)) || null;
 // the items: id = SHAPE_ITEM[shape] + block (Stone Slab = 1003)
 const SHAPE_ITEM = { slab: 1000, vslab: 1100, stairs: 1200, quarter: 1300, vstairs: 1400, vquarter: 1500 };
-const SHAPE_NAME = { slab: 'Slab', vslab: 'Vertical Slab', stairs: 'Stairs', quarter: 'Quarter', vstairs: 'Vertical Stairs', vquarter: 'Vertical Quarter' };
-for (const b of SPLITTABLE) for (const k in SHAPE_ITEM)
-  BLOCKS[formItem(k, b)] = { name: `${BLOCKS[b].name} ${SHAPE_NAME[k]}`, t: BLOCKS[b].t, item: true, form: k, of: b };
+// The pieces and shapes in data/blocks.json (FORMS): for each block that can be cut, the item for each of its forms (FORM_NAMES,
+// in order), named "<the block> <the form's name>" and with the block's pictures. These are their rows, for addBlockRows.
+function formRows(rows) {
+  const names = BLOCK_DATA.FORM_NAMES, forms = Object.keys(names).filter(f => !f.startsWith('_'));
+  return rows.flatMap(r => forms.map(f => {
+    const b = blockRows.get(rowIdFor(r.of, r[f]));
+    return { id: r[f], name: b.name + ' ' + names[f], pictures: b.pictures, item: true, ...(f === 'piece' ? { piece: r.of } : { form: f, of: r.of }) };
+  }));
+}
+addBlockRows(formRows(BLOCK_DATA.FORMS));   // (every piece, slab, stairs... item: formItem(form, b))
 const formOf = id => BLOCKS[id] && BLOCKS[id].form;
+// ---- Keys: a name for every id that both editions make the same way, so the shared data files (data/*.json) can say
+// "oak_planks" or "slab:oak_planks" instead of a number. Made from what each block IS, not just its name:
+//   plain: the name in lower case, anything but letters and digits turned into _ ("Oak Planks" -> oak_planks); 0 is air
+//   made from another block: snowy:<key> (snowlogged), piece:<key>, slab: vslab: stairs: vstairs: quarter: vquarter:<key>
+//   one of several states of a block: <key>#<state>,<state>... (in this order, each only when it isn't the usual one):
+//     layer=N (deep stone, deep cobblestone, bricks, chiseled, deep ores: layers 2-8), wall=N (torches: 1-4) and count=N
+//     (2-4), facing=N (Kiln and Furnace: 1-3) and lit, level=N (water: 1-7), stage=N (Grain: always, 0-7, so the plain key
+//     is the item), layers=N (snow: 2-7), axis=N (a lying log: 1-2), look=N (Red Bricks' other looks: 1-3), placed (a
+//     Rock, Clay Ball or Brick put down: the plain key is the item)
+// keyTable(): "id<TAB>key" for every id, sorted by id (test: compare it with the desktop version's --keydump).
+function blockKey(id) {
+  if (id === 0) return 'air';
+  const b = BLOCKS[id];
+  if (!b) return null;
+  if (b.snowed) return 'snowy:' + blockKey(b.inner);
+  if (b.form) return b.form + ':' + blockKey(b.of);
+  if (b.item && b.piece) return 'piece:' + blockKey(b.piece);
+  const s = keyStates(b);
+  if (b.shape === 'flat' && BLOCKS[b.drop] && BLOCKS[b.drop].item && BLOCKS[b.drop].name === b.name) s.push('placed');
+  return keySlug(b.name) + (s.length ? '#' + s.join(',') : '');
+}
+// the states in a block's key, in order, all but placed (blockKey and rowKey each tell that their own way). b is the block,
+// or its row in data/blocks.json (they have the same fields)
+function keyStates(b) {
+  const s = [];
+  if (b.layer > 1) s.push('layer=' + b.layer);
+  if (b.shape === 'torch') { if (b.wi) s.push('wall=' + b.wi); if (b.count > 1) s.push('count=' + b.count); }
+  if (b.front) { if (b.facing) s.push('facing=' + b.facing); if (b.lit) s.push('lit'); }
+  if (b.level) s.push('level=' + b.level);
+  if (b.stage !== undefined) s.push('stage=' + b.stage);
+  if (b.shape === 'snow' && b.layers > 1) s.push('layers=' + b.layers);
+  if (b.axis) s.push('axis=' + b.axis);
+  if (b.look) s.push('look=' + b.look);
+  return s;
+}
+function keyTable() {
+  const ids = [0, ...Object.keys(BLOCKS).map(Number).filter(k => BLOCKS[k]).sort((a, c) => a - c)];
+  const seen = new Map(), clash = [];
+  const lines = ids.map(id => { const k = blockKey(id); if (seen.has(k)) clash.push(`${k}: ${seen.get(k)} and ${id}`); seen.set(k, id); return id + '\t' + k; });
+  return { text: lines.join('\n') + '\n', count: ids.length, clash };
+}
+// idOf(key): the id with that key (the data files name things by their keys). A key that isn't a block or item stops the
+// game with a message, so a typo in data/*.json can't slip by. (Built the first time, and again if a key isn't found yet.)
+let keyIds = null;
+function idOf(key) {
+  if (!keyIds || !keyIds.has(key)) {
+    keyIds = new Map([['air', 0]]);
+    for (const id of Object.keys(BLOCKS).map(Number)) if (BLOCKS[id]) keyIds.set(blockKey(id), id);
+  }
+  if (!keyIds.has(key)) throw new Error(`The game's data (data/*.json) names "${key}", which isn't a block or item`);
+  return keyIds.get(key);
+}
 // the shape the piece in spot s belongs to (the spots with its value in this space), or null if it's a loose piece
 function shapeAt(a, s) {
   const b = a[s];
@@ -1349,10 +1280,13 @@ function putPieces(x, y, z, i, a, snow) {
   else if (snow && snowRests(getBlock(x, y - 1, z))) setBlock(x, y, z, SNOW);   // (the snow stays, lying on the block below)
   else { if (snow && world.get(i) === PIECES_IN_SNOW) dropSnowballs(1, x, y, z); setBlock(x, y, z, 0); }
 }
-// Every block you can pick from the inventory (press E). Add new blocks here, not to the hotbar.
-const ITEMS = [1, 2, 3, ...deepShown(3), 8, ...deepShown(8), 7, 60, CUTTER, 4, 61, 5, FIR_PLANKS, FIR_LOG, STRIPPED_FIR_LOG, FIR_LEAVES, 6, 9, ...deepShown(9), 12, 10, 11, 63, 64, 65, 66, 67, 68, 69, ...deepShown(69), ...NEW_COLOUR_BLOCKS, ...FLOWERS, FURNACE, 22, WATER, BEDROCK,
-  ...ORES, ...deepOresShown(), FIRECLAY, ...FIRECLAY_BLOCKS, FOUNDRY,
-  PALM_PLANKS, PALM_LOG, STRIPPED_PALM_LOG, PALM_LEAVES, WILLOW_PLANKS, WILLOW_LOG, STRIPPED_WILLOW_LOG, WILLOW_LEAVES, SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT, SNOW, SNOW_BLOCK];
+// Every block you can pick from the inventory (press E): data/blocks.json's inventory (the deep layers' only while tall worlds are on)
+const ITEMS = Object.keys(BLOCKS).map(Number).filter(id => BLOCKS[id].inventory && (TALL_WORLDS || !(BLOCKS[id].layer > 1)));
+// a block with other looks (and each of the looks) -> the block and its looks, in order: it's put down as one of them at random
+// (Red Bricks: data/blocks.json's look)
+const LOOKS = {};
+for (const id of Object.keys(BLOCKS).map(Number)) { const b = BLOCKS[id]; if (b.look) (LOOKS[b.drop] = LOOKS[b.drop] || [b.drop])[b.look] = id; }
+for (const looks of Object.values(LOOKS)) for (const id of looks) LOOKS[id] = looks;
 // The hotbar is always 10 slots (keys 1-9, 0). 0 = empty slot. Your setup is remembered.
 // Survival also has more slots, kept in the same arrays (by number):
 //   0-9 the hotbar, 10-19 Pockets, 20-59 the Backpack's slots (as many as the backpack you wear gives),
@@ -1378,19 +1312,19 @@ const HOTBAR_COUNT = (() => {
 })();
 while (HOTBAR.length < NS) HOTBAR.push(0);
 while (HOTBAR_COUNT.length < NS) HOTBAR_COUNT.push(0);
-const STACK_MAX = 64;
+const STACK_MAX = NUMBERS.STACK_MAX;   // 64
 // ---- Tool durability (Pack & Plate) ----
 // Each tool can be used DURABILITY[its material] times. Breaking a block uses 1 (2 with the wrong tool for that block),
 // a hit on a mob uses 1 for a sword and 2 for any other tool, tilling uses 1. At 0 the tool breaks and is gone.
 // HOTBAR_WEAR: how much each slot's tool has been used (0 = new). A tool dropped on the ground keeps its wear. Survival only.
-const DURABILITY = { crude: 32, stone: 160, copper: 320, iron: 480, bronite: 720, rosium: 960, steel: 1440 };
+const DURABILITY = NUMBERS.DURABILITY;   // crude 32, stone 160, copper 320, iron 480, bronite 720, rosium 960, steel 1440
 const HOTBAR_WEAR = new Array(NS).fill(0);
 // HOTBAR_DATA: a backpack that isn't being worn carries what was in it: { id: [], n: [], w: [] } (null: nothing)
 const HOTBAR_DATA = new Array(NS).fill(null);
 // (the hotbar remembered between worlds is your creative one; a survival hotbar is only kept in its world's save)
 function saveHotbar() { if (SURVIVAL) return; try { localStorage.setItem('cubeland-hotbar', JSON.stringify(HOTBAR.slice(0, 10))); localStorage.setItem('cubeland-hotbar-count', JSON.stringify(HOTBAR_COUNT.slice(0, 10))); } catch (e) {} }
 // the block id to actually place for a hotbar block (bricks pick a random variant)
-const placeId = id => BLOCKS[id] && BLOCKS[id].places ? BLOCKS[id].places : BRICK_VARIANTS.includes(id) ? BRICK_VARIANTS[Math.floor(Math.random() * BRICK_VARIANTS.length)] : id;
+const placeId = id => BLOCKS[id] && BLOCKS[id].places ? BLOCKS[id].places : LOOKS[id] ? LOOKS[id][Math.floor(Math.random() * LOOKS[id].length)] : id;
 let selected = 0;
 // act: the slot the current click uses (see actSlot); offSel: which offhand slot is picked (R)
 let act = 0, offSel = 0, clicking = false;
@@ -1486,27 +1420,17 @@ for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) px(tile('water'), 
 
 // ===================== Your textures (from textures.js) =====================
 // Each picture uses the file with its name. A picture with no file keeps the stand-in drawn above (or stays empty).
-// other spellings of a picture's file name
-const TEXTURE_SPELLINGS = {
-  grass_top: 'grass', tortch_side: 'torch_side', tortch_top: 'torch_top', tortch_bottom: 'torch_bottom',
-  chisled_terracota: 'chiseled_terracotta', red_chiseled_terracotta: 'chiseled_red_terracotta',
-};
-// a picture whose file you haven't made (yet) borrows another one
-const TEXTURE_BORROWS = {
-  // the 4 looks of Red Bricks
-  bricks_a: 'red_bricks', bricks_b: 'red_bricks', bricks_c: 'red_bricks', bricks_d: 'red_bricks',
-  // the Cutter: the Crafting Bench's side, planks underneath; with no second saw frame the blade just stands still
-  cutter_base: 'crafting_bench_side', cutter_bottom: 'planks', cutter_saw_frame_0: 'cutter_saw', cutter_saw_1: 'cutter_saw',
-  // biome blocks: White Terracotta (snow), the Grass pictures, or Glass (ice)
-  snow: 'white_terracotta', snowy_grass_side: 'grass_side', ice: 'glass', swamp_grass: 'grass', swamp_grass_side: 'grass_side',
-};
+// The names are in data/texture-names.json: TEXTURE_SPELLINGS = other spellings of a picture's file name (file -> picture);
+// TEXTURE_BORROWS = a picture whose file you haven't made (yet) borrows another one (picture -> picture)
+const TEXTURE_NAMES = gameData('texture-names');
+const TEXTURE_SPELLINGS = TEXTURE_NAMES.TEXTURE_SPELLINGS, TEXTURE_BORROWS = TEXTURE_NAMES.TEXTURE_BORROWS;
 function loadCustomTextures(onDone) {
   const files = {};   // picture name -> its file
   for (const [file, src] of Object.entries(window.TEXTURES || {})) { const name = TEXTURE_SPELLINGS[file] || file; if (!(name in files)) files[name] = src; }
   const fills = {};   // file -> the atlas places it fills (its own picture, and the ones borrowing it)
   TILE_NAMES.forEach((name, t) => {
     let n = name;
-    while (n && !(n in files)) n = TEXTURE_BORROWS[n];
+    for (let hops = 0; n && !(n in files); hops++) n = hops < 32 ? TEXTURE_BORROWS[n] : null;   // (a borrowing that goes in a circle just ends)
     if (n) (fills[n] = fills[n] || []).push(t);
   });
   const entries = Object.entries(fills);
@@ -1534,16 +1458,7 @@ function loadCustomTextures(onDone) {
 // character; for characters a file name can't hold, use a name from FONT_NAMES (e.g. q_mark.png for "?").
 // Characters without a picture yet (like numbers) are shown in the computer's normal font.
 // Sizes: font-size 12px draws each letter pixel as 1 screen pixel, 24px as 2, 36px as 3, and so on.
-const FONT_NAMES = {
-  asterisk: '*', dash: '-', hyphen: '-', minus: '-', period: '.', dot: '.', full_stop: '.', plus: '+',
-  q_mark: '?', question: '?', question_mark: '?', exclamation: '!', exclamation_mark: '!', ampersand: '&', and: '&',
-  caret: '^', comma: ',', colon: ':', semicolon: ';', slash: '/', forward_slash: '/', backslash: '\\',
-  apostrophe: "'", quote: '"', quotes: '"', lparen: '(', left_paren: '(', open_paren: '(', rparen: ')', right_paren: ')',
-  close_paren: ')', lbracket: '[', rbracket: ']', equals: '=', underscore: '_', percent: '%', hash: '#', at: '@',
-  dollar: '$', less_than: '<', greater_than: '>', tilde: '~', space: ' ',
-  times: '·', middot: '·', middle_dot: '·',   // the raised dot between the controls on the start screen (·)
-  zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9',
-};
+const FONT_NAMES = TEXTURE_NAMES.FONT_NAMES;   // (data/texture-names.json: e.g. q_mark -> ?)
 function fontChar(key) {   // "font/upper/a" -> "A", "font/symbol/q_mark" -> "?"
   const parts = key.split('/'), name = parts[parts.length - 1], folder = parts[parts.length - 2] || '';
   if ([...name].length === 1) return folder === 'upper' ? name.toUpperCase() : name;
@@ -2003,9 +1918,9 @@ if (GEN === 1) for (let cz = 0; cz < WZ; cz += CELL) for (let cx = 0; cx < WX; c
 // --- 5. Paint the land: grass on top, then dirt, then stone ---
 // Plateaus: sand in low spots (which end up underwater).
 // Hills: sandy (or now and then gravelly) beaches along the shore, sand and gravel on the sea floor.
-// the badlands' stripes, from the bottom up (they repeat): plain, orange, yellow, red, white and pink Terracotta
-const BADLANDS_BANDS = [65, 65, COLOUR_TERRACOTTA[1], COLOUR_TERRACOTTA[1], COLOUR_TERRACOTTA[1], 65, COLOUR_TERRACOTTA[2], 65, 65,
-  66, 66, 65, COLOUR_TERRACOTTA[10], 65, COLOUR_TERRACOTTA[1], 65, 65, COLOUR_TERRACOTTA[9], 65];
+// The badlands' stripes of Terracotta, from the bottom up (they repeat), and the ore veins (below) are in data/worldgen.json.
+const WORLDGEN = gameData('worldgen');
+const BADLANDS_BANDS = WORLDGEN.BADLANDS_BANDS.map(idOf);
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   let depth = -1, surf = 1;
   const beach = GEN === 1 ? 0 : fbm(x / 40, z / 40, 2, 950), gravelly = GEN === 1 ? 0 : fbm(x / 30 + 70, z / 30 + 70, 2, 960);
@@ -2090,17 +2005,16 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++)
   for (let y = SEA_LEVEL; y > 0 && !raw[idx(x, y, z)]; y--) raw[idx(x, y, z)] = WATER;
 
 // --- Ores and Fireclay: veins in the ground, by depth below the surface (before the caves, which cut through them) ---
-// [block, veins per 10,000 columns, blocks per vein, shallowest, deepest (blocks below the surface)]. A vein is a short
-// random walk that turns the Stone it passes through into ore (Fireclay also takes Dirt). (The same as the desktop edition.)
-const ORE_VEINS = [
-  [COPPER_ORE, 110, 8, 3, 999], [TIN_ORE, 90, 6, 3, 999], [IRON_ORE, 70, 6, 10, 999], [GOLD_ORE, 18, 4, 28, 999], [FIRECLAY, 20, 20, 4, 20],
-];
-// New worlds (LAND 2): the four ores are as common at every depth (from 3 below the surface all the way down, with more
+// The veins are data/worldgen.json's ORE_VEINS, grown in their order (a row's place picks its veins' random numbers): each
+// one's ore, veins per 10,000 columns, blocks per vein, shallowest and deepest (blocks below the surface). A vein is a short
+// random walk that turns the Stone it passes through into its ore (Dirt too, for takesDirt). (The same as the desktop edition.)
+const ORE_VEINS = WORLDGEN.ORE_VEINS.map(r => ({ ...r, ore: idOf(r.ore) }));
+// New worlds (LAND 2): the allDepths ores are as common at every depth (from 3 below the surface all the way down, with more
 // veins in a taller world) and turn any layer's Stone into that layer's ore. Older worlds keep the old veins exactly.
 const deepOresGrown = [];   // [index, deep ore] (put in once the world is packed, like the other blocks past 255: see `late`)
 function placeOres() {
-  ORE_VEINS.forEach(([ore, per, size, top, deep], o) => {
-    const newOre = LAND >= 2 && ore !== FIRECLAY;
+  ORE_VEINS.forEach(({ ore, per, size, top, deep, takesDirt, allDepths }, o) => {
+    const newOre = LAND >= 2 && !!allDepths;
     if (newOre) { top = 3; deep = 999; per *= WY / 192; }
     const s = 7001 + o * 10, n = Math.floor(WX * WZ * per / 10000);
     for (let k = 0; k < n; k++) {
@@ -2110,7 +2024,7 @@ function placeOres() {
       let y = lo + Math.floor(hash(k, 3, s) * (hi - lo + 1));
       for (let j = 0; j < size; j++) {
         const i = idx(x, y, z), b = raw[i];
-        if (b === 3 || (ore === FIRECLAY && b === 2)) raw[i] = ore;
+        if (b === 3 || (takesDirt && b === 2)) raw[i] = ore;
         else if (newOre && b >= STRATA && b < STRATA + STRATA_LAYERS - 1) { raw[i] = ore; deepOresGrown.push([i, oreIn(ore, b - STRATA + 2), ore]); }
         const [dx, dy, dz] = ORE_STEPS[Math.floor(hash3(k, j, o, s + 5) * 6)];
         x += dx; y += dy; z += dz;
@@ -3721,25 +3635,8 @@ const Sound = (() => {
   const levels = { master: 1, block: 1, player: 1, mob: 1, music: 1 };   // the volume sliders in Settings, 0 to 1
   const musicLevel = () => muted ? 0 : 0.32 * levels.master * levels.music;
   try { muted = localStorage.getItem('cubeland-muted') === '1'; } catch (e) {}
-  // which sound recipe each block uses (block id: recipe). Recipe names describe the sound, not the block:
-  // stone-type blocks use 'rock' (deep bm / crk), dirt (and tilled soil) uses the sharp 'stone' chk, gravel the crumbly 'dirt' crunch.
-  const MATERIAL = { 1: 'grass', 2: 'stone', 3: 'rock', 4: 'wood', 5: 'grass', 6: 'sand', 7: 'wood', 8: 'cobble', 9: 'rock', 10: 'glass', 11: 'dirt', 12: 'brick', 13: 'brick', 14: 'brick', 15: 'brick',
-    60: 'wood', 61: 'wood', 63: 'dirt', 64: 'brick', 65: 'brick', 66: 'brick', 67: 'brick', 68: 'brick', 69: 'rock',
-    [FIR_LOG]: 'wood', [FIR_PLANKS]: 'wood', [STRIPPED_FIR_LOG]: 'wood', [FIR_LEAVES]: 'grass',
-    [PALM_LOG]: 'wood', [PALM_PLANKS]: 'wood', [STRIPPED_PALM_LOG]: 'wood', [PALM_LEAVES]: 'grass',
-    [WILLOW_LOG]: 'wood', [WILLOW_PLANKS]: 'wood', [STRIPPED_WILLOW_LOG]: 'wood', [WILLOW_LEAVES]: 'grass',
-    [SANDSTONE_BRICKS]: 'rock', [CHISELED_SANDSTONE]: 'rock', [SMOOTH_SANDSTONE]: 'rock', [MUD]: 'dirt', [MUD_BRICKS]: 'brick', [PEAT]: 'dirt' };
-  for (let k = 0; k < 8; k++) MATERIAL[FURNACE + k] = 'brick';   // torches use 'wood' (see mat below)
-  for (const b of NEW_COLOUR_BLOCKS) MATERIAL[b] = 'brick';
-  for (const b of FLOWERS) MATERIAL[b] = 'grass';
-  for (const b of GRAIN_STAGES) MATERIAL[b] = 'grass';
-  for (const b of [TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED]) MATERIAL[b] = 'stone';
-  for (let b = STRATA; b <= DEEP_CHISELED + STRATA_LAYERS - 2; b++) MATERIAL[b] = 'rock';   // (deep stone and bedrock sound like stone)
-  for (const b of [...ORES, ...DEEP_ORES]) MATERIAL[b] = 'rock';
-  MATERIAL[FIRECLAY] = 'dirt';
-  for (let b = FIRECLAY_TERRACOTTA; b < FOUNDRY + 8; b++) MATERIAL[b] = 'brick';   // the Fireclay blocks and the Foundry's Furnace
-  for (let b = SNOW; b <= SNOW_BLOCK; b++) MATERIAL[b] = 'snow';   // (the layers and the Snow Block)
-  for (let k = 0; k < 16; k++) MATERIAL[TURNED_LOGS + k] = 'wood';   // (logs lying on their sides)
+  // Which sound recipe each block uses is its sound in data/blocks.json (see mat). Recipe names describe the sound, not the
+  // block: stone-type blocks use 'rock' (deep bm / crk), dirt (and tilled soil) uses the sharp 'stone' chk, gravel the crumbly 'dirt' crunch.
   // materials whose placing sound is their footstep sound instead of their dig sound
   // materials with their own placing sound (others reuse the breaking sound, softer)
   const PLACE_RECIPES = {
@@ -4191,7 +4088,7 @@ const Sound = (() => {
     node.connect(master);
     src.start();
   }
-  const mat = id => { id = plainOf(id); return isTorch(id) ? 'wood' : MATERIAL[id] || 'stone'; };   // (a snowlogged block: the block's own sound)
+  const mat = id => (BLOCKS[id] && BLOCKS[id].sound) || 'stone';   // (left out: stone. A snow-logged block has its block's sound)
 
   // ---------- Music: a synthesized piano ----------
   // Song notation: a space = one beat, notes written with no space between them = half a beat.
@@ -4302,6 +4199,8 @@ const Sound = (() => {
   }
 
   return {
+    soundOf: mat,                   // a block's sound (its recipe's name)
+    hasSound: name => !!RECIPES[name],
     hush(on) {                      // (called every frame: true near a staircase)
       if (!ctx || !hushGain || hushed === on) return;
       hushed = on;
@@ -4683,37 +4582,14 @@ function raycast(max = 6) {
 // skins from textures/entity/mobs/<name>/. Sizes are in model pixels: 16 = one block.
 // The Zombie arrived in Fear & Foes (Alpha 0.0.8.0), taking over from Grr Angry as the night mob (false brings Grr back).
 const ZOMBIE_READY = true;
-const MOB_TYPES = {
-  // drops: [item, fewest, most, chance] dropped when killed (chance: how likely, 1/20 = 1 in 20; left out = always)
-  // hostile: chases and attacks the player, but only in survival mode. dark: spawns anywhere dark (caves any time, open ground at night).
-  // burns: catches fire in daylight when nothing is over its head (water puts it out), losing 1 health a second
-  // growl: the mob's voice, heard every so often (and when hit) up to ~28 blocks away. 'growl' = the Zombie's low grumble, 'hrr' = Dan's cat-like trill
-  // curious: drawn to block-breaking/placing sounds (within hearing) and torches (within lightRange)
-  danthechocolateman: { name: 'Dan The Chocolate Man', health: 5, speed: 1.3, max: 6, drops: [[CHOCOLATE, 1, 2]], growl: 'hrr' },
-  // scale: how much bigger than the model to draw it (the Zombie's model is 32 pixels tall; 0.9x makes it 1.8 blocks, as tall as the player)
-  ...(ZOMBIE_READY ? {
-    // shamble: walks like a zombie (arms out in front, stiff dragging steps, head lolling)
-    zombie: { name: 'Zombie', health: 8, speed: 1.5, max: 5, hostile: true, dark: true, burns: true, shamble: true, damage: 3, sight: 16, reach: 1.8, glow: true,
-      curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 0.9, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
-  } : {
-    // night: only spawns on open ground after dark (Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks)
-    grrangry: { name: 'Grr Angry', health: 8, speed: 1.5, max: 5, hostile: true, night: true, damage: 3, sight: 16, reach: 1.8, glow: true,
-      curious: true, hearing: 24, lightRange: 16, growl: 'growl', scale: 1.6, drops: [[FIRE_ESSENCE, 1, 1, 1 / 20]] },
-  }),
-  // thrower: keeps its distance (closes in past `far`, backs off inside `near`) and throws Rocks at you when it can see you;
-  // damage = what a Rock that hits you takes off. Its model is 32 pixels tall, so 0.9x is 1.8 blocks.
-  skeleton: { name: 'Skeleton', health: 6, speed: 1.4, max: 3, hostile: true, dark: true, burns: true, thrower: true, near: 5, far: 10,
-    damage: 2, sight: 18, reach: 0, glow: true, scale: 0.9, drops: [[BONE, 1, 2]] },
-  // deep: only spawns where it's pitch dark underground. snuffer: creeps to the nearest burning torch (not an Ever Torch) and puts it
-  // out a stage at a time (lit -> smoldering -> burnt). Light doesn't hurt it, but it fades away (dropping nothing) when someone
-  // comes near holding a lit torch. faint: it never looks darker than this, so you can just make it out in the dark.
-  gloomling: { name: 'Gloomling', health: 4, speed: 1.1, max: 3, deep: true, snuffer: true, faint: 0.3, scale: 1, drops: [[GLOOM_WISP, 1, 1]] },
-  // cow: lives in herds and is saved with the world; grazes, fattens on Grain, has calves (see Cows). max 0: it has its own spawning.
-  // Its model is 13 pixels tall; 1.5x makes it about 1.2 blocks. What it drops depends on how it was kept (cowDrops).
-  cow: { name: 'Cow', health: 6, speed: 1, max: 0, cow: true, scale: 1.5, growl: 'moo' },
-};
+// The mobs' stats are in data/mobs.json (MOBS, in spawning order; drops by key): drops: [item, fewest, most, chance] dropped
+// when killed (chance: how likely; left out = always). What each field means is in the file's notes. Of zombie and grrangry,
+// only the one ZOMBIE_READY picks is in the game.
+const MOB_DATA = gameData('mobs');
+const MOB_TYPES = Object.fromEntries(MOB_DATA.MOBS.filter(m => m.type !== (ZOMBIE_READY ? 'grrangry' : 'zombie')).map(({ type, ...t }) =>
+  [type, Object.fromEntries(Object.entries(t).map(([f, v]) => [f, f === 'drops' ? v.map(([k, ...r]) => [idOf(k), ...r]) : v]))]));
 // how close (in blocks) someone holding a lit torch has to come for a Gloomling to fade away, and how long fading takes (seconds)
-const GLOOM_FADE_RANGE = 6, GLOOM_FADE_TIME = 1.2;
+const GLOOM_FADE_RANGE = MOB_DATA.GLOOM_FADE.range, GLOOM_FADE_TIME = MOB_DATA.GLOOM_FADE.time;   // (data/mobs.json)
 const isLitTorch = id => isTorch(id) && (BLOCKS[id].burn === 0 || BLOCKS[id].burn === 3);
 // play a mob's growl from where it stands: fades out by ~28 blocks, and comes from the left or right speaker
 function mobGrowl(m) {
@@ -4745,7 +4621,7 @@ function nearestTorchGoal(m, range) {
 // ---- Health (survival only; see gameMode) ----
 // 5 hearts, and each heart is split in quarters, so health goes from 0 to 20.
 // The hearts are your pictures in textures/gui/heart_atlas.png: the white ones are normal health.
-const HEARTS = 5, MAX_HEALTH = HEARTS * 4;
+const HEARTS = NUMBERS.HEARTS, MAX_HEALTH = HEARTS * 4;   // (5 hearts)
 player.health = MAX_HEALTH;
 let hurtFlash = 0;
 // amount is in quarter hearts (a mob's damage: 3 = three quarters of a heart). from = what hit you (knocks you away from it)
@@ -4951,10 +4827,13 @@ function drawHearts() {
   layoutHearts();
 }
 // The HUD around the hotbar, at a whole-number size so the pixels stay sharp, everything 4 apart: the hotbar at the bottom
-// in the middle, the offhand box left of it and the tool row right of it; the hearts just above the hotbar's left end and
-// the armor bar, their mirror image, just above its right end (the hearts are where they always were); with no room beside
-// the hotbar, the tool row goes above its right end, one line up (over the armor bar); the notes (block name, "Your X
-// broke"...) above all of them. Exactly as the desktop version.
+// in the middle, the offhand box left of it; on one line just above the hotbar, the hearts at its left end, the armor bar
+// (their mirror image) at its right end, and the tool row in the middle between them (bottoms lined up):
+//      hearts   [tool row]   armor
+//   [R] [1][2][3][4][5][6][7][8][9][0]
+// A tool row too long for the space between them (4 clear each side) goes on a line of its own just above the hotbar, in
+// the middle, with the hearts and armor bar level just above it. The notes (block name, "Your X broke"...) above all of
+// them. Exactly as the desktop version.
 function layoutHearts() {
   if (!SURVIVAL) return;
   // (hearts sized as if there were 10, so each stays the same size whatever the atlas's resolution; a whole number of
@@ -4963,22 +4842,21 @@ function layoutHearts() {
   const r = { left: b.left / z, top: b.top / z, width: b.width / z };
   const old = Math.max(1, Math.floor(r.width / 2 / 99)) * 9;   // a heart's size on screen (css pixels), as with the first 9x9 hearts
   const s = Math.max(1, Math.round(old / HS * dpr)) / dpr;
-  const G = 4, right = r.left + r.width, line = innerHeight / z - r.top + G, rowH = HS * s;   // (bottoms: up from the screen's bottom)
-  Object.assign(heartsEl.style, { width: heartsEl.width * s + 'px', height: rowH + 'px', left: r.left + 'px', bottom: line + 'px' });
-  let top = line + rowH;   // how high the things above the hotbar reach
+  const G = 4, right = r.left + r.width, rowH = HS * s, iconsW = heartsEl.width * s;   // (the armor bar is as wide as the hearts)
+  const line = innerHeight / z - r.top + G;   // 4 above the hotbar (bottoms: up from the screen's bottom)
   const ob = document.getElementById('offhand-box');
   ob.style.left = r.left - G - ob.getBoundingClientRect().width / z + 'px';
   const tr = document.getElementById('tool-row'), tb = tr.getBoundingClientRect(), tw = tb.width / z, th = tb.height / z;
-  // the armor bar: the hearts' mirror image (as wide and as high up, its right end at the hotbar's right end)
-  if (armorShown) Object.assign(armorEl.style, { width: armorEl.width * s + 'px', height: rowH + 'px', left: right - armorEl.width * s + 'px', bottom: line + 'px' });
-  if (right + G + tw <= innerWidth / z - G) Object.assign(tr.style, { left: right + G + 'px', bottom: '12px' });   // (bottoms lined up)
-  else {
-    // (on the hearts' line only if neither the armor bar nor the hearts are in the way; otherwise one line up)
-    const up = armorShown || right - tw < r.left + heartsEl.width * s + G ? line + rowH + G : line;
-    Object.assign(tr.style, { left: right - tw + 'px', bottom: up + 'px' });
-    top = Math.max(top, up + th);
-  }
-  nameEl.style.bottom = top + G + 'px';
+  // the tool row in the space between the hearts and the armor bar (4 clear each side), in its middle; or, too long for it,
+  // on its own line in the middle of the hotbar, with the hearts and armor bar 4 above it. (Whole pixels from the
+  // hotbar's left edge, so the slots stay on its pixel grid.)
+  const gapL = r.left + iconsW + G, gap = right - iconsW - G - gapL, fits = tw <= gap;
+  const icons = fits ? line : line + th + G;   // the hearts' and armor bar's line
+  Object.assign(tr.style, { left: (fits ? gapL + Math.round((gap - tw) / 2) : r.left + Math.round((r.width - tw) / 2)) + 'px', bottom: line + 'px' });
+  Object.assign(heartsEl.style, { width: iconsW + 'px', height: rowH + 'px', left: r.left + 'px', bottom: icons + 'px' });
+  // the armor bar: the hearts' mirror image (as wide, as high up, its right end at the hotbar's right end)
+  if (armorShown) Object.assign(armorEl.style, { width: armorEl.width * s + 'px', height: rowH + 'px', left: right - armorEl.width * s + 'px', bottom: icons + 'px' });
+  nameEl.style.bottom = Math.max(icons + rowH, line + th) + G + 'px';   // (the notes: above all of them)
 }
 addEventListener('resize', () => setTimeout(layoutHearts));
 // ---- Survival: your armor bar, the hearts' mirror image: as many icons as hearts (textures/gui/armor_full, _three_quarter,
@@ -4987,8 +4865,10 @@ addEventListener('resize', () => setTimeout(layoutHearts));
 // top-left, bottom-left, bottom-right: the hearts' order, mirrored), so they're used as they are. It shows the protection
 // your armor gives right now (armorBlock: what the damage maths uses) against a full new set's 0.5: helmet 20% of the bar,
 // chestplate 40%, leggings 25%, boots 15%, less as they wear. Rounded to the nearest quarter icon: quarters =
-// floor(protection x 8 x HEARTS + 0.5), 0 to 20; icon k from the right holds clamp(quarters - 4k, 0, 4) quarters. Nothing
-// worn: all empty.
+// floor(protection x 8 x HEARTS + 0.5), 0 to 20; icon k from the right holds clamp(quarters - 4k, 0, 4) quarters.
+// It only shows while your armor gives at least 1 quarter: with nothing worn it's hidden (a worn piece always gives at
+// least half its share, so the bar goes when the last piece comes off or breaks). Its place
+// stays kept for it (layoutHearts lays out the tool row the same either way), so nothing moves when it comes or goes.
 // Survival only, once the pictures are there; the hearts and health are just as they were. Exactly as the desktop version.
 // (var: the hotbar can be drawn before this line)
 var armorEl = document.getElementById('armor-bar');
@@ -5001,12 +4881,13 @@ var armorPics = ['empty', 'quarter', 'half', 'three_quarter', 'full'].map(k => {
 var armorShown = false;
 function drawArmorBar() {
   if (!armorPics) return;   // (not set up yet)
-  const show = SURVIVAL && !!HS && armorPics.every(p => p && p.naturalWidth);
+  const ready = SURVIVAL && !!HS && armorPics.every(p => p && p.naturalWidth);
+  const quarters = ready ? Math.floor(armorBlock() * 8 * HEARTS + 0.5) : 0, show = quarters > 0;   // (no armor points: hidden)
   const w = HEARTS * HP - (HP - HS);   // (as wide as the hearts)
   if (show && (armorEl.width !== w || armorEl.height !== HS)) { armorEl.width = w; armorEl.height = HS; armorShown = false; }
   if (show !== armorShown) { armorShown = show; armorEl.style.display = show ? 'block' : 'none'; layoutHearts(); }
   if (!show) return;
-  const g = armorEl.getContext('2d'), quarters = Math.floor(armorBlock() * 8 * HEARTS + 0.5);
+  const g = armorEl.getContext('2d');
   g.imageSmoothingEnabled = false; g.clearRect(0, 0, w, HS);
   for (let k = 0; k < HEARTS; k++) {   // k: icons from the right-hand end
     const x = (HEARTS - 1 - k) * HP, pic = armorPics[Math.max(0, Math.min(4, quarters - 4 * k))];
@@ -5844,7 +5725,7 @@ function mobBlocked(m, x, y, z) {
 }
 // Deeper strata breed tougher monsters: a hostile (or deep-dwelling) mob is 10% stronger (health and the damage it does) for every
 // strata layer below the first one it spawns in, so at the bottom layer (8) it's 1.7x as strong. It keeps that strength wherever it goes.
-const MOB_LAYER_BOOST = 0.1;
+const MOB_LAYER_BOOST = MOB_DATA.LAYER_BOOST;   // (data/mobs.json)
 const strataLayerAt = y => WY === 640 ? Math.max(1, Math.min(STRATA_LAYERS, 1 + Math.floor((SEA_LEVEL - Math.floor(y)) / STRATA_THICK))) : 1;
 const layerBoost = m => 1 + MOB_LAYER_BOOST * ((m.layer || 1) - 1);
 const mobDamage = m => Math.round(MOB_TYPES[m.type].damage * layerBoost(m));
@@ -5926,9 +5807,8 @@ function mobDies(m) {
 // - Breeding stops at COW.perChunk cows in one 16x16 chunk (all the way up), counting calves, fat cows and the rest:
 //   no cow there mates and no calf is born. It only stops breeding: cows can still spawn or wander in past it.
 // - Leather: a cow that's had room to roam (few cows close by, for a while) gives more Leather.
-// The desktop game's src/Main.Cows.cs has the same rules (these numbers must match the ones there).
-const COW = { perChunk: 8, crowdedAt: 4, fatAt: 3, fedMax: 5, happyMax: 180, grazeHappy: 45, grainHappy: 90, grazeBelow: 60, grazeTime: 2,
-  mateCooldown: 300, mateCost: 60, calfTime: 600, calfGrainBoost: 60, nearRange: 6, calfHealth: 3, regrowMin: 120, regrowMax: 300 };
+// The desktop game's src/Main.Cows.cs has the same rules (and reads the same numbers, from data/mobs.json).
+const COW = MOB_DATA.COW;   // the cows' numbers (data/mobs.json): what each one means is in the file's notes
 const grazed = new Map();   // world index of eaten grass (now Dirt) -> seconds until it grows back
 // which model a cow wears: 0 = cow, 1 = calf (cowbaby), 2 = fat cow (cowfat)
 const cowVariant = m => m.baby > 0 ? 1 : m.fed >= COW.fatAt ? 2 : 0;
@@ -6851,7 +6731,7 @@ function useOne() {
 }
 // survival: what breaking a block gives you. Any of the 4 brick looks gives Bricks, a torch spot gives one torch,
 // water gives nothing.
-const dropFor = b => BLOCKS[b] && BLOCKS[b].drop ? BLOCKS[b].drop : isTorch(b) ? torchDrop(b) : BRICK_VARIANTS.includes(b) ? BRICK_VARIANTS[0] : ITEMS.includes(b) && !isWater(b) ? b : 0;
+const dropFor = b => BLOCKS[b] && BLOCKS[b].drop ? BLOCKS[b].drop : isTorch(b) ? torchDrop(b) : ITEMS.includes(b) && !isWater(b) ? b : 0;
 // ---- Stage breaking (survival): Stone, ores and logs take no breaking time, but several swings. Each swing breaks some
 // of the block's stages straight away; it stays where it is, cracked to show how far it's gone, until its last stage
 // breaks (and only that gives anything). Holding the button swings again and again. Other blocks break with one click.
@@ -6878,16 +6758,17 @@ const isLogBlock = b => LOGS.includes(b) || (b >= TURNED_LOGS && b < TURNED_LOGS
 const isNatural = (x, y, z) => !edits.has(idx(x, y, z));
 const STAGE_TERRACOTTA = new Set([65, ...COLOUR_TERRACOTTA]);   // (Terracotta: plain and every colour, as in the badlands)
 const isStageStone = b => b === 3 || (b >= STRATA && b < STRATA + STRATA_LAYERS - 1) || !!(BLOCKS[b] && BLOCKS[b].pick) || b === SANDSTONE || STAGE_TERRACOTTA.has(b);
+const LOG_STAGES = NUMBERS.LOG_STAGES, STONE_STAGES = NUMBERS.STONE_STAGES;   // (a log's stages, 8; Stone's for each layer down, 4)
 function stageTotal(b, x, y, z) {
   if (!STAGE_BREAKING || !SURVIVAL || !isNatural(x, y, z)) return 0;
-  if (isLogBlock(b)) return 8;
-  if (isStageStone(b)) return 4 * ((BLOCKS[b] && BLOCKS[b].layer) || 1);
+  if (isLogBlock(b)) return LOG_STAGES;
+  if (isStageStone(b)) return STONE_STAGES * ((BLOCKS[b] && BLOCKS[b].layer) || 1);
   return 0;
 }
-const PICK_STAGES = { stone: 1, copper: 2, iron: 4, bronite: 8, rosium: 16, steel: 32 };
+const PICK_STAGES = NUMBERS.PICK_STAGES, AXE_STAGES = NUMBERS.AXE_STAGES;   // (pickaxes 1-32; axes: by hand 1, crude 2, stone 4, the rest 8)
 function stagesPerSwing(b) {
   const t = BLOCKS[HOTBAR[act]];
-  if (isLogBlock(b)) return !t || t.tool !== 'axe' ? 1 : t.material === 'crude' ? 2 : t.material === 'stone' ? 4 : 8;
+  if (isLogBlock(b)) return !t || t.tool !== 'axe' ? AXE_STAGES.none : AXE_STAGES[t.material] || AXE_STAGES.none;
   return t && t.tool === 'pickaxe' ? PICK_STAGES[t.material] || 1 : 0;
 }
 var cracks = new Map(), crackMeshes = new Map();   // block index -> stages broken so far / its crack overlay (var: setBlock can run first)
@@ -7003,7 +6884,7 @@ function needAxe(b, natural = false) {   // (natural: a block the world grew, wh
   // placed deep stone (or deep ore): the pickaxe has to be good enough for this layer (natural: it just takes more swings)
   const layer = stoneLayer(b), held = BLOCKS[HOTBAR[act]];
   if (!natural && layer > 1 && holding('pickaxe') && layer > (STRATA_PICKAXE[held.material] || 0)) return tell(`You need a better pickaxe to mine ${BLOCKS[b].name} this deep`);
-  const kind = NEEDS_AXE.includes(b) ? 'axe' : NEEDS_PICKAXE.includes(b) ? 'pickaxe' : null;
+  const kind = (BLOCKS[b] && BLOCKS[b].needs) || null;
   if (!kind || holding(kind)) return false;
   nameEl.textContent = kind === 'axe' ? `You need an axe to cut ${BLOCKS[b].name}` : `You need a pickaxe to mine ${BLOCKS[b].name}`;
   nameEl.style.opacity = 1; nameTimer = 2;
@@ -7015,7 +6896,7 @@ function collectBlock(b, x, y, z) {
   const id = dropFor(b), hand = BLOCKS[b] && BLOCKS[b].handDrop;
   if (SURVIVAL && hand && !holding('shovel')) {   // (Fireclay by hand: a few Fireclay Balls)
     for (let n = hand[1] + Math.floor(Math.random() * (hand[2] - hand[1] + 1)); n > 0; n--) collect(hand[0], x, y, z);
-  } else if (SURVIVAL && DIGGABLE.includes(b) && !holding('shovel') && BLOCKS[PIECE_ITEM + id]) {
+  } else if (SURVIVAL && BLOCKS[b] && BLOCKS[b].shovel && !holding('shovel') && BLOCKS[PIECE_ITEM + id]) {
     for (let n = 1 + Math.floor(Math.random() * 8); n > 0; n--) collect(PIECE_ITEM + id, x, y, z);
   } else for (let n = STAGE_BREAKING && SURVIVAL && BLOCKS[b] && BLOCKS[b].pick && isNatural(x, y, z) ? BLOCKS[b].layer || 1 : 1; n > 0; n--) collect(id, x, y, z);   // (an ore: a Chunk for each layer down; 1 while stage breaking is held back)
 }
@@ -7644,7 +7525,7 @@ function actSlot(button) {
 }
 // ---- Armor: a full set takes half of all damage (helmet 10%, chestplate 20%, leggings 12.5%, boots 7.5%). A piece
 // protects less as it wears, but never less than half until it breaks. Each piece you wear loses 1 durability per hit.
-const ARMOR_SHARE = [0.10, 0.20, 0.125, 0.075];
+const ARMOR_SHARE = NUMBERS.ARMOR_SHARE;   // [0.1, 0.2, 0.125, 0.075]
 function armorBlock() {
   if (!SURVIVAL) return 0;
   let p = 0;
@@ -7722,8 +7603,7 @@ function giveItem(id, wear = 0, data = null) {
 // the most a tool can be used (0: not a tool that wears out)
 const maxWear = id => (isTool(id) && DURABILITY[BLOCKS[id].material]) || (BLOCKS[id] && BLOCKS[id].armor !== undefined && ARMOR_DURABILITY[BLOCKS[id].material]) || 0;
 // the tool each block is meant for (null: none in particular)
-const rightTool = b => NEEDS_AXE.includes(b) ? 'axe' : NEEDS_PICKAXE.includes(b) || (BLOCKS[b] && BLOCKS[b].pick) ? 'pickaxe'
-  : DIGGABLE.includes(b) ? 'shovel' : isLeaves(b) ? 'hoe' : null;
+const rightTool = b => { const d = BLOCKS[b]; return !d ? null : d.needs || (d.pick ? 'pickaxe' : d.shovel ? 'shovel' : d.leaves ? 'hoe' : null); };
 // breaking block b with what you're holding: 1, or 2 with the wrong tool
 const breakWear = b => { const k = rightTool(b); return !k || holding(k) ? 1 : 2; };
 // use up some of the selected tool (survival); it breaks when it's used up
@@ -7740,31 +7620,23 @@ function wearTool(cost) {
 // ===================== Inventory (E) =====================
 const invEl = document.getElementById('inventory'), invGrid = document.getElementById('inv-grid'), invName = document.getElementById('inv-name');
 const invIcons = [];   // the creative list's pictures: [canvas, id, drawn yet]
-// ---- The creative inventory: nine tabs, in this order; each block or item is in one of them (anything not listed goes in
+// ---- The creative inventory: its tabs, in order; each block or item is in one of them (anything not listed goes in
 // Building). Shapes has every form of every block that has them (piece, slab, stairs, quarter, then the vertical ones),
 // block by block. Survival's Sort sorts by this order too. The search box above them finds things (any part of the name, in
 // any case) from all the tabs at once. Exactly as the desktop version.
-const WOOD_SETS = [[4, 61, 7, 5], [FIR_LOG, STRIPPED_FIR_LOG, FIR_PLANKS, FIR_LEAVES], [PALM_LOG, STRIPPED_PALM_LOG, PALM_PLANKS, PALM_LEAVES],
-  [WILLOW_LOG, STRIPPED_WILLOW_LOG, WILLOW_PLANKS, WILLOW_LEAVES]];   // each wood's Log, Stripped Log, Planks and Leaves
-const FORM_ORDER = ['piece', 'slab', 'stairs', 'quarter', 'vslab', 'vstairs', 'vquarter'];
-const INV_TABS = [
-  ['Building', [8, ...deepShown(8), 9, ...deepShown(9), 69, ...deepShown(69), 64, ...COLOUR_BRICKS, 65, ...COLOUR_TERRACOTTA, 67, ...COLOUR_CHISELED, 10,
-    SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD_BRICKS, ...FIRECLAY_BLOCKS]],
-  ['Natural', [1, 2, TILLED, WET_TILLED, FERTILIZED, WET_FERTILIZED, 3, ...deepShown(3), ...ORES, ...deepOresShown(), 6, 97, 98, 58, MUD, PEAT, 99, 11, 63,
-    FIRECLAY, SNOW, SNOW_BLOCK, WATER, BEDROCK]],
-  ['Wood', WOOD_SETS.flat()],
-  ['Shapes', SPLITTABLE.filter(b => TALL_WORLDS || !DEEP_BLOCKS.includes(b)).flatMap(b => FORM_ORDER.map(f => formItem(f, b)))],
-  ['Light & Decoration', [TORCH, SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH, ...FLOWERS]],
-  ['Tools & Armor', [CRUDE_AXE, ...TOOLS, ...GEAR_ITEMS]],
-  ['Food', Object.keys(BLOCKS).map(Number).filter(id => BLOCKS[id] && BLOCKS[id].food)],
-  ['Materials', [STICK, ROCK, CLAY_BALL, BRICK, FIRECLAY_BALL, FIRECLAY_BRICK, ...Object.values(CHUNK), ...Object.values(METAL_BRICK), STEEL_SCRAP,
-    BONE, BONE_ASH, GLOOM_WISP, FIRE_ESSENCE, LEATHER, ...DYE, GRAIN, GRAIN_SEEDS, FLOUR, SNOWBALL]],
-  ['Machines', [CRAFTING_BENCH, CUTTER, FURNACE, FOUNDRY]],
-];
+// The tabs are in data/creative.json (by key; { tall: [...] }: only while tall worlds are on). INV_TABS: [[name, [id, ...]], ...]
+const CREATIVE = gameData('creative');
+const INV_TABS = CREATIVE.TABS.map(t => [t.name, t.forms
+  ? SPLITTABLE.filter(b => TALL_WORLDS || !DEEP_BLOCKS.includes(b)).flatMap(b => t.forms.map(f => {
+    if (f !== 'piece' && !SHAPE_ITEM[f]) throw new Error(`The game's data (data/creative.json) has a shape "${f}", which isn't one of the Cutter's`);
+    return formItem(f, b);
+  }))
+  : t.items.flatMap(x => typeof x === 'string' ? [idOf(x)] : TALL_WORLDS ? x.tall.map(idOf) : [])]);
+const SHAPES_TAB = Math.max(0, CREATIVE.TABS.findIndex(t => t.forms));   // (where a shape not in the lists goes)
 const TAB_OF = new Map();
 INV_TABS.forEach(([, ids], k) => ids.forEach(id => { if (!TAB_OF.has(id)) TAB_OF.set(id, k); }));
 for (const id of ITEMS) if (!TAB_OF.has(id)) { INV_TABS[0][1].push(id); TAB_OF.set(id, 0); }   // (a block left out of the lists: Building)
-const tabOf = id => TAB_OF.has(id) ? TAB_OF.get(id) : isPiece(id) || formOf(id) ? 3 : 0;
+const tabOf = id => TAB_OF.has(id) ? TAB_OF.get(id) : isPiece(id) || formOf(id) ? SHAPES_TAB : 0;
 // creative: every block and item, tab by tab (survival has no list: you only have what you collected)
 const INV_LIST = SURVIVAL ? [] : [...new Set(INV_TABS.flatMap(([, ids]) => ids))].filter(id => BLOCKS[id]);
 const INV_SET = new Set(INV_LIST);
@@ -7861,16 +7733,14 @@ SPLITTABLE.filter(id => TALL_WORLDS || !DEEP_BLOCKS.includes(id)).forEach(id => 
   itemHover(slot, () => id);
   document.getElementById('bench-grid').append(slot);
 });
-// what the bench cuts the block into: [name, item id offset, blocks used, how many you get]
-const BENCH_MODES = {
-  pieces: ['8 Pieces', PIECE_ITEM, 1, 8],
-  slab: ['2 Slabs', SHAPE_ITEM.slab, 1, 2],
-  vslab: ['2 Vertical Slabs', SHAPE_ITEM.vslab, 1, 2],
-  stairs: ['4 Stairs (from 3 blocks)', SHAPE_ITEM.stairs, 3, 4],
-  quarter: ['4 Quarters', SHAPE_ITEM.quarter, 1, 4],
-  vstairs: ['4 Vertical Stairs (from 3 blocks)', SHAPE_ITEM.vstairs, 3, 4],
-  vquarter: ['4 Vertical Quarters', SHAPE_ITEM.vquarter, 1, 4],
-};
+// what the bench cuts the block into: { shape: [name, item id offset, blocks used, how many you get] }, in the buttons'
+// order, from data/recipes.json (CUTTER)
+const RECIPE_DATA = gameData('recipes');
+const BENCH_MODES = Object.fromEntries(RECIPE_DATA.CUTTER.map(m => {
+  const item = m.mode === 'pieces' ? PIECE_ITEM : SHAPE_ITEM[m.mode];
+  if (!item) throw new Error(`The game's data (data/recipes.json) has a Cutter shape "${m.mode}", which the Cutter can't make`);
+  return [m.mode, [m.label, item, m.uses, m.makes]];
+}));
 let benchMode = 'pieces';
 for (const k in BENCH_MODES) {
   const b = document.createElement('button'); b.textContent = BENCH_MODES[k][0]; b.dataset.mode = k;
@@ -7958,26 +7828,12 @@ function openBench(cutter) {
 // Put fuel in its fuel slot, then pick what to smelt: each one takes SMELT_TIME seconds, and waits inside the
 // furnace (f.done) when it's done, until you open it and take it. Clicking a recipe more than once lines them up. The front glows while it burns.
 // In creative it needs no fuel or ingredients.
-const SMELT_TIME = 5;
-const SMELTS = [
-  { out: BRICK, from: CLAY_BALL },   // Clay Ball -> Brick (quicker than leaving it on the ground to dry)
-  { out: 65, from: 63 },             // Clay -> Terracotta
-  { out: 3, from: 8 },               // Cobblestone -> Stone
-  { out: BONE_ASH, from: BONE },     // Bone -> Bone Ash
-  { out: BREAD, from: FLOUR },       // Flour -> Bread
-  { out: COOKED_MEAT, from: RAW_MEAT }, // Raw Meat -> Cooked Meat
-  ...deepShown(8).map((c, k) => ({ out: STRATA + k, from: c })),   // a deep layer's Cobblestone -> that layer's Stone
-  { out: FIRECLAY_BRICK, from: FIRECLAY_BALL },        // Fireclay Ball -> Fireclay Brick
-  { out: FIRECLAY_TERRACOTTA, from: FIRECLAY },        // Fireclay -> Fireclay Terracotta
-  { out: SMOOTH_SANDSTONE, from: 97 },                 // Sandstone -> Smooth Sandstone
-  { out: MUD_BRICKS, from: MUD },                      // Mud -> Mud Bricks
-  // the Foundry: a Chunk -> its Brick; two metals' Bricks -> an alloy; an Iron Brick -> Steel Scrap, 4 Steel Scrap -> a Steel Brick
-  ...METALS.map(m => ({ out: METAL_BRICK[m], from: CHUNK[m], at: 'foundry' })),
-  { out: METAL_BRICK.bronite, needs: [[METAL_BRICK.copper, 1], [METAL_BRICK.tin, 1]], at: 'foundry' },
-  { out: METAL_BRICK.rosium, needs: [[METAL_BRICK.gold, 1], [METAL_BRICK.copper, 1]], at: 'foundry' },
-  { out: STEEL_SCRAP, from: METAL_BRICK.iron, at: 'foundry' },
-  { out: STEEL_BRICK, needs: [[STEEL_SCRAP, 4]], at: 'foundry' },
-];
+// The smelts and the fuel are in data/smelting.json (by key): SMELTS here is [{ out, from | needs, at }] by id, in the
+// Kiln's and Foundry's order (the deep layers' ones, tall, only while tall worlds are on); FUEL is { id: how many }.
+const SMELT_TIME = NUMBERS.SMELT_TIME;   // 5
+const SMELTING = gameData('smelting');
+const SMELTS = SMELTING.SMELTS.filter(r => !r.tall || TALL_WORLDS).map(r => ({ out: idOf(r.out),
+  ...(r.needs ? { needs: r.needs.map(([k, n]) => [idOf(k), n]) } : { from: idOf(r.from) }), ...(r.at ? { at: r.at } : {}) }));
 const smeltNeeds = r => r.needs || [[r.from, 1]];
 const stationOf = i => isFoundry(world.get(i)) ? 'foundry' : 'kiln';
 const stationName = i => isFoundry(world.get(i)) ? 'Foundry' : 'Kiln';
@@ -7993,8 +7849,7 @@ function foundryBuilt(i) {
   }
   return true;
 }
-const FUEL = { 4: 4, 61: 4, 7: 2, [STICK]: 1, [FIR_LOG]: 4, [STRIPPED_FIR_LOG]: 4, [FIR_PLANKS]: 2, [PALM_LOG]: 4, [STRIPPED_PALM_LOG]: 4, [PALM_PLANKS]: 2,
-  [WILLOW_LOG]: 4, [STRIPPED_WILLOW_LOG]: 4, [WILLOW_PLANKS]: 2, [PEAT]: 8 };   // how many things one of it smelts: Log / Stripped Log 4, Planks 2, Stick 1; Peat (from the swamp) 8
+const FUEL = Object.fromEntries(Object.entries(SMELTING.FUEL).filter(([k]) => !k.startsWith('_')).map(([k, n]) => [idOf(k), n]));   // how many things one of it smelts
 const furnaceEl = document.getElementById('furnace'), furnaceName = document.getElementById('furnace-name');
 const furnaceFuel = document.createElement('canvas'); furnaceFuel.width = furnaceFuel.height = TILE;
 document.getElementById('furnace-fuel').append(furnaceFuel);
@@ -8322,84 +8177,11 @@ function tickEverSparks(dt) {
 // ===================== Crafting (survival) =====================
 // A list of things you can make. Click one: it uses up the ingredients from your hotbar and gives you what it makes.
 // at: 'hand' = can be made anywhere (in the inventory, E), 'bench' = only at a Crafting Bench (which can make everything).
-// needs: [[block or item id, how many], ...]. axe: you also need an axe somewhere in your hotbar (it isn't used up).
-const RECIPES = [
-  { out: CRUDE_AXE, n: 1, needs: [[ROCK, 2], [STICK, 1]], at: 'hand' },       // 2 Rocks + a Stick -> Crude Axe
-  { out: 8, n: 1, needs: [[ROCK, 4]], at: 'hand' },                         // 4 Rocks -> Cobblestone
-  { out: 7, n: 4, needs: [[4, 1]], at: 'hand', axe: true },      // Log -> 4 Planks
-  { out: 7, n: 4, needs: [[61, 1]], at: 'hand', axe: true },     // Stripped Log -> 4 Planks
-  { out: STICK, n: 4, needs: [[7, 2]], at: 'bench', axe: true }, // 2 Planks -> 4 Sticks (sticks also sometimes drop from leaves)
-  { out: CRAFTING_BENCH, n: 1, needs: [[7, 4], [4, 1]], at: 'hand' },   // 4 Planks + a Log -> Crafting Bench
-  { out: CUTTER, n: 1, needs: [[7, 3], [METAL_BRICK.copper, 1]], at: 'bench' },   // 3 Planks + a Copper Brick (its blade) -> Cutter
-  // the same from Fir wood
-  { out: FIR_PLANKS, n: 4, needs: [[FIR_LOG, 1]], at: 'hand', axe: true },
-  { out: FIR_PLANKS, n: 4, needs: [[STRIPPED_FIR_LOG, 1]], at: 'hand', axe: true },
-  { out: STICK, n: 4, needs: [[FIR_PLANKS, 2]], at: 'bench', axe: true },
-  { out: CRAFTING_BENCH, n: 1, needs: [[FIR_PLANKS, 4], [FIR_LOG, 1]], at: 'hand' },
-  { out: CUTTER, n: 1, needs: [[FIR_PLANKS, 3], [METAL_BRICK.copper, 1]], at: 'bench' },
-  // ... and from Palm and Willow wood
-  { out: PALM_PLANKS, n: 4, needs: [[PALM_LOG, 1]], at: 'hand', axe: true },
-  { out: PALM_PLANKS, n: 4, needs: [[STRIPPED_PALM_LOG, 1]], at: 'hand', axe: true },
-  { out: STICK, n: 4, needs: [[PALM_PLANKS, 2]], at: 'bench', axe: true },
-  { out: CRAFTING_BENCH, n: 1, needs: [[PALM_PLANKS, 4], [PALM_LOG, 1]], at: 'hand' },
-  { out: CUTTER, n: 1, needs: [[PALM_PLANKS, 3], [METAL_BRICK.copper, 1]], at: 'bench' },
-  { out: WILLOW_PLANKS, n: 4, needs: [[WILLOW_LOG, 1]], at: 'hand', axe: true },
-  { out: WILLOW_PLANKS, n: 4, needs: [[STRIPPED_WILLOW_LOG, 1]], at: 'hand', axe: true },
-  { out: STICK, n: 4, needs: [[WILLOW_PLANKS, 2]], at: 'bench', axe: true },
-  { out: CRAFTING_BENCH, n: 1, needs: [[WILLOW_PLANKS, 4], [WILLOW_LOG, 1]], at: 'hand' },
-  { out: CUTTER, n: 1, needs: [[WILLOW_PLANKS, 3], [METAL_BRICK.copper, 1]], at: 'bench' },
-  { out: TORCH, n: 2, needs: [[STICK, 1], [TORCH, 1]], at: 'hand' },     // a Stick + a Torch -> 2 Torches (light the first one at a lit furnace)
-  { out: EVER_TORCH, n: 1, needs: [[TORCH, 1], [FIRE_ESSENCE, 1]], at: 'hand' },   // a Torch + Fire Essence -> an Ever Torch (never burns out)
-  { out: CLAY_BALL, n: 4, needs: [[63, 1]], at: 'hand' },                // Clay -> 4 Clay Balls
-  { out: CLAY_BALL, n: 1, needs: [[PIECE_ITEM + 63, 2]], at: 'hand' },   // 2 Clay Pieces -> a Clay Ball
-  { out: 63, n: 1, needs: [[CLAY_BALL, 4]], at: 'hand' },                // 4 Clay Balls packed back into Clay
-  { out: SNOW_BLOCK, n: 1, needs: [[SNOWBALL, 4]], at: 'hand' },           // 4 Snowballs packed into a Snow Block
-  { out: SNOW, n: 8, needs: [[SNOW_BLOCK, 1]], at: 'hand' },               // ... which makes 8 Snow (layers)
-  { out: 64, n: 1, needs: [[BRICK, 4]], at: 'bench' },                   // 4 Bricks -> Bricks (block)
-  { out: FURNACE, n: 1, needs: [[BRICK, 8]], at: 'bench' },              // 8 Bricks -> Furnace
-  // chiseled blocks: 1 block, carved with a pickaxe (not used up)
-  { out: 67, n: 1, needs: [[65, 1]], at: 'bench', tool: 'pickaxe' },     // Terracotta -> Chiseled Terracotta
-  { out: 68, n: 1, needs: [[66, 1]], at: 'bench', tool: 'pickaxe' },     // Red Terracotta -> Chiseled Red Terracotta
-  { out: 69, n: 1, needs: [[3, 1]], at: 'bench', tool: 'pickaxe' },      // Stone -> Chiseled Stone
-  { out: SANDSTONE_BRICKS, n: 1, needs: [[97, 1]], at: 'bench', tool: 'pickaxe' },     // Sandstone, cut into bricks
-  { out: CHISELED_SANDSTONE, n: 1, needs: [[97, 1]], at: 'bench', tool: 'pickaxe' },   // Sandstone, carved
-  // Fireclay, like Clay; and the Foundry's blocks
-  { out: FIRECLAY_BALL, n: 4, needs: [[FIRECLAY, 1]], at: 'hand' },                           // Fireclay -> 4 Fireclay Balls
-  { out: FIRECLAY, n: 1, needs: [[FIRECLAY_BALL, 4]], at: 'hand' },                           // 4 Fireclay Balls packed back into Fireclay
-  { out: FIRECLAY, n: 1, needs: [[63, 1], [6, 1], [11, 1]], at: 'bench' },                     // Clay + Sand + Gravel mixed into Fireclay
-  { out: FIRECLAY_BRICKS, n: 1, needs: [[FIRECLAY_BRICK, 4]], at: 'bench' },                   // 4 Fireclay Bricks -> Fireclay Bricks (block)
-  { out: FIRECLAY_CASING, n: 1, needs: [[FIRECLAY_BRICK, 4], [FIRECLAY_TERRACOTTA, 1]], at: 'bench' },   // the Foundry's walls
-  { out: CHISELED_FIRECLAY, n: 1, needs: [[FIRECLAY_TERRACOTTA, 1]], at: 'bench', tool: 'pickaxe' },   // carved
-  { out: FOUNDRY, n: 1, needs: [[FIRECLAY_BRICK, 8]], at: 'bench' },                          // 8 Fireclay Bricks -> the Foundry's Furnace
-];
-// Dyes and colours. colour: only listed while you carry at least one of its ingredients (there are a lot of them)
-for (const f of FLOWERS) RECIPES.push({ out: BLOCKS[f].dye, n: 1, needs: [[f, 1]], at: 'hand', colour: true });   // a Flower -> its Dye
-RECIPES.push({ out: dyeOf('black'), n: 1, needs: [[GLOOM_WISP, 1]], at: 'hand', colour: true });   // a Gloom Wisp -> Black Dye
-RECIPES.push({ out: dyeOf('white'), n: 1, needs: [[BONE_ASH, 1]], at: 'hand', colour: true });     // Bone Ash -> White Dye
-RECIPES.push({ out: FLOUR, n: 1, needs: [[GRAIN, 1]], at: 'hand' });                               // Grain, mashed by hand -> Flour
-// two dyes mixed -> 2 of the colour in between
-for (const [out, a, b] of [['orange', 'red', 'yellow'], ['green', 'yellow', 'aqua'], ['blue', 'aqua', 'indigo'], ['purple', 'indigo', 'magenta'], ['pink', 'red', 'white']])
-  RECIPES.push({ out: dyeOf(out), n: 2, needs: [[dyeOf(a), 1], [dyeOf(b), 1]], at: 'hand', colour: true });
-deepShown(3).forEach((b, k) => RECIPES.push({ out: DEEP_CHISELED + k, n: 1, needs: [[b, 1]], at: 'bench', tool: 'pickaxe', colour: true }));   // deep Stone -> its Chiseled Stone
-COLOURS.forEach((c, k) => {
-  RECIPES.push({ out: COLOUR_TERRACOTTA[k], n: 8, needs: [[65, 8], [DYE[k], 1]], at: 'bench', colour: true });   // 8 Terracotta + a Dye -> 8 coloured
-  if (k) RECIPES.push({ out: COLOUR_CHISELED[k], n: 1, needs: [[COLOUR_TERRACOTTA[k], 1]], at: 'bench', tool: 'pickaxe', colour: true });   // carved
-  RECIPES.push({ out: COLOUR_BRICKS[k], n: 1, needs: [[COLOUR_TERRACOTTA[k], 1]], at: 'bench', tool: 'pickaxe', colour: true });   // cut into bricks
-});
-// tools: made of Cobblestone (stone tools) or a metal's Bricks, with sticks for the handle
-const TOOL_RECIPE = { Pickaxe: [3, 2], Axe: [3, 2], Shovel: [1, 2], Sword: [2, 1], Hoe: [2, 2] };   // [material, sticks]
-for (const id of TOOLS) {
-  const t = BLOCKS[id], [m, s] = TOOL_RECIPE[t.name.split(' ').pop()];
-  RECIPES.push({ out: id, n: 1, needs: [[t.material === 'stone' ? 8 : METAL_BRICK[t.material], m], [STICK, s]], at: 'bench' });
-}
-// armor: helmet 3, chestplate 5, leggings 4, boots 3 of its material (Leather, or a metal's Bricks);
-// a backpack is 4 Leather + 1 Brick (5 Leather for a leather one), a belt 2 Leather + 1 Brick (3 Leather)
-GEAR_TIERS.forEach((m, t) => {
-  const mat = m === 'leather' ? LEATHER : METAL_BRICK[m];
-  [3, 5, 4, 3].forEach((n, k) => RECIPES.push({ out: ARMOR_ITEM(t, k), n: 1, needs: [[mat, n]], at: 'bench' }));
-  RECIPES.push({ out: BACKPACKS[t], n: 1, needs: m === 'leather' ? [[LEATHER, 5]] : [[LEATHER, 4], [mat, 1]], at: 'bench' });
-  RECIPES.push({ out: BELTS[t], n: 1, needs: m === 'leather' ? [[LEATHER, 3]] : [[LEATHER, 2], [mat, 1]], at: 'bench' });
-});
+// needs: [[block or item id, how many], ...]. axe: you also need an axe somewhere in your hotbar; tool: that tool (neither is used up).
+// The recipes are in data/recipes.json (by key, in the lists' order; the deep layers' ones, tall, only while tall worlds are on).
+// colour: only listed while you carry at least one of its ingredients (there are a lot of them).
+const RECIPES = RECIPE_DATA.RECIPES.filter(r => !r.tall || TALL_WORLDS).map(r => ({ out: idOf(r.out), n: r.n, needs: r.needs.map(([k, n]) => [idOf(k), n]),
+  at: r.at, ...(r.axe ? { axe: true } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.colour ? { colour: true } : {}) }));
 const countOf = id => HOTBAR.reduce((a, h, i) => a + (h === id ? HOTBAR_COUNT[i] : 0), 0);
 const canCraft = r => r.needs.every(([id, k]) => countOf(id) >= k) && (!r.axe || HOTBAR.some(isAxe)) &&
   (!r.tool || HOTBAR.some(id => BLOCKS[id] && BLOCKS[id].tool === r.tool));
@@ -8635,7 +8417,7 @@ function stairGround(c) {
   let y = Math.min(WY - 1, heights[c] + 8);
   while (y > 0) {
     const b = getBlock(x, y, z);
-    if (b === 0 || isLeaves(b) || NEEDS_AXE.includes(b) || (BLOCKS[b] && (BLOCKS[b].shape === 'plant' || BLOCKS[b].shape === 'flat'))) y--; else break;
+    if (b === 0 || isLeaves(b) || (BLOCKS[b] && (BLOCKS[b].needs === 'axe' || BLOCKS[b].shape === 'plant' || BLOCKS[b].shape === 'flat'))) y--; else break;
   }
   return y;
 }
@@ -9774,6 +9556,311 @@ function frame(now) {
   else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
+
+// ===================== ?datacheck (testing the shared data files) =====================
+// Each table from data/*.json (window.GAME_DATA, in textures.js) compared field by field with what this code uses: every difference is printed
+// (none, to pass) and kept in window.DATACHECK. Fields starting with _ are notes. Like the desktop version's --datacheck.
+if (/[?&]datacheck\b/.test(location.search)) {
+  const D = window.GAME_DATA || {}, out = {};
+  const diff = (code, data, path, d) => {
+    if (code !== null && data !== null && typeof code === 'object' && typeof data === 'object') {
+      if (Array.isArray(code) !== Array.isArray(data)) { d.push(`${path}: ${JSON.stringify(code)} in the code, ${JSON.stringify(data)} in the data`); return; }
+      const keys = new Set([...Object.keys(code), ...Object.keys(data)].filter(k => !k.startsWith('_')));
+      for (const k of keys) diff(code[k], data[k], `${path}.${k}`, d);
+    } else if (code !== data) d.push(`${path}: ${JSON.stringify(code)} in the code, ${JSON.stringify(data)} in the data`);
+  };
+  // a field the code doesn't read (a typo, say) would be ignored without a word, so it's a difference too
+  const blockKeyKnown = k => { try { idOf(k); return true; } catch (e) { return false; } };
+  const fieldsKnown = (rows, known, path, d) => rows.forEach((r, k) => { for (const f of Object.keys(r)) if (!f.startsWith('_') && !known.includes(f)) d.push(`${path}.${k}: "${f}" isn't something the game reads`); });
+  const table = (name, code) => { const d = []; if (!D[name]) d.push(`${name}: not in textures.js`); else diff(code, D[name], name, d); out[name] = d; };
+  // keys: every id has a key of its own (see blockKey)
+  out.keys = keyTable().clash;
+  // numbers: what the code does now (the stage numbers from stagesPerSwing and stageTotal, the belts' tool slots from the belts)
+  const keep = HOTBAR[act], axeStages = {};
+  for (const m of ['none', 'crude', 'stone', 'copper', 'iron', 'bronite', 'rosium', 'steel']) {
+    HOTBAR[act] = m === 'none' ? 0 : +Object.keys(BLOCKS).find(k => BLOCKS[k] && BLOCKS[k].tool === 'axe' && BLOCKS[k].material === m);
+    axeStages[m] = stagesPerSwing(4);
+  }
+  HOTBAR[act] = keep;
+  table('numbers', { STACK_MAX, SMELT_TIME, BURN_TIMES, FARM, DURABILITY, ARMOR_DURABILITY, ARMOR_SHARE, PICK_TIER, STRATA_PICKAXE, PICK_STAGES,
+    AXE_STAGES: axeStages, LOG_STAGES, STONE_STAGES, HEARTS });
+  // smelting: the fuel and the smelts by key, in the Kiln's and Foundry's order (the deep layers' smelts, tall: true, are
+  // in SMELTS only while tall worlds are on, so they're also checked on their own against the strata)
+  const S = D.smelting, key = id => blockKey(id) || `(no block ${id})`, sd = [];
+  const smeltKeys = r => ({ out: key(r.out), ...(r.needs ? { needs: r.needs.map(([id, n]) => [key(id), n]) } : { from: key(r.from) }), ...(r.at ? { at: r.at } : {}) });
+  const untall = rs => rs.map(({ tall, ...r }) => r);
+  if (!S) sd.push('smelting: not in textures.js');
+  else {
+    diff(Object.fromEntries(Object.entries(FUEL).map(([id, n]) => [key(+id), n])), S.FUEL, 'smelting.FUEL', sd);
+    diff(SMELTS.map(smeltKeys), untall(S.SMELTS.filter(r => !r.tall || TALL_WORLDS)), 'smelting.SMELTS', sd);
+    diff(deepRow(8).map((c, k) => smeltKeys({ out: STRATA + k, from: c })), untall(S.SMELTS.filter(r => r.tall)), 'smelting.SMELTS (tall)', sd);
+    fieldsKnown(S.SMELTS, ['out', 'from', 'needs', 'at', 'tall'], 'smelting.SMELTS', sd);
+  }
+  out.smelting = sd;
+  // recipes: crafting by key, in the lists' order (the deep layers' Chiseled Stone, tall, checked on its own like the
+  // smelts), and the Cutter's shapes (pieces always make 8: the Cutter's code gives a block's 8 spots)
+  const C = D.recipes, rd = [];
+  const recipeKeys = r => ({ out: key(r.out), n: r.n, needs: r.needs.map(([id, n]) => [key(id), n]), at: r.at,
+    ...(r.axe ? { axe: true } : {}), ...(r.tool ? { tool: r.tool } : {}), ...(r.colour ? { colour: true } : {}) });
+  if (!C) rd.push('recipes: not in textures.js');
+  else {
+    diff(RECIPES.map(recipeKeys), untall(C.RECIPES.filter(r => !r.tall || TALL_WORLDS)), 'recipes.RECIPES', rd);
+    diff(deepRow(3).map((b, k) => recipeKeys({ out: DEEP_CHISELED + k, n: 1, needs: [[b, 1]], at: 'bench', tool: 'pickaxe', colour: true })),
+      untall(C.RECIPES.filter(r => r.tall)), 'recipes.RECIPES (tall)', rd);
+    fieldsKnown(C.RECIPES, ['out', 'n', 'needs', 'at', 'axe', 'tool', 'colour', 'tall'], 'recipes.RECIPES', rd);
+    diff(Object.entries(BENCH_MODES).map(([mode, [label, , uses, makes]]) => ({ mode, label, uses, makes })), C.CUTTER, 'recipes.CUTTER', rd);
+    fieldsKnown(C.CUTTER, ['mode', 'label', 'uses', 'makes'], 'recipes.CUTTER', rd);
+    for (const [mode, [, item]] of Object.entries(BENCH_MODES)) if (item !== (mode === 'pieces' ? PIECE_ITEM : SHAPE_ITEM[mode])) rd.push(`recipes.CUTTER ${mode}: not a shape the Cutter can make`);
+    if (BENCH_MODES.pieces && BENCH_MODES.pieces[3] !== 8) rd.push(`recipes.CUTTER pieces: makes ${BENCH_MODES.pieces[3]}, but a block is always 8 pieces`);
+  }
+  out.recipes = rd;
+  // creative: the tabs by key, in order, the Shapes tab from its forms. The tall groups (only while tall worlds are on) are
+  // checked on their own: every deep layer's block and ore once, and nothing else. Each thing in one tab only, and every
+  // block you can pick in a tab (one left out would quietly go in Building).
+  const V = D.creative, cd = [];
+  const expand = (t, tall) => t.forms ? SPLITTABLE.filter(b => tall || !DEEP_BLOCKS.includes(b)).flatMap(b => t.forms.map(f => key(formItem(f, b))))
+    : (t.items || []).flatMap(x => typeof x === 'string' ? [x] : tall && x && Array.isArray(x.tall) ? x.tall : []);
+  if (!V) cd.push('creative: not in textures.js');
+  else {
+    diff(INV_TABS.map(([name, ids]) => ({ name, items: ids.map(key) })), V.TABS.map(t => ({ name: t.name, items: expand(t, TALL_WORLDS) })), 'creative.TABS', cd);
+    fieldsKnown(V.TABS, ['name', 'items', 'forms'], 'creative.TABS', cd);
+    V.TABS.forEach((t, k) => (t.items || []).forEach((x, j) => {
+      if (typeof x !== 'string' && !(x && Object.keys(x).join() === 'tall' && Array.isArray(x.tall))) cd.push(`creative.TABS.${k}.items.${j}: should be a key, or { "tall": [keys] }`);
+    }));
+    const deep = [...DEEP_BLOCKS, ...DEEP_ORES].map(key), tallKeys = V.TABS.flatMap(t => (t.items || []).flatMap(x => x && Array.isArray(x.tall) ? x.tall : []));
+    for (const k of deep) { const n = tallKeys.filter(t => t === k).length; if (n !== 1) cd.push(`creative.TABS: ${k} is in the tall lists ${n} times (should be once)`); }
+    for (const k of tallKeys) if (!deep.includes(k)) cd.push(`creative.TABS: ${k} is in a tall list, but isn't a deep layer's block`);
+    for (const t of V.TABS) for (const x of t.items || []) if (typeof x === 'string' && deep.includes(x)) cd.push(`creative.TABS ${t.name}: ${x} is a deep layer's block, so it goes in a tall list`);
+    const all = V.TABS.flatMap(t => expand(t, true)), once = new Set();
+    for (const k of all) { if (once.has(k) && !k.startsWith('(no block')) cd.push(`creative.TABS: ${k} is in more than one place (only the first counts)`); once.add(k); }
+    for (const id of ITEMS) if (!once.has(key(id))) cd.push(`creative.TABS: ${key(id)} isn't in any tab (so it goes in Building, at the end)`);
+    for (const id of Object.keys(BLOCKS).map(Number)) if (BLOCKS[id] && BLOCKS[id].item && !isPiece(id) && !formOf(id) && !once.has(key(id)) && (TALL_WORLDS || !deep.includes(key(id))))
+      cd.push(`creative.TABS: ${key(id)} isn't in any tab (so creative doesn't have it)`);
+  }
+  out.creative = cd;
+  // mobs: the mob table (in spawning order; whichever of zombie / grrangry ZOMBIE_READY leaves out isn't in it), drops by key,
+  // and the layer boost, the Gloomling's fading and the cows' numbers
+  const M = D.mobs, md = [];
+  if (!M) md.push('mobs: not in textures.js');
+  else {
+    const mobKeys = t => Object.fromEntries(Object.entries(t).map(([f, v]) => [f, f === 'drops' ? v.map(([id, ...r]) => [key(id), ...r]) : v]));
+    const inPlay = M.MOBS.filter(m => m.type !== (ZOMBIE_READY ? 'grrangry' : 'zombie')), byType = Object.fromEntries(inPlay.map(({ type, ...m }) => [type, m]));
+    diff(Object.keys(MOB_TYPES), inPlay.map(m => m.type), 'mobs.MOBS (spawning order)', md);
+    for (const type of new Set([...Object.keys(MOB_TYPES), ...Object.keys(byType)])) diff(MOB_TYPES[type] && mobKeys(MOB_TYPES[type]), byType[type], `mobs.MOBS ${type}`, md);
+    fieldsKnown(M.MOBS, ['type', 'name', 'health', 'speed', 'max', 'drops', 'growl', 'hostile', 'dark', 'night', 'deep', 'burns', 'shamble', 'damage', 'sight', 'reach',
+      'glow', 'curious', 'hearing', 'lightRange', 'thrower', 'near', 'far', 'snuffer', 'faint', 'scale', 'cow'], 'mobs.MOBS', md);
+    M.MOBS.forEach((m, k) => (m.drops || []).forEach(([t], j) => { if (!blockKeyKnown(t)) md.push(`mobs.MOBS.${k}.drops.${j}: "${t}" isn't a block or item`); }));
+    for (const t of ['zombie', 'grrangry']) if (!M.MOBS.some(m => m.type === t)) md.push(`mobs.MOBS: no ${t} (ZOMBIE_READY picks one of the two)`);
+    diff({ LAYER_BOOST: MOB_LAYER_BOOST, GLOOM_FADE: { range: GLOOM_FADE_RANGE, time: GLOOM_FADE_TIME }, COW },
+      { LAYER_BOOST: M.LAYER_BOOST, GLOOM_FADE: M.GLOOM_FADE, COW: M.COW }, 'mobs', md);
+  }
+  out.mobs = md;
+  // texture-names: the files' other spellings and the pictures' borrowings (both must be pictures the game uses; a borrowing
+  // that goes round in a circle would never end), and the font letters' names (each one character; every named letter file
+  // has one, or it would be left out)
+  const X = D['texture-names'], xd = [];
+  if (!X) xd.push('texture-names: not in textures.js');
+  else {
+    diff({ TEXTURE_SPELLINGS, TEXTURE_BORROWS, FONT_NAMES }, { TEXTURE_SPELLINGS: X.TEXTURE_SPELLINGS, TEXTURE_BORROWS: X.TEXTURE_BORROWS, FONT_NAMES: X.FONT_NAMES }, 'texture-names', xd);
+    const tiles = new Set(TILE_NAMES), sp = X.TEXTURE_SPELLINGS || {}, bo = X.TEXTURE_BORROWS || {}, fn = X.FONT_NAMES || {};
+    for (const [f, n] of Object.entries(sp)) if (!f.startsWith('_') && !tiles.has(n)) xd.push(`texture-names.TEXTURE_SPELLINGS.${f}: "${n}" isn't a picture the game uses`);
+    for (const [n, b] of Object.entries(bo)) {
+      if (n.startsWith('_')) continue;
+      if (!tiles.has(n)) xd.push(`texture-names.TEXTURE_BORROWS.${n}: isn't a picture the game uses`);
+      const seen = [n];
+      for (let m = b; m in bo; m = bo[m]) { if (seen.includes(m)) { xd.push(`texture-names.TEXTURE_BORROWS.${n}: goes round in a circle (${[...seen, m].join(' -> ')})`); break; } seen.push(m); }
+    }
+    for (const [k, c] of Object.entries(fn)) {
+      if (k.startsWith('_')) continue;
+      if (typeof c !== 'string' || [...c].length !== 1) xd.push(`texture-names.FONT_NAMES.${k}: should be one character, not ${JSON.stringify(c)}`);
+      if ([...k].length === 1) xd.push(`texture-names.FONT_NAMES.${k}: a one-character file name is already that character`);
+    }
+    for (const f of Object.keys(window.TEXTURES || {})) if (/^font\//.test(f)) { const nm = f.split('/').pop(); if ([...nm].length > 1 && !(nm in fn)) xd.push(`texture-names.FONT_NAMES: no "${nm}", so the letter ${f}.png isn't used`); }
+  }
+  out['texture-names'] = xd;
+  // blocks: each row against the block the game has (its pictures by name, the blocks it names by key). Ids are whole numbers
+  // 1-4095 (pieces keep a block in 12 bits), each used once; pictures is one name or 3 (side, top, bottom) or 4 (and front).
+  const BL = D.blocks, bd = [];
+  const BLOCK_FIELDS = ['id', 'name', 'pictures', 'icon', 'transparent', 'noCollide', 'liquid', 'shape', 'box', 'drop', 'places', 'handDrop', 'item', 'food',
+    'tool', 'material', 'damage', 'pick', 'layer', 'level', 'front', 'facing', 'lit', 'wall', 'wi', 'count', 'burn', 'axis', 'layers', 'soil', 'wet', 'fert',
+    'stage', 'dye', 'armor', 'pack', 'belt', 'tools', 'piece', 'form', 'of', 'snowed', 'inner', 'needs', 'shovel', 'leaves', 'sound', 'inventory', 'look'];
+  const blockAsData = id => {
+    const b = BLOCKS[id]; if (!b) return undefined;
+    return Object.fromEntries(Object.entries(b).map(([f, v]) => f === 't' ? ['pictures', v.map(t => TILE_NAMES[t])] : f === 'icon' ? [f, TILE_NAMES[v]]
+      : ['drop', 'places', 'piece', 'of', 'inner', 'dye'].includes(f) ? [f, key(v)] : f === 'handDrop' ? [f, [key(v[0]), v[1], v[2]]] : [f, v]));
+  };
+  const rowAsData = ({ id, pictures, ...r }) => ({ ...r, pictures: typeof pictures === 'string' ? [pictures, pictures, pictures] : pictures });
+  // (in the order the game loads them, which is the file's order: a row can only name blocks loaded before it or with it)
+  // (FORMS' rows each make 7 items: they're checked as those items, see formRows)
+  const BLOCK_TABLES = ['BASE', 'KILN', 'TORCHES', 'WATER', 'LYING_LOGS', 'SNOW', 'TOOLS', 'DEEP_STONE', 'SOILS', 'GRAIN', 'COLOURS', 'METALS', 'DEEP_ORES', 'FOUNDRY',
+    'GEAR', 'FLOWERS', 'SNOWY', 'FORMS'];
+  if (!BL) bd.push('blocks: not in textures.js');
+  else {
+    const made = { SNOWY: () => snowyRows(BL.SNOWY || []), FORMS: () => formRows(BL.FORMS || []) };
+    const madeRows = {};
+    const rowsOf = table => {
+      if (!made[table]) return BL[table] || [];
+      if (!madeRows[table]) try { madeRows[table] = made[table](); } catch (e) { bd.push(`blocks.${table}: ${e.message}`); madeRows[table] = []; }
+      return madeRows[table];
+    };
+    const inFile = Object.keys(BL).filter(t => !t.startsWith('_') && BLOCK_TABLES.includes(t));
+    if (inFile.join() !== BLOCK_TABLES.filter(t => inFile.includes(t)).join()) bd.push(`blocks: the tables should be in the order the game loads them (${BLOCK_TABLES.join(', ')}), not ${inFile.join(', ')}`);
+    const seen = new Set(), rowOf = new Map();
+    for (const table of BLOCK_TABLES) rowsOf(table).forEach((r, k) => {
+      const at = `blocks.${table}.${k} (id ${r.id})`;
+      if (!Number.isInteger(r.id) || r.id < 1 || r.id >= PIECE_GROUP) bd.push(`${at}: an id is a whole number from 1 to ${PIECE_GROUP - 1}`);
+      if (seen.has(r.id)) bd.push(`${at}: id ${r.id} is used more than once`);
+      seen.add(r.id);
+      rowOf.set(r.id, r);
+      const p = r.pictures;
+      if (!(typeof p === 'string' || (Array.isArray(p) && (p.length === 3 || p.length === 4) && p.every(n => typeof n === 'string')))) bd.push(`${at}: pictures is one name, or 3 or 4 names`);
+      diff(blockAsData(r.id), rowAsData(r), `blocks.${table} ${r.id}`, bd);
+      if (typeof r.name === 'string' && rowKey(r) !== key(r.id)) bd.push(`${at}: its key is "${rowKey(r)}", but the game's block ${r.id} is "${key(r.id)}"`);
+    });
+    for (const table of BLOCK_TABLES) fieldsKnown(BL[table] || [], table === 'FORMS' ? ['of', ...FORMS] : table === 'SNOWY' ? ['id', 'inner', 'drop', 'box'] : BLOCK_FIELDS, `blocks.${table}`, bd);
+    // what blocks are: needs is the tool you must hold (axe or pickaxe); shovel, leaves and inventory are true when they're there;
+    // sound is one the game has; a look is another look (1 up, each once) of the block it drops, which has no look of its own
+    const looked = new Set();
+    for (const table of BLOCK_TABLES) for (const r of rowsOf(table)) {
+      const at = `blocks ${r.id}`;
+      if (r.needs !== undefined && r.needs !== 'axe' && r.needs !== 'pickaxe') bd.push(`${at}: needs is axe or pickaxe, not ${JSON.stringify(r.needs)}`);
+      for (const f of ['shovel', 'leaves', 'inventory']) if (r[f] !== undefined && r[f] !== true) bd.push(`${at}: ${f} is true or left out, not ${JSON.stringify(r[f])}`);
+      if (r.sound !== undefined && !Sound.hasSound(r.sound)) bd.push(`${at}: the game has no sound ${JSON.stringify(r.sound)}`);
+      if (r.look !== undefined) {
+        const of = blockKeyKnown(r.drop) ? rowOf.get(idOf(r.drop)) : null;
+        if (!Number.isInteger(r.look) || r.look < 1 || !of || of.look !== undefined) bd.push(`${at}: a look (1 up) is another look of the block it drops, which has no look of its own`);
+        if (looked.has(r.drop + '#' + r.look)) bd.push(`${at}: ${r.drop} has look ${r.look} more than once`);
+        looked.add(r.drop + '#' + r.look);
+      }
+    }
+    // every block the game has comes from the file (one made in the code would be the editions' own)
+    for (const id of Object.keys(BLOCKS).map(Number)) if (BLOCKS[id] && !blockRows.has(id)) bd.push(`blocks: ${id} (${key(id)}) isn't in data/blocks.json`);
+    // snow-logged: the ids saved worlds have (from SNOW_LOGGED_1: the torches and flowers in id order; then pieces, the Cutter
+    // and the Rock, Clay Ball and Brick put down), each holding its block once; breaking one gives what it holds (a torch
+    // and pieces have their own ways), and it's at least as high as the snow
+    const snowyWant = [...SNOW_LOGGABLE.map((inner, k) => [inner, SNOW_LOGGED_1 + k]), [PIECES, PIECES_IN_SNOW], [CUTTER, 389], [62, 390], [71, 391], [72, 392]];
+    const snowyHas = (BL.SNOWY || []).map(r => [r.inner, r.id]);
+    if (snowyHas.map(([k, id]) => k + ' ' + id).sort().join() !== snowyWant.map(([b, id]) => key(b) + ' ' + id).sort().join())
+      bd.push(`blocks.SNOWY: should be exactly ${snowyWant.map(([b, id]) => `${id} ${key(b)}`).join(', ')}`);
+    const innerSeen = new Set();
+    for (const [k, id] of snowyHas) { if (innerSeen.has(k)) bd.push(`blocks.SNOWY: ${k} is held by more than one block (${id})`); innerSeen.add(k); }
+    for (const r of rowsOf('SNOWY')) {
+      const inner = blockKeyKnown(r.inner) ? idOf(r.inner) : 0;
+      if (r.drop === undefined && inner && !isTorch(inner) && inner !== PIECES) bd.push(`blocks ${r.id}: breaking it should give something (what it holds, ${r.inner})`);
+      if (r.box && !(r.box[4] >= 1 / 8)) bd.push(`blocks ${r.id}: its box should be at least as high as the snow (1/8)`);
+    }
+    // the forms: FORM_NAMES' forms are the code's (FORMS, in order), and each item is where formItem has it (FORMS is SPLITTABLE)
+    const FN = BL.FORM_NAMES || {};
+    if (Object.keys(FN).filter(f => !f.startsWith('_')).join() !== FORMS.join()) bd.push(`blocks.FORM_NAMES: should name the forms ${FORMS.join(', ')}, in that order`);
+    for (const f of FORMS) if (typeof FN[f] !== 'string' || !FN[f]) bd.push(`blocks.FORM_NAMES.${f}: should be a name`);
+    (BL.FORMS || []).forEach((r, k) => { const b = blockKeyKnown(r.of) && idOf(r.of); if (b) for (const f of FORMS) if (r[f] !== formItem(f, b)) bd.push(`blocks.FORMS.${k} (${r.of}): ${f} should be ${formItem(f, b)} (see formItem), not ${r[f]}`); });
+    // the families: the code still finds their blocks by number (WATER + level, soilId, GRAIN_STAGES, the colours' lists...),
+    // so each table must be just those blocks, each the one the code expects there
+    const span = (a, n) => Array.from({ length: n }, (_, k) => a + k), sorted = ids => [...ids].sort((a, c) => a - c).join(', ');
+    const FAMILIES = { KILN: span(FURNACE, 8), WATER: span(WATER, 8), LYING_LOGS: span(TURNED_LOGS, 2 * LOGS.length), SNOW: span(SNOW, SNOW_BLOCK - SNOW),
+      DEEP_STONE: DEEP_BLOCKS, SOILS: span(TILLED, 4), GRAIN: GRAIN_STAGES, COLOURS: [...DYE, ...NEW_COLOUR_BLOCKS], METALS: [...ORES, ...METALS.flatMap(m => [CHUNK[m], METAL_BRICK[m]])],
+      DEEP_ORES, FOUNDRY: span(FOUNDRY, 8), GEAR: GEAR_ITEMS, FLOWERS };
+    for (const [table, ids] of Object.entries(FAMILIES)) {
+      const has = sorted((BL[table] || []).map(r => r.id));
+      if (has !== sorted(ids)) bd.push(`blocks.${table}: should be blocks ${sorted(ids)} (the code finds them by number), not ${has}`);
+    }
+    const pics = r => r && (typeof r.pictures === 'string' ? [r.pictures, r.pictures, r.pictures] : r.pictures);
+    const want = (id, fields, why) => {
+      const r = rowOf.get(id);
+      for (const [f, v] of Object.entries(fields)) {
+        const has = f === 'pictures' ? pics(r) : r && r[f];
+        if (JSON.stringify(has) !== JSON.stringify(v)) bd.push(`blocks ${id}: ${f} should be ${JSON.stringify(v)}, not ${JSON.stringify(has)} (${why})`);
+      }
+    };
+    for (const [base, name] of [[FURNACE, 'the Kiln'], [FOUNDRY, 'the Foundry']]) for (let k = 0; k < 8; k++)
+      want(base + k, { facing: k % 4, front: FURNACE_FRONTS[k % 4], lit: k >= 4 || undefined, drop: key(base) }, `${name}: ${base} + facing, + 4 when lit; breaking it gives ${base}`);
+    for (let l = 0; l <= 7; l++) want(WATER + l, { level: l, liquid: true }, `water: ${WATER} + level`);
+    LOGS.forEach(log => { for (let axis = 1; axis <= 2; axis++) want(turned(log, axis), { name: rowOf.get(log) && rowOf.get(log).name, pictures: pics(rowOf.get(log)), axis, drop: key(log) }, `a lying ${key(log)}: see turned`); });
+    for (let n = 1; n < SNOW_BLOCK - SNOW + 1; n++) want(SNOW + n - 1, { shape: 'snow', layers: n }, `snow: ${SNOW} + layers - 1`);
+    const nameOf = id => rowOf.get(id) && rowOf.get(id).name;
+    for (const b of Object.keys(DEEP_SET).map(Number)) deepRow(b).forEach((id, k) => want(id, { name: nameOf(b), layer: k + 2, drop: b === 3 ? key(DEEP_COBBLE + k) : undefined },
+      `the deep layers: ${key(b)} in layer ${k + 2} is ${DEEP_SET[b]} + ${k}${b === 3 ? ', and gives that layer\'s Cobblestone' : ''}`));
+    ORES.forEach((ore, k) => { for (let n = 2; n <= STRATA_LAYERS; n++) want(oreIn(ore, n), { name: nameOf(ore), layer: n, pick: rowOf.get(ore) && rowOf.get(ore).pick, drop: key(CHUNK[METALS[k]]) },
+      `a deep ore: ${key(ore)} in layer ${n} is ${DEEP_ORE} + 7 x ${k} + ${n - 2}, mined and dropping like the ore`); });
+    // torches: the code finds them by (burn, wall, count) (see torchVariant), and carries the standing one of each burn
+    // (TORCH, SMOLDERING_TORCH...): every (burn, wall, count) there can be has one torch (lit ones up to 4 on a wall too,
+    // from before a wall held 2), with that burn's name and pictures
+    const carried = [TORCH, SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH], torchAt = new Map();
+    for (const r of BL.TORCHES || []) {
+      const c = `${r.burn}:${r.wi}:${r.count}`;
+      if (torchAt.has(c)) bd.push(`blocks.TORCHES: burn ${r.burn}, wall ${r.wi}, count ${r.count} is both ${torchAt.get(c)} and ${r.id}`);
+      torchAt.set(c, r.id);
+    }
+    carried.forEach((id, burn) => want(id, { burn, wi: 0, count: 1 }, 'the torches you carry: TORCH, SMOLDERING_TORCH, BURNT_TORCH, EVER_TORCH'));
+    for (let burn = 0; burn <= 3; burn++) TORCH_WALLS.forEach((wall, wi) => { for (let n = 1; n <= 4; n++) {
+      const id = torchAt.get(`${burn}:${wi}:${n}`), can = n <= (burn === 0 ? 4 : torchMax(wi));
+      if (can && !id) bd.push(`blocks.TORCHES: no torch for burn ${burn}, wall ${wi}, count ${n}`);
+      if (!can && id) bd.push(`blocks.TORCHES: ${id} is burn ${burn}, wall ${wi}, count ${n}, which can't be (see torchMax)`);
+      if (id) want(id, { shape: 'torch', wall, name: nameOf(carried[burn]), pictures: pics(rowOf.get(carried[burn])) }, `a torch: burn ${burn}, wall ${wi} (TORCH_WALLS[${wi}]), count ${n}`);
+    } });
+    // tools: found by what they are (tool) and what they're made of (material, as in PICK_TIER), each one once
+    const KINDS = ['axe', 'pickaxe', 'shovel', 'sword', 'hoe'], toolOf = new Map(), tiers = Object.keys(PICK_TIER).filter(m => !m.startsWith('_'));
+    for (const r of BL.TOOLS || []) {
+      if (r.item !== true || !KINDS.includes(r.tool) || !tiers.includes(r.material)) bd.push(`blocks ${r.id}: a tool is an item with a tool (${KINDS.join(', ')}) and a material (${tiers.join(', ')})`);
+      const c = r.material + ' ' + r.tool;
+      if (toolOf.has(c)) bd.push(`blocks.TOOLS: the ${c} is both ${toolOf.get(c)} and ${r.id}`);
+      toolOf.set(c, r.id);
+    }
+    for (const m of tiers) for (const kind of KINDS) if (!toolOf.has(m + ' ' + kind)) bd.push(`blocks.TOOLS: no ${m} ${kind}`);
+    // gear: ARMOR_ITEM(tier, piece), BACKPACKS[tier] and BELTS[tier], in GEAR_TIERS' order (a backpack's pack and a belt's belt and
+    // tools are how many slots they add)
+    GEAR_TIERS.forEach((m, t) => {
+      ARMOR_PIECES.forEach((p, k) => want(ARMOR_ITEM(t, k), { item: true, armor: k, material: m }, `armor: ARMOR_ITEM(${t}, ${k}) is the ${m} ${p}`));
+      want(BACKPACKS[t], { item: true, material: m }, `BACKPACKS[${t}] is the ${m} backpack`);
+      want(BELTS[t], { item: true, material: m }, `BELTS[${t}] is the ${m} utility belt`);
+      const pk = rowOf.get(BACKPACKS[t]), bt = rowOf.get(BELTS[t]), whole = v => Number.isInteger(v) && v > 0;
+      if (!(pk && whole(pk.pack))) bd.push(`blocks ${BACKPACKS[t]}: a backpack's pack is how many slots it adds (a whole number)`);
+      if (!(bt && whole(bt.belt) && whole(bt.tools))) bd.push(`blocks ${BELTS[t]}: a belt's belt and tools are how many slots it adds (whole numbers)`);
+    });
+    for (const wet of [false, true]) for (const fert of [false, true]) want(soilId(wet, fert), { soil: true, wet, fert }, 'soil: see soilId');
+    GRAIN_STAGES.forEach((id, k) => want(id, { stage: k }, 'Grain: GRAIN_STAGES in order'));
+    COLOURS.forEach((c, k) => {
+      const C = colourName(c), why = `the colours' lists: ${c} is colour ${k}`;
+      want(DYE[k], { name: `${C} Dye`, item: true }, why);
+      want(COLOUR_TERRACOTTA[k], { name: `${C} Terracotta` }, why);
+      want(COLOUR_CHISELED[k], { name: `Chiseled ${C} Terracotta` }, why);
+      want(COLOUR_BRICKS[k], { name: `${C} Bricks` }, why);
+    });
+    METALS.forEach((m, k) => {
+      const M = colourName(m), why = `the metals' lists: ${m} is metal ${k}`;
+      want(ORES[k], { name: `${M} Ore`, drop: key(CHUNK[m]) }, why);
+      want(CHUNK[m], { name: `${M} Chunk`, item: true }, why);
+      want(METAL_BRICK[m], { name: `${M} Brick`, item: true }, why);
+    });
+    FLOWER_COLOURS.forEach((c, k) => want(FLOWERS[k], { name: `${colourName(c)} Flower`, shape: 'plant', dye: key(dyeOf(c)) }, `the flowers' list: ${c} is flower ${k}`));
+  }
+  out.blocks = bd;
+  // worldgen: the ore veins and the badlands' stripes (the world fingerprints check what they grow). An allDepths ore needs
+  // deep versions (see oreIn); per and size are whole numbers above 0, top and deep whole numbers, top no deeper than deep.
+  const W = D.worldgen, wd = [];
+  if (!W) wd.push('worldgen: not in textures.js');
+  else {
+    fieldsKnown(W.ORE_VEINS || [], ['ore', 'per', 'size', 'top', 'deep', 'takesDirt', 'allDepths'], 'worldgen.ORE_VEINS', wd);
+    (W.ORE_VEINS || []).forEach((r, k) => {
+      const at = `worldgen.ORE_VEINS.${k} (${r.ore})`;
+      if (!blockKeyKnown(r.ore)) wd.push(`${at}: isn't a block`);
+      else if (r.allDepths && !ORES.includes(idOf(r.ore))) wd.push(`${at}: allDepths, but it has no deep versions`);
+      for (const f of ['per', 'size', 'top', 'deep']) if (!(Number.isInteger(r[f]) && r[f] >= (f === 'per' || f === 'size' ? 1 : 0))) wd.push(`${at}: ${f} can't be ${JSON.stringify(r[f])}`);
+      if (r.top > r.deep) wd.push(`${at}: top (${r.top}) is deeper than deep (${r.deep})`);
+      for (const f of ['takesDirt', 'allDepths']) if (f in r && r[f] !== true) wd.push(`${at}: ${f} should be true or left out, not ${JSON.stringify(r[f])}`);
+    });
+    if (!Array.isArray(W.BADLANDS_BANDS) || !W.BADLANDS_BANDS.length) wd.push('worldgen.BADLANDS_BANDS: should be a list of blocks');
+    else W.BADLANDS_BANDS.forEach((b, k) => { if (!blockKeyKnown(b)) wd.push(`worldgen.BADLANDS_BANDS.${k}: "${b}" isn't a block`); });
+  }
+  out.worldgen = wd;
+  // every file's own fields (numbers: its diff already covers them), and no data file the game doesn't read
+  const TOP = { smelting: ['FUEL', 'SMELTS'], recipes: ['RECIPES', 'CUTTER'], creative: ['TABS'], mobs: ['MOBS', 'LAYER_BOOST', 'GLOOM_FADE', 'COW'],
+    'texture-names': ['TEXTURE_SPELLINGS', 'TEXTURE_BORROWS', 'FONT_NAMES'], blocks: [...BLOCK_TABLES, 'FORM_NAMES'], worldgen: ['ORE_VEINS', 'BADLANDS_BANDS'] };
+  for (const [name, known] of Object.entries(TOP)) for (const f of Object.keys(D[name] || {})) if (!f.startsWith('_') && !known.includes(f)) out[name].push(`${name}.${f}: isn't something the game reads`);
+  out.files = Object.keys(D).filter(name => !(name in out)).map(name => `data/${name}.json isn't a file the game reads`);
+  window.DATACHECK = out;
+  for (const [name, d] of Object.entries(out)) console.log(`datacheck ${name}: ${d.length} differences${d.length ? '\n  ' + d.join('\n  ') : ''}`);
+}
 </script>
 </body>
 </html>

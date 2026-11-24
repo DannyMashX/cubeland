@@ -9,7 +9,7 @@ namespace Cubeland;
 // Blackened quarters count as empty: if the gloom reaches all the health you have, you die. In the light it fades again.
 public partial class Main
 {
-	const int HEARTS = 5, MaxHealth = HEARTS * 4;
+	static readonly int HEARTS = Nums.N.HEARTS, MaxHealth = HEARTS * 4;   // (data/numbers.json)
 	const float GloomStart = 60, GloomStep = 90, GloomFade = 120, GloomDark = 0.15f;
 	int health = MaxHealth, gloom; float darkTime, lightTime, gloomCheck; bool inDark, dead, gloomDeath;
 	float hurtFlash;

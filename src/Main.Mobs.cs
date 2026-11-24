@@ -14,7 +14,7 @@ public partial class Main
 	{
 		public string Name; public int Health; public float Speed; public int Max;
 		public bool Hostile, Night, Dark, Burns, Shamble, Glow, Curious; public int Damage; public float Sight, Reach, Hearing, LightRange, Scale = 1;
-		public bool Thrower, Deep, Snuffer; public float Near, Far, Faint;   // (see the Skeleton and Gloomling below)
+		public bool Thrower, Deep, Snuffer; public float Near, Far, Faint;   // (what each one means: data/mobs.json's notes)
 		public bool Cow;                                                     // (see Main.Cows.cs)
 		public string Growl; public (int id, int lo, int hi, float chance)[] Drops = Array.Empty<(int, int, int, float)>();
 	}
@@ -24,32 +24,27 @@ public partial class Main
 	// The Zombie arrived in Fear & Foes (Alpha 0.0.8.0), taking over from Grr Angry as the night mob (false brings Grr back;
 	// it must match ZOMBIE_READY in the web game's index.html, or web and desktop players see different mobs).
 	public static readonly bool ZombieReady = true;
-	public static readonly Dictionary<string, MobType> MobTypes = MakeMobTypes();
-	static Dictionary<string, MobType> MakeMobTypes()
+	// every mob, in spawning order: data/mobs.json (with the Zombie or Grr Angry, as ZombieReady says)
+	public static readonly Dictionary<string, MobType> MobTypes = MobTypesFrom(Nums.Mobs, ZombieReady);
+
+	// data/mobs.json as the mob types, in spawning order. zombie: the Zombie, not Grr Angry (only one of the two is in the game).
+	public static Dictionary<string, MobType> MobTypesFrom(MobsData d, bool zombie)
 	{
-		var d = new Dictionary<string, MobType>
-		{
-			["danthechocolateman"] = new() { Name = "Dan The Chocolate Man", Health = 5, Speed = 1.3f, Max = 6, Drops = new[] { (Blocks.Chocolate, 1, 2, 1f) }, Growl = "hrr" },
-		};
-		if (ZombieReady)   // scale: the Zombie's model is 32 pixels tall; 0.9x makes it 1.8 blocks, as tall as you
-			d["zombie"] = new() { Name = "Zombie", Health = 8, Speed = 1.5f, Max = 5, Hostile = true, Dark = true, Burns = true, Shamble = true, Damage = 3, Sight = 16, Reach = 1.8f, Glow = true,
-				Curious = true, Hearing = 24, LightRange = 16, Growl = "growl", Scale = 0.9f, Drops = new[] { (Blocks.FireEssence, 1, 1, 1 / 20f) } };
-		else   // night: only spawns on open ground after dark. Grr's model is 18 pixels tall; 1.6x makes him 1.8 blocks
-			d["grrangry"] = new() { Name = "Grr Angry", Health = 8, Speed = 1.5f, Max = 5, Hostile = true, Night = true, Damage = 3, Sight = 16, Reach = 1.8f, Glow = true,
-				Curious = true, Hearing = 24, LightRange = 16, Growl = "growl", Scale = 1.6f, Drops = new[] { (Blocks.FireEssence, 1, 1, 1 / 20f) } };
-		// thrower: keeps its distance (closes in past Far, backs off inside Near) and throws Rocks at you when it can see you;
-		// Damage = what a Rock that hits you takes off. Its model is 32 pixels tall, so 0.9x is 1.8 blocks.
-		d["skeleton"] = new() { Name = "Skeleton", Health = 6, Speed = 1.4f, Max = 3, Hostile = true, Dark = true, Burns = true, Thrower = true, Near = 5, Far = 10,
-			Damage = 2, Sight = 18, Reach = 0, Glow = true, Scale = 0.9f, Drops = new[] { (Blocks.Bone, 1, 2, 1f) } };
-		// deep: only spawns where it's pitch dark underground. snuffer: creeps to the nearest burning torch (not an Ever Torch) and puts
-		// it out a stage at a time (lit -> smoldering -> burnt). Light doesn't hurt it, but it fades away (dropping nothing) when someone
-		// comes near holding a lit torch. faint: it never looks darker than this, so you can just make it out in the dark.
-		d["gloomling"] = new() { Name = "Gloomling", Health = 4, Speed = 1.1f, Max = 3, Deep = true, Snuffer = true, Faint = 0.3f, Drops = new[] { (Blocks.GloomWisp, 1, 1, 1f) } };
-		// cow: lives in herds and is saved with the world; grazes, fattens on Grain, has calves (Main.Cows.cs). Max 0: it has its own spawning.
-		// Its model is 13 pixels tall; 1.5x makes it about 1.2 blocks. What it drops depends on how it was kept (CowDrops).
-		d["cow"] = new() { Name = "Cow", Health = 6, Speed = 1f, Max = 0, Cow = true, Scale = 1.5f, Growl = "moo" };
-		return d;
+		var types = new Dictionary<string, MobType>();
+		foreach (var m in d.MOBS.Where(m => m.type != (zombie ? "grrangry" : "zombie")))
+			types.Add(m.type, new MobType
+			{
+				Name = m.name, Health = m.health, Speed = m.speed, Max = m.max, Hostile = m.hostile, Night = m.night, Dark = m.dark, Burns = m.burns, Shamble = m.shamble,
+				Glow = m.glow, Curious = m.curious, Damage = m.damage, Sight = m.sight, Reach = m.reach, Hearing = m.hearing, LightRange = m.lightRange, Scale = m.scale,
+				Thrower = m.thrower, Deep = m.deep, Snuffer = m.snuffer, Near = m.near, Far = m.far, Faint = m.faint, Cow = m.cow, Growl = m.growl,
+				Drops = (m.drops ?? Array.Empty<JsonElement[]>()).Select(Drop).ToArray(),
+			});
+		return types;
 	}
+	// a drop: [key, fewest, most, chance] (chance left out: always)
+	public static (int id, int lo, int hi, float chance) Drop(JsonElement[] e) => e.Length is 3 or 4
+		? (DataKeys.IdOf(e[0].ValueKind == JsonValueKind.String ? e[0].GetString() : null), e[1].GetInt32(), e[2].GetInt32(), e.Length == 4 ? e[3].GetSingle() : 1f)
+		: throw new InvalidOperationException($"data/mobs.json: a drop has {e.Length} things in it ([key, fewest, most] or [key, fewest, most, chance])");
 
 	public class Mob
 	{
@@ -615,7 +610,7 @@ public partial class Main
 	void InitMobs() { LoadModels(); mobRoot = new Node3D(); AddChild(mobRoot); }
 	// Deeper strata breed tougher monsters: a hostile (or deep-dwelling) mob is 10% stronger (health and the damage it does) for every
 	// strata layer below the first one it spawns in, so at the bottom layer (8) it's 1.7x as strong. It keeps that strength wherever it goes.
-	const float MobLayerBoost = 0.1f;
+	static readonly float MobLayerBoost = Nums.Mobs.LAYER_BOOST;
 	int StrataLayerAt(float y) => World.WY == 640 ? Math.Clamp(1 + (world.SeaLevel - (int)MathF.Floor(y)) / Blocks.StrataThick, 1, Blocks.StrataLayers) : 1;
 	static float LayerBoost(int layer) => 1 + MobLayerBoost * (Math.Max(1, layer) - 1);
 	static int MobDamage(Mob m) => (int)MathF.Round(m.T.Damage * LayerBoost(m.Layer), MidpointRounding.AwayFromZero);
@@ -929,7 +924,7 @@ public partial class Main
 		UpdateHearts(dt);
 	}
 	// how close (in blocks) someone holding a lit torch has to come for a Gloomling to fade away, and how long fading takes (seconds)
-	const float GloomFadeRange = 6, GloomFadeTime = 1.2f;
+	static readonly float GloomFadeRange = Nums.Mobs.GLOOM_FADE.range, GloomFadeTime = Nums.Mobs.GLOOM_FADE.time;
 	static bool IsLitTorch(int id) => Blocks.IsTorch(id) && (Blocks.B[id].Burn == 0 || Blocks.B[id].Burn == 3);
 	// a Gloomling starts fading away
 	void StartFade(Mob m) { m.Fade = 0.001f; m.Walking = false; }

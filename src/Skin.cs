@@ -15,17 +15,10 @@ public static class Skin
 	public const int Px = 2;   // screen pixels per pixel of the button pictures
 	public static FontFile Font { get; private set; }
 	static StyleBox btn, btnHover, panel, sel;
-	static readonly Dictionary<string, char> Names = new()
-	{
-		["asterisk"] = '*', ["dash"] = '-', ["hyphen"] = '-', ["minus"] = '-', ["period"] = '.', ["dot"] = '.', ["full_stop"] = '.', ["plus"] = '+',
-		["q_mark"] = '?', ["question"] = '?', ["question_mark"] = '?', ["exclamation"] = '!', ["exclamation_mark"] = '!', ["ampersand"] = '&', ["and"] = '&',
-		["caret"] = '^', ["comma"] = ',', ["colon"] = ':', ["semicolon"] = ';', ["slash"] = '/', ["forward_slash"] = '/', ["backslash"] = '\\',
-		["apostrophe"] = '\'', ["quote"] = '"', ["quotes"] = '"', ["lparen"] = '(', ["left_paren"] = '(', ["open_paren"] = '(', ["rparen"] = ')', ["right_paren"] = ')',
-		["close_paren"] = ')', ["lbracket"] = '[', ["rbracket"] = ']', ["equals"] = '=', ["underscore"] = '_', ["percent"] = '%', ["hash"] = '#', ["at"] = '@',
-		["dollar"] = '$', ["less_than"] = '<', ["greater_than"] = '>', ["tilde"] = '~', ["space"] = ' ',
-		["times"] = '·', ["middot"] = '·', ["middle_dot"] = '·',
-		["zero"] = '0', ["one"] = '1', ["two"] = '2', ["three"] = '3', ["four"] = '4', ["five"] = '5', ["six"] = '6', ["seven"] = '7', ["eight"] = '8', ["nine"] = '9',
-	};
+	// a letter picture named like this is this character (for the ones a file name can't hold, like q_mark.png for "?"):
+	// data/texture-names.json's FONT_NAMES. Each has to be one character, or the game stops and says which.
+	public static readonly Dictionary<string, char> Names = (Nums.TextureNames.FONT_NAMES ?? new()).ToDictionary(kv => kv.Key,
+		kv => kv.Value is { Length: 1 } v ? v[0] : throw new InvalidOperationException($"data/texture-names.json: the font name \"{kv.Key}\" is \"{kv.Value}\", not one character"));
 
 	// a requested text size -> a whole multiple of 12, in the web version's tiers: small text (16 or less) 12,
 	// headings 24, big titles 36 or 60

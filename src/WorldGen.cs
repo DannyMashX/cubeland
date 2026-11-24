@@ -591,9 +591,8 @@ public class WorldGen
 		}
 	}
 
-	// the badlands' stripes, from the bottom up (they repeat): plain, orange, yellow, red, white and pink Terracotta
-	static readonly int[] BadlandsBands = { 65, 65, Blocks.ColourTerracotta[1], Blocks.ColourTerracotta[1], Blocks.ColourTerracotta[1], 65, Blocks.ColourTerracotta[2], 65, 65,
-		66, 66, 65, Blocks.ColourTerracotta[10], 65, Blocks.ColourTerracotta[1], 65, 65, Blocks.ColourTerracotta[9], 65 };
+	// the badlands' stripes, from the bottom up (they repeat): data/worldgen.json's BADLANDS_BANDS
+	public static readonly int[] BadlandsBands = Array.ConvertAll(Nums.Worldgen.BADLANDS_BANDS, DataKeys.IdOf);
 	// --- Paint the land: grass on top, then dirt, then stone; sand, gravel and clay by the water ---
 	void Paint()
 	{
@@ -696,25 +695,26 @@ public class WorldGen
 			for (int i = y * slab, end = i + slab; i < end; i++)
 			{
 				if (world[i] == 3) world[i] = id;
-				else if (Land >= 2 && Blocks.OreIndex(world[i]) is int k and >= 0) Late.Add((i, Blocks.DeepOreOf(k, layer), world[i]));   // (an ore in a deep layer: that layer's ore)
+				else if (Land >= 2 && AllDepthOres.Contains(world[i]) && Blocks.OreIndex(world[i]) is int k and >= 0) Late.Add((i, Blocks.DeepOreOf(k, layer), world[i]));   // (an allDepths ore in a deep layer: that layer's ore)
 			}
 		}
 	}
 
 	// --- Ores and Fireclay: veins in the ground, by depth below the surface (before the caves, which cut through them) ---
-	// (block, veins per 10,000 columns, blocks per vein, shallowest, deepest (blocks below the surface)). A vein is a short
-	// random walk that turns the Stone it passes through into ore (Fireclay also takes Dirt). (The same as the web version.)
-	static readonly (int ore, int per, int size, int top, int deep)[] OreVeins =
-	{
-		(Blocks.CopperOre, 110, 8, 3, 999), (Blocks.TinOre, 90, 6, 3, 999), (Blocks.IronOre, 70, 6, 10, 999), (Blocks.GoldOre, 18, 4, 28, 999), (Blocks.Fireclay, 20, 20, 4, 20),
-	};
+	// data/worldgen.json's ORE_VEINS, grown in their order (a row's place is in its veins' seeds): each one's ore, veins per
+	// 10,000 columns, blocks per vein, shallowest and deepest (blocks below the surface), whether it turns Dirt into ore too,
+	// and whether it's at every depth from land 2. A vein is a short random walk that turns the Stone it passes through into
+	// its ore. (The same as the web version.)
+	public static readonly (int ore, int per, int size, int top, int deep, bool takesDirt, bool allDepths)[] OreVeins =
+		Array.ConvertAll(Nums.Worldgen.ORE_VEINS, r => (DataKeys.IdOf(r.ore), r.per, r.size, r.top, r.deep, r.takesDirt == true, r.allDepths == true));
+	static readonly HashSet<int> AllDepthOres = new(Array.ConvertAll(Array.FindAll(OreVeins, v => v.allDepths), v => v.ore));
 	static readonly int[][] OreSteps = { new[] { 1, 0, 0 }, new[] { -1, 0, 0 }, new[] { 0, 1, 0 }, new[] { 0, -1, 0 }, new[] { 0, 0, 1 }, new[] { 0, 0, -1 } };
 	void PlaceOres()
 	{
 		for (int o = 0; o < OreVeins.Length; o++)
 		{
-			var (ore, per, size, top, deep) = OreVeins[o];
-			bool even = Land >= 2 && ore != Blocks.Fireclay;   // (worlds from Land 2: the ores are as common at every depth, all the way down)
+			var (ore, per, size, top, deep, takesDirt, allDepths) = OreVeins[o];
+			bool even = Land >= 2 && allDepths;   // (worlds from Land 2: the allDepths ores are as common at every depth, all the way down)
 			if (even) { top = 3; deep = 999; }
 			int s = 7001 + o * 10, n = (int)((long)WX * WZ * per / 10000);
 			if (even) n = (int)((long)n * WY / 192);
@@ -727,7 +727,7 @@ public class WorldGen
 				for (int j = 0; j < size; j++)
 				{
 					int i = Idx(x, y, z), b = world[i];
-					if (b == Blocks.Stone || (ore == Blocks.Fireclay && b == Blocks.Dirt)) world[i] = (byte)ore;
+					if (b == Blocks.Stone || (takesDirt && b == Blocks.Dirt)) world[i] = (byte)ore;
 					var d = OreSteps[(int)Math.Floor(Hash3(k, j, o, s + 5) * 6)];
 					x += d[0]; y += d[1]; z += d[2];
 					if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 2 || y >= WY) break;

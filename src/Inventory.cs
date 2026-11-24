@@ -21,7 +21,7 @@ public class Inventory
 	// Each tool can be used Durability[its material] times. Breaking a block uses 1 (2 with the wrong tool for that block),
 	// a hit on a mob uses 1 for a sword and 2 for any other tool, tilling uses 1. At 0 the tool breaks and is gone.
 	// Wear: how much each slot's tool has been used (0 = new). A tool dropped on the ground keeps its wear. Survival only.
-	public static readonly Dictionary<string, int> Durability = new() { ["crude"] = 32, ["stone"] = 160, ["copper"] = 320, ["iron"] = 480, ["bronite"] = 720, ["rosium"] = 960, ["steel"] = 1440 };
+	public static readonly Dictionary<string, int> Durability = Nums.N.DURABILITY;   // (data/numbers.json)
 	public readonly int[] Wear = new int[NS];
 	// the most a tool can be used (0: not a tool that wears out)
 	public static int MaxWear(int id) => Blocks.Get(id) is { } d && (d.Tool != null ? Durability : d.Armor >= 0 ? ArmorDurability : null) is { } t && t.TryGetValue(d.Material ?? "", out int m) ? m : 0;
@@ -135,8 +135,8 @@ public class Inventory
 	}
 	// ---- Armor: a full set takes half of all damage (helmet 10%, chestplate 20%, leggings 12.5%, boots 7.5%). A piece
 	// protects less as it wears, but never less than half until it breaks. Each piece you wear loses 1 durability per hit.
-	public static readonly Dictionary<string, int> ArmorDurability = new() { ["leather"] = 100, ["copper"] = 200, ["iron"] = 300, ["bronite"] = 450, ["rosium"] = 600, ["steel"] = 900 };
-	static readonly float[] ArmorShare = { 0.10f, 0.20f, 0.125f, 0.075f };
+	public static readonly Dictionary<string, int> ArmorDurability = Nums.N.ARMOR_DURABILITY;   // (data/numbers.json)
+	public static readonly float[] ArmorShare = Nums.N.ARMOR_SHARE;   // (data/numbers.json: helmet, chestplate, leggings, boots)
 	public float ArmorBlock()
 	{
 		if (!Survival) return 0;
@@ -202,91 +202,20 @@ public class Inventory
 	// Needs: [id, how many]. Axe: you also need an axe somewhere in your hotbar (it isn't used up). Tool: the same for another tool.
 	// Colour: only listed while you carry at least one of its ingredients (there are a lot of them)
 	public class Recipe { public int Out, N; public (int id, int n)[] Needs; public string At = "hand"; public bool Axe; public string Tool; public bool Colour; }
-	public static readonly List<Recipe> Recipes = new()
+	// every recipe, in the order the recipe lists show them, and the Cutter's shapes: data/recipes.json
+	// (the deep layers' Chiseled Stone only while tall worlds are on)
+	static readonly RecipesData RecipeFile = GameData.Read<RecipesData>("recipes") ?? throw new InvalidOperationException("data/recipes.json is missing or can't be read");
+	public static readonly List<Recipe> Recipes = RecipesFrom(RecipeFile, World.TallWorlds);
+	// data/recipes.json as the game's tables (tall: with the deep layers' Chiseled Stone)
+	public static List<Recipe> RecipesFrom(RecipesData d, bool tall) => d.RECIPES.Where(r => tall || !r.tall).Select(r => new Recipe
 	{
-		new() { Out = Blocks.CrudeAxe, N = 1, Needs = new[] { (Blocks.Rock, 2), (Blocks.Stick, 1) } },
-		new() { Out = Blocks.Cobblestone, N = 1, Needs = new[] { (Blocks.Rock, 4) } },
-		new() { Out = Blocks.Planks, N = 4, Needs = new[] { (Blocks.Log, 1) }, Axe = true },
-		new() { Out = Blocks.Planks, N = 4, Needs = new[] { (Blocks.StrippedLog, 1) }, Axe = true },
-		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.Planks, 2) }, At = "bench", Axe = true },
-		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.Planks, 4), (Blocks.Log, 1) } },
-		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.Planks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },   // 3 Planks + a Copper Brick (its blade)
-		// the same from Fir wood
-		new() { Out = Blocks.FirPlanks, N = 4, Needs = new[] { (Blocks.FirLog, 1) }, Axe = true },
-		new() { Out = Blocks.FirPlanks, N = 4, Needs = new[] { (Blocks.StrippedFirLog, 1) }, Axe = true },
-		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.FirPlanks, 2) }, At = "bench", Axe = true },
-		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.FirPlanks, 4), (Blocks.FirLog, 1) } },
-		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.FirPlanks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },
-		// ... and from Palm and Willow wood
-		new() { Out = Blocks.PalmPlanks, N = 4, Needs = new[] { (Blocks.PalmLog, 1) }, Axe = true },
-		new() { Out = Blocks.PalmPlanks, N = 4, Needs = new[] { (Blocks.StrippedPalmLog, 1) }, Axe = true },
-		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.PalmPlanks, 2) }, At = "bench", Axe = true },
-		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.PalmPlanks, 4), (Blocks.PalmLog, 1) } },
-		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.PalmPlanks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },
-		new() { Out = Blocks.WillowPlanks, N = 4, Needs = new[] { (Blocks.WillowLog, 1) }, Axe = true },
-		new() { Out = Blocks.WillowPlanks, N = 4, Needs = new[] { (Blocks.StrippedWillowLog, 1) }, Axe = true },
-		new() { Out = Blocks.Stick, N = 4, Needs = new[] { (Blocks.WillowPlanks, 2) }, At = "bench", Axe = true },
-		new() { Out = Blocks.CraftingBench, N = 1, Needs = new[] { (Blocks.WillowPlanks, 4), (Blocks.WillowLog, 1) } },
-		new() { Out = Blocks.Cutter, N = 1, Needs = new[] { (Blocks.WillowPlanks, 3), (Blocks.MetalBrick["copper"], 1) }, At = "bench" },
-		new() { Out = Blocks.Torch, N = 2, Needs = new[] { (Blocks.Stick, 1), (Blocks.Torch, 1) } },
-		new() { Out = Blocks.EverTorch, N = 1, Needs = new[] { (Blocks.Torch, 1), (Blocks.FireEssence, 1) } },
-		new() { Out = Blocks.ClayBall, N = 4, Needs = new[] { (Blocks.Clay, 1) } },
-		new() { Out = Blocks.ClayBall, N = 1, Needs = new[] { (Blocks.PieceItem + Blocks.Clay, 2) } },
-		new() { Out = Blocks.Clay, N = 1, Needs = new[] { (Blocks.ClayBall, 4) } },   // 4 Clay Balls packed back into Clay
-		new() { Out = Blocks.SnowBlock, N = 1, Needs = new[] { (Blocks.Snowball, 4) } },   // 4 Snowballs packed into a Snow Block
-		new() { Out = Blocks.Snow, N = 8, Needs = new[] { (Blocks.SnowBlock, 1) } },     // ... which makes 8 layers of Snow
-		new() { Out = Blocks.BricksBlock, N = 1, Needs = new[] { (Blocks.Brick, 4) }, At = "bench" },
-		new() { Out = Blocks.Furnace, N = 1, Needs = new[] { (Blocks.Brick, 8) }, At = "bench" },
-		new() { Out = 67, N = 1, Needs = new[] { (65, 1) }, At = "bench", Tool = "pickaxe" },
-		new() { Out = 68, N = 1, Needs = new[] { (66, 1) }, At = "bench", Tool = "pickaxe" },
-		new() { Out = 69, N = 1, Needs = new[] { (3, 1) }, At = "bench", Tool = "pickaxe" },
-		new() { Out = Blocks.SandstoneBricks, N = 1, Needs = new[] { (Blocks.Sandstone, 1) }, At = "bench", Tool = "pickaxe" },     // Sandstone, cut into bricks
-		new() { Out = Blocks.ChiseledSandstone, N = 1, Needs = new[] { (Blocks.Sandstone, 1) }, At = "bench", Tool = "pickaxe" },   // Sandstone, carved
-		new() { Out = Blocks.Flour, N = 1, Needs = new[] { (Blocks.Grain, 1) } },   // Grain, mashed by hand -> Flour
-		// Fireclay, like Clay; and the Foundry's blocks
-		new() { Out = Blocks.FireclayBall, N = 4, Needs = new[] { (Blocks.Fireclay, 1) } },                     // Fireclay -> 4 Fireclay Balls
-		new() { Out = Blocks.Fireclay, N = 1, Needs = new[] { (Blocks.FireclayBall, 4) } },                     // 4 Fireclay Balls packed back into Fireclay
-		new() { Out = Blocks.Fireclay, N = 1, Needs = new[] { (63, 1), (Blocks.Sand, 1), (11, 1) }, At = "bench" },        // Clay + Sand + Gravel mixed into Fireclay
-		new() { Out = Blocks.FireclayBricks, N = 1, Needs = new[] { (Blocks.FireclayBrick, 4) }, At = "bench" },   // 4 Fireclay Bricks -> Fireclay Bricks (block)
-		new() { Out = Blocks.FireclayCasing, N = 1, Needs = new[] { (Blocks.FireclayBrick, 4), (Blocks.FireclayTerracotta, 1) }, At = "bench" },   // the Foundry's walls
-		new() { Out = Blocks.ChiseledFireclay, N = 1, Needs = new[] { (Blocks.FireclayTerracotta, 1) }, At = "bench", Tool = "pickaxe" },   // carved
-		new() { Out = Blocks.Foundry, N = 1, Needs = new[] { (Blocks.FireclayBrick, 8) }, At = "bench" },    // 8 Fireclay Bricks -> the Foundry's Furnace
-	};
-	static Inventory()
-	{
-		// dyes and colours
-		foreach (int f in Blocks.Flowers) Recipes.Add(new() { Out = Blocks.B[f].Dye, N = 1, Needs = new[] { (f, 1) }, Colour = true });   // a Flower -> its Dye
-		Recipes.Add(new() { Out = Blocks.DyeOf("black"), N = 1, Needs = new[] { (Blocks.GloomWisp, 1) }, Colour = true });   // a Gloom Wisp -> Black Dye
-		Recipes.Add(new() { Out = Blocks.DyeOf("white"), N = 1, Needs = new[] { (Blocks.BoneAsh, 1) }, Colour = true });     // Bone Ash -> White Dye
-		// deep Stone -> that layer's Chiseled Stone (at the bench, with a pickaxe)
-		if (World.TallWorlds) for (int k = 0; k < Blocks.StrataLayers - 1; k++) Recipes.Add(new() { Out = Blocks.DeepChiseled + k, N = 1, Needs = new[] { (Blocks.Strata + k, 1) }, At = "bench", Tool = "pickaxe", Colour = true });
-		foreach (var (o, a, b) in new[] { ("orange", "red", "yellow"), ("green", "yellow", "aqua"), ("blue", "aqua", "indigo"), ("purple", "indigo", "magenta"), ("pink", "red", "white") })
-			Recipes.Add(new() { Out = Blocks.DyeOf(o), N = 2, Needs = new[] { (Blocks.DyeOf(a), 1), (Blocks.DyeOf(b), 1) }, Colour = true });   // two dyes mixed
-		for (int k = 0; k < Blocks.Colours.Length; k++)
-		{
-			Recipes.Add(new() { Out = Blocks.ColourTerracotta[k], N = 8, Needs = new[] { (Blocks.Terracotta, 8), (Blocks.Dye[k], 1) }, At = "bench", Colour = true });
-			if (k > 0) Recipes.Add(new() { Out = Blocks.ColourChiseled[k], N = 1, Needs = new[] { (Blocks.ColourTerracotta[k], 1) }, At = "bench", Tool = "pickaxe", Colour = true });
-			Recipes.Add(new() { Out = Blocks.ColourBricks[k], N = 1, Needs = new[] { (Blocks.ColourTerracotta[k], 1) }, At = "bench", Tool = "pickaxe", Colour = true });
-		}
-		// tools: made of Cobblestone (stone tools) or a metal's Bricks, with sticks for the handle. [material, sticks]
-		var toolRecipe = new Dictionary<string, (int m, int s)> { ["Pickaxe"] = (3, 2), ["Axe"] = (3, 2), ["Shovel"] = (1, 2), ["Sword"] = (2, 1), ["Hoe"] = (2, 2) };
-		foreach (int id in Blocks.Tools)
-		{
-			var (m, s) = toolRecipe[Blocks.B[id].Name.Split(' ').Last()];
-			string mat = Blocks.B[id].Material;
-			Recipes.Add(new() { Out = id, N = 1, Needs = new[] { (mat == "stone" ? Blocks.Cobblestone : Blocks.MetalBrick[mat], m), (Blocks.Stick, s) }, At = "bench" });
-		}
-		// gear, at the bench: armor from Leather or a metal's Bricks (helmet 3, chestplate 5, leggings 4, boots 3);
-		// backpacks and belts are Leather, with a Brick of the metal for the metal ones
-		for (int t = 0; t < Blocks.GearTiers.Length; t++)
-		{
-			string m = Blocks.GearTiers[t]; int mat = t == 0 ? Blocks.Leather : Blocks.MetalBrick[m];
-			int[] n = { 3, 5, 4, 3 };
-			for (int k = 0; k < 4; k++) Recipes.Add(new() { Out = Blocks.ArmorItem(t, k), N = 1, Needs = new[] { (mat, n[k]) }, At = "bench" });
-			Recipes.Add(new() { Out = Blocks.Backpacks[t], N = 1, Needs = t == 0 ? new[] { (Blocks.Leather, 5) } : new[] { (Blocks.Leather, 4), (mat, 1) }, At = "bench" });
-			Recipes.Add(new() { Out = Blocks.Belts[t], N = 1, Needs = t == 0 ? new[] { (Blocks.Leather, 3) } : new[] { (Blocks.Leather, 2), (mat, 1) }, At = "bench" });
-		}
-	}
+		Out = DataKeys.IdOf(r.@out), N = r.n, Needs = r.needs.Select(n => (DataKeys.IdOf(n[0].GetString()), n[1].GetInt32())).ToArray(),
+		At = r.at is "hand" or "bench" ? r.at : throw new InvalidOperationException($"data/recipes.json: a recipe for {r.@out} is made at \"{r.at}\" (hand or bench)"),
+		Axe = r.axe, Tool = r.tool, Colour = r.colour,
+	}).ToList();
+	public static (string key, string name, int baseId, int use, int n)[] CutterFrom(RecipesData d) => d.CUTTER.Select(c => (c.mode, c.label,
+		c.mode == "pieces" ? Blocks.PieceItem : Blocks.ShapeItem.TryGetValue(c.mode ?? "", out int b) ? b : throw new InvalidOperationException($"data/recipes.json: the Cutter can't make \"{c.mode}\""),
+		c.uses, c.makes)).ToArray();
 	public bool CanCraft(Recipe r) =>
 		r.Needs.All(n => CountOf(n.id) >= n.n) && (!r.Axe || Id.Any(i => Blocks.Get(i)?.Tool == "axe")) && (r.Tool == null || Id.Any(i => Blocks.Get(i)?.Tool == r.Tool));
 	// true = made, false = can't, null = no room for what it makes (nothing changes)
@@ -302,17 +231,9 @@ public class Inventory
 		string.Join(" + ", r.Needs.Select(n => $"{n.n} {Blocks.B[n.id].Name}")) + (r.Axe ? ", with an axe" : "") + (r.Tool != null ? $", with a {r.Tool}" : "");
 
 	// ===================== Crafting Bench: cut a block into pieces, slabs, stairs... =====================
-	// [name, item id base, blocks used, how many you get]
-	public static readonly (string key, string name, int baseId, int use, int n)[] BenchModes =
-	{
-		("pieces", "8 Pieces", Blocks.PieceItem, 1, 8),
-		("slab", "2 Slabs", 1000, 1, 2),
-		("vslab", "2 Vertical Slabs", 1100, 1, 2),
-		("stairs", "4 Stairs (from 3 blocks)", 1200, 3, 4),
-		("quarter", "4 Quarters", 1300, 1, 4),
-		("vstairs", "4 Vertical Stairs (from 3 blocks)", 1400, 3, 4),
-		("vquarter", "4 Vertical Quarters", 1500, 1, 4),
-	};
+	// its buttons, in order: [shape, label, item id base, blocks used, how many you get] (data/recipes.json's CUTTER;
+	// pieces always give a block's 8 spots)
+	public static readonly (string key, string name, int baseId, int use, int n)[] BenchModes = CutterFrom(RecipeFile);
 	// returns what to show under the bench
 	public string BenchCut(int block, int mode)
 	{

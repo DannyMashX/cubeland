@@ -1,0 +1,63 @@
+{
+  "_note": "The creative inventory (E): its tabs, in order, and what's in each, in order. Survival's Sort sorts by this order too. Read by both editions. Things are named by their keys (see blockKey in index.html / DataKeys.cs).",
+  "_notes": {
+    "TABS": "name = the tab's button; items = what's in it, in order ({ \"tall\": [...] } = only while tall worlds are on: the deep layers' blocks and ores); forms (the Shapes tab) = every block the Cutter can cut, block by block, in each of these forms. Each thing goes in one tab: anything left out of them all goes in Building, at the end"
+  },
+  "TABS": [
+    { "name": "Building", "items": [
+      "cobblestone",
+      { "tall": ["cobblestone#layer=2", "cobblestone#layer=3", "cobblestone#layer=4", "cobblestone#layer=5", "cobblestone#layer=6", "cobblestone#layer=7", "cobblestone#layer=8"] },
+      "stone_bricks",
+      { "tall": ["stone_bricks#layer=2", "stone_bricks#layer=3", "stone_bricks#layer=4", "stone_bricks#layer=5", "stone_bricks#layer=6", "stone_bricks#layer=7", "stone_bricks#layer=8"] },
+      "chiseled_stone",
+      { "tall": ["chiseled_stone#layer=2", "chiseled_stone#layer=3", "chiseled_stone#layer=4", "chiseled_stone#layer=5", "chiseled_stone#layer=6", "chiseled_stone#layer=7", "chiseled_stone#layer=8"] },
+      "bricks", "red_bricks", "orange_bricks", "yellow_bricks", "green_bricks", "aqua_bricks", "blue_bricks", "indigo_bricks", "purple_bricks",
+      "magenta_bricks", "pink_bricks", "white_bricks", "black_bricks", "terracotta", "red_terracotta", "orange_terracotta", "yellow_terracotta",
+      "green_terracotta", "aqua_terracotta", "blue_terracotta", "indigo_terracotta", "purple_terracotta", "magenta_terracotta", "pink_terracotta",
+      "white_terracotta", "black_terracotta", "chiseled_terracotta", "chiseled_red_terracotta", "chiseled_orange_terracotta",
+      "chiseled_yellow_terracotta", "chiseled_green_terracotta", "chiseled_aqua_terracotta", "chiseled_blue_terracotta",
+      "chiseled_indigo_terracotta", "chiseled_purple_terracotta", "chiseled_magenta_terracotta", "chiseled_pink_terracotta",
+      "chiseled_white_terracotta", "chiseled_black_terracotta", "glass", "sandstone_bricks", "chiseled_sandstone", "smooth_sandstone", "mud_bricks",
+      "fireclay_terracotta", "fireclay_bricks", "fireclay_casing", "chiseled_fireclay"
+    ] },
+    { "name": "Natural", "items": [
+      "grass", "dirt", "tilled_dirt", "wet_tilled_dirt", "fertilized_dirt", "wet_fertilized_dirt", "stone",
+      { "tall": ["stone#layer=2", "stone#layer=3", "stone#layer=4", "stone#layer=5", "stone#layer=6", "stone#layer=7", "stone#layer=8"] },
+      "copper_ore", "iron_ore", "gold_ore", "tin_ore",
+      { "tall": ["copper_ore#layer=2", "copper_ore#layer=3", "copper_ore#layer=4", "copper_ore#layer=5", "copper_ore#layer=6", "copper_ore#layer=7", "copper_ore#layer=8", "iron_ore#layer=2", "iron_ore#layer=3", "iron_ore#layer=4", "iron_ore#layer=5", "iron_ore#layer=6", "iron_ore#layer=7", "iron_ore#layer=8", "gold_ore#layer=2", "gold_ore#layer=3", "gold_ore#layer=4", "gold_ore#layer=5", "gold_ore#layer=6", "gold_ore#layer=7", "gold_ore#layer=8", "tin_ore#layer=2", "tin_ore#layer=3", "tin_ore#layer=4", "tin_ore#layer=5", "tin_ore#layer=6", "tin_ore#layer=7", "tin_ore#layer=8"] },
+      "sand", "sandstone", "snowy_grass", "swamp_grass", "mud", "peat", "ice", "gravel", "clay", "fireclay", "snow", "snow_block", "water",
+      "bedrock"
+    ] },
+    { "name": "Wood", "items": [
+      "oak_log", "stripped_oak_log", "oak_planks", "oak_leaves", "fir_log", "stripped_fir_log", "fir_planks", "fir_leaves", "palm_log",
+      "stripped_palm_log", "palm_planks", "palm_leaves", "willow_log", "stripped_willow_log", "willow_planks", "willow_leaves"
+    ] },
+    { "name": "Shapes", "forms": ["piece", "slab", "stairs", "quarter", "vslab", "vstairs", "vquarter"] },
+    { "name": "Light & Decoration", "items": [
+      "torch", "smoldering_torch", "burnt_torch", "ever_torch", "red_flower", "yellow_flower", "aqua_flower", "indigo_flower", "magenta_flower"
+    ] },
+    { "name": "Tools & Armor", "items": [
+      "crude_axe", "stone_axe", "stone_pickaxe", "stone_shovel", "stone_sword", "stone_hoe", "copper_axe", "copper_pickaxe", "copper_shovel",
+      "copper_sword", "copper_hoe", "iron_axe", "iron_pickaxe", "iron_shovel", "iron_sword", "iron_hoe", "bronite_axe", "bronite_pickaxe",
+      "bronite_shovel", "bronite_sword", "bronite_hoe", "rosium_axe", "rosium_pickaxe", "rosium_shovel", "rosium_sword", "rosium_hoe", "steel_axe",
+      "steel_pickaxe", "steel_shovel", "steel_sword", "steel_hoe", "leather_helmet", "leather_chestplate", "leather_leggings", "leather_boots",
+      "copper_helmet", "copper_chestplate", "copper_leggings", "copper_boots", "iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots",
+      "bronite_helmet", "bronite_chestplate", "bronite_leggings", "bronite_boots", "rosium_helmet", "rosium_chestplate", "rosium_leggings",
+      "rosium_boots", "steel_helmet", "steel_chestplate", "steel_leggings", "steel_boots", "leather_backpack", "copper_backpack", "iron_backpack",
+      "bronite_backpack", "rosium_backpack", "steel_backpack", "leather_utility_belt", "copper_utility_belt", "iron_utility_belt",
+      "bronite_utility_belt", "rosium_utility_belt", "steel_utility_belt"
+    ] },
+    { "name": "Food", "items": [
+      "chocolate", "bread", "raw_meat", "cooked_meat", "dates"
+    ] },
+    { "name": "Materials", "items": [
+      "stick", "rock", "clay_ball", "brick", "fireclay_ball", "fireclay_brick", "copper_chunk", "iron_chunk", "gold_chunk", "tin_chunk",
+      "copper_brick", "iron_brick", "gold_brick", "tin_brick", "bronite_brick", "rosium_brick", "steel_brick", "steel_scrap", "bone", "bone_ash",
+      "gloom_wisp", "fire_essence", "leather", "red_dye", "orange_dye", "yellow_dye", "green_dye", "aqua_dye", "blue_dye", "indigo_dye",
+      "purple_dye", "magenta_dye", "pink_dye", "white_dye", "black_dye", "grain", "grain_seeds", "flour", "snowball"
+    ] },
+    { "name": "Machines", "items": [
+      "crafting_bench", "cutter", "kiln", "furnace"
+    ] }
+  ]
+}

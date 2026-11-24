@@ -1,0 +1,33 @@
+{
+  "_note": "Plain gameplay numbers, read by both editions (web: packed into textures.js by build-textures.ps1; desktop: res://data/numbers.json). Names are the web version's constant names. Materials: crude, stone, copper, iron, bronite, rosium, steel (tools); leather, copper, iron, bronite, rosium, steel (gear, in this order).",
+  "_notes": {
+    "STACK_MAX": "the most of one thing a slot holds (tools, armor, packs and belts: always 1)",
+    "SMELT_TIME": "seconds a Kiln or Foundry takes to smelt one thing",
+    "BURN_TIMES": "how long a torch stays lit, then smoldering, in seconds: [shortest, longest] each, picked at random between them",
+    "FARM": "Grain and soil: stageTime seconds a growth stage takes on average (on wet soil), in stageHits lucky ticks; growth is times dryRate on dry soil and times fertRate on fertilized soil; water wets tilled soil joined to it within wetReach blocks; fertilizer lasts fertHarvests ripe harvests; dry tilled soil with nothing growing turns back into Dirt after revertTime seconds; seedChance: the chance tilling grass turns up a Grain Seed",
+    "DURABILITY": "uses each tool takes, by what it's made of",
+    "ARMOR_DURABILITY": "hits each armor piece takes, by what it's made of",
+    "ARMOR_SHARE": "how much of all damage each piece takes off when new: helmet, chestplate, leggings, boots (a full set: half)",
+    "PICK_TIER": "how good each pickaxe is (an ore needs its tier or better)",
+    "STRATA_PICKAXE": "the deepest layer of stone each pickaxe can mine",
+    "PICK_STAGES": "stage breaking: stages of Stone or ore each pickaxe swing breaks",
+    "AXE_STAGES": "stage breaking: stages of a log each swing breaks, by the axe's material (none: by hand or another tool)",
+    "LOG_STAGES": "stage breaking: stages in a log",
+    "STONE_STAGES": "stage breaking: stages in Stone, ores, Sandstone and Terracotta, for each layer down",
+    "HEARTS": "hearts of health (each one 4 quarters)"
+  },
+  "STACK_MAX": 64,
+  "SMELT_TIME": 5,
+  "BURN_TIMES": [[900, 1500], [300, 600]],
+  "FARM": { "stageTime": 40, "stageHits": 3, "dryRate": 0.5, "fertRate": 1.6, "wetReach": 5, "fertHarvests": 2, "revertTime": 180, "seedChance": 0.16666666666666666 },
+  "DURABILITY": { "crude": 32, "stone": 160, "copper": 320, "iron": 480, "bronite": 720, "rosium": 960, "steel": 1440 },
+  "ARMOR_DURABILITY": { "leather": 100, "copper": 200, "iron": 300, "bronite": 450, "rosium": 600, "steel": 900 },
+  "ARMOR_SHARE": [0.1, 0.2, 0.125, 0.075],
+  "PICK_TIER": { "stone": 1, "copper": 2, "iron": 3, "bronite": 4, "rosium": 5, "steel": 6 },
+  "STRATA_PICKAXE": { "stone": 2, "copper": 3, "iron": 4, "bronite": 6, "rosium": 7, "steel": 8 },
+  "PICK_STAGES": { "stone": 1, "copper": 2, "iron": 4, "bronite": 8, "rosium": 16, "steel": 32 },
+  "AXE_STAGES": { "none": 1, "crude": 2, "stone": 4, "copper": 8, "iron": 8, "bronite": 8, "rosium": 8, "steel": 8 },
+  "LOG_STAGES": 8,
+  "STONE_STAGES": 4,
+  "HEARTS": 5
+}

@@ -144,7 +144,7 @@ public partial class Main
 		while (y > 0)
 		{
 			int b = world.GetBlock(x, y, z);
-			if (b == 0 || Blocks.IsLeaves(b) || Blocks.NeedsAxe.Contains(b) || Blocks.Get(b)?.Shape is "plant" or "flat") y--; else break;
+			if (b == 0 || Blocks.IsLeaves(b) || NeededTool(b) == "axe" || Blocks.Get(b)?.Shape is "plant" or "flat") y--; else break;
 		}
 		return y;
 	}
