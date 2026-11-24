@@ -5,8 +5,10 @@
     <RootNamespace>Cubeland</RootNamespace>
     <Nullable>disable</Nullable>
   </PropertyGroup>
-  <!-- your font and gui_atlas.png, drawn the same way as in the game -->
+  <!-- your font and gui_atlas.png, drawn the same way as in the game (GameData.cs: the font's letter names come from
+       data/texture-names.json, which build-launcher.ps1 copies into launcher\data\) -->
   <ItemGroup>
     <Compile Include="../src/Skin.cs" Link="src/Skin.cs" />
+    <Compile Include="../src/GameData.cs" Link="src/GameData.cs" />
   </ItemGroup>
 </Project>

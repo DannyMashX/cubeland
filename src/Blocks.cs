@@ -37,13 +37,19 @@ public class BlockDef
 	public int Axis;               // logs: which way it lies (0 upright, 1 along x, 2 along z)
 	public int Layers;             // snow: how many layers deep (1-7; a full block is the Snow Block)
 	public int Inner, Snowed;      // snow-logged: the torch or flower it holds, and how many layers of snow are round it
+	public bool Log;               // a tree's log, standing (lying ones: see Blocks.IsLogBlock)
+	public int Fruit;              // leaves: what they drop now and then (1 in 4, broken without a hoe)
+	public int Sapling;            // leaves: their sapling (dropped now and then)
+	public string Grows;           // a sapling: the tree it grows into
+	public bool Sand;              // a sapling that can be planted on Sand too
+	public int Hinge, Open, Half;  // a door as it stands: its hinge (0 left, 1 right, as you look at its front), open (0/1), half (0 bottom, 1 top)
 	public BlockDef Copy() => (BlockDef)MemberwiseClone();
 }
 
 // Every block and item in the game (the same numbers as the web version, so saved worlds line up).
 public static partial class Blocks
 {
-	public const int MaxId = 2200;
+	public const int MaxId = 4096;
 	// Strata (640-tall worlds): from sea level down, a new layer of stone every 64 blocks, down to bedrock at the very bottom.
 	// Layer 1 is the normal Stone (and everything above sea level); layers 2-8 are blocks 113-119, each darker and
 	// harder: past a few layers, only a better pickaxe can mine it (see StrataPickaxe). All of them are called Stone.
@@ -64,7 +70,12 @@ public static partial class Blocks
 	public const int DeepFormItem = 1800;
 	// the item for a piece / slab / stairs... of block b
 	public static int BenchOut(string mode, int b) => FormItem(mode == "pieces" ? "piece" : mode, b);   // what a bench mode makes from block b
-	public static int FormItem(string form, int b)
+	// (from data/blocks.json's FORMS rows; 0: b can't be cut into that form. The older blocks' ids still follow the old sums,
+	// FormSum, which the data check holds them to: 100 + b, 1000 + b..., and the deep stone sets' and ExtraFormBlocks' from
+	// 1800 and 2000; the newer woods' are B + 10 to B + 46, in their WOODS block)
+	public static int FormItem(string form, int b) => formItem.TryGetValue((form, b), out int id) ? id : 0;
+	static readonly Dictionary<(string form, int b), int> formItem = new();
+	public static int FormSum(string form, int b)
 	{
 		int i = Array.IndexOf(DeepBlocks, b), e = Array.IndexOf(ExtraFormBlocks, b);
 		return i >= 0 ? DeepFormItem + 7 * i + Array.IndexOf(Forms, form) : e >= 0 ? ExtraFormItem + 7 * e + Array.IndexOf(Forms, form)
@@ -98,12 +109,15 @@ public static partial class Blocks
 	public const int SandstoneBricks = 162, ChiseledSandstone = 199, SmoothSandstone = 202, Mud = 203, MudBricks = 204, Peat = 205;
 	public const int Dates = 705;   // food, from Palm Leaves
 	// Logs lie the way you put them down: on the top or bottom of something they stand upright; on a side they lie pointing
-	// out from it. Each kind of log has two lying blocks (360-375): 360 + 2k along x, 361 + 2k along z, k its place in Logs.
+	// out from it. Each kind of log has two lying blocks, one along x (axis 1) and one along z (axis 2), found from data/blocks.json:
+	// the rows that lie and drop the log (the older woods' are 360-375). The logs themselves are the rows with "log".
 	// (They're numbered over 255, so the world's growing puts them in after it's packed: see WorldGen.Late.)
-	public static readonly int[] Logs = { Log, StrippedLog, FirLog, StrippedFirLog, PalmLog, StrippedPalmLog, WillowLog, StrippedWillowLog };
-	public const int TurnedLogs = 360;
-	public static int Turned(int log, int axis) { int k = Array.IndexOf(Logs, log); return k < 0 || axis == 0 ? log : TurnedLogs + 2 * k + axis - 1; }
-	public static int LogOf(int b) => b >= TurnedLogs && b < TurnedLogs + 16 ? Logs[(b - TurnedLogs) / 2] : b;   // (the upright log of a lying one)
+	public static int[] Logs { get; private set; }
+	public const int TurnedLogs = 360;   // (the older woods' lying logs, 360-375)
+	static readonly Dictionary<(int log, int axis), int> turned = new();
+	static readonly Dictionary<int, int> logOf = new();
+	public static int Turned(int log, int axis) => axis != 0 && turned.TryGetValue((log, axis), out int t) ? t : log;
+	public static int LogOf(int b) => logOf.TryGetValue(b, out int l) ? l : b;   // (the upright log of a lying one)
 	// Snow: Snow (380-386) lies in layers, 1 to 7 deep (each an eighth of a block); putting Snow on Snow adds a layer, and an
 	// 8th layer makes it a Snow Block (387). Only the 2nd layer up is solid (you sink into the first). It falls off whatever
 	// it was lying on if that goes. Breaking it gives you a Snow for each layer. Snowy lands are covered in one layer.
@@ -154,7 +168,7 @@ public static partial class Blocks
 	public static int OreIndex(int b) { int k = Array.IndexOf(Ores, b); return k >= 0 ? k : b >= DeepOre && b < DeepOre + 28 ? (b - DeepOre) / 7 : -1; }
 	public static readonly int[] DeepOres = Enumerable.Range(DeepOre, 28).ToArray();
 	// ---- Stage breaking (survival): Stone, ores and logs break a few stages with each swing, and only come out at the last ----
-	public static bool IsLogBlock(int b) => Array.IndexOf(Logs, b) >= 0 || (b >= TurnedLogs && b < TurnedLogs + 16);
+	public static bool IsLogBlock(int b) => Get(b)?.Log == true || logOf.ContainsKey(b);
 	// how many stages block b has as the world grew it (0: it breaks at once, as always): Stone and ores 4 x their layer,
 	// Sandstone and Terracotta 4, logs 8. Blocks a player put down (or changed) always break at once, the old way.
 	public static int Stages(int b)
@@ -260,6 +274,28 @@ public static partial class Blocks
 			if (B[r.id] != null) throw new InvalidOperationException($"data/blocks.json: block {r.id} ({r.name}) is there twice");
 			B[r.id] = b;
 		}
+		// the trees' logs (rows with "log"), and the lying logs: the rows that lie (axis) and drop a log
+		Logs = rows.Where(x => x.r.log).Select(x => x.r.id).ToArray();
+		foreach (var (r, b) in rows)
+			if (b.Axis > 0 && Get(b.Drop)?.Log == true)
+			{
+				if (!turned.TryAdd((b.Drop, b.Axis), r.id)) throw new InvalidOperationException($"data/blocks.json: {b.Name} {r.id} lies along axis {b.Axis}, and so does {turned[(b.Drop, b.Axis)]}");
+				logOf[r.id] = b.Drop;
+			}
+		// the doors as they stand (DOORS): each door's 32 states, from its row (see DoorBlocks); doorOf: an item's first state
+		foreach (var dr in Nums.Blocks.DOORS ?? Array.Empty<DoorRow>())
+		{
+			int of = KeyRef(keys, dr.of, $"the DOORS row of {dr.item}");
+			if (dr.item < 1 || dr.item >= MaxId || B[dr.item] is not { Item: true } itemDef) throw new InvalidOperationException($"data/blocks.json: a DOORS row's item {dr.item} isn't an item");
+			string itemKey = keys.First(kv => kv.Value == dr.item).Key;
+			foreach (var (id, d) in DoorBlocks(dr, of, B[of], dr.item, itemDef, itemKey, P))
+			{
+				if (id < 1 || id >= MaxId) throw new InvalidOperationException($"data/blocks.json: {d.Name} (standing) is {id}, which isn't 1-{MaxId - 1}");
+				if (B[id] != null) throw new InvalidOperationException($"data/blocks.json: {d.Name} (standing) is {id}, which is {B[id].Name} too");
+				B[id] = d;
+			}
+			doorOf[dr.item] = dr.first;
+		}
 		// Torches (rows: lit = 22-41, smoldering = 81-92, burnt = 170-181, ever = 182-193), found by (burn, wall, count)
 		foreach (var r in Nums.Blocks.TORCHES ?? Array.Empty<BlockRow>()) torchIds[$"{B[r.id].Burn}:{B[r.id].Wi}:{B[r.id].Count}"] = r.id;
 		// the tools (rows: stone 207-211; copper, iron, bronite, rosium, steel from 644), in the rows' order
@@ -280,6 +316,7 @@ public static partial class Blocks
 				if (id < 1 || id >= MaxId) throw new InvalidOperationException($"data/blocks.json: {d.Name} is {id}, which isn't 1-{MaxId - 1}");
 				if (B[id] != null) throw new InvalidOperationException($"data/blocks.json: {d.Name} is {id}, which is {B[id].Name} too");
 				B[id] = d;
+				formItem[(d.Piece > 0 ? "piece" : d.Form, of)] = id;
 			}
 		}
 		// snow-logged: a torch, flower or other small thing with snow lying round it (data/blocks.json's SNOWY; see SnowLogged): its
@@ -305,6 +342,14 @@ public static partial class Blocks
 			looks[g.Key] = g.OrderBy(x => x.b.Look).Select(x => x.r.id).Prepend(g.Key).ToArray();
 	}
 	static readonly Dictionary<int, int[]> looks = new();
+
+	// ---- Doors: one for each wood (data/blocks.json's DOORS). The item puts down a door 2 blocks tall: 32 states (see DoorBlocks) ----
+	static readonly Dictionary<int, int> doorOf = new();
+	public static bool IsDoor(int id) => Get(id)?.Shape == "door";
+	public static int DoorFirst(int item) => doorOf.TryGetValue(item, out int f) ? f : 0;   // (0: not a door item)
+	// the door made from `item` in this state, and a door's state with one thing changed
+	public static int DoorState(int item, int facing, int hinge, bool open, int half) => DoorFirst(item) + facing * 8 + hinge * 4 + (open ? 2 : 0) + half;
+	public static int DoorWith(int door, int facing, int hinge, bool open, int half) => DoorState(B[door].Drop, facing, hinge, open, half);
 
 	public static bool IsTorch(int id) => Get(id)?.Shape == "torch";
 	public static bool IsWater(int id) => id >= Water && id <= Water + 7;

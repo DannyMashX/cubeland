@@ -31,6 +31,8 @@ public static class Worlds
 		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: lucky ticks so far in each stage)
 		public Dictionary<int, int> Fert = new();   // fertilized soil -> harvests left
 		public Dictionary<int, float> Grazed = new();   // grass a cow ate -> seconds until it grows back
+		public Dictionary<int, float> Saplings = new();   // saplings: lucky ticks so far
+		public int[] Grown = Array.Empty<int>();          // the blocks saplings grew (natural, not put there)
 		public Dictionary<int, Kilns.Kiln> Kilns = new();
 	}
 	static readonly JsonSerializerOptions Opts = new() { IncludeFields = true };

@@ -36,6 +36,7 @@ public class Player
 			return;
 		}
 		if (Blocks.B[id].Shape == "half") { into.Add(new Aabb(new Vector3(x, y, z), new Vector3(1, 0.5f, 1))); return; }   // a half-tall block: just its bottom half
+		if (Blocks.B[id].Shape == "door") { var bx = Blocks.B[id].Box; into.Add(new Aabb(new Vector3(x + bx[0], y + bx[1], z + bx[2]), new Vector3(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2]))); return; }   // a door: just its panel
 		if (Blocks.B[id].Shape == "snow") { if (Blocks.B[id].Layers > 1) into.Add(new Aabb(new Vector3(x, y, z), new Vector3(1, (Blocks.B[id].Layers - 1) / 8f, 1))); return; }   // snow: you sink in one layer
 		if (Blocks.B[id].NoCollide) return;
 		into.Add(new Aabb(new Vector3(x, y, z), Vector3.One));

@@ -62,7 +62,7 @@ public partial class Main
 	// holding the left button on Stone, an ore or a log: another swing each SwingTime
 	void HoldToBreak(float dt)
 	{
-		if (!Survival || dead || invOpen || menuOpen || Input.MouseMode != LockMode || !Input.IsMouseButtonPressed(MouseButton.Left)) { holdSwing = SwingTime; return; }
+		if (!Survival || dead || invOpen || menuOpen || !Locked || !LeftDown) { holdSwing = SwingTime; return; }
 		if ((holdSwing -= dt) > 0) return;
 		holdSwing = SwingTime;
 		if (MobInSights() != null || player.Raycast() is not { } h || h.Sub >= 0 || Blocks.Stages(h.Id) == 0 || !StageBreakingOn || !Natural(h.X, h.Y, h.Z)) return;
@@ -127,7 +127,8 @@ public partial class Main
 		{
 			int b = world.GetBlock(x, y, z);
 			if (rnd.NextDouble() < 0.2) Collect(Blocks.Stick, x, y, z);   // (what leaves give broken by hand)
-			if (b == Blocks.PalmLeaves && rnd.NextDouble() < 0.25) Collect(Blocks.Dates, x, y, z);
+			if (Blocks.B[b].Fruit > 0 && rnd.NextDouble() < 0.25) Collect(Blocks.B[b].Fruit, x, y, z);   // (fruit trees' leaves: Dates, Cherries...)
+			if (Blocks.B[b].Sapling > 0 && rnd.NextDouble() < SaplingDrop) Collect(Blocks.B[b].Sapling, x, y, z);   // (and now and then their sapling)
 			world.SetBlock(x, y, z, 0);
 		}
 		// then what lay on them (snow, torches) falls off
@@ -145,6 +146,7 @@ public partial class Main
 	public static readonly bool StageBreakingOn = StageBreakingReady || Array.IndexOf(OS.GetCmdlineUserArgs(), "--stagebreak") >= 0;
 	public static readonly bool TreeFellingOn = TreeFellingReady || Array.IndexOf(OS.GetCmdlineUserArgs(), "--treefell") >= 0;
 	// as the world grew it: nobody has put a block down there or changed it (a half-broken block is still natural)
-	bool Natural(int x, int y, int z) => !world.Edits.ContainsKey(World.Idx(x, y, z));
+	// (a sapling's tree is natural too: it grew)
+	bool Natural(int x, int y, int z) { int i = World.Idx(x, y, z); return !world.Edits.ContainsKey(i) || world.Grown.Contains(i); }
 	bool NaturalLog(int x, int y, int z) => y >= 0 && Blocks.IsLogBlock(world.GetBlock(x, y, z)) && Natural(x, y, z);
 }

@@ -108,7 +108,7 @@ public partial class Main
 		if (player.Raycast() is not { } h) return;
 		int b = h.Id;
 		if (h.Sub >= 0 && world.PieceMap.TryGetValue(World.Idx(h.X, h.Y, h.Z), out var a) && a != null) b = Blocks.FormItem("piece", World.SpotBlock(a[h.Sub]));
-		else { b = Blocks.Plain(b); b = Blocks.IsTorch(b) ? Blocks.TorchDrop(b) : Blocks.IsLogBlock(b) ? Blocks.LogOf(b) : Blocks.IsSnow(b) ? Blocks.Snow : b; }
+		else { b = Blocks.Plain(b); b = Blocks.IsTorch(b) ? Blocks.TorchDrop(b) : Blocks.IsDoor(b) ? Blocks.B[b].Drop : Blocks.IsLogBlock(b) ? Blocks.LogOf(b) : Blocks.IsSnow(b) ? Blocks.Snow : b; }
 		if (Blocks.Get(b) == null || b == 0) return;
 		int have = Array.IndexOf(inv.Id, b, 0, Inventory.Slots);
 		if (have >= 0) { SelectSlot(have); return; }

@@ -37,7 +37,10 @@ public partial class Main : Node3D
 	public override void _Ready()
 	{
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
-		if (DataTools()) { SetProcess(false); GetTree().Quit(); return; }   // (testing the shared data files: see Main.Data.cs)
+		// a test run's window doesn't take the focus (from here on: Windows may still bring it up when it opens) and never
+		// touches the real pointer (see TestRun)
+		if (TestRun && DisplayServer.GetName() != "headless") DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.NoFocus, true);
+		if (DataTools()){ SetProcess(false); GetTree().Quit(); return; }   // (testing the shared data files: see Main.Data.cs)
 		// menus and the hotbar follow your Windows display scaling, like the web edition does in a browser, but always
 		// by a whole number (150% and up makes them twice as big), so every pixel of the pixel art stays the same size.
 		// --uiscale=N for testing.
@@ -109,6 +112,7 @@ public partial class Main : Node3D
 	{
 		ready = true;
 		stages.Clear(); foreach (var (m, _) in cracks.Values) if (GodotObject.IsInstanceValid(m)) m.QueueFree(); cracks.Clear();   // (a new world: no blocks half broken)
+		ClearDoorSwings();
 		loading.Visible = false;
 		mesher = new ChunkMesher(world);
 		player = new Player(world);
@@ -146,7 +150,7 @@ public partial class Main : Node3D
 		}
 		if (netClient) ConnectToHost();
 		// tests go straight in; otherwise the main menu (or the Ready screen) is showing
-		Input.MouseMode = (tempWorld || HasArg("--play")) && !menuOpen ? LockMode : Input.MouseModeEnum.Visible;
+		if ((tempWorld || HasArg("--play")) && !menuOpen) Lock(); else Unlock();
 	}
 	Vector3 FindSpawn()
 	{
@@ -170,14 +174,14 @@ public partial class Main : Node3D
 		Atlas.SpinSaw(delta);   // (the Cutter's saw blade)
 		if (current == null) { MenuOnly(dt); return; }
 		PlaceToolRow(); PlaceTip(); UpdateHeld();
-		if (ready) { HoldToBreak(dt); UpdateCracks(dt); }
+		if (ready) { HoldToBreak(dt); UpdateCracks(dt); UpdateDoorSwings(dt); }
 		if (!ready)
 		{
 			if (genTask.IsFaulted) { loading.Text = "Couldn't make the world:\n" + genTask.Exception?.InnerException?.Message; return; }
 			if (genTask.IsCompleted) StartPlaying();
 			else { loading.Text = $"Making the world... {(int)(genProgress * 100)}%"; loading.Visible = !menuOpen; return; }
 		}
-		bool moving = Input.MouseMode == LockMode && !invOpen && !dead && (!netClient || welcomed);   // (a joined game waits for the host's blocks)
+		bool moving = Locked && !invOpen && !dead && (!netClient || welcomed);   // (a joined game waits for the host's blocks)
 		if (!dead && (moving || (inv.Survival && invOpen && (!netClient || welcomed))))   // (survival keeps falling while the inventory is open)
 		{
 			var ev = player.Update(dt, !moving ? default : new Player.Keys
@@ -378,7 +382,7 @@ public partial class Main : Node3D
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -413,7 +417,7 @@ public partial class Main : Node3D
 				GD.Print("worlds: " + string.Join(", ", Worlds.List().Select(w => w.Name + " " + w.Seed)));
 			}
 		}
-		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Input.MouseMode = LockMode; }   // menus closed, as if playing
+		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Lock(); }   // menus closed, as if playing
 		var timeArg = args.FirstOrDefault(a => a.StartsWith("--time="));   // (test: the time of day again, after the world loaded its own)
 		if (timeArg != null && !timeArgDone) { timeArgDone = true; sky.TimeOfDay = float.Parse(timeArg[7..], System.Globalization.CultureInfo.InvariantCulture); }
 		var holdArg = args.FirstOrDefault(a => a.StartsWith("--hold="));   // (test: put item ID in the first hotbar slot and hold it)
@@ -446,14 +450,15 @@ public partial class Main : Node3D
 				var at = pb.GetGlobalRect().GetCenter() * GetWindow().ContentScaleFactor;   // (the window's pixels)
 				clickStep++;
 				GD.Print($"clicks: clicking \"{pb.Text}\" ({pb.GetPath()}) at {at}");
-				Input.ParseInputEvent(new InputEventMouseMotion { Position = at, GlobalPosition = at });
-				Input.ParseInputEvent(new InputEventMouseButton { Position = at, GlobalPosition = at, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left });
-				Input.ParseInputEvent(new InputEventMouseButton { Position = at, GlobalPosition = at, ButtonIndex = MouseButton.Left, Pressed = false });
+				Input.ParseInputEvent(new InputEventMouseMotion { Position = at, GlobalPosition = at, Device = TestDevice });
+				Input.ParseInputEvent(new InputEventMouseButton { Position = at, GlobalPosition = at, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left, Device = TestDevice });
+				Input.ParseInputEvent(new InputEventMouseButton { Position = at, GlobalPosition = at, ButtonIndex = MouseButton.Left, Pressed = false, Device = TestDevice });
 			}
 		}
-		if (args.Contains("--mousemove") && !menuOpen && Input.MouseMode == LockMode)   // (test: the mouse moving right, through the same path a real one takes)
+		if (args.Contains("--mousemove") && !menuOpen && Locked)   // (test: the mouse moving right: a made-up movement, 8 pixels a frame; the real pointer is left alone)
 		{
-			DisplayServer.WarpMouse(DisplayServer.WindowGetSize() / 2 + new Vector2I(8, 0));   // (the real pointer, 8 pixels right of the middle)
+			var mid = (Vector2)(DisplayServer.WindowGetSize() / 2);
+			Input.ParseInputEvent(new InputEventMouseMotion { Relative = new Vector2(8, 0), Position = mid, GlobalPosition = mid, Device = TestDevice });
 			if ((int)(shotTimer * 2) != (int)((shotTimer - (float)GetProcessDeltaTime()) * 2))
 				GD.Print($"mousemove: yaw {player.Yaw:F2}, mouse over: {GetViewport().GuiGetHoveredControl()?.GetPath()}");
 		}
@@ -504,7 +509,7 @@ public partial class Main : Node3D
 		{   // a Dan and the night mob (Grr Angry until the Zombie is switched on) just in front of you, facing you
 			mobsShown = true;
 			if (menuOpen) ShowMainMenu(false);
-			Input.MouseMode = LockMode;   // playing, so the pause screen stays away
+			Lock();   // playing, so the pause screen stays away
 			var ya = args.FirstOrDefault(a => a.StartsWith("--yaw="));
 			if (ya != null) player.Yaw = float.Parse(ya[6..], System.Globalization.CultureInfo.InvariantCulture);
 			var fwd = new Vector3(-MathF.Sin(player.Yaw), 0, -MathF.Cos(player.Yaw)); var side = new Vector3(fwd.Z, 0, -fwd.X);
@@ -816,6 +821,29 @@ public partial class Main : Node3D
 			var lit = (Vector3)hearts[^1].Mat.GetShaderParameter("light");
 			Check($"hearts take the light where they are (cave {dark.X:0.00}, open {lit.X:0.00})", dark.X < 0.3f && lit.X > 0.7f);
 			sky.TimeOfDay = 0.3f;
+			// right-click with something in the offhand: what's in your hand goes down if it can; otherwise the offhand is used
+			{
+				int off = Inventory.Off0 + inv.OffSel, keep0 = inv.Id[0], keepOff = inv.Id[off];
+				var (pos, yaw, pitch, fly) = (player.Pos, player.Yaw, player.Pitch, player.Flying);
+				inv.SetSlot(off, Blocks.Torch, 4); SelectSlot(0);
+				bool Uses(int held, bool main) { inv.SetSlot(0, held); return ActSlot(MouseButton.Right) == (main ? 0 : off); }
+				Check("right-click: a block in your hand goes down, not the offhand's torch", Uses(Blocks.Stone, true));
+				Check("so do slabs and stairs, pieces, doors, torches, Rocks and Clay Balls", Uses(Blocks.FormItem("slab", Blocks.Stone), true) && Uses(Blocks.FormItem("stairs", Blocks.Planks), true)
+					&& Uses(Blocks.FormItem("piece", Blocks.Planks), true) && Uses(DataKeys.IdOf("cedar_door"), true) && Uses(Blocks.SmolderingTorch, true) && Uses(Blocks.Rock, true)
+					&& Uses(Blocks.ClayBall, true));
+				Check("an empty hand, a tool, food, a Snowball or a Stick: the offhand", Uses(0, false) && Uses(Blocks.CrudeAxe, false) && Uses(Blocks.Dates, false) && Uses(Blocks.Snowball, false) && Uses(Blocks.Stick, false));
+				inv.SetSlot(off, 0);
+				Check("nothing in the offhand: your hand, whatever it holds", Uses(Blocks.Stick, true) && Uses(0, true));
+				inv.SetSlot(off, Blocks.Torch, 4);
+				int hx = (int)pos.X + 2, hz = (int)pos.Z + 2, ht = world.Heights[hz * World.WX + hx];
+				world.SetBlock(hx, ht + 1, hz, 0); world.SetBlock(hx, ht + 2, hz, 0);
+				player.Pos = new Vector3(hx + 0.5f, ht + 2.2f, hz + 0.5f); player.Flying = true; player.Yaw = 0; player.Pitch = -MathF.PI / 2 + 0.001f;
+				inv.SetSlot(0, Blocks.Stone, 5); inv.Act = ActSlot(MouseButton.Right); try { Place(); } finally { inv.Act = -1; }
+				Check("and it really goes down: Stone placed, the offhand's torches all there", world.GetBlock(hx, ht + 1, hz) == Blocks.Stone && inv.Count[0] == 4 && inv.Id[off] == Blocks.Torch && inv.Count[off] == 4);
+				world.SetBlock(hx, ht + 1, hz, 0);
+				inv.SetSlot(0, keep0); inv.SetSlot(off, keepOff); SelectSlot(0);
+				(player.Pos, player.Yaw, player.Pitch, player.Flying) = (pos, yaw, pitch, fly);
+			}
 			for (int k = 0; k < 6; k++) AddHeart(player.EyePos + new Vector3(-0.6f + k * 0.25f, -0.2f, -1.6f), k * 0.15f);   // (to look at)
 		}
 		if (args.Contains("--heldtest") && !heldTested && !menuOpen && inv.Survival && shotTimer > 0.5f)
@@ -907,6 +935,203 @@ public partial class Main : Node3D
 			longChecked = true;
 			CheckHudLayout();
 		}
+		if (args.Contains("--saplingtest") && !saplingTested && !menuOpen && shotTimer > 0.3f)
+		{   // (test: saplings: the 16 and the leaves that drop them; planted only on their ground; growing (lucky ticks, Bone Ash) into
+			//  the tree the world grows there, only with room for its trunk; a Redwood from four; an Oak in the plains; what grows is
+			//  natural; the save. Best with --survival --biomes)
+			saplingTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int Id(string key) => DataKeys.IdOf(key);
+			int oak = Id("oak_sapling"), palm = Id("palm_sapling"), cedar = Id("cedar_sapling"), redwood = Id("redwood_sapling");
+			var saplings = Enumerable.Range(1, Blocks.MaxId - 1).Where(i => Blocks.Get(i)?.Grows != null).ToArray();
+			var dropping = Enumerable.Range(1, Blocks.MaxId - 1).Where(i => Blocks.Get(i)?.Sapling > 0).ToArray();
+			Check($"16 saplings ({saplings.Length}); the 16 trees' leaves drop their own ({dropping.Length}; Dead has none)", saplings.Length == 16 && dropping.Length == 16
+				&& dropping.All(i => Blocks.IsLeaves(i) && Blocks.B[Blocks.B[i].Sapling].Grows != null) && Blocks.B[Blocks.Leaves].Sapling == oak
+				&& Blocks.B[Blocks.PalmLeaves].Sapling == palm && Blocks.B[Id("cedar_leaves")].Sapling == cedar && Blocks.B[Id("redwood_leaves")].Sapling == redwood);
+			Check("only Palm, Orange and Palo Verde grow on Sand too", string.Join(",", saplings.Where(i => Blocks.B[i].Sand).Select(DataKeys.KeyOf)) == "orange_sapling,palo_verde_sapling,palm_sapling");
+			Check("saplings are blocks (the main hand puts them down), in the creative inventory, plants you walk through",
+				saplings.All(i => CanPutDown(i) && AllCreative().Contains(i) && Blocks.B[i].Shape == "plant" && Blocks.B[i].NoCollide));
+			// a flat field of Grass, clear high above
+			int x0 = (int)player.Pos.X - 10, z0 = (int)player.Pos.Z - 4, y = world.Heights[z0 * World.WX + x0] + 1;
+			void Field(int ax, int az, int w, int d, int yy, int up) { for (int dx = 0; dx < w; dx++) for (int dz = 0; dz < d; dz++) { world.SetBlock(ax + dx, yy - 1, az + dz, Blocks.Grass); for (int u = 0; u < up; u++) if (world.GetBlock(ax + dx, yy + u, az + dz) != 0) world.SetBlock(ax + dx, yy + u, az + dz, 0); } }
+			Field(x0 - 6, z0 - 6, 46, 26, y, 44);
+			bool Plant(int id, int x, int z)
+			{   // (standing above the spot, looking straight down, holding it)
+				inv.SetSlot(inv.Selected, id); player.Pos = new Vector3(x + 0.5f, y + 1.2f, z + 0.5f); player.Vel = Vector3.Zero; player.Flying = true;
+				player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0; Place(); return world.GetBlock(x, y, z) == id;
+			}
+			int pz = z0 + 14;
+			Check("an Oak sapling plants on Grass (and starts counting its lucky ticks)", Plant(oak, x0, pz) && world.Saplings.ContainsKey(World.Idx(x0, y, pz)));
+			world.SetBlock(x0 + 2, y - 1, pz, Blocks.Sand); world.SetBlock(x0 + 4, y - 1, pz, Blocks.Stone); world.SetBlock(x0 + 6, y - 1, pz, Blocks.Tilled); world.SetBlock(x0 + 8, y, pz, Blocks.Snow);
+			Check("but not on Sand, Stone or tilled soil, nor into a layer of snow", !Plant(oak, x0 + 2, pz) && !Plant(oak, x0 + 4, pz) && !Plant(oak, x0 + 6, pz) && !Plant(oak, x0 + 8, pz) && world.GetBlock(x0 + 8, y, pz) == Blocks.Snow);
+			int[] grounds = { Blocks.Dirt, Blocks.SnowyGrass, Blocks.SwampGrass, Blocks.Mud, Blocks.Peat };
+			for (int k = 0; k < grounds.Length; k++) world.SetBlock(x0 + 10 + 2 * k, y - 1, pz, grounds[k]);
+			Check("a Palm sapling plants on Sand too; any on Dirt, Snowy Grass, Swamp Grass, Mud or Peat", Plant(palm, x0 + 2, pz) && Enumerable.Range(0, grounds.Length).All(k => Plant(cedar, x0 + 10 + 2 * k, pz)));
+			world.SetBlock(x0 + 2, y - 1, pz, Blocks.Dirt);
+			Check("it pops off when the ground under it goes", world.GetBlock(x0 + 2, y, pz) == palm);
+			for (int x = x0; x < x0 + 20; x++) { world.SetBlock(x, y, pz, 0); world.SetBlock(x, y - 1, pz, Blocks.Grass); }
+			Check("(and stops counting when it's gone)", !world.Saplings.ContainsKey(World.Idx(x0, y, pz)));
+			// growing: an Oak sapling grows by itself into the tree the world grows there; another under a block waits for room
+			int gi = World.Idx(x0, y, z0), nx = x0 + 10, ni = World.Idx(nx, y, z0);
+			string want = world.Gen.BiomeOf(x0, z0) == WorldGen.Plains ? "prairie_oak" : "oak";
+			var plan = world.Gen.PlanTree(want, x0, y - 1, z0, (a, b, c) => World.Idx(a, b, c) == gi ? 0 : world.GetBlock(a, b, c), (a, c) => y - 1);
+			var roomy = world.Gen.PlanTree("oak", nx, y - 1, z0, (a, b, c) => World.Idx(a, b, c) == ni ? 0 : world.GetBlock(a, b, c), (a, c) => y - 1);
+			var leaf = roomy.First(p => Blocks.IsLeaves(p.id) && p.y > y + 1);
+			Plant(oak, x0, z0); Plant(oak, nx, z0);
+			world.SetBlock(nx, y + 2, z0, Blocks.Stone); world.SetBlock(leaf.x, leaf.y, leaf.z, Blocks.Glass);
+			Check("a sapling under a block has no room to grow", world.GrowSapling(nx, y, z0, justLook: true) == World.Growth.NoRoom);
+			int secs = 0;
+			while ((world.GetBlock(x0, y, z0) == oak || world.Saplings.GetValueOrDefault(ni) < World.SaplingHits - 1) && secs < 40000) { world.TickTimers(1); secs++; }
+			Check($"a sapling grows by itself after a while ({secs} s here; {World.SaplingTime} s on average)", world.GetBlock(x0, y, z0) != oak && secs > 3);
+			Check($"into the {want} the world grows there, every block of it ({plan?.Count} blocks)", plan != null && plan.All(p => world.GetBlock(p.x, p.y, p.z) == p.id) && world.GetBlock(x0, y, z0) == Blocks.Log);
+			Check("what grew is natural (felling and stage breaking treat it as a tree), and saved", plan != null && plan.All(p => Natural(p.x, p.y, p.z) && world.Edits.ContainsKey(World.Idx(p.x, p.y, p.z))) && !world.Saplings.ContainsKey(gi));
+			Check("with no room for its trunk, it waits (at its last lucky tick)", world.GetBlock(nx, y, z0) == oak && world.Saplings.GetValueOrDefault(ni) == World.SaplingHits - 1 && world.GetBlock(nx, y + 2, z0) == Blocks.Stone);
+			world.SetBlock(nx, y + 2, z0, 0); secs = 0;
+			while (world.GetBlock(nx, y, z0) == oak && secs < 40000) { world.TickTimers(1); secs++; }
+			Check($"with room again, it grows at its next lucky tick ({secs} s)", world.GetBlock(nx, y, z0) == Blocks.Log);
+			Check("its leaves never break anything (the Glass in their way is still there)", world.GetBlock(leaf.x, leaf.y, leaf.z) == Blocks.Glass);
+			world.SetBlock(x0, y + 1, z0, 0);
+			Check("a grown block changed is yours (not natural any more)", !world.Grown.Contains(World.Idx(x0, y + 1, z0)) && !Natural(x0, y + 1, z0));
+			// a Redwood: only from four saplings in a square
+			int rx = x0 + 20, rlog = Id("redwood_log");
+			world.SetBlock(rx, y, z0, redwood);
+			Check("a lone Redwood sapling never grows", world.GrowSapling(rx, y, z0, justLook: true) == World.Growth.NeedsFour);
+			world.SetBlock(rx + 1, y, z0, redwood); world.SetBlock(rx, y, z0 + 1, redwood);
+			Check("nor three of them", world.GrowSapling(rx + 1, y, z0, justLook: true) == World.Growth.NeedsFour);
+			world.SetBlock(rx + 1, y, z0 + 1, redwood);
+			Check("four in a square grow one Redwood (from any of them), its 2 x 2 trunk where they stood", world.GrowSapling(rx + 1, y, z0 + 1) == World.Growth.Grew
+				&& new[] { (0, 0), (1, 0), (0, 1), (1, 1) }.All(c => world.GetBlock(rx + c.Item1, y, z0 + c.Item2) == rlog && world.GetBlock(rx + c.Item1, y + 20, z0 + c.Item2) == rlog));
+			// Bone Ash (survival: it's used up)
+			if (inv.Survival)
+			{
+				int bx = x0 + 30;
+				world.SetBlock(bx, y, z0, cedar); world.SetBlock(bx, y + 3, z0, Blocks.Stone); world.SetBlock(bx + 4, y, z0, redwood);
+				inv.SetSlot(inv.Selected, Blocks.BoneAsh, 64); int Ash() => inv.Count[inv.Selected];
+				FarmUse(bx, y, z0, cedar); FarmUse(bx + 4, y, z0, redwood);
+				Check("Bone Ash on a sapling with no room, or a lone Redwood: not used", Ash() == 64 && world.GetBlock(bx, y, z0) == cedar && world.GetBlock(bx + 4, y, z0) == redwood);
+				world.SetBlock(bx, y + 3, z0, 0);
+				int used = 0; while (world.GetBlock(bx, y, z0) == cedar && used < 60) { FarmUse(bx, y, z0, cedar); used++; }
+				Check($"with room, each Bone Ash is used, and now and then the sapling grows at once ({used} used)", world.GetBlock(bx, y, z0) == Id("cedar_log") && Ash() == 64 - used);
+				world.SetBlock(bx + 4, y, z0, 0);
+				// leaves broken without a hoe now and then drop their sapling; with a hoe, never
+				int cl = Id("cedar_leaves");
+				int Picked(int held)
+				{
+					foreach (var dr in drops.All.ToArray()) drops.Remove(dr);
+					// (a fresh one each time: a hoe wears out)
+					for (int k = 0; k < 200; k++) { inv.SetSlot(inv.Selected, held); world.SetBlock(x0 + 12, y, pz, cl); player.Pos = new Vector3(x0 + 12.5f, y + 1.2f, pz + 0.5f); player.Pitch = -MathF.PI / 2 + 0.001f; Break(); }
+					return drops.All.Count(d => d.Id == cedar);
+				}
+				int byHand = Picked(0), byHoe = Picked(Blocks.Tools.First(t => Blocks.B[t].Tool == "hoe"));
+				Check($"Cedar Leaves drop Cedar Saplings by hand now and then ({byHand} in 200), never with a hoe ({byHoe})", byHand is > 4 and < 45 && byHoe == 0);
+				world.SetBlock(x0 + 12, y, pz, 0);
+			}
+			// an Oak sapling in the plains grows a prairie oak (anywhere else, the woods' oak)
+			int qx = -1, qz = -1;
+			for (int z = 12; z < World.WZ - 12 && qx < 0; z += 5) for (int x = 12; x < World.WX - 12; x += 5)
+				if (world.Gen.BiomeOf(x, z) == WorldGen.Plains && Math.Abs(x - x0) + Math.Abs(z - z0) > 60) { qx = x; qz = z; break; }
+			if (qx < 0) Check("a plains spot to try an Oak sapling in (a Biomes world: --biomes)", false);
+			else
+			{
+				int qy = world.Heights[qz * World.WX + qx] + 1, qi = World.Idx(qx, qy, qz);
+				Field(qx - 5, qz - 5, 11, 11, qy, 16); world.SetBlock(qx, qy, qz, oak);
+				var prairie = world.Gen.PlanTree("prairie_oak", qx, qy - 1, qz, (a, b, c) => World.Idx(a, b, c) == qi ? 0 : world.GetBlock(a, b, c), (a, c) => qy - 1);
+				Check($"an Oak sapling in the plains grows a prairie oak ({prairie?.Count} blocks)", world.GrowSapling(qx, qy, qz) == World.Growth.Grew && prairie != null && prairie.All(p => world.GetBlock(p.x, p.y, p.z) == p.id));
+			}
+			// the save: lucky ticks so far and what grew
+			Plant(oak, x0 + 4, pz); world.Saplings[World.Idx(x0 + 4, y, pz)] = 2;
+			var so = new System.Text.Json.JsonSerializerOptions { IncludeFields = true };
+			var back = System.Text.Json.JsonSerializer.Deserialize<Worlds.Save>(System.Text.Json.JsonSerializer.Serialize(new Worlds.Save { Saplings = new(world.Saplings), Grown = world.Grown.ToArray() }, so), so);
+			Check($"saplings' lucky ticks ({world.Saplings.Count}) and what grew ({world.Grown.Count}) go in the save", world.Saplings.Count > 0 && world.Grown.Count > 0
+				&& back.Saplings.Count == world.Saplings.Count && back.Saplings.All(kv => world.Saplings[kv.Key] == kv.Value) && back.Grown.ToHashSet().SetEquals(world.Grown));
+			player.Pos = new Vector3(x0 + 14.5f, y + 6, z0 - 14); player.Pitch = -0.25f; player.Yaw = 0;   // (to look at: the trees that grew)
+		}
+		if (args.Contains("--doortest") && !doorTested && !menuOpen && shotTimer > 0.3f)
+		{   // (test: doors: put down, opened and shut from either side, double doors, broken, walked through; their recipes and
+			//  keys; fruit from fruit trees' leaves; then a row of every door, some open, to look at)
+			doorTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int x0 = (int)player.Pos.X - 8, z0 = (int)player.Pos.Z - 8, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -2; dx < 20; dx++) for (int dz = -4; dz < 14; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 8; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			int cedar = DataKeys.IdOf("cedar_door");
+			int D(int f, int g, bool o, int half) => Blocks.DoorState(cedar, f, g, o, half);
+			void Stand(float x, float z) { player.Pos = new Vector3(x, y, z); player.Vel = Vector3.Zero; player.Flying = true; }
+			void Put(int x, float hitX) { inv.SetSlot(inv.Selected, cedar); PlaceDoor(new Player.Hit { X = x, Y = y - 1, Z = z0, Ny = 1, Sub = -1, Id = Blocks.Stone, Pt = new Vector3(hitX, y, z0 + 0.5f) }, cedar); }
+			bool Is(int x, int f, int g, bool o) => world.GetBlock(x, y, z0) == D(f, g, o, 0) && world.GetBlock(x, y + 1, z0) == D(f, g, o, 1);
+			Check("16 doors, each with an item and 32 states", Blocks.ItemRows.Count(i => Blocks.DoorFirst(i) > 0) == 16 && Blocks.DoorFirst(cedar) == cedar + 1 && Blocks.IsDoor(cedar + 32) && !Blocks.IsDoor(cedar + 33));
+			Check("a door's key names its facing, half, hinge and open", DataKeys.KeyOf(D(1, 0, true, 1)) == "cedar_door#facing=1,half=1,hinge=0,open=1" && DataKeys.KeyOf(cedar) == "cedar_door");
+			// one door, put down from the south (+z), clicked left of the middle: it faces you, hinge on the left
+			Stand(x0 + 0.5f, z0 + 3.5f); Put(x0, x0 + 0.3f);
+			Check("a door goes down shut, 2 tall, facing you, its hinge on the side you clicked", Is(x0, 0, 0, false));
+			Check("shut, it's a wall", world.Solid(x0, y, z0) && world.Solid(x0, y + 1, z0));
+			Put(x0 + 3, x0 + 3.8f);
+			Check("clicked right of the middle: the hinge is on the right", Is(x0 + 3, 0, 1, false));
+			ToggleDoor(x0, y + 1, z0);
+			Check("right-clicked from in front: it opens away from you (both halves)", Is(x0, 0, 0, true));
+			Check("open, you can walk through", !world.Solid(x0, y, z0) && !world.Solid(x0, y + 1, z0));
+			Check("it swings for a moment (the chunk leaves it out meanwhile)", ChunkMesher.Swinging.ContainsKey(World.Idx(x0, y, z0)) && swings.Count > 0);
+			UpdateDoorSwings(0.2f);
+			Check("then stands in its new place", !ChunkMesher.Swinging.ContainsKey(World.Idx(x0, y, z0)) && swings.Count == 0);
+			ToggleDoor(x0, y, z0);
+			Check("right-clicked again: shut", Is(x0, 0, 0, false));
+			Stand(x0 + 0.5f, z0 - 2.5f); ToggleDoor(x0, y, z0);
+			Check("opened from behind: turned round first, so it swings away from you", Is(x0, 2, 1, true));
+			ToggleDoor(x0, y, z0);
+			Check("and shuts again the same way", Is(x0, 2, 1, false));
+			// a double door: hinges on the outsides
+			Stand(x0 + 7f, z0 + 3.5f); Put(x0 + 6, x0 + 6.2f); Put(x0 + 7, x0 + 7.8f);
+			Check("two doors side by side, hinges outside", Is(x0 + 6, 0, 0, false) && Is(x0 + 7, 0, 1, false));
+			ToggleDoor(x0 + 6, y, z0);
+			Check("a double door opens together", Is(x0 + 6, 0, 0, true) && Is(x0 + 7, 0, 1, true));
+			ToggleDoor(x0 + 7, y + 1, z0);
+			Check("and shuts together", Is(x0 + 6, 0, 0, false) && Is(x0 + 7, 0, 1, false));
+			Stand(x0 + 7f, z0 - 2.5f); ToggleDoor(x0 + 7, y, z0);
+			Check("a double door opened from behind: both turn round and open away from you", Is(x0 + 6, 2, 1, true) && Is(x0 + 7, 2, 0, true));
+			ToggleDoor(x0 + 6, y, z0);
+			Check("and shut together", Is(x0 + 6, 2, 1, false) && Is(x0 + 7, 2, 0, false));
+			UpdateDoorSwings(0.2f);
+			// picking it (creative) gives the door; breaking either half takes both, survival: 1 door
+			player.Pos = new Vector3(x0 + 3.5f, y + 2.2f, z0 + 0.5f); player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0;
+			if (!inv.Survival) { inv.SetSlot(inv.Selected, 0); PickBlock(); Check("picking a door gives the door", inv.Held == cedar); }
+			int Dropped(int id) => drops.All.Count(d => d.Id == id);
+			foreach (var dr in drops.All.ToArray()) drops.Remove(dr);
+			inv.SetSlot(inv.Selected, Blocks.Tools.First(t => Blocks.B[t].Tool == "axe")); Break();
+			Check("breaking its top half takes the whole door" + (inv.Survival ? ", and gives 1 door" : ""), world.GetBlock(x0 + 3, y, z0) == 0 && world.GetBlock(x0 + 3, y + 1, z0) == 0 && (!inv.Survival || Dropped(cedar) == 1));
+			Check("doors sound like wood", Sound.MatOf(D(0, 0, false, 0)) == "wood" && Sound.MatOf(D(3, 1, true, 1)) == "wood");
+			int planks = DataKeys.IdOf("cedar_planks");
+			Check("6 Cedar Planks make 2 Cedar Doors at the bench", Inventory.Recipes.Any(r => r.Out == cedar && r.N == 2 && r.At == "bench" && r.Needs.Length == 1 && r.Needs[0] == (planks, 6)));
+			Check("doors burn (2), in the Wood tab, not standing ones", Kilns.Fuel.GetValueOrDefault(cedar) == 2 && AllCreative().Contains(cedar) && !AllCreative().Any(Blocks.IsDoor));
+			// fruit: cherry leaves broken without a hoe now and then give Cherries; with a hoe, never
+			int cl = DataKeys.IdOf("cherry_leaves"), cherries = DataKeys.IdOf("cherries");
+			Check("Cherry, Orange and Juniper leaves bear their fruit; Palm, Dates", Blocks.B[cl].Fruit == cherries && Blocks.B[DataKeys.IdOf("orange_leaves")].Fruit == DataKeys.IdOf("oranges")
+				&& Blocks.B[DataKeys.IdOf("juniper_leaves")].Fruit == DataKeys.IdOf("juniper_berries") && Blocks.B[Blocks.PalmLeaves].Fruit == Blocks.Dates && Blocks.B[Blocks.Leaves].Fruit == 0);
+			if (inv.Survival)
+			{
+				int Pick(int held) { foreach (var dr in drops.All.ToArray()) drops.Remove(dr); inv.SetSlot(inv.Selected, held); for (int k = 0; k < 80; k++) { world.SetBlock(x0 + 12, y, z0, cl); player.Pos = new Vector3(x0 + 12.5f, y + 1.2f, z0 + 0.5f); Break(); } return Dropped(cherries); }
+				int byHand = Pick(0), byHoe = Pick(Blocks.Tools.First(t => Blocks.B[t].Tool == "hoe"));
+				Check($"Cherry Leaves: Cherries by hand now and then ({byHand} in 80), never with a hoe ({byHoe})", byHand is > 5 and < 40 && byHoe == 0);
+				world.SetBlock(x0 + 12, y, z0, 0);
+			}
+			Check("the woods' logs are logs (felling, the axe), lying ones too", Blocks.IsLogBlock(DataKeys.IdOf("redwood_log")) && Blocks.IsLogBlock(DataKeys.IdOf("redwood_log#axis=2")) && Blocks.IsLogBlock(DataKeys.IdOf("dead_log"))
+				&& Blocks.LogOf(DataKeys.IdOf("dead_log#axis=1")) == DataKeys.IdOf("dead_log") && Blocks.Turned(DataKeys.IdOf("stripped_holly_log"), 2) == DataKeys.IdOf("stripped_holly_log#axis=2"));
+			// to look at: every door in a row, every other one open, and the double door open
+			for (int dx = -2; dx < 20; dx++) for (int u = 0; u < 3; u++) world.SetBlock(x0 + dx, y + u, z0, 0);
+			var doorItems = Blocks.ItemRows.Where(i => Blocks.DoorFirst(i) > 0).ToArray();
+			for (int k = 0; k < doorItems.Length; k++)
+			{
+				world.SetBlock(x0 + k, y, z0 - 2, Blocks.DoorState(doorItems[k], 0, 0, k % 2 == 1, 0));
+				world.SetBlock(x0 + k, y + 1, z0 - 2, Blocks.DoorState(doorItems[k], 0, 0, k % 2 == 1, 1));
+			}
+			world.SetBlock(x0 + 6, y, z0 + 3, D(0, 0, true, 0)); world.SetBlock(x0 + 6, y + 1, z0 + 3, D(0, 0, true, 1));
+			world.SetBlock(x0 + 7, y, z0 + 3, D(0, 1, true, 0)); world.SetBlock(x0 + 7, y + 1, z0 + 3, D(0, 1, true, 1));
+			inv.SetSlot(inv.Selected, cedar);
+			player.Pos = new Vector3(x0 + 8f, y + 0.6f, z0 + 11f); player.Flying = true; player.Yaw = 0; player.Pitch = -0.12f;
+			if (args.FirstOrDefault(a => a.StartsWith("--doorview=")) is { } dv)   // (another view: dx,dy,dz,yaw,pitch from the first door's spot)
+			{
+				var v = dv[11..].Split(',').Select(t => float.Parse(t, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+				player.Pos = new Vector3(x0 + v[0], y + v[1], z0 + v[2]); player.Yaw = v[3]; player.Pitch = v[4];
+			}
+		}
 		if (args.Contains("--stagetest") && !stageTested && !StageBreakingOn && !menuOpen && inv.Survival && shotTimer > 0.3f)
 		{   // (test, survival, stage breaking held back: everything breaks as in Beta 0.1.2.0, and new worlds are land 1)
 			stageTested = true;
@@ -953,7 +1178,7 @@ public partial class Main : Node3D
 				Check("FELLING ALONE: a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
 			}
 			Check("OFF: nothing half broken, no cracks", stages.Count == 0);
-			Check($"new worlds are land {(World.OreSpreadOn ? 2 : 1)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 2 : 1) && current.Land == World.NewLand);
+			Check($"new worlds are land {(World.OreSpreadOn ? 4 : 3)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 4 : 3) && current.Land == World.NewLand);
 		}
 		if (args.Contains("--stagetest") && !stageTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
 		{   // (test, survival: stage breaking of Stone, ores and logs, natural or put down, and tree felling)
@@ -1020,7 +1245,7 @@ public partial class Main : Node3D
 			Swings(x0 + 1, y, z0 + 5, side: true);
 			Check("a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
 			}   // (felling on)
-			Check($"new worlds are land {(World.OreSpreadOn ? 2 : 1)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 2 : 1) && current.Land == World.NewLand);
+			Check($"new worlds are land {(World.OreSpreadOn ? 4 : 3)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 4 : 3) && current.Land == World.NewLand);
 			// half broken, to look at
 			Grow(x0 + 3, y, z0 + 4, Blocks.Stone); Hold(Tool("pickaxe", "stone")); Aim(x0 + 3, y, z0 + 4); Break(); Break();
 			Grow(x0 + 4, y, z0 + 4, Blocks.Log); Hold(0); Aim(x0 + 4, y, z0 + 4); for (int k = 0; k < 7; k++) Break();
@@ -1094,7 +1319,7 @@ public partial class Main : Node3D
 			if (open == "--open=worlds" && !worldsPanel.Visible) ShowWorlds(true);
 			if (open == "--open=settings") { ShowSettings(true); if (ArgInt("--tab=", -1) >= 0) ShowSettingsTab(ArgInt("--tab=", 0)); }
 			if (open == "--open=new" && !whatsNewPanel.Visible) whatsNewPanel.Visible = true;
-			if (open == "--open=pause" && !pauseMenu.Visible) { if (menuOpen) ShowMainMenu(false); pauseMenu.Visible = true; UpdateSaveText(); Input.MouseMode = Input.MouseModeEnum.Visible; }
+			if (open == "--open=pause" && !pauseMenu.Visible) { if (menuOpen) ShowMainMenu(false); pauseMenu.Visible = true; UpdateSaveText(); Unlock(); }
 		}
 		else if (open != null && !invOpen)
 		{
@@ -1114,7 +1339,8 @@ public partial class Main : Node3D
 		var stay = args.FirstOrDefault(a => a.StartsWith("--stay="));
 		if (shotTimer < (stay != null ? float.Parse(stay[7..]) : sceneBuilt ? 4f : 1.5f)) return;
 		if (args.FirstOrDefault(a => a.StartsWith("--panorama=")) is { } panoArg) { if (!panoCapturing) CapturePanorama(panoArg[11..]); return; }
-		GetViewport().GetTexture().GetImage().SavePng(arg[7..]);
+		if (GetViewport().GetTexture()?.GetImage() is { } shotImage) shotImage.SavePng(arg[7..]);   // (headless: no picture, the rest goes on)
+		else GD.Print("no picture (headless)");
 		GD.Print($"shot saved, {chunkParts.Count} chunks in {groupNodes.Count} groups");
 		foreach (var m in mobList) GD.Print($"mob {m.Type}: layer {m.Layer}, health {m.Health}{(m.Burning ? ", burning" : "")}{(m.Fade > 0 ? ", fading" : "")} at y {m.Y:0.0}");
 		GD.Print($"your health {health}, rocks flying {rocks.Count}");
@@ -1172,7 +1398,7 @@ public partial class Main : Node3D
 			if (ob == Blocks.GoldOre) { var (ox, oy, oz) = World.FromIdx(q); if (world.Heights[oz * World.WX + ox] - oy < 20) goldShallow++; }
 		}
 		GD.Print("ores 142-146: " + string.Join(", ", oreCount));
-		if (current.Land >= 2) Check("ores and fireclay are in the ground, gold at every depth (Land 2)", oreCount.All(n => n > 0) && goldShallow > 0);
+		if (World.OreSpread(current.Land)) Check("ores and fireclay are in the ground, gold at every depth (lands 2 and 4)", oreCount.All(n => n > 0) && goldShallow > 0);
 		else Check("ores and fireclay are in the ground, gold only deep", oreCount.All(n => n > 0) && goldShallow == 0);
 		Check("ores need the right pickaxe", Blocks.B[Blocks.CopperOre].Pick == Blocks.PickTier["stone"] && Blocks.B[Blocks.IronOre].Pick == Blocks.PickTier["copper"]
 			&& Blocks.B[Blocks.TinOre].Pick == Blocks.PickTier["iron"] && Blocks.B[Blocks.GoldOre].Pick == Blocks.PickTier["iron"] && Blocks.B[Blocks.IronOre].Drop == Blocks.Chunk["iron"]);
@@ -1468,7 +1694,7 @@ public partial class Main : Node3D
 	}
 	void UpdateOutline()
 	{
-		var h = Input.MouseMode == LockMode ? player.Raycast() : null;
+		var h = Locked ? player.Raycast() : null;
 		outline.Visible = h != null;
 		if (h is not { } hit) return;
 		Vector3 pos = new(hit.X, hit.Y, hit.Z), size = Vector3.One;
@@ -1528,18 +1754,43 @@ public partial class Main : Node3D
 	}
 
 	double lastSpace;
-	Input.MouseModeEnum lastMouseMode = (Input.MouseModeEnum)(-1); int clickWait = 60, clickStep;
+	string lastMouseNote; int clickWait = 60, clickStep;
 	// Looking around with the mouse. Godot's own "captured" mouse gets its movements a special way (raw input) that
 	// doesn't reach the game on some PCs, so instead the pointer is hidden and kept inside the window, and each frame
 	// the game sees how far it moved from the middle of the window, turns you by that much, and puts it back.
 	public const Input.MouseModeEnum LockMode = Input.MouseModeEnum.ConfinedHidden;
+	// Playing (Locked): looking around, clicks break and place, the pause screen away. Lock() / Unlock() go in and out of it.
+	// The real pointer is only held (hidden, kept in the window, put back in the middle) while you're playing AND the window
+	// has the focus: losing the focus lets it go (see _Notification), and a click back in the game takes it again.
+	// A test run (the game started with any arguments: normal play has none) never holds, hides, clips or moves the real
+	// pointer at all, and its window doesn't take the focus: "playing" is just this flag, and a test that needs the mouse
+	// feeds the game made-up mouse events (Input.ParseInputEvent: --clicks, --mousemove).
+	public static readonly bool TestRun = OS.GetCmdlineUserArgs().Length > 0;
+	bool playLock, mouseHeld; Vector2 testMoved;
+	public bool Locked => playLock;
+	void Lock() { playLock = true; HoldMouse(); }
+	void Unlock() { playLock = false; ReleaseMouse(); }
+	void HoldMouse() { if (TestRun || !playLock || !GetWindow().HasFocus()) return; Input.MouseMode = LockMode; mouseHeld = true; }
+	void ReleaseMouse() { if (TestRun && Input.MouseMode == Input.MouseModeEnum.Visible) return; Input.MouseMode = Input.MouseModeEnum.Visible; mouseHeld = false; lookPrimed = false; }
+	// (test runs: the made-up mouse events carry this device number; the real mouse's don't count, so moving or clicking it
+	//  over a test window does nothing to the test)
+	public const int TestDevice = 7357;
+	public override void _Input(InputEvent e) { if (TestRun && playLock && e is InputEventMouseMotion { Device: TestDevice } mm) testMoved += mm.Relative; }
+	// the left button held down (to keep breaking): the real one, never in a test run
+	bool LeftDown => !TestRun && Input.IsMouseButtonPressed(MouseButton.Left);
 	bool lookPrimed;
 	void MouseLook()
 	{
-		bool locked = Input.MouseMode == LockMode && GetWindow().HasFocus();
-		var mode = Input.MouseMode;
-		if (mode != lastMouseMode) { lastMouseMode = mode; GD.Print($"mouse: {mode}"); }   // (a note in the game's log)
-		if (!locked) { lookPrimed = false; return; }
+		string note = !playLock ? "free" : TestRun ? "playing (test run: the real pointer is left alone)" : mouseHeld ? "playing, held" : "playing, not held (no focus)";
+		if (note != lastMouseNote) { lastMouseNote = note; GD.Print($"mouse: {note}"); }   // (a note in the game's log)
+		if (TestRun)
+		{
+			if (playLock) { player.Yaw -= testMoved.X * MouseSens; player.Pitch = Math.Clamp(player.Pitch - testMoved.Y * MouseSens, -1.55f, 1.55f); }
+			testMoved = Vector2.Zero;
+			return;
+		}
+		if (mouseHeld && !GetWindow().HasFocus()) ReleaseMouse();   // (in case the focus went without a notification)
+		if (!playLock || !mouseHeld) { lookPrimed = false; return; }
 		var middle = DisplayServer.WindowGetSize() / 2;
 		var at = DisplayServer.MouseGetPosition() - DisplayServer.WindowGetPosition();
 		if (lookPrimed)
@@ -1556,12 +1807,14 @@ public partial class Main : Node3D
 	{
 		if (skinPanel?.Visible == true) { SkinKey(e); return; }   // (the skin editor has keys of its own)
 		if (!ready) return;
-		bool locked = Input.MouseMode == LockMode;
+		if (TestRun && e is InputEventMouse && e.Device != TestDevice) return;   // (a test run: the real mouse does nothing)
+		bool locked = Locked;
 		if (e is InputEventMouseMotion && locked) { }   // (looking around is done in MouseLook, every frame)
 		else if (e is InputEventMouseButton mb && mb.Pressed)
 		{
 			if (invOpen || menuOpen || pauseMenu.Visible || dead) return;
-			if (!locked) { Input.MouseMode = LockMode; return; }
+			if (!locked) { Lock(); return; }
+			if (!TestRun && !mouseHeld) { HoldMouse(); return; }   // (back from another window: this click just takes the pointer again)
 			if (mb.ButtonIndex == MouseButton.Left) { LeftClick(); holdSwing = SwingTime; }
 			else if (mb.ButtonIndex == MouseButton.Right) { inv.Act = ActSlot(mb.ButtonIndex); SwingHand(); try { Place(); } finally { inv.Act = -1; } }
 			else if (mb.ButtonIndex == MouseButton.WheelDown) SelectSlot(inv.Selected + 1);
@@ -1577,7 +1830,7 @@ public partial class Main : Node3D
 				else if (howPanel?.Visible == true) howPanel.Visible = false;
 				else if (invOpen) CloseInventory();
 				else if (pauseMenu.Visible) Resume();
-				else if (!menuOpen) Input.MouseMode = Input.MouseModeEnum.Visible;
+				else if (!menuOpen) Unlock();
 				return;
 			}
 			if (menuOpen || pauseMenu.Visible || AnyPanel || dead) return;

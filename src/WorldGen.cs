@@ -695,7 +695,7 @@ public class WorldGen
 			for (int i = y * slab, end = i + slab; i < end; i++)
 			{
 				if (world[i] == 3) world[i] = id;
-				else if (Land >= 2 && AllDepthOres.Contains(world[i]) && Blocks.OreIndex(world[i]) is int k and >= 0) Late.Add((i, Blocks.DeepOreOf(k, layer), world[i]));   // (an allDepths ore in a deep layer: that layer's ore)
+				else if (World.OreSpread(Land) && AllDepthOres.Contains(world[i]) && Blocks.OreIndex(world[i]) is int k and >= 0) Late.Add((i, Blocks.DeepOreOf(k, layer), world[i]));   // (an allDepths ore in a deep layer: that layer's ore)
 			}
 		}
 	}
@@ -714,7 +714,7 @@ public class WorldGen
 		for (int o = 0; o < OreVeins.Length; o++)
 		{
 			var (ore, per, size, top, deep, takesDirt, allDepths) = OreVeins[o];
-			bool even = Land >= 2 && allDepths;   // (worlds from Land 2: the allDepths ores are as common at every depth, all the way down)
+			bool even = World.OreSpread(Land) && allDepths;   // (lands with the ore spread, 2 and 4: the allDepths ores are as common at every depth, all the way down)
 			if (even) { top = 3; deep = 999; }
 			int s = 7001 + o * 10, n = (int)((long)WX * WZ * per / 10000);
 			if (even) n = (int)((long)n * WY / 192);
@@ -782,18 +782,336 @@ public class WorldGen
 	double ForestAt(int x, int z) => Smoothstep(0.47, 0.6, Fbm(x / 110.0 + 20, z / 110.0 + 20, 2, 970));
 	// biome worlds: each biome's own trees (the Woods have the ones below)
 	static readonly int[][] PalmFronds = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 }, new[] { 1, 1 }, new[] { 1, -1 }, new[] { -1, 1 }, new[] { -1, -1 } };
+
+	// ---- Trees and Leaves (Biomes worlds from land 3, see World.NewTrees): the new trees ----
+	// Each biome's usual tree spots (where land 1 grows its trees) are shared out between its trees (worldgen.json TREE_MIX), the
+	// same kind in patches (TREE_PATCH blocks square), and some trees have spots of their own (TREE_EXTRA: each row its own roll,
+	// tried in order before the usual spots). How each one looks is below (its numbers: TREE_SHAPES). Their blocks are numbered
+	// over 255, so a log grows as an Oak Log and a leaf as Oak Leaves, and the real block takes its place once the world is packed
+	// (see Late). The same maths as the web version, in the same order: both must grow the same worlds.
+	bool NewTreesHere => gen == 3 && World.NewTrees(Land);
+	static readonly string[] BiomeNames = { "woods", "plains", "desert", "snowy", "swamp", "taiga", "meadow", "badlands" };   // (biomeMap's numbers)
+	static readonly string[] OwnTree = { "oak", "oak", "palm", "fir", "willow", "fir", "oak", null };   // the tree each biome grew before (its code is below)
+	// the trees GrowTree knows how to grow (a TREE_SHAPES row must be one of these: see the data check)
+	public static readonly string[] GrownTrees = { "maple", "cedar", "birch", "cherry", "orange", "aspen", "redwood", "cypress", "juniper", "larch", "holly", "palo_verde", "dead", "prairie_oak", "shrub" };
+	static readonly TreeShapeRow[] TreeShapes = Nums.Worldgen.TREE_SHAPES ?? Array.Empty<TreeShapeRow>();
+	static readonly TreeExtraRow[] TreeExtra = Nums.Worldgen.TREE_EXTRA ?? Array.Empty<TreeExtraRow>();
+	// a shape's crown: [the number] or [across, up and down]
+	public static double[] CrownOf(TreeShapeRow T)
+	{
+		if (T.crown.ValueKind == System.Text.Json.JsonValueKind.Number) return new[] { T.crown.GetDouble() };
+		var c = new List<double>();
+		if (T.crown.ValueKind == System.Text.Json.JsonValueKind.Array) foreach (var e in T.crown.EnumerateArray()) c.Add(e.GetDouble());
+		return c.ToArray();
+	}
+	// each shape's place (its seeds), log, leaves and crown, by its name
+	static readonly Dictionary<string, (int at, int log, int leaves, double[] crown)> ShapeOf = MakeShapes();
+	static Dictionary<string, (int, int, int, double[])> MakeShapes()
+	{
+		var d = new Dictionary<string, (int, int, int, double[])>();
+		for (int k = 0; k < TreeShapes.Length; k++)
+			d[TreeShapes[k].tree] = (k, DataKeys.IdOf(TreeShapes[k].log), TreeShapes[k].leaves != null ? DataKeys.IdOf(TreeShapes[k].leaves) : 0, CrownOf(TreeShapes[k]));
+		return d;
+	}
+	static int Span(int[] ab, double v) => ab[0] + (int)Math.Floor(v * (ab[1] - ab[0] + 1));   // a whole number from a to b, picked by v (0 to 1)
+	// put a block of a tree: into air (and into leaves too, with into: a trunk going up through leaves)
+	void TreeBlock(int id, int x, int y, int z, bool into = false)
+	{
+		if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
+		if (planning)
+		{   // (a sapling's tree: grown into empty space first, by the same rules; PlanTree then fits it into the world)
+			int p = Idx(x, y, z);
+			if (planned.TryGetValue(p, out var c) && !(into && Blocks.IsLeaves(c.id))) return;
+			planned[p] = (x, y, z, id); return;
+		}
+		int i = Idx(x, y, z), b = world[i];
+		if (b != 0 && !(into && Blocks.IsLeaves(b))) return;
+		if (id < 256) { world[i] = (byte)id; return; }
+		byte stand = (byte)(Blocks.B[id].Leaves ? 5 : 4);
+		world[i] = stand; Late.Add((i, id, stand));
+	}
+	// a trunk: n logs above y
+	void Stem(int id, int x, int y, int z, int n) { for (int k = 1; k <= n; k++) TreeBlock(id, x, y + k, z, true); }
+	// leaves in a ball rx across and ry up and down, around the middle of block (cx, cy, cz) (cx, cz may be half-way between
+	// blocks, for a 2 x 2 trunk); holes: the share of its outer blocks left out, so the edge is ragged
+	void Crown(int id, double cx, int cy, double cz, double rx, double ry, double holes, int s)
+	{
+		int X = (int)Math.Ceiling(rx), Y = (int)Math.Ceiling(ry);
+		for (int dy = -Y; dy <= Y; dy++) for (int bz = (int)Math.Floor(cz - X); bz <= (int)Math.Ceiling(cz + X); bz++) for (int bx = (int)Math.Floor(cx - X); bx <= (int)Math.Ceiling(cx + X); bx++)
+		{
+			double d = ((bx - cx) * (bx - cx) + (bz - cz) * (bz - cz)) / (rx * rx) + dy * dy / (ry * ry);
+			if (d > 1 || (d > 0.5 && Hash3(bx, cy + dy, bz, s) < holes)) continue;
+			TreeBlock(id, bx, cy + dy, bz);
+		}
+	}
+	// a flat round layer of leaves r across; sparse: the share of it left out (not next to the trunk)
+	void Layer(int id, double cx, int y, double cz, double r, double sparse, int s)
+	{
+		for (int bz = (int)Math.Floor(cz - r); bz <= (int)Math.Ceiling(cz + r); bz++) for (int bx = (int)Math.Floor(cx - r); bx <= (int)Math.Ceiling(cx + r); bx++)
+		{
+			double d = (bx - cx) * (bx - cx) + (bz - cz) * (bz - cz);
+			if (d > r * r || (d > 1 && Hash3(bx, y, bz, s) < sparse)) continue;
+			TreeBlock(id, bx, y, bz);
+		}
+	}
+	// any of 8 spots `far` away in another biome (a desert's edge)
+	bool NearOtherBiome(int x, int z, int far, int bi)
+	{
+		foreach (var d in PalmFronds)
+		{
+			int px = Math.Min(WX - 1, Math.Max(0, x + d[0] * far)), pz = Math.Min(WZ - 1, Math.Max(0, z + d[1] * far));
+			if (biomeMap[pz * WX + px] != bi) return true;
+		}
+		return false;
+	}
+	// low, with sea within `far` (a coast)
+	bool NearSea(int x, int h, int z, int far)
+	{
+		if (h > SeaLevel + 3) return false;
+		foreach (var d in PalmFronds)
+		{
+			int px = Math.Min(WX - 1, Math.Max(0, x + d[0] * far)), pz = Math.Min(WZ - 1, Math.Max(0, z + d[1] * far));
+			if (world[Idx(px, SeaLevel, pz)] == Blocks.Water) return true;
+		}
+		return false;
+	}
+	// the ground each biome's trees grow on
+	bool TreeGround(int bi, int top, int h) => bi == Snowy ? top == Blocks.SnowyGrass : bi == Swamp ? top == Blocks.SwampGrass
+		: bi == Desert ? top == 6 && h > SeaLevel : bi == Badlands ? h > SeaLevel && Array.IndexOf(BadlandsBands, top) >= 0 : top == 1;
+	// grow tree `name` standing on (x, h, z)
+	void GrowTree(string name, int x, int h, int z)
+	{
+		var (ti, log, leaves, C) = ShapeOf[name];
+		var T = TreeShapes[ti];
+		int s = 12000 + 10 * ti;
+		double v = Hash(x, z, s); int th = T.trunk != null ? Span(T.trunk, v) : 0, top = h + th;
+		switch (name)
+		{
+			case "maple":   // a big round crown
+				Stem(log, x, h, z, th + 1); Crown(leaves, x, top + 1, z, C[0], C[0] * 0.8, 0.3, s + 1); break;
+			case "cedar":   // flat tiers of leaves, wide at the bottom, and a tuft on top
+				Stem(log, x, h, z, th);
+				for (int k = 0; k < T.tiers.Length; k++) Layer(leaves, x, top - T.gap * (T.tiers.Length - 1 - k), z, T.tiers[k], 0.25, s + 1 + k);
+				TreeBlock(leaves, x, top + 1, z); break;
+			case "birch":   // slim, with a small oval crown
+			case "cherry":  // short, with a wide round crown
+			case "orange":  // small, with a round crown
+				Stem(log, x, h, z, th); Crown(leaves, x, name == "birch" ? top - 1 : top + 1, z, C[0], C[1], 0.3, s + 1); break;
+			case "aspen":   // tall and thin, with a narrow column of leaves
+				Stem(log, x, h, z, th);
+				for (int y = top - (int)C[1]; y <= top + 1; y++) Layer(leaves, x, y, z, y >= top ? 1 : C[0], 0.15, s + 1);
+				break;
+			case "redwood":   // a thick trunk (2 x 2), the tallest tree, with a narrow cone of leaves on its top third
+			{
+				int[][] cols = { new[] { 0, 0 }, new[] { 1, 0 }, new[] { 0, 1 }, new[] { 1, 1 } };
+				foreach (var c in cols) if (Math.Abs(TreeGroundAt(x + c[0], z + c[1]) - h) > 2) return;   // (only on fairly flat ground)
+				foreach (var c in cols) { int g = TreeGroundAt(x + c[0], z + c[1]); Stem(log, x + c[0], g, z + c[1], top - g); }
+				int tip = top + 3;
+				for (int y = top - th / 3; y <= tip; y++)
+				{
+					if (y < tip - 5 && (tip - y) % 3 == 2) continue;   // (gaps between its lower layers of branches)
+					Layer(leaves, x + 0.5, y, z + 0.5, Math.Min(C[0], 1.6 + (tip - y) * 0.22), 0.2, s + 1);
+				}
+				break;
+			}
+			case "cypress":   // a tall narrow spire, with roots flaring out at the bottom
+			{
+				Stem(log, x, h, z, th);
+				for (int k = 0; k < 4; k++) { var d = PalmFronds[k]; if (Hash(x + d[0], z + d[1], s + 2) < 0.6) TreeBlock(log, x + d[0], h + 1, z + d[1]); }
+				int tip = top + 2;
+				for (int y = h + 4; y <= tip; y++) Layer(leaves, x, y, z, 0.6 + C[0] * (tip - y) / (tip - h - 4), 0.2, s + 1);
+				break;
+			}
+			case "juniper":   // short and gnarled: a leaning trunk with a clump of leaves on top and one or two on short branches
+			{
+				var l = PalmFronds[(int)Math.Floor(Hash(x, z, s + 2) * 4)];
+				int cx = x, cz = z;
+				for (int k = 1; k <= th; k++) { TreeBlock(log, cx, h + k, cz, true); if (k < th && Hash3(x, k, z, s + 3) < 0.4) { cx += l[0]; cz += l[1]; } }
+				Crown(leaves, cx, top + 1, cz, C[0], 1, 0.3, s + 1);
+				int n = 1 + (int)Math.Floor(Hash(x, z, s + 4) * 2);
+				for (int j = 0; j < n; j++)
+				{
+					var d = PalmFronds[(int)Math.Floor(Hash3(x, j, z, s + 5) * 8)];
+					TreeBlock(log, cx + d[0], top, cz + d[1], true);
+					Crown(leaves, cx + 2 * d[0], top, cz + 2 * d[1], C[0] - 0.3, 1, 0.3, s + 6 + j);
+				}
+				break;
+			}
+			case "larch":   // a sparse cone
+			case "holly":   // small and dense, a cone right down to the ground
+			{
+				Stem(log, x, h, z, th);
+				int tip = top + (name == "larch" ? 1 : 2), low = name == "larch" ? h + 3 : h + 1;
+				for (int y = low; y <= tip; y++) Layer(leaves, x, y, z, name == "larch" ? Math.Min(C[0], (tip - y + 1) >> 1) : 0.6 + C[0] * (tip - y) / (tip - low), T.sparse, s + 1);
+				break;
+			}
+			case "palo_verde":   // a short trunk splitting into branches, with a wide, flat, sparse crown
+			{
+				Stem(log, x, h, z, th);
+				int n = 2 + (int)Math.Floor(Hash(x, z, s + 2) * 2), len = Span(T.branch, Hash(x, z, s + 3));
+				for (int j = 0; j < n; j++) { var d = PalmFronds[4 + (int)Math.Floor(Hash3(x, j, z, s + 4) * 4)]; for (int k = 1; k <= len; k++) TreeBlock(log, x + d[0] * k, top + k, z + d[1] * k, true); }
+				Layer(leaves, x, top + len + 1, z, C[0], T.sparse, s + 1); Layer(leaves, x, top + len + 2, z, C[0] - 1.2, T.sparse, s + 5);
+				break;
+			}
+			case "dead":   // bleached and leafless: a trunk with a few bare branches sticking out
+			{
+				Stem(log, x, h, z, th);
+				int n = Span(T.branches, Hash(x, z, s + 2));
+				for (int j = 0; j < n; j++)
+				{
+					int k4 = (int)Math.Floor(Hash3(x, j, z, s + 3) * 4); var d = PalmFronds[k4];
+					int y = h + 2 + (int)Math.Floor(Hash3(x, j, z, s + 4) * (th - 1));
+					int len = Span(T.branch, Hash3(x, j, z, s + 5)), along = Blocks.Turned(log, d[0] != 0 ? 1 : 2);
+					for (int k = 1; k <= len; k++) TreeBlock(along, x + d[0] * k, y, z + d[1] * k);
+				}
+				break;
+			}
+			case "prairie_oak":   // short, with a wide, flattened crown
+				Stem(log, x, h, z, th + 1); Crown(leaves, x, top + 1, z, C[0], C[1], 0.3, s + 1); break;
+			case "shrub":   // a low bush of leaves, sometimes round a stub of log
+				if (Hash(x, z, s + 2) < 0.4) TreeBlock(log, x, h + 1, z);
+				Crown(leaves, x, h + 1, z, C[0] + (C[1] - C[0]) * v, 1, 0.35, s + 1); break;
+		}
+	}
+	// ---- Saplings: a tree grown in the finished world. The same shapes and seeds as the world grows at that spot: the new
+	// trees (GrowTree, in any world), and the older four as their biomes grow them (OldTree: the oak is the woods' normal one).
+	// PlanTree works out the blocks without putting any: the tree grows into empty space first (its own blocks overlap as when
+	// the world grows it), then it's fitted into the world: null if any log can't go in (every log has to go into air, leaves
+	// or the saplings it grows from, which read as air); leaves only go into air, so a tree never breaks anything built. A
+	// Redwood's four trunks stand on its saplings' ground. (The same as the web version.) ----
+	bool planning; Func<int, int, int> planGround;
+	readonly Dictionary<int, (int x, int y, int z, int id)> planned = new();
+	int TreeGroundAt(int x, int z) => planGround != null ? planGround(x, z) : W.Heights[z * WX + x];
+	public static readonly string[] OldTrees = { "oak", "fir", "palm", "willow" };
+	// the biome at (x, z) (-1: not a Biomes world)
+	public int BiomeOf(int x, int z) => gen == 3 && x >= 0 && z >= 0 && x < WX && z < WZ ? biomeMap[z * WX + x] : -1;
+	public List<(int x, int y, int z, int id)> PlanTree(string name, int x, int h, int z, Func<int, int, int, int> get, Func<int, int, int> ground)
+	{
+		planned.Clear(); planning = true; planGround = ground;
+		try { if (Array.IndexOf(OldTrees, name) >= 0) OldTree(name, x, h, z); else GrowTree(name, x, h, z); }
+		finally { planning = false; planGround = null; }
+		var fit = new List<(int x, int y, int z, int id)>();
+		foreach (var (bx, by, bz, id) in planned.Values)
+		{
+			int there = get(bx, by, bz);
+			if (Blocks.IsLeaves(id)) { if (there == 0) fit.Add((bx, by, bz, id)); continue; }
+			if (there != 0 && !Blocks.IsLeaves(there)) return null;   // (a log can't go in: no room yet)
+			fit.Add((bx, by, bz, id));
+		}
+		return fit.Count == 0 ? null : fit;
+	}
+	// the four older trees (only for saplings: the world still grows them with the code further down, as it always has)
+	void OldTree(string name, int x, int h, int z)
+	{
+		double v = Hash(x, z, 77);
+		switch (name)
+		{
+			case "oak":   // the woods' normal oak (with its trunk up into its leaves, but in land 0 worlds up to them)
+			{
+				int th = 4 + (int)(v * 3);
+				for (int dy = -2; dy <= 1; dy++)
+				{
+					int r = dy >= 0 ? 1 : 2, ly = h + th + dy;
+					for (int dz = -r; dz <= r; dz++) for (int dx = -r; dx <= r; dx++)
+					{
+						if (Math.Abs(dx) == r && Math.Abs(dz) == r && Hash(x + dx, z + dz, ly) < 0.6) continue;
+						TreeBlock(Blocks.Leaves, x + dx, ly, z + dz);
+					}
+				}
+				for (int k = 1; k <= th; k++) TreeBlock(Blocks.Log, x, h + k, z, Land >= 1);
+				break;
+			}
+			case "fir":   // rings of leaves, widest at the bottom, narrowing up to a point
+			{
+				int th = 6 + (int)(v * 4), tip = h + th + 1;
+				Stem(Blocks.FirLog, x, h, z, th);
+				for (int ly = h + 3; ly <= tip; ly++)
+				{
+					int r = Math.Min(3, (tip - ly + 1) >> 1);
+					for (int dz = -r; dz <= r; dz++) for (int dx = -r; dx <= r; dx++) if (dx * dx + dz * dz <= r * r + 1) TreeBlock(Blocks.FirLeaves, x + dx, ly, z + dz);
+				}
+				break;
+			}
+			case "palm":   // a tall bare trunk with a crown of long fronds drooping at the tips
+			{
+				int th = 6 + (int)(v * 4), cy = h + th;
+				Stem(Blocks.PalmLog, x, h, z, th);
+				TreeBlock(Blocks.PalmLeaves, x, cy + 1, z);
+				foreach (var d in PalmFronds)
+				{
+					int len = d[0] != 0 && d[1] != 0 ? 2 : 3;
+					for (int k = 1; k <= len; k++) TreeBlock(Blocks.PalmLeaves, x + d[0] * k, k < len ? cy + 1 : cy, z + d[1] * k);
+					TreeBlock(Blocks.PalmLeaves, x + d[0] * len, cy - 1, z + d[1] * len);
+				}
+				break;
+			}
+			case "willow":   // low and wide, with leaves drooping off the edges
+			{
+				int th = 4 + (int)(v * 2), cy = h + th;
+				Stem(Blocks.WillowLog, x, h, z, th);
+				for (int dz = -3; dz <= 3; dz++) for (int dx = -3; dx <= 3; dx++)
+				{
+					int d = dx * dx + dz * dz;
+					if (d > 10) continue;
+					TreeBlock(Blocks.WillowLeaves, x + dx, cy, z + dz);
+					if (d <= 5) TreeBlock(Blocks.WillowLeaves, x + dx, cy + 1, z + dz);
+					if (d >= 5)
+					{
+						double hang = Hash(x + dx, z + dz, 8080);
+						if (hang < 0.35) TreeBlock(Blocks.WillowLeaves, x + dx, cy - 1, z + dz);
+						if (hang < 0.12) TreeBlock(Blocks.WillowLeaves, x + dx, cy - 2, z + dz);
+					}
+				}
+				break;
+			}
+		}
+	}
+
+	// a spot where biome bi usually grows a tree: which tree grows there (worldgen.json TREE_MIX). True if it grew a new one (false:
+	// the biome's own tree, which the code below grows as before)
+	bool MixedTree(int bi, int x, int h, int z)
+	{
+		if (!NewTreesHere) return false;
+		var mix = Nums.Worldgen.TREE_MIX != null && Nums.Worldgen.TREE_MIX.TryGetValue(BiomeNames[bi], out var m) ? m : Array.Empty<System.Text.Json.JsonElement[]>();
+		int P = Nums.Worldgen.TREE_PATCH;
+		double p = Hash((int)Math.Floor((double)x / P), (int)Math.Floor((double)z / P), 12900 + bi); string name = OwnTree[bi];
+		foreach (var e in mix) { double share = e[1].GetDouble(); if (p < share) { name = e[0].GetString(); break; } p -= share; }
+		if (name == OwnTree[bi]) return false;
+		GrowTree(name, x, h, z); return true;
+	}
+	// the trees with spots of their own (worldgen.json TREE_EXTRA, each row its own roll): true if one grew here
+	bool ExtraTree(int bi, int x, int h, int z)
+	{
+		int top = world[Idx(x, h, z)];
+		for (int k = 0; k < TreeExtra.Length; k++)
+		{
+			var r = TreeExtra[k];
+			if (r.biome != BiomeNames[bi] || !TreeGround(bi, top, h) || Hash(x, z, 12100 + k) >= r.chance) continue;
+			if (r.spacing > 0)
+			{   // (only one spot in each spacing x spacing square can grow it, so they're never too close)
+				int n = r.spacing, gx = (int)Math.Floor((double)x / n), gz = (int)Math.Floor((double)z / n);
+				if (x != gx * n + (int)Math.Floor(Hash(gx, gz, 12300 + k) * n) || z != gz * n + (int)Math.Floor(Hash(gx, gz, 12400 + k) * n)) continue;
+			}
+			if (r.grove != null && Fbm(x / r.grove[0] + 31 * k, z / r.grove[0] + 31 * k, 2, 12200 + k) < r.grove[1]) continue;   // (only in its groves)
+			if ((r.edge > 0 || r.coast > 0) && !(r.edge > 0 && NearOtherBiome(x, z, r.edge, bi)) && !(r.coast > 0 && NearSea(x, h, z, r.coast))) continue;
+			GrowTree(r.tree, x, h, z); return true;
+		}
+		return false;
+	}
+
 	void BiomeTree(int x, int h, int z, int bi)
 	{
 		int top = world[Idx(x, h, z)]; double v = Hash(x, z, 77), roll = Hash(x, z, 999);
 		if (bi == Plains || bi == Meadow)   // now and then a lone round tree (a few more in meadows)
 		{
-			if (top != 1 || roll > (bi == Meadow ? 0.0015 : 0.0008)) return;
+			if (top != 1 || roll > (bi == Meadow ? 0.0015 : 0.0008) || MixedTree(bi, x, h, z)) return;
 			int th = 5 + (int)(v * 3);
 			Trunk(x, h, z, Land >= 1 ? th + 1 : th); LeafBall(x, h + th + 1, z, 2.3);
 		}
 		else if (bi == Snowy || bi == Taiga)   // Fir trees, pointed: rings of leaves, widest at the bottom, narrowing up to a point (taiga: thicker forests, no snow)
 		{
 			if (bi == Snowy ? top != Blocks.SnowyGrass || roll > 0.004 + ForestAt(x, z) * 0.03 : top != 1 || roll > 0.006 + ForestAt(x, z) * 0.045) return;
+			if (MixedTree(bi, x, h, z)) return;
 			int th = 6 + (int)(v * 4), tip = h + th + 1;
 			Trunk(x, h, z, th, Blocks.FirLog);
 			for (int ly = h + 3; ly <= tip; ly++)
@@ -804,7 +1122,7 @@ public class WorldGen
 		}
 		else if (bi == Desert)     // Palm trees, now and then: a tall bare trunk with a crown of long fronds drooping at the tips
 		{
-			if (top != 6 || h <= SeaLevel || roll > 0.002) return;
+			if (top != 6 || h <= SeaLevel || roll > 0.002 || MixedTree(bi, x, h, z)) return;
 			int th = 6 + (int)(v * 4), cy = h + th;
 			Trunk(x, h, z, th, Blocks.PalmLog);
 			Put(x, cy + 1, z, Blocks.PalmLeaves, true);
@@ -817,7 +1135,7 @@ public class WorldGen
 		}
 		else if (bi == Swamp)      // Willow trees: low and wide, with leaves drooping off the edges
 		{
-			if (top != Blocks.SwampGrass || roll > 0.012) return;
+			if (top != Blocks.SwampGrass || roll > 0.012 || MixedTree(bi, x, h, z)) return;
 			int th = 4 + (int)(v * 2), cy = h + th;
 			Trunk(x, h, z, th, Blocks.WillowLog);
 			for (int dz = -3; dz <= 3; dz++) for (int dx = -3; dx <= 3; dx++)
@@ -837,11 +1155,14 @@ public class WorldGen
 	}
 	void Trees()
 	{
+		bool newTrees = NewTreesHere;
 		for (int z = 3; z < WZ - 3; z++) for (int x = 3; x < WX - 3; x++)
 		{
 			int h = W.Heights[z * WX + x];
+			if (newTrees && ExtraTree(biomeMap[z * WX + x], x, h, z)) continue;   // (a tree with a spot of its own)
 			if (gen == 3 && biomeMap[z * WX + x] != Woods) { BiomeTree(x, h, z, biomeMap[z * WX + x]); continue; }
 			if (world[Idx(x, h, z)] != 1 || Hash(x, z, 999) > (gen == 1 ? 0.011 : 0.003 + ForestAt(x, z) * 0.045)) continue;
+			if (MixedTree(Woods, x, h, z)) continue;   // (land 3: maples and cedars among the oaks)
 			double kind = gen == 1 ? Hash(x, z, 555) : Hash(x, z, 555) < 0.93 ? 0 : 0.95, v = Hash(x, z, 77);
 			if (kind < 0.45)
 			{

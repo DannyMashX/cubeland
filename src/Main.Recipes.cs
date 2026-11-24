@@ -142,7 +142,7 @@ public partial class Main
 			Way(s.At == "foundry" ? "Foundry" : "Kiln", s.Needs.Select(x => (x.Id, x.N)).ToArray(), 1);
 		if (ways == 0) howList.AddChild(Text("Can't be made: found in the world", 14, 0.85f));
 		howPanel.Visible = true;
-		if (!invOpen) { invOpen = true; dim.Visible = true; Input.MouseMode = Input.MouseModeEnum.Visible; }
+		if (!invOpen) { invOpen = true; dim.Visible = true; Unlock(); }
 	}
 
 	// ===================== the Cutter's block list: search and "Can make now" =====================

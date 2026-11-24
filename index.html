@@ -604,7 +604,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.3.0"></script>
+<script src="textures.js?v=beta-0.1.4.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -612,7 +612,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.3.0';
+const GAME_VERSION = 'Beta 0.1.4.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -662,15 +662,17 @@ const BIOMES_MIN = 0.5, BIOMES_MAX = 4;
 const validBiomes = b => typeof b === "number" && b >= BIOMES_MIN && b <= BIOMES_MAX && Math.abs(b * 4 - Math.round(b * 4)) < 1e-9 ? Math.round(b * 4) / 4 : 1;
 // The land's version: which features a world grows with. 0 (or none saved) = worlds made before Beta 0.1.1.3 (they keep growing
 // exactly as they did); 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. (As the desktop version.)
-// 2: ores as common at every depth, in every layer of stone (see placeOres). Held back for the Survival & light update: while
-// ORE_SPREAD_READY is false, new worlds are still made as land 1 (exactly as the released game makes them). A saved world
-// always grows with the land it was made with, up to the newest one this code knows (so a land 2 world made while testing,
-// or by a later version, is never grown differently). It must match OreSpreadReady in the desktop version.
-// (Test: ?orespread in the address makes new worlds land 2 anyway.)
-const LAND_KNOWN = 2;
+// 2: ores as common at every depth, in every layer of stone (see placeOres). 3 (Trees and Leaves): land 1 plus the new trees
+// (see biomeTree), without the ore spread; 4: land 3 plus the ore spread. The ore spread is held back for the Survival & light
+// update: while ORE_SPREAD_READY is false, new worlds are made as land 3. A saved world always grows with the land it was made
+// with, up to the newest one this code knows (so a land 2 world made while testing, or one from a later version, is never grown
+// differently). It must match OreSpreadReady in the desktop version. (Test: ?orespread in the address makes new worlds land 4.)
+const LAND_KNOWN = 4;
 const ORE_SPREAD_READY = false;
-const LAND_VERSION = ORE_SPREAD_READY || /[?&]orespread\b/.test(location.search) ? 2 : 1;   // what new worlds are made as
+const LAND_VERSION = ORE_SPREAD_READY || /[?&]orespread\b/.test(location.search) ? 4 : 3;   // what new worlds are made as
 const validLand = l => Math.min(LAND_KNOWN, Math.max(0, l | 0));
+const oreSpread = land => land === 2 || land >= 4;   // (lands with the ore spread)
+const newTrees = land => land >= 3;                  // (lands with the Trees and Leaves trees)
 const Worlds = (() => {
   const LIST_KEY = 'cubeland-worlds', LAST_KEY = 'cubeland-last-world';
   let list = [];
@@ -785,6 +787,7 @@ const idx = (x, y, z) => (y * WZ + z) * WX + x;
 // nothing. world.get(i) / world.set(i, id) use the world index (idx); world.at(x, y, z) / world.put(x, y, z, id) use x, y, z.
 // The world grows in `raw` (one byte per block, the same as the desktop version), which is packed in here once it's grown.
 let raw = new Uint8Array(WX * WY * WZ);
+let growing = null;   // a sapling growing into a tree: the tree's blocks (index -> block), which the tree code puts here instead (see treeShape)
 const world = (() => {
   const NCY = WY / CS, N = NCX * NCY * NCZ, SHARED = new Uint8Array(4096), WIDE = 256;
   const pal = new Array(N), pn = new Int32Array(N), place = new Array(N);
@@ -910,7 +913,7 @@ function addBlockRows(rows) {
   for (const r of blockRows.values()) { const k = rowKey(r); rowIds.set(k, rowIds.has(k) ? 0 : r.id); }
   for (const r of rows) {
     const b = BLOCKS[r.id];
-    for (const f of ['drop', 'places', 'dye', 'piece', 'of', 'inner']) if (r[f] !== undefined) b[f] = rowIdFor(r[f], r.id);
+    for (const f of ['drop', 'places', 'dye', 'piece', 'of', 'inner', 'fruit']) if (r[f] !== undefined) b[f] = rowIdFor(r[f], r.id);
     if (r.handDrop) b.handDrop = [rowIdFor(r.handDrop[0], r.id), r.handDrop[1], r.handDrop[2]];
   }
 }
@@ -946,6 +949,8 @@ const burnTime = burn => { const [lo, hi] = BURN_TIMES[burn]; return lo + Math.r
 const torchBurn = new Map();   // world index of a lit or smoldering torch spot -> seconds until it burns down a stage
 // farming (Till & Tend, see farmChanged)
 const crops = new Map();      // world index of growing (not yet ripe) Grain -> lucky ticks it has had in this stage (see stageChance)
+const saplings = new Map();   // world index of a sapling -> lucky ticks it has had (see Saplings)
+const grown = new Set();      // the blocks saplings grew into trees: saved like your changes, but natural, not put there by you (see isNatural)
 const soils = new Set();      // world index of every tilled / fertilized soil block
 const fertLeft = new Map();   // world index of fertilized soil -> ripe harvests it has left (FARM.fertHarvests to start)
 const soilIdle = new Map();   // world index of dry, empty tilled soil -> seconds it has been like that
@@ -956,10 +961,17 @@ const isTorch = id => !!(BLOCKS[id] && BLOCKS[id].shape === 'torch');
 const WATER = 50;
 addBlockRows(BLOCK_DATA.WATER);
 // Logs lie the way you put them down: on the top or bottom of something they stand upright; on a side they lie pointing
-// out from it. Each kind of log has two lying blocks (360-375): 360 + 2k along x, 361 + 2k along z, k its place in LOGS.
-// (They're numbered over 255, so the world's growing puts them in after it's packed: see `late`.) (data/blocks.json LYING_LOGS)
-const LOGS = [4, 61, FIR_LOG, STRIPPED_FIR_LOG, PALM_LOG, STRIPPED_PALM_LOG, WILLOW_LOG, STRIPPED_WILLOW_LOG], TURNED_LOGS = 360;
-const turned = (log, axis) => { const k = LOGS.indexOf(log); return k < 0 || !axis ? log : TURNED_LOGS + 2 * k + axis - 1; };
+// out from it. Each kind of log has two lying blocks, rows with an axis that drop it: the older woods' are 360-375 (360 + 2k
+// along x, 361 + 2k along z, k its place in LOGS: data/blocks.json LYING_LOGS), the Trees and Leaves woods' are in WOODS.
+// (They're numbered over 255, so the world's growing puts them in after it's packed: see `late`.)
+const LOGS = [4, 61, FIR_LOG, STRIPPED_FIR_LOG, PALM_LOG, STRIPPED_PALM_LOG, WILLOW_LOG, STRIPPED_WILLOW_LOG], TURNED_LOGS = 360;   // (the older ones)
+// a log lying along x (axis 1) or z (axis 2): the row with that axis that drops it (found once every block is loaded)
+let lyingOf = null;
+function turned(log, axis) {
+  if (!axis) return log;
+  if (!lyingOf) { lyingOf = new Map(); for (const k of Object.keys(BLOCKS)) { const b = BLOCKS[k]; if (b && b.axis && b.drop) lyingOf.set(b.drop * 4 + b.axis, +k); } }
+  return lyingOf.get(log * 4 + axis) || log;
+}
 addBlockRows(BLOCK_DATA.LYING_LOGS);
 // Snow: Snow (380-386) lies in layers, 1 to 7 deep (each an eighth of a block); putting Snow on Snow adds a layer, and an
 // 8th layer makes it a Snow Block (387). Only the 2nd layer up is solid (you sink into the first). It falls off whatever
@@ -1023,6 +1035,7 @@ const BONE = 620, BONE_ASH = 621, GLOOM_WISP = 622;
 const GRAIN_SEEDS = 623, GRAIN = 624, FLOUR = 625, BREAD = 626;
 const TILLED = 93, WET_TILLED = 94, FERTILIZED = 95, WET_FERTILIZED = 96;
 const GRAIN_STAGES = [42, 43, 44, 45, 46, 47, 48, 49], GRAIN_RIPE = 49;
+const SAPLING = NUMBERS.SAPLING;   // saplings: dropChance (from leaves), growTime (seconds, on average), growHits (lucky ticks), boneAshChance
 const FARM = NUMBERS.FARM;   // stageTime 40, stageHits 3, dryRate 0.5, fertRate 1.6, wetReach 5, fertHarvests 2, revertTime 180, seedChance 1/6
 // cows: Leather (more from a cow with room to roam), Raw Meat (more from a well-fed cow) -> Cooked Meat in the Kiln
 const LEATHER = 627, RAW_MEAT = 628, COOKED_MEAT = 629;
@@ -1090,6 +1103,31 @@ const isGear = id => !!(BLOCKS[id] && (BLOCKS[id].armor !== undefined || BLOCKS[
 const FLOWER_COLOURS = ['red', 'yellow', 'aqua', 'indigo', 'magenta'];
 const FLOWERS = FLOWER_COLOURS.map((c, k) => 194 + k);
 addBlockRows(BLOCK_DATA.FLOWERS);   // (dye: the Dye each one makes)
+addBlockRows(BLOCK_DATA.WOODS);   // Trees and Leaves: the fruit, the new woods, the Dead Log, the door items and the saplings
+// leaves name their sapling, which can come later in the file (BASE's leaves: WOODS' saplings), so it's looked up once they're all in
+for (const r of blockRows.values()) if (r.sapling !== undefined) BLOCKS[r.id].sapling = rowIdFor(r.sapling, r.id);
+// The doors as they stand (data/blocks.json DOORS): each door's 32 states are first + facing x 8 + hinge x 4 + open x 2 + half
+// (facing: the Kiln's numbers, the way its front faces; hinge 0 = on the left as you look at its front; half 0 = the bottom).
+// Shut, it's 4px thick in the middle of its space; open, it lies against its hinge side. Its edges look like its planks, and its
+// big faces show <the door>_bottom / _top (see doorFaces). (The same as the desktop version.)
+const DOOR_SHUT_BOX = [[0, 0, 0.375, 1, 1, 0.625], [0.375, 0, 0, 0.625, 1, 1]];   // facing 0 and 2, facing 1 and 3
+const DOOR_OPEN_BOX = [   // [facing][hinge]
+  [[0, 0, 0, 0.25, 1, 1], [0.75, 0, 0, 1, 1, 1]], [[0, 0, 0.75, 1, 1, 1], [0, 0, 0, 1, 1, 0.25]],
+  [[0.75, 0, 0, 1, 1, 1], [0, 0, 0, 0.25, 1, 1]], [[0, 0, 0, 1, 1, 0.25], [0, 0, 0.75, 1, 1, 1]]];
+function doorRows(rows) {
+  return rows.flatMap(r => {
+    const item = blockRows.get(r.item), planks = blockRows.get(rowIdFor(r.of, 'DOORS')), key = keySlug(item.name);
+    const edge = typeof planks.pictures === 'string' ? planks.pictures : planks.pictures[0];
+    return Array.from({ length: 32 }, (_, s) => {
+      const facing = s >> 3, hinge = (s >> 2) & 1, open = (s >> 1) & 1, half = s & 1;
+      return { id: r.first + s, name: item.name, pictures: [edge, edge, edge, key + (half ? '_top' : '_bottom')], shape: 'door', facing, hinge, open, half,
+        transparent: true, box: open ? DOOR_OPEN_BOX[facing][hinge] : DOOR_SHUT_BOX[facing & 1], drop: key, sound: 'wood', needs: 'axe' };
+    });
+  });
+}
+addBlockRows(doorRows(BLOCK_DATA.DOORS));
+const DOOR_OF_ITEM = new Map(BLOCK_DATA.DOORS.map(r => [r.item, r.first]));   // a door you carry -> its first state
+const isDoor = b => !!(BLOCKS[b] && BLOCKS[b].shape === 'door');
 const isFlower = id => FLOWERS.includes(id);
 const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // Survival digging rules:
@@ -1157,9 +1195,15 @@ const SPLITTABLE = BLOCK_DATA.FORMS.map(r => rowIdFor(r.of, 'FORMS'));
 // so theirs are 1800 + 7 x (the block's place in DEEP_BLOCKS) + (piece 0, slab 1, vslab 2, stairs 3, quarter 4, vstairs 5, vquarter 6).
 const FORMS = ['piece', 'slab', 'vslab', 'stairs', 'quarter', 'vstairs', 'vquarter'], DEEP_FORM_ITEM = 1800;
 // the item for a piece / slab / stairs... of block b
-function formItem(form, b) {
+// the item for a piece / slab / stairs... of block b: its FORMS row's (0: b can't be cut that way)
+const FORM_ITEMS = new Map(BLOCK_DATA.FORMS.map(r => [rowIdFor(r.of, 'FORMS'), r]));
+function formItem(form, b) { const r = FORM_ITEMS.get(b); return r ? r[form] : 0; }
+// how the older blocks' form items were numbered (the datacheck holds their rows to it; the Trees and Leaves woods' are at
+// their wood's first id + 10, 20, 30 or 40 for the log, stripped log, planks and leaves)
+function formSum(form, b) {
   const i = DEEP_BLOCKS.indexOf(b);
   const e = EXTRA_FORM_BLOCKS.indexOf(b);
+  if (b >= 2200 && b < 3400) return b - b % 100 + 10 * (b % 100 + 1) + FORMS.indexOf(form);
   return i >= 0 ? DEEP_FORM_ITEM + 7 * i + FORMS.indexOf(form) : e >= 0 ? EXTRA_FORM_ITEM + 7 * e + FORMS.indexOf(form)
     : (form === 'piece' ? PIECE_ITEM : SHAPE_ITEM[form]) + b;
 }
@@ -1228,6 +1272,7 @@ function keyStates(b) {
   if (b.shape === 'snow' && b.layers > 1) s.push('layers=' + b.layers);
   if (b.axis) s.push('axis=' + b.axis);
   if (b.look) s.push('look=' + b.look);
+  if (b.shape === 'door') s.push('facing=' + (b.facing | 0), 'half=' + (b.half | 0), 'hinge=' + (b.hinge | 0), 'open=' + (b.open | 0));   // (every one, even 0)
   return s;
 }
 function keyTable() {
@@ -1724,6 +1769,7 @@ const RAW = 255; // "land, decide grass/dirt/stone later"
 function put(x, y, z, id, onlyAir) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
   const i = idx(x, y, z);
+  if (growing) { if (!(onlyAir && growing.get(i))) growing.set(i, id); return; }   // (a sapling growing: see treeShape)
   if (onlyAir && raw[i]) return;
   raw[i] = id;
 }
@@ -2009,12 +2055,32 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++)
 // one's ore, veins per 10,000 columns, blocks per vein, shallowest and deepest (blocks below the surface). A vein is a short
 // random walk that turns the Stone it passes through into its ore (Dirt too, for takesDirt). (The same as the desktop edition.)
 const ORE_VEINS = WORLDGEN.ORE_VEINS.map(r => ({ ...r, ore: idOf(r.ore) }));
-// New worlds (LAND 2): the allDepths ores are as common at every depth (from 3 below the surface all the way down, with more
+// Lands with the ore spread (2 and 4, see oreSpread): the allDepths ores are as common at every depth (from 3 below the surface all the way down, with more
 // veins in a taller world) and turn any layer's Stone into that layer's ore. Older worlds keep the old veins exactly.
-const deepOresGrown = [];   // [index, deep ore] (put in once the world is packed, like the other blocks past 255: see `late`)
+// Blocks numbered 256 and up that the world grows (deep ores, the new trees' wood, lying logs, snow): the world grows one byte
+// per block, so `stand` goes in for now, and the real block takes its place once the world is packed, if nothing else has been
+// put there since. Kept as [index, id, stand], in the order they were grown (the desktop version's Late), in typed arrays: a
+// big world can grow a million of them.
+const late = (() => {
+  let a = new Int32Array(3 * 65536), n = 0;
+  return {
+    push(i, id, stand) {
+      if (3 * n + 3 > a.length) { const b = new Int32Array(a.length * 2); b.set(a); a = b; }
+      a[3 * n] = i; a[3 * n + 1] = id; a[3 * n + 2] = stand; n++;
+    },
+    // the ones still wanted (their stand-in is still there), in order, as index, id, index, id...
+    kept() {
+      let m = 0; for (let k = 0; k < n; k++) if (raw[a[3 * k]] === a[3 * k + 2]) m++;
+      const out = new Int32Array(2 * m); m = 0;
+      for (let k = 0; k < n; k++) if (raw[a[3 * k]] === a[3 * k + 2]) { out[m++] = a[3 * k]; out[m++] = a[3 * k + 1]; }
+      return out;
+    },
+    clear() { a = new Int32Array(0); n = 0; },
+  };
+})();
 function placeOres() {
   ORE_VEINS.forEach(({ ore, per, size, top, deep, takesDirt, allDepths }, o) => {
-    const newOre = LAND >= 2 && !!allDepths;
+    const newOre = oreSpread(LAND) && !!allDepths;
     if (newOre) { top = 3; deep = 999; per *= WY / 192; }
     const s = 7001 + o * 10, n = Math.floor(WX * WZ * per / 10000);
     for (let k = 0; k < n; k++) {
@@ -2025,7 +2091,7 @@ function placeOres() {
       for (let j = 0; j < size; j++) {
         const i = idx(x, y, z), b = raw[i];
         if (b === 3 || (takesDirt && b === 2)) raw[i] = ore;
-        else if (newOre && b >= STRATA && b < STRATA + STRATA_LAYERS - 1) { raw[i] = ore; deepOresGrown.push([i, oreIn(ore, b - STRATA + 2), ore]); }
+        else if (newOre && b >= STRATA && b < STRATA + STRATA_LAYERS - 1) { raw[i] = ore; late.push(i, oreIn(ore, b - STRATA + 2), ore); }
         const [dx, dy, dz] = ORE_STEPS[Math.floor(hash3(k, j, o, s + 5) * 6)];
         x += dx; y += dy; z += dz;
         if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 2 || y >= WY) break;
@@ -2090,68 +2156,247 @@ function leafBall(cx, cy, cz, r) {
 }
 function trunk(x, y, z, h, log = 4) { for (let yy = y + 1; yy <= y + h; yy++) put(x, yy, z, log, true); }
 // (worlds from LAND 1: a trunk that goes up through leaves already there, so it reaches into the tree's crown)
-function trunkInto(x, y, z, h) { for (let yy = y + 1; yy <= y + h; yy++) { const i = idx(x, yy, z); if (!raw[i] || isLeaves(raw[i])) raw[i] = 4; } }
+function trunkInto(x, y, z, h) {
+  for (let yy = y + 1; yy <= y + h; yy++) {
+    const i = idx(x, yy, z);
+    if (growing) { if (!growing.get(i) || isLeaves(growing.get(i))) growing.set(i, 4); continue; }   // (a sapling growing: see treeShape)
+    if (!raw[i] || isLeaves(raw[i])) raw[i] = 4;
+  }
+}
 // hills worlds: plain round-topped trees, scattered on open grass and packed close together in forests
 const forestAt = (x, z) => smoothstep(0.47, 0.6, fbm(x / 110 + 20, z / 110 + 20, 2, 970));
+const PALM_FRONDS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];   // (the 4 sides, then the 4 corners)
+// ---- Trees and Leaves (Biomes worlds from land 3, see newTrees): the new trees ----
+// Each biome's usual tree spots (where land 1 grows its trees) are shared out between its trees (worldgen.json TREE_MIX), the
+// same kind in patches (TREE_PATCH blocks square), and some trees have spots of their own (TREE_EXTRA: each row its own roll,
+// tried in order before the usual spots). How each one looks is below (its numbers: TREE_SHAPES). Their blocks are numbered
+// over 255, so a log grows as an Oak Log and a leaf as Oak Leaves, and the real block takes its place once the world is packed
+// (see `late`). (The same as the desktop version: both must grow the same worlds.)
+const NEW_TREES = GEN === 3 && newTrees(LAND);
+const BIOME_NAMES = ['woods', 'plains', 'desert', 'snowy', 'swamp', 'taiga', 'meadow', 'badlands'];   // (biomeMap's numbers)
+const TREE_SHAPE = Object.fromEntries(WORLDGEN.TREE_SHAPES.map(r => [r.tree, r]));   // (world growth uses it from land 3; saplings in every world)
+const OWN_TREE = ['oak', 'oak', 'palm', 'fir', 'willow', 'fir', 'oak', null];   // the tree each biome grew before (its code is below)
+const span = ([a, b], v) => a + Math.floor(v * (b - a + 1));   // a whole number from a to b, picked by v (0 to 1)
+// put a block of a tree: into air (and into leaves too, with into: a trunk going up through leaves)
+function treeBlock(id, x, y, z, into) {
+  if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
+  const i = idx(x, y, z), b = growing ? growing.get(i) || 0 : raw[i];
+  if (b && !(into && isLeaves(b))) return;
+  if (growing) { growing.set(i, id); return; }   // (a sapling growing: its real blocks, see treeShape)
+  if (id < 256) { raw[i] = id; return; }
+  const stand = BLOCKS[id].leaves ? 5 : 4;
+  raw[i] = stand; late.push(i, id, stand);
+}
+// a trunk: n logs above y
+function stem(id, x, y, z, n) { for (let k = 1; k <= n; k++) treeBlock(id, x, y + k, z, true); }
+// leaves in a ball rx across and ry up and down, around the middle of block (cx, cy, cz) (cx, cz may be half-way between
+// blocks, for a 2 x 2 trunk); holes: the share of its outer blocks left out, so the edge is ragged
+function crown(id, cx, cy, cz, rx, ry, holes, s) {
+  const X = Math.ceil(rx), Y = Math.ceil(ry);
+  for (let dy = -Y; dy <= Y; dy++) for (let bz = Math.floor(cz - X); bz <= Math.ceil(cz + X); bz++) for (let bx = Math.floor(cx - X); bx <= Math.ceil(cx + X); bx++) {
+    const d = ((bx - cx) ** 2 + (bz - cz) ** 2) / (rx * rx) + dy * dy / (ry * ry);
+    if (d > 1 || (d > 0.5 && hash3(bx, cy + dy, bz, s) < holes)) continue;
+    treeBlock(id, bx, cy + dy, bz);
+  }
+}
+// a flat round layer of leaves r across; sparse: the share of it left out (not next to the trunk)
+function layer(id, cx, y, cz, r, sparse, s) {
+  for (let bz = Math.floor(cz - r); bz <= Math.ceil(cz + r); bz++) for (let bx = Math.floor(cx - r); bx <= Math.ceil(cx + r); bx++) {
+    const d = (bx - cx) ** 2 + (bz - cz) ** 2;
+    if (d > r * r || (d > 1 && hash3(bx, y, bz, s) < sparse)) continue;
+    treeBlock(id, bx, y, bz);
+  }
+}
+// any of 8 spots `far` away in another biome (a desert's edge)
+const nearOtherBiome = (x, z, far, bi) => PALM_FRONDS.some(([dx, dz]) => {
+  const px = Math.min(WX - 1, Math.max(0, x + dx * far)), pz = Math.min(WZ - 1, Math.max(0, z + dz * far));
+  return biomeMap[pz * WX + px] !== bi;
+});
+// low, with sea within `far` (a coast)
+const nearSea = (x, h, z, far) => h <= SEA_LEVEL + 3 && PALM_FRONDS.some(([dx, dz]) => {
+  const px = Math.min(WX - 1, Math.max(0, x + dx * far)), pz = Math.min(WZ - 1, Math.max(0, z + dz * far));
+  return raw[idx(px, SEA_LEVEL, pz)] === WATER;
+});
+// the ground each biome's trees grow on
+const treeGround = (bi, top, h) => bi === SNOWY ? top === SNOWY_GRASS : bi === SWAMP ? top === SWAMP_GRASS
+  : bi === DESERT ? top === 6 && h > SEA_LEVEL : bi === BADLANDS ? h > SEA_LEVEL && BADLANDS_BANDS.includes(top) : top === 1;
+// grow tree `name` standing on (x, h, z)
+function growTree(name, x, h, z) {
+  const T = TREE_SHAPE[name], log = idOf(T.log), leaves = T.leaves ? idOf(T.leaves) : 0, s = 12000 + 10 * WORLDGEN.TREE_SHAPES.indexOf(T);
+  const v = hash(x, z, s), th = T.trunk ? span(T.trunk, v) : 0, top = h + th;
+  switch (name) {
+    case 'maple':   // a big round crown
+      stem(log, x, h, z, th + 1); crown(leaves, x, top + 1, z, T.crown, T.crown * 0.8, 0.3, s + 1); break;
+    case 'cedar':   // flat tiers of leaves, wide at the bottom, and a tuft on top
+      stem(log, x, h, z, th);
+      T.tiers.forEach((r, k) => layer(leaves, x, top - T.gap * (T.tiers.length - 1 - k), z, r, 0.25, s + 1 + k));
+      treeBlock(leaves, x, top + 1, z); break;
+    case 'birch':   // slim, with a small oval crown
+    case 'cherry':  // short, with a wide round crown
+    case 'orange':  // small, with a round crown
+      stem(log, x, h, z, th); crown(leaves, x, name === 'birch' ? top - 1 : top + 1, z, T.crown[0], T.crown[1], 0.3, s + 1); break;
+    case 'aspen':   // tall and thin, with a narrow column of leaves
+      stem(log, x, h, z, th);
+      for (let y = top - T.crown[1]; y <= top + 1; y++) layer(leaves, x, y, z, y >= top ? 1 : T.crown[0], 0.15, s + 1); break;
+    case 'redwood': {   // a thick trunk (2 x 2), the tallest tree, with a narrow cone of leaves on its top third
+      const cols = [[0, 0], [1, 0], [0, 1], [1, 1]];
+      if (!growing && cols.some(([dx, dz]) => Math.abs(heights[(z + dz) * WX + x + dx] - h) > 2)) return;   // (only on fairly flat ground)
+      for (const [dx, dz] of cols) { const g = growing ? h : heights[(z + dz) * WX + x + dx]; stem(log, x + dx, g, z + dz, top - g); }   // (from saplings: all 4 on their ground)
+      const tip = top + 3;
+      for (let y = top - Math.floor(th / 3); y <= tip; y++) {
+        if (y < tip - 5 && (tip - y) % 3 === 2) continue;   // (gaps between its lower layers of branches)
+        layer(leaves, x + 0.5, y, z + 0.5, Math.min(T.crown, 1.6 + (tip - y) * 0.22), 0.2, s + 1);
+      }
+      break;
+    }
+    case 'cypress': {   // a tall narrow spire, with roots flaring out at the bottom
+      stem(log, x, h, z, th);
+      PALM_FRONDS.slice(0, 4).forEach(([dx, dz], k) => { if (hash(x + dx, z + dz, s + 2) < 0.6) treeBlock(log, x + dx, h + 1, z + dz); });
+      const tip = top + 2;
+      for (let y = h + 4; y <= tip; y++) layer(leaves, x, y, z, 0.6 + T.crown * (tip - y) / (tip - h - 4), 0.2, s + 1);
+      break;
+    }
+    case 'juniper': {   // short and gnarled: a leaning trunk with a clump of leaves on top and one or two on short branches
+      const [lx, lz] = PALM_FRONDS[Math.floor(hash(x, z, s + 2) * 4)];
+      let cx = x, cz = z;
+      for (let k = 1; k <= th; k++) { treeBlock(log, cx, h + k, cz, true); if (k < th && hash3(x, k, z, s + 3) < 0.4) { cx += lx; cz += lz; } }
+      crown(leaves, cx, top + 1, cz, T.crown, 1, 0.3, s + 1);
+      const n = 1 + Math.floor(hash(x, z, s + 4) * 2);
+      for (let j = 0; j < n; j++) {
+        const [dx, dz] = PALM_FRONDS[Math.floor(hash3(x, j, z, s + 5) * 8)];
+        treeBlock(log, cx + dx, top, cz + dz, true);
+        crown(leaves, cx + 2 * dx, top, cz + 2 * dz, T.crown - 0.3, 1, 0.3, s + 6 + j);
+      }
+      break;
+    }
+    case 'larch':   // a sparse cone
+    case 'holly': { // small and dense, a cone right down to the ground
+      stem(log, x, h, z, th);
+      const tip = top + (name === 'larch' ? 1 : 2), low = name === 'larch' ? h + 3 : h + 1;
+      for (let y = low; y <= tip; y++) layer(leaves, x, y, z, name === 'larch' ? Math.min(T.crown, (tip - y + 1) >> 1) : 0.6 + T.crown * (tip - y) / (tip - low), T.sparse || 0, s + 1);
+      break;
+    }
+    case 'palo_verde': {   // a short trunk splitting into branches, with a wide, flat, sparse crown
+      stem(log, x, h, z, th);
+      const n = 2 + Math.floor(hash(x, z, s + 2) * 2), len = span(T.branch, hash(x, z, s + 3));
+      for (let j = 0; j < n; j++) { const [dx, dz] = PALM_FRONDS[4 + Math.floor(hash3(x, j, z, s + 4) * 4)]; for (let k = 1; k <= len; k++) treeBlock(log, x + dx * k, top + k, z + dz * k, true); }
+      layer(leaves, x, top + len + 1, z, T.crown, T.sparse, s + 1); layer(leaves, x, top + len + 2, z, T.crown - 1.2, T.sparse, s + 5);
+      break;
+    }
+    case 'dead': {   // bleached and leafless: a trunk with a few bare branches sticking out
+      stem(log, x, h, z, th);
+      const n = span(T.branches, hash(x, z, s + 2));
+      for (let j = 0; j < n; j++) {
+        const k4 = Math.floor(hash3(x, j, z, s + 3) * 4), [dx, dz] = PALM_FRONDS[k4], y = h + 2 + Math.floor(hash3(x, j, z, s + 4) * (th - 1));
+        const len = span(T.branch, hash3(x, j, z, s + 5)), along = turned(log, dx ? 1 : 2);
+        for (let k = 1; k <= len; k++) treeBlock(along, x + dx * k, y, z + dz * k);
+      }
+      break;
+    }
+    case 'prairie_oak':   // short, with a wide, flattened crown
+      stem(log, x, h, z, th + 1); crown(leaves, x, top + 1, z, T.crown[0], T.crown[1], 0.3, s + 1); break;
+    case 'shrub':   // a low bush of leaves, sometimes round a stub of log
+      if (hash(x, z, s + 2) < 0.4) treeBlock(log, x, h + 1, z);
+      crown(leaves, x, h + 1, z, T.crown[0] + (T.crown[1] - T.crown[0]) * v, 1, 0.35, s + 1); break;
+  }
+}
+// a spot where biome bi usually grows a tree: which tree grows there (worldgen.json TREE_MIX). True if it grew a new one (false:
+// the biome's own tree, which the code below grows as before)
+function mixedTree(bi, x, h, z) {
+  if (!NEW_TREES) return false;
+  const mix = WORLDGEN.TREE_MIX[BIOME_NAMES[bi]] || [], P = WORLDGEN.TREE_PATCH;
+  let p = hash(Math.floor(x / P), Math.floor(z / P), 12900 + bi), name = OWN_TREE[bi];
+  for (const [tree, share] of mix) { if (p < share) { name = tree; break; } p -= share; }
+  if (name === OWN_TREE[bi]) return false;
+  growTree(name, x, h, z); return true;
+}
+// the trees with spots of their own (worldgen.json TREE_EXTRA, each row its own roll): true if one grew here
+function extraTree(bi, x, h, z) {
+  const top = raw[idx(x, h, z)];
+  return WORLDGEN.TREE_EXTRA.some((r, k) => {
+    if (r.biome !== BIOME_NAMES[bi] || !treeGround(bi, top, h) || hash(x, z, 12100 + k) >= r.chance) return false;
+    if (r.spacing) {   // (only one spot in each spacing x spacing square can grow it, so they're never too close)
+      const n = r.spacing, gx = Math.floor(x / n), gz = Math.floor(z / n);
+      if (x !== gx * n + Math.floor(hash(gx, gz, 12300 + k) * n) || z !== gz * n + Math.floor(hash(gx, gz, 12400 + k) * n)) return false;
+    }
+    if (r.grove && fbm(x / r.grove[0] + 31 * k, z / r.grove[0] + 31 * k, 2, 12200 + k) < r.grove[1]) return false;   // (only in its groves)
+    if ((r.edge || r.coast) && !(r.edge && nearOtherBiome(x, z, r.edge, bi)) && !(r.coast && nearSea(x, h, z, r.coast))) return false;
+    growTree(r.tree, x, h, z); return true;
+  });
+}
 // biome worlds: each biome's own trees (the Woods have the ones below)
-const PALM_FRONDS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 function biomeTree(x, h, z, bi) {
   const top = raw[idx(x, h, z)], v = hash(x, z, 77), roll = hash(x, z, 999);
   if (bi === PLAINS || bi === MEADOW) {   // now and then a lone round tree (a few more in meadows)
-    if (top !== 1 || roll > (bi === MEADOW ? 0.0015 : 0.0008)) return;
+    if (top !== 1 || roll > (bi === MEADOW ? 0.0015 : 0.0008) || mixedTree(bi, x, h, z)) return;
     const th = 5 + (v * 3 | 0);
     trunk(x, h, z, LAND >= 1 ? th + 1 : th); leafBall(x, h + th + 1, z, 2.3);
   } else if (bi === SNOWY || bi === TAIGA) {   // Fir trees, pointed: rings of leaves, widest at the bottom, narrowing up to a point (taiga: thicker forests, no snow)
     if (bi === SNOWY ? top !== SNOWY_GRASS || roll > 0.004 + forestAt(x, z) * 0.03 : top !== 1 || roll > 0.006 + forestAt(x, z) * 0.045) return;
-    const th = 6 + (v * 4 | 0), tip = h + th + 1;
-    trunk(x, h, z, th, FIR_LOG);
-    for (let ly = h + 3; ly <= tip; ly++) {
-      const r = Math.min(3, (tip - ly + 1) >> 1);
-      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dz * dz <= r * r + 1) put(x + dx, ly, z + dz, FIR_LEAVES, true);
-    }
+    if (mixedTree(bi, x, h, z)) return;
+    firTree(x, h, z, v);
   } else if (bi === DESERT) {   // Palm trees, now and then: a tall bare trunk with a crown of long fronds drooping at the tips
-    if (top !== 6 || h <= SEA_LEVEL || roll > 0.002) return;
-    const th = 6 + (v * 4 | 0), cy = h + th;
-    trunk(x, h, z, th, PALM_LOG);
-    put(x, cy + 1, z, PALM_LEAVES, true);
-    for (const [fx, fz] of PALM_FRONDS) {
-      const len = fx && fz ? 2 : 3;   // (shorter on the diagonals, so the crown looks round)
-      for (let k = 1; k <= len; k++) put(x + fx * k, k < len ? cy + 1 : cy, z + fz * k, PALM_LEAVES, true);
-      put(x + fx * len, cy - 1, z + fz * len, PALM_LEAVES, true);
-    }
+    if (top !== 6 || h <= SEA_LEVEL || roll > 0.002 || mixedTree(bi, x, h, z)) return;
+    palmTree(x, h, z, v);
   } else if (bi === SWAMP) {    // Willow trees: low and wide, with leaves drooping off the edges
-    if (top !== SWAMP_GRASS || roll > 0.012) return;
-    const th = 4 + (v * 2 | 0), cy = h + th;
-    trunk(x, h, z, th, WILLOW_LOG);
-    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
-      const d = dx * dx + dz * dz;
-      if (d > 10) continue;
-      put(x + dx, cy, z + dz, WILLOW_LEAVES, true);
-      if (d <= 5) put(x + dx, cy + 1, z + dz, WILLOW_LEAVES, true);
-      if (d >= 5) {
-        const hang = hash(x + dx, z + dz, 8080);
-        if (hang < 0.35) put(x + dx, cy - 1, z + dz, WILLOW_LEAVES, true);
-        if (hang < 0.12) put(x + dx, cy - 2, z + dz, WILLOW_LEAVES, true);
-      }
+    if (top !== SWAMP_GRASS || roll > 0.012 || mixedTree(bi, x, h, z)) return;
+    willowTree(x, h, z, v);
+  }
+}
+// the first trees' shapes, standing on (x, h, z) (v: hash(x, z, 77)), for world growth and for saplings
+function firTree(x, h, z, v) {   // pointed: rings of leaves, widest at the bottom, narrowing up to a point
+  const th = 6 + (v * 4 | 0), tip = h + th + 1;
+  trunk(x, h, z, th, FIR_LOG);
+  for (let ly = h + 3; ly <= tip; ly++) {
+    const r = Math.min(3, (tip - ly + 1) >> 1);
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dz * dz <= r * r + 1) put(x + dx, ly, z + dz, FIR_LEAVES, true);
+  }
+}
+function palmTree(x, h, z, v) {   // a tall bare trunk with a crown of long fronds drooping at the tips
+  const th = 6 + (v * 4 | 0), cy = h + th;
+  trunk(x, h, z, th, PALM_LOG);
+  put(x, cy + 1, z, PALM_LEAVES, true);
+  for (const [fx, fz] of PALM_FRONDS) {
+    const len = fx && fz ? 2 : 3;   // (shorter on the diagonals, so the crown looks round)
+    for (let k = 1; k <= len; k++) put(x + fx * k, k < len ? cy + 1 : cy, z + fz * k, PALM_LEAVES, true);
+    put(x + fx * len, cy - 1, z + fz * len, PALM_LEAVES, true);
+  }
+}
+function willowTree(x, h, z, v) {   // low and wide, with leaves drooping off the edges
+  const th = 4 + (v * 2 | 0), cy = h + th;
+  trunk(x, h, z, th, WILLOW_LOG);
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+    const d = dx * dx + dz * dz;
+    if (d > 10) continue;
+    put(x + dx, cy, z + dz, WILLOW_LEAVES, true);
+    if (d <= 5) put(x + dx, cy + 1, z + dz, WILLOW_LEAVES, true);
+    if (d >= 5) {
+      const hang = hash(x + dx, z + dz, 8080);
+      if (hang < 0.35) put(x + dx, cy - 1, z + dz, WILLOW_LEAVES, true);
+      if (hang < 0.12) put(x + dx, cy - 2, z + dz, WILLOW_LEAVES, true);
     }
   }
 }
+function oakTree(x, h, z, v) {   // the woods' normal oak: a trunk up into a squarish crown
+  const th = 4 + (v * 3 | 0);
+  for (let dy = -2; dy <= 1; dy++) {
+    const r = dy >= 0 ? 1 : 2, ly = h + th + dy;
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.abs(dx) === r && Math.abs(dz) === r && hash(x + dx, z + dz, ly) < 0.6) continue;
+      put(x + dx, ly, z + dz, 5, true);
+    }
+  }
+  if (LAND >= 1) trunkInto(x, h, z, th); else trunk(x, h, z, th);
+}
 for (let z = 3; z < WZ - 3; z++) for (let x = 3; x < WX - 3; x++) {
   const h = heights[z * WX + x];
+  if (NEW_TREES && extraTree(biomeMap[z * WX + x], x, h, z)) continue;   // (a tree with a spot of its own)
   if (GEN === 3 && biomeMap[z * WX + x] !== WOODS) { biomeTree(x, h, z, biomeMap[z * WX + x]); continue; }
   if (raw[idx(x, h, z)] !== 1 || hash(x, z, 999) > (GEN === 1 ? 0.011 : 0.003 + forestAt(x, z) * 0.045)) continue;
+  if (mixedTree(WOODS, x, h, z)) continue;   // (land 3: maples and cedars among the oaks)
   const kind = GEN === 1 ? hash(x, z, 555) : hash(x, z, 555) < 0.93 ? 0 : 0.95, v = hash(x, z, 77);
-  if (kind < 0.45) {                    // normal
-    const th = 4 + (v * 3 | 0);
-    for (let dy = -2; dy <= 1; dy++) {
-      const r = dy >= 0 ? 1 : 2, ly = h + th + dy;
-      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
-        if (Math.abs(dx) === r && Math.abs(dz) === r && hash(x + dx, z + dz, ly) < 0.6) continue;
-        put(x + dx, ly, z + dz, 5, true);
-      }
-    }
-    if (LAND >= 1) trunkInto(x, h, z, th); else trunk(x, h, z, th);
-  } else if (kind < 0.75) {             // lollipop
+  if (kind < 0.45) oakTree(x, h, z, v);   // normal
+  else if (kind < 0.75) {             // lollipop
     const th = 5 + (v * 4 | 0);
     trunk(x, h, z, LAND >= 1 ? th + 2 : th);
     leafBall(x, h + th + 2, z, 2.6);
@@ -2202,10 +2447,6 @@ for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
 //   Swamps: hollows, mounds of peat and mud with a dead willow trunk, ringed by still water
 const STRUCT_CELL = 64;
 const structuresBuilt = [];   // (what was built where, for testing: window.STRUCTURES with ?worldhash)
-// Blocks numbered 256 and up (lying logs, snow): the world grows one byte per block, so `stand` goes in for now, and the
-// real block takes its place once the world is packed, if nothing else has been put there since. Entries: [index, id, stand].
-const late = [];
-for (const d of deepOresGrown) late.push(d);   // (deep ores: see placeOres)
 {
   const plant = b => b === 0 || isLeaves(b) || b === 4 || b === FIR_LOG || b === PALM_LOG || b === WILLOW_LOG || isFlower(b) || b === ROCK_BLOCK;
   // the ground under a spot (under any trees, flowers or rocks; the top of the water at sea)
@@ -2283,7 +2524,7 @@ for (const d of deepOresGrown) late.push(d);   // (deep ores: see placeOres)
       const cx = alongX ? x + k : x + a, cz = alongX ? z + a : z + k, y = ay + dy, d = dy * dy + a * a;
       if (d <= 5) {
         if (k > 0 && d <= 1) { const i = idx(cx, y, cz); if (plant(raw[i])) raw[i] = 0; }   // (hollow, open at the far end)
-        else { putOver(cx, y, cz, log); if (y > 0 && y < WY && raw[idx(cx, y, cz)] === log) late.push([idx(cx, y, cz), turned(log, alongX ? 1 : 2), log]); }   // (lying along its length)
+        else { putOver(cx, y, cz, log); if (y > 0 && y < WY && raw[idx(cx, y, cz)] === log) late.push(idx(cx, y, cz), turned(log, alongX ? 1 : 2), log); }   // (lying along its length)
       } else if (k === 0 && d <= 11 && dy >= -2) putOver(cx, y, cz, 2);   // (the roots)
     }
     for (let k = 1; k < L; k++)
@@ -2378,8 +2619,8 @@ if (GEN === 3 && LAND >= 1) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX;
   while (y > 0 && !raw[idx(x, y, z)]) y--;
   while (y > 0) {
     const b = raw[idx(x, y, z)];
-    if (isFlower(b)) { if (snowCanLie(raw[idx(x, y - 1, z)])) late.push([idx(x, y, z), withSnow(b, 1), b]); break; }   // (a flower: it stands in the snow)
-    if (!raw[idx(x, y + 1, z)] && snowCanLie(b)) late.push([idx(x, y + 1, z), SNOW, 0]);
+    if (isFlower(b)) { if (snowCanLie(raw[idx(x, y - 1, z)])) late.push(idx(x, y, z), withSnow(b, 1), b); break; }   // (a flower: it stands in the snow)
+    if (!raw[idx(x, y + 1, z)] && snowCanLie(b)) late.push(idx(x, y + 1, z), SNOW, 0);
     if (!isLeaves(b)) break;   // (the ground, a log, a boulder...: the snow goes no further down)
     y--;
     while (y > 0 && !raw[idx(x, y, z)]) y--;
@@ -2747,20 +2988,21 @@ waterMat.onBeforeCompile = material.onBeforeCompile;
 // Measured after everything (including trees that spill into neighbouring chunks) is placed.
 recomputeHeights();
 // the world has grown: pack it into chunks (see `world`), and let go of the one-byte-per-block copy
-const lateKept = late.filter(l => raw[l[0]] === l[2]);   // (the blocks numbered 256 and up that are still wanted)
+const lateKept = late.kept();   // (the blocks numbered 256 and up that are still wanted: index, id, index, id...)
+late.clear();
 if (/[?&]worldhash\b/.test(location.search)) {   // (testing: a fingerprint of the new world, to compare with the desktop version's)
   let h = 2166136261; for (let i = 0; i < raw.length; i++) h = Math.imul(h ^ raw[i], 16777619) >>> 0;
-  for (const l of lateKept) { h = Math.imul(h ^ l[0], 16777619) >>> 0; h = Math.imul(h ^ l[1], 16777619) >>> 0; }
+  for (let k = 0; k < lateKept.length; k++) h = Math.imul(h ^ lateKept[k], 16777619) >>> 0;
   window.WORLDHASH = h.toString(16).padStart(8, '0');
   window.STRUCTURES = structuresBuilt.slice();
 }
 world.load(raw); raw = null;
-for (const [i, id] of lateKept) {
-  world.set(i, id);
+for (let k = 0; k < lateKept.length; k += 2) {
+  const i = lateKept[k];
+  world.set(i, lateKept[k + 1]);
   const c = i % (WX * WZ), y = Math.floor(i / (WX * WZ));
   if (y > heights[c]) heights[c] = y;   // (snow on top: the column's highest block)
 }
-late.length = 0;
 const chunkTop = new Int32Array(NCX * NCZ);
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
   const k = Math.floor(z / CS) * NCX + Math.floor(x / CS);
@@ -2967,6 +3209,69 @@ function addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
     ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
   }
 }
+// ---- Doors (data/blocks.json's DOORS): a 4-pixel panel, 2 blocks tall. Its pose: where its hinge is in its block (x, z), the
+// way it reaches from the hinge to its free edge (w), and the way its front faces (n). Its big faces show its picture with the
+// picture's left edge at the hinge (so a door hinged on the right is mirrored, and its back is the mirror of its front); its
+// edges show the planks. (The same as the desktop version.)
+const DOOR_FRONT = [[0, 1], [1, 0], [0, -1], [-1, 0]];   // the way a door's front faces (the Kiln's numbers: 0 +z, 1 +x, 2 -z, 3 -x)
+const doorRight = f => [DOOR_FRONT[f][1], -DOOR_FRONT[f][0]];   // its right, as you look at its front
+function doorPose(facing, hinge, open) {
+  const [fx, fz] = DOOR_FRONT[facing], [rx, rz] = doorRight(facing), sx = hinge ? rx : -rx, sz = hinge ? rz : -rz;   // (s: its hinge side)
+  // shut: across the middle of the block; open: lying against its hinge side, its hinge at the front
+  return open ? { p: [0.5 + sx * 0.375 + fx * 0.5, 0.5 + sz * 0.375 + fz * 0.5], w: [-fx, -fz], n: [-sx, -sz] }
+    : { p: [0.5 + sx * 0.5, 0.5 + sz * 0.5], w: [-sx, -sz], n: [fx, fz] };
+}
+function addDoor(x, y, z, b, pose, pos, uv, col, lt, sk, ind, light, sky) {
+  const T = 0.125, lo = 0.5 - T, hi = 0.5 + T, { p, w, n } = pose;   // (T: half its thickness; lo-hi: the planks' middle 4 pixels, for the edges)
+  const at = (u, v, s) => [x + p[0] + u * w[0] + s * n[0], y + v, z + p[1] + u * w[1] + s * n[1]];
+  const quad = (cs, tile, uvs, shade) => {   // (2 corners along the bottom, then 2 along the top; seen from both sides)
+    const base = pos.length / 3;
+    cs.forEach((c, i) => { pos.push(c[0], c[1], c[2]); uv.push(...atlasUV(tile, uvs[i][0], uvs[i][1])); col.push(shade, shade, shade); lt.push(light); sk.push(sky); });
+    ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3, base, base + 2, base + 1, base + 2, base + 3, base + 1);
+  };
+  const pic = b.t[3], edge = b.t[0];
+  for (const s of [T, -T]) quad([at(0, 0, s), at(1, 0, s), at(0, 1, s), at(1, 1, s)], pic, [[0, 0], [1, 0], [0, 1], [1, 1]], 0.9);   // its front and back
+  for (const u of [0, 1]) quad([at(u, 0, -T), at(u, 0, T), at(u, 1, -T), at(u, 1, T)], edge, [[lo, 0], [hi, 0], [lo, 1], [hi, 1]], 0.7);   // its hinge edge and free edge
+  for (const v of [0, 1]) quad([at(0, v, -T), at(1, v, -T), at(0, v, T), at(1, v, T)], edge, [[0, lo], [1, lo], [0, hi], [1, hi]], v ? 1 : 0.6);   // its bottom and top
+}
+// ---- the swing (only for show): for a moment the panel turns about its hinge into its new pose, away from whoever opened it;
+// the chunk leaves that door out meanwhile ----
+const DOOR_SWING_TIME = 0.15, doorSwings = [], doorSwinging = new Set();   // (doorSwinging: the cells of doors being drawn swinging)
+function startDoorSwing(x, by, z, bottom, top, from, to) {
+  for (let i = doorSwings.length - 1; i >= 0; i--) if (doorSwings[i].x === x && doorSwings[i].y === by && doorSwings[i].z === z) { dropDoorSwing(doorSwings[i]); doorSwings.splice(i, 1); }   // (still swinging: this swing takes over)
+  const s = { x, y: by, z, bottom, top, from, to, t: 0, mesh: null };
+  doorSwinging.add(idx(x, by, z)); if (top) doorSwinging.add(idx(x, by + 1, z));
+  doorSwings.push(s); drawDoorSwing(s);
+}
+function drawDoorSwing(s) {
+  const k = Math.min(1, s.t / DOOR_SWING_TIME), a = k * Math.PI / 2, c = Math.cos(a), sn = Math.sin(a), f = s.from, t = s.to;
+  const pose = { p: [f.p[0] + (t.p[0] - f.p[0]) * k, f.p[1] + (t.p[1] - f.p[1]) * k], w: [f.w[0] * c + t.w[0] * sn, f.w[1] * c + t.w[1] * sn], n: [f.n[0] * c + t.n[0] * sn, f.n[1] * c + t.n[1] * sn] };
+  const pos = [], uv = [], col = [], lt = [], sk = [], ind = [], skyCache = new Map(), anyLight = lightMap.size > 0;
+  for (const [id, y] of [[s.bottom, s.y], [s.top, s.y + 1]])
+    if (id) addDoor(s.x, y, s.z, BLOCKS[id], pose, pos, uv, col, lt, sk, ind, anyLight ? LIGHT_CURVE(lightAt(s.x, y, s.z)) : 0, skyExposure(s.x, y, s.z, skyCache));
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uv), 2));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+  geo.setAttribute('torch', new THREE.BufferAttribute(new Float32Array(lt), 1));
+  geo.setAttribute('sky', new THREE.BufferAttribute(new Float32Array(sk), 1));
+  geo.setAttribute('tintOff', new THREE.BufferAttribute(new Float32Array(lt.length * 3), 3));
+  geo.setIndex(new THREE.BufferAttribute(new Uint16Array(ind), 1));
+  if (s.mesh) { s.mesh.geometry.dispose(); s.mesh.geometry = geo; }
+  else { s.mesh = new THREE.Mesh(geo, material); scene.add(s.mesh); }
+}
+function dropDoorSwing(s) { scene.remove(s.mesh); s.mesh.geometry.dispose(); doorSwinging.delete(idx(s.x, s.y, s.z)); doorSwinging.delete(idx(s.x, s.y + 1, s.z)); }
+function tickDoorSwings(dt) {
+  for (let i = doorSwings.length - 1; i >= 0; i--) {
+    const s = doorSwings[i];
+    s.t += dt;
+    if (s.t < DOOR_SWING_TIME) { drawDoorSwing(s); continue; }
+    dropDoorSwing(s); doorSwings.splice(i, 1);
+    const dirty = new Set();   // (the chunk draws it again, in its new pose)
+    markDirty(s.x, s.y, s.z, dirty); markDirty(s.x, s.y + 1, s.z, dirty);
+    for (const k of dirty) { if (chunkBuilt[k]) buildChunkKey(k); rebuildSoon.delete(k); }
+  }
+}
 function buildChunk(cx, cy, cz) {
   const pos = [], uv = [], col = [], ind = [], lt = [], sk = [];
   const tn = [], tints = new Map();   // grass and leaves: how far the biome colour at each corner is from as-drawn (see grassTint)
@@ -2998,6 +3303,10 @@ function buildChunk(cx, cy, cz) {
       b = BLOCKS[id = SNOW];
     }
     else if (b.shape === 'torch') { addTorch(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
+    if (b.shape === 'door') {   // (a door swinging open or shut is drawn on its own while it swings)
+      if (!doorSwinging.has(idx(x, y, z))) addDoor(x, y, z, b, doorPose(b.facing, b.hinge, b.open), pos, uv, col, lt, sk, ind, anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, skyExposure(x, y, z, skyCache));
+      continue;
+    }
     if (b.shape === 'flat') { addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'plant') { addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
@@ -3324,6 +3633,7 @@ function setBlock(x, y, z, id) {
   const i = idx(x, y, z), old = world.get(i);
   world.set(i, id);
   edits.set(i, id);
+  grown.delete(i);   // (changed since a sapling grew it: not natural any more)
   if (cracks && cracks.has(i) && old !== id) { cracks.delete(i); showCrack(i, 0); }   // (a cracked block that changed: it's whole again)
   if (!isPieces(id)) pieceMap.delete(i);
   if (isTorch(old)) torches.delete(i);
@@ -3345,11 +3655,24 @@ function setBlock(x, y, z, id) {
   if (id) chunkTop[cz * NCX + cx] = Math.max(chunkTop[cz * NCX + cx], y + 1);
   const dirty = new Set();
   markDirty(x, y, z, dirty);
-  if (isTorch(id) || isTorch(old) || nearTorch(x, y, z)) relight(dirty);
-  for (const k of dirty) { buildChunkKey(k); rebuildSoon.delete(k); }
+  if (blockBatch) {   // (many blocks changing at once: their chunks are built once, afterwards; see changeMany)
+    for (const k of dirty) blockBatch.dirty.add(k);
+    if (isTorch(id) || isTorch(old) || nearTorch(x, y, z)) blockBatch.relight = true;
+  } else {
+    if (isTorch(id) || isTorch(old) || nearTorch(x, y, z)) relight(dirty);
+    for (const k of dirty) { buildChunkKey(k); rebuildSoon.delete(k); }
+  }
   wakeWater(x, y, z);
   wakeFall(x, y, z);
   Net.blockChanged(i, id);   // multiplayer: tell the other players
+}
+// change many blocks at once (fn calls setBlock for each): their chunks are built once at the end, not once for each block
+let blockBatch = null;
+function changeMany(fn) {
+  const b = blockBatch = { dirty: new Set(), relight: false };
+  try { fn(); } finally { blockBatch = null; }
+  if (b.relight) relight(b.dirty);
+  for (const k of b.dirty) { buildChunkKey(k); rebuildSoon.delete(k); }
 }
 // put a piece of block `id` in spot s (0-7) of block space (x, y, z), or take one out (id 0).
 // Pieces go into empty space or water, or into a free spot of a space that already holds pieces.
@@ -3563,7 +3886,7 @@ function solid(x, y, z) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0) return true; // invisible walls at world edge
   if (y >= WY) return false;
   const b = world.at(x, y, z);
-  return b !== 0 && !BLOCKS[b].noCollide;   // torches don't block movement
+  return b !== 0 && !BLOCKS[b].noCollide && !(BLOCKS[b].shape === 'door' && BLOCKS[b].open);   // torches don't block movement (and an open door can be walked past)
 }
 // every solid box touching the box from (x0, y0, z0) to (x1, y1, z1): whole blocks, or single pieces
 // in a space that holds pieces. Each box is [x0, y0, z0, x1, y1, z1].
@@ -3574,6 +3897,11 @@ function solidBoxes(x0, y0, z0, x1, y1, z1) {
       for (let x = Math.floor(x0); x <= Math.floor(x1 - 1e-6); x++) {
         const sn = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY ? snowIn(world.at(x, y, z)) : 0;   // snowlogged: its snow, as snow
         if (sn > 1) { const h = (sn - 1) / 8; if (y < y1 && y + h > y0) out.push([x, y, z, x + 1, y + h, z + 1]); continue; }
+        if (x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY && isDoor(world.at(x, y, z))) {   // a door, open or shut: just its panel
+          const d = BLOCKS[world.at(x, y, z)].box, p = [x + d[0], y + d[1], z + d[2], x + d[3], y + d[4], z + d[5]];
+          if (p[0] < x1 && p[3] > x0 && p[1] < y1 && p[4] > y0 && p[2] < z1 && p[5] > z0) out.push(p);
+          continue;
+        }
         if (!solid(x, y, z)) continue;
         const inside = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY;
         const a = inside && isPieces(world.at(x, y, z)) ? pieceMap.get(idx(x, y, z)) : null;
@@ -6543,6 +6871,8 @@ addEventListener('mousedown', e => {
     mobNoise(hit.x, hit.y, hit.z);
     return;
   }
+  // right-click a door to open or shut it (hold Shift to build against it instead)
+  if (e.button === 2 && isDoor(hb) && !(keys.ShiftLeft || keys.ShiftRight)) { toggleDoor(hit.x, hit.y, hit.z); return; }
   // right-click a Crafting Bench (survival: its recipes) or a Cutter to use it (hold Shift to build against it instead)
   if (e.button === 2 && (plainOf(hb) === CUTTER || hb === CRAFTING_BENCH && SURVIVAL) && !(keys.ShiftLeft || keys.ShiftRight)) { openBench(plainOf(hb) === CUTTER); return; }
   // right-click a lit (burning) furnace holding a Stick: the stick catches fire and becomes a Torch
@@ -6584,6 +6914,7 @@ addEventListener('mousedown', e => {
     saveHotbar(); drawHotbarIcons(); selectSlot(selected);
     return;
   }
+  if (e.button === 2 && DOOR_OF_ITEM.has(HOTBAR[act])) { putDoor(hit, HOTBAR[act]); return; }   // a door: 2 blocks tall, facing you
   if (e.button === 0 && hit.y > 0) {
     const grew = isNatural(hit.x, hit.y, hit.z);   // (as the world grew it, before this breaks it)
     const natural = STAGE_BREAKING && grew;   // (natural blocks break in stages: see stage breaking)
@@ -6595,13 +6926,15 @@ addEventListener('mousedown', e => {
     // leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
     if ((!isLeaves(hb) || holding('hoe')) && !isSnow(hb) && hb !== SNOW_BLOCK) collectBlock(hb, hit.x, hit.y, hit.z);
     if (isLeaves(hb) && !holding('hoe') && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);
-    if (hb === PALM_LEAVES && !holding('hoe') && Math.random() < 0.25) collect(DATES, hit.x, hit.y, hit.z);   // Palm Leaves: a 1 in 4 chance of Dates
+    if (BLOCKS[hb].fruit && !holding('hoe') && Math.random() < 0.25) collect(BLOCKS[hb].fruit, hit.x, hit.y, hit.z);   // leaves with fruit: a 1 in 4 chance of it
+    if (BLOCKS[hb].sapling && !holding('hoe') && Math.random() < SAPLING.dropChance) collect(BLOCKS[hb].sapling, hit.x, hit.y, hit.z);   // and now and then their sapling
     if (hb === GRAIN_RIPE) for (let n = 1 + (Math.random() < 0.5 ? 1 : 0); n > 0; n--) collect(GRAIN_SEEDS, hit.x, hit.y, hit.z);   // ripe Grain: 1-2 Seeds too
     if (isSnow(hb)) dropSnowballs(BLOCKS[hb].layers, hit.x, hit.y, hit.z);   // snow: 2-4 Snowballs for each layer
     if (hb === SNOW_BLOCK) for (let n = 4; n > 0; n--) collect(SNOWBALL, hit.x, hit.y, hit.z);   // a Snow Block: 4
     if (isTorch(hb) && BLOCKS[hb].count > 1) setBlock(hit.x, hit.y, hit.z, withSnow(torchVariant(BLOCKS[hb].wi, BLOCKS[hb].count - 1, BLOCKS[hb].burn), snowIn(hb))); // take one torch off
     else if (snowIn(hb)) setBlock(hit.x, hit.y, hit.z, SNOW);   // (snowlogged: what it held comes out, the snow stays)
     else { setBlock(hit.x, hit.y, hit.z, 0); dropTorchesAround(hit.x, hit.y, hit.z); }
+    if (isDoor(hb)) breakDoorHalf(hit.x, hit.y, hit.z, BLOCKS[hb]);   // (a door: its other half goes too)
     if (TREE_FELLING && isLogBlock(hb) && grew) fellTree(hit.x, hit.y, hit.z);   // (the bottom log of a tree: the rest of it comes down)
     mobNoise(hit.x, hit.y, hit.z);
     wearTool(cost);
@@ -6647,6 +6980,11 @@ addEventListener('mousedown', e => {
       if (!snowRests(getBlock(bx, by - 1, bz)) || isWater(there)) return;
       setBlock(bx, by, bz, id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;
     }
+    if (BLOCKS[id].grows) {   // a sapling: on top of Grass, Dirt, Snowy Grass, Swamp Grass, Mud or Peat (Palm, Orange and Palo Verde on Sand too), into air
+      const under = getBlock(bx, by - 1, bz);
+      if (by !== hit.y + 1 || there || !(grassy(under) || under === 2 || under === MUD || under === PEAT || (BLOCKS[id].sand && under === 6))) return;
+      setBlock(bx, by, bz, id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;
+    }
     if (BLOCKS[id].shape === 'plant') {   // a flower: planted on top of grass or dirt
       const under = getBlock(bx, by - 1, bz);
       if (by !== hit.y + 1 || (!grassy(under) && under !== 2) || (there && BLOCKS[there].layers !== 1)) return;
@@ -6667,6 +7005,54 @@ addEventListener('mousedown', e => {
       mobNoise(bx, by, bz); useOne(); }
   }
 });
+// Doors (one for each wood, data/blocks.json's DOORS): its front faces you when you put it down, and its hinge goes on the side
+// of the face you clicked. Right-click opens or shuts it: open, it lies against its hinge side. It swings away from you: a shut
+// door opened from behind is turned round first (facing + 2, the hinge the other side, which looks the same shut). A door beside
+// it on its other side with the other hinge (a double door) goes with it. Breaking either half takes the whole door. Mobs can't
+// open them. (The same as the desktop version.)
+const doorState = (item, facing, hinge, open, half) => DOOR_OF_ITEM.get(item) + facing * 8 + hinge * 4 + (open ? 2 : 0) + half;
+const doorWith = (door, facing, hinge, open, half) => doorState(BLOCKS[door].drop, facing, hinge, open, half);
+// put down a door (item: the door you're holding) where a block would go, if there's room for both halves
+function putDoor(hit, item) {
+  const { px: x, py: y, pz: z } = hit;
+  if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y + 1 >= WY || getBlock(x, y, z) || getBlock(x, y + 1, z)) return;
+  if (x < player.x + P_HALF && x + 1 > player.x - P_HALF && z < player.z + P_HALF && z + 1 > player.z - P_HALF && y < player.y + P_H && y + 2 > player.y) return;   // (not into you)
+  // its front faces you (the Kiln's rule), and its hinge is on the side of the face you clicked, as you look at its front
+  const dx = player.x - (x + 0.5), dz = player.z - (z + 0.5);
+  const facing = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz >= 0 ? 0 : 2), [rx, rz] = doorRight(facing);
+  const hinge = (hit.pt[0] - (x + 0.5)) * rx + (hit.pt[2] - (z + 0.5)) * rz < 0 ? 0 : 1, bottom = doorState(item, facing, hinge, false, 0);
+  setBlock(x, y, z, bottom); setBlock(x, y + 1, z, doorState(item, facing, hinge, false, 1));
+  Sound.place(bottom); mobNoise(x, y, z); useOne();
+}
+// right-click a door: open it or shut it (with the other half of a double door)
+function toggleDoor(x, y, z) {
+  const by = BLOCKS[getBlock(x, y, z)].half ? y - 1 : y, id = getBlock(x, by, z);   // (its bottom half)
+  if (!isDoor(id)) return;
+  const b = BLOCKS[id], [fx, fz] = DOOR_FRONT[b.facing], [rx, rz] = doorRight(b.facing);
+  // the other half of a double door: beside it on its other side (away from its hinge), facing the same way, with the other
+  // hinge, just as open (looked for before either changes)
+  const nx = x + (b.hinge ? -rx : rx), nz = z + (b.hinge ? -rz : rz), n = getBlock(nx, by, nz), nb = BLOCKS[n];
+  const pair = isDoor(n) && !nb.half && nb.facing === b.facing && nb.hinge !== b.hinge && nb.open === b.open;
+  // shut and opened from behind: turned round first, so it swings away from you
+  const turn = !b.open && (player.x - (x + 0.5)) * fx + (player.z - (z + 0.5)) * fz < 0;
+  flipDoor(x, by, z, turn);
+  if (pair) flipDoor(nx, by, nz, turn);
+  Sound.place(id); mobNoise(x, by, z);
+}
+// a door's both halves: opened if shut, shut if open (turn: facing + 2 and the hinge the other side, first)
+function flipDoor(x, by, z, turn) {
+  const id = getBlock(x, by, z), b = BLOCKS[id];
+  const facing = turn ? (b.facing + 2) % 4 : b.facing, hinge = turn ? 1 - b.hinge : b.hinge, open = !b.open;
+  const top = isDoor(getBlock(x, by + 1, z)) ? doorWith(id, facing, hinge, open, 1) : 0;
+  startDoorSwing(x, by, z, doorWith(id, facing, hinge, open, 0), top, doorPose(facing, hinge, !open), doorPose(facing, hinge, open));
+  setBlock(x, by, z, doorWith(id, facing, hinge, open, 0));
+  if (top) setBlock(x, by + 1, z, top);
+}
+// a door broken: its other half goes too (no second drop)
+function breakDoorHalf(x, y, z, b) {
+  const oy = b.half ? y - 1 : y + 1, o = BLOCKS[getBlock(x, oy, z)];
+  if (o && o.shape === 'door' && o.half !== b.half && o.drop === b.drop) setBlock(x, oy, z, 0);
+}
 // what snow can lie on: whole blocks (not water, plants, torches, pieces or more snow)
 const snowRests = b => { const d = BLOCKS[b]; return !!d && !d.shape && !d.liquid && !d.noCollide && !d.item; };
 // Put down the slab / vertical slab / stairs in your hand, in the space just in front of where you're looking
@@ -6752,10 +7138,10 @@ const STAGE_BREAKING = STAGE_BREAKING_READY || /[?&]stagebreak\b/.test(location.
 // TreeFellingReady in the desktop version. (Test: ?treefell in the address turns it on.)
 const TREE_FELLING_READY = false;
 const TREE_FELLING = TREE_FELLING_READY || /[?&]treefell\b/.test(location.search);
-const isLogBlock = b => LOGS.includes(b) || (b >= TURNED_LOGS && b < TURNED_LOGS + 16);
+const isLogBlock = b => { const d = BLOCKS[b]; return !!d && (!!d.log || !!(d.axis && BLOCKS[d.drop] && BLOCKS[d.drop].log)); };   // (a log, standing or lying)
 // Only natural blocks (as the world grew them: no saved edit there) break in stages. Ones a player put down (or changed)
 // break the old way: one click, the old tool rules, and a placed log never fells anything.
-const isNatural = (x, y, z) => !edits.has(idx(x, y, z));
+const isNatural = (x, y, z) => { const i = idx(x, y, z); return !edits.has(i) || grown.has(i); };   // (a tree a sapling grew counts as natural)
 const STAGE_TERRACOTTA = new Set([65, ...COLOUR_TERRACOTTA]);   // (Terracotta: plain and every colour, as in the badlands)
 const isStageStone = b => b === 3 || (b >= STRATA && b < STRATA + STRATA_LAYERS - 1) || !!(BLOCKS[b] && BLOCKS[b].pick) || b === SANDSTONE || STAGE_TERRACOTTA.has(b);
 const LOG_STAGES = NUMBERS.LOG_STAGES, STONE_STAGES = NUMBERS.STONE_STAGES;   // (a log's stages, 8; Stone's for each layer down, 4)
@@ -6858,7 +7244,8 @@ function fellTree(x, y, z) {
   for (const [a, b, c] of leaves) {
     const lb = getBlock(a, b, c);
     if (Math.random() < 0.2) collect(STICK, a, b, c);
-    if (lb === PALM_LEAVES && Math.random() < 0.25) collect(DATES, a, b, c);
+    if (BLOCKS[lb] && BLOCKS[lb].fruit && Math.random() < 0.25) collect(BLOCKS[lb].fruit, a, b, c);
+    if (BLOCKS[lb] && BLOCKS[lb].sapling && Math.random() < SAPLING.dropChance) collect(BLOCKS[lb].sapling, a, b, c);   // (and now and then their sapling)
     setBlock(a, b, c, 0);
   }
   for (const [a, b, c] of [...logs, ...leaves]) dropTorchesAround(a, b, c);   // (snow lying on them, torches on them...)
@@ -7496,8 +7883,9 @@ function swapOffhand() {
   swapSlots(i, selected);
   saveHotbar(); drawHotbarIcons(); selectSlot(selected);
 }
-// ---- which slot a click uses: right-click uses the picked offhand item if there is one; breaking a block uses the best
-// tool of the right kind from your tool slots when your hand isn't holding one; hitting a mob uses your best sword ----
+// ---- which slot a click uses (survival): right-click puts down what's in your hand if it's something you can put down, and
+// otherwise uses the picked offhand item if there is one; breaking a block uses the best tool of the right kind from your
+// tool slots when your hand isn't holding one; hitting a mob uses your best sword ----
 function bestTool(kind) {
   let best = -1;
   for (let k = TOOL0; k < OFF0; k++) {
@@ -7506,9 +7894,12 @@ function bestTool(kind) {
   }
   return best;
 }
+// something you can put down: a block (torches, snow...), a shape or piece, a door, or an item that goes down on the ground
+// ("places": a Rock, a Clay Ball). (Tools, food, Snowballs, Sticks, seeds... aren't: with those the offhand gets the right-click.)
+const canPutDown = id => { const b = id > 0 && BLOCKS[id]; return !!b && (!b.item || !!b.form || !!b.piece || !!b.places || DOOR_OF_ITEM.has(id)); };
 function actSlot(button) {
   if (!SURVIVAL) return selected;
-  if (button === 2) return HOTBAR[OFF0 + offSel] ? OFF0 + offSel : selected;
+  if (button === 2) return canPutDown(HOTBAR[selected]) || !HOTBAR[OFF0 + offSel] ? selected : OFF0 + offSel;
   if (button !== 0) return selected;
   let kind;
   if (mobInSights()) kind = 'sword';
@@ -8025,6 +8416,7 @@ function farmChanged(i, old, id, loading) {
   if (!(BLOCKS[id] && BLOCKS[id].fert)) fertLeft.delete(i);
   else if (!fertLeft.has(i)) fertLeft.set(i, FARM.fertHarvests);
   if (isCrop(id) && id !== GRAIN_RIPE) { if (old !== id) crops.set(i, 0); } else crops.delete(i);
+  if (BLOCKS[id] && BLOCKS[id].grows) { if (old !== id) saplings.set(i, 0); } else saplings.delete(i);
   // a ripe Grain harvested (or trampled away) from fertilized soil uses up one of the fertilizer's harvests
   if (!loading && old === GRAIN_RIPE && id !== GRAIN_RIPE && fertLeft.has(i - WX * WZ) && !Net.client) {
     const n = fertLeft.get(i - WX * WZ) - 1;
@@ -8056,6 +8448,15 @@ function tickFarm(dt) {
     if (hits < FARM.stageHits) { crops.set(i, hits); continue; }
     const [x, y, z] = fromIdx(i);
     setBlock(x, y, z, id + 1);
+  }
+  // saplings: lucky ticks, like Grain's; on the last one it grows if it can, and if not it tries again at its next lucky tick
+  for (const [i, got] of [...saplings]) {
+    if (!saplings.has(i) || !(BLOCKS[world.get(i)] || {}).grows) { saplings.delete(i); continue; }   // (gone: grown into a Redwood with others, or broken)
+    if (Math.random() >= Math.min(1, step * SAPLING.growHits / SAPLING.growTime)) continue;
+    const hits = got + 1;
+    if (hits < SAPLING.growHits) { saplings.set(i, hits); continue; }
+    const [x, y, z] = fromIdx(i);
+    if (saplingGrow(x, y, z) !== 'grew') saplings.set(i, SAPLING.growHits - 1);   // (no room yet, or a lone Redwood)
   }
   // grass a cow ate grows back (if it's still Dirt with nothing on top)
   for (const [i, left] of [...grazed]) {
@@ -8119,6 +8520,13 @@ function farmUse(hit, hb) {
     setBlock(hit.x, hit.y + 1, hit.z, GRAIN_STAGES[0]); Sound.place(1); mobNoise(hit.x, hit.y + 1, hit.z); useOne();
     return true;
   }
+  if (held === BONE_ASH && BLOCKS[hb] && BLOCKS[hb].grows) {   // Bone Ash on a sapling: used up, and now and then it grows into its tree at once (not used if it couldn't grow)
+    const could = saplingGrow(hit.x, hit.y, hit.z, true);
+    if (could !== 'grew') { showNote(could === 'four' ? 'A Redwood needs four saplings in a square' : "There's no room for this tree to grow", 2); return true; }
+    Sound.place(1); mobNoise(hit.x, hit.y, hit.z); useOne();
+    if (Math.random() < SAPLING.boneAshChance) saplingGrow(hit.x, hit.y, hit.z);
+    return true;
+  }
   if (held === BONE_ASH && isSoil(target)) {
     const b = BLOCKS[target];
     if (b.fert) { fertLeft.set(idx(hit.x, ty, hit.z), FARM.fertHarvests); Net.blockChanged(idx(hit.x, ty, hit.z), target); }   // (topped up)
@@ -8127,6 +8535,52 @@ function farmUse(hit, hb) {
     return true;
   }
   return false;
+}
+// ---- Saplings (leaves drop them now and then; plant them on grass, dirt, mud or peat): each grows into its tree at a random
+// moment (lucky ticks, like Grain: SAPLING.growTime seconds on average, in SAPLING.growHits ticks), if its trunk has room; if
+// not, it tries again at its next lucky tick. The tree has the same shape the world grows at that spot (the new trees, in any
+// world, and the first four as their biomes grow them; an Oak in the plains grows a prairie oak). A Redwood only grows from
+// four saplings in a 2 x 2 square. What a sapling grows is saved like your changes but counts as natural (see grown). Only the
+// host grows them, like Grain. (data/numbers.json SAPLING; the same as the desktop version.) ----
+// tree `name` standing on (x, h, z), grown into empty space (its own blocks overlap as when the world grows it): index -> block
+function treeShape(name, x, h, z) {
+  growing = new Map();   // (the tree code puts its blocks here instead of into the world: see put, treeBlock, trunkInto)
+  try {
+    const v = hash(x, z, 77);
+    if (name === 'oak') oakTree(x, h, z, v); else if (name === 'fir') firTree(x, h, z, v);
+    else if (name === 'palm') palmTree(x, h, z, v); else if (name === 'willow') willowTree(x, h, z, v);
+    else growTree(name, x, h, z);   // (a Redwood's four trunks stand on its saplings' ground)
+    return growing;
+  } finally { growing = null; }
+}
+// grow the sapling at (x, y, z) into its tree now, if it can (justLook: only see whether it could). 'grew', 'room' (a log
+// can't go in yet) or 'four' (a Redwood sapling that isn't one of four in a square). Every log has to go into air, leaves or
+// the saplings it grows from (which count as air); leaves only go into air, so a tree never breaks anything built.
+function saplingGrow(x, y, z, justLook = false) {
+  const id = getBlock(x, y, z);
+  let tree = BLOCKS[id] && BLOCKS[id].grows, gx = x, gz = z, cells = [idx(x, y, z)];
+  if (!tree || y < 1) return 'room';
+  if (tree === 'redwood') {   // (the first whole 2 x 2 square of Redwood saplings it's part of, in this order; the tree's corner is the square's)
+    const sq = [[-1, -1], [0, -1], [-1, 0], [0, 0]].map(([ox, oz]) => [x + ox, z + oz])
+      .find(([cx, cz]) => cx >= 0 && cz >= 0 && cx + 1 < WX && cz + 1 < WZ && [[0, 0], [1, 0], [0, 1], [1, 1]].every(([dx, dz]) => world.at(cx + dx, y, cz + dz) === id));
+    if (!sq) return 'four';
+    [gx, gz] = sq;
+    cells = [idx(gx, y, gz), idx(gx + 1, y, gz), idx(gx, y, gz + 1), idx(gx + 1, y, gz + 1)];
+  } else if (tree === 'oak' && GEN === 3 && biomeMap[z * WX + x] === PLAINS) tree = 'prairie_oak';
+  const fit = [];
+  for (const [i, bid] of treeShape(tree, gx, y - 1, gz)) {
+    const there = cells.includes(i) ? 0 : world.get(i);
+    if (isLeaves(bid)) { if (!there) fit.push([i, bid]); continue; }
+    if (there && !isLeaves(there)) return 'room';   // (a log can't go in: no room yet)
+    fit.push([i, bid]);
+  }
+  if (!fit.length) return 'room';
+  if (justLook) return 'grew';
+  changeMany(() => {
+    for (const i of cells) setBlock(...fromIdx(i), 0);
+    for (const [i, bid] of fit) { setBlock(...fromIdx(i), bid); grown.add(i); }
+  });
+  return 'grew';
 }
 // Ever Torches give off little fire essence sparks (your fire_essence picture) that drift up and fade:
 // that's how you tell them from ordinary torches. Only ones near you make sparks.
@@ -8623,6 +9077,8 @@ function gatherSave() {
     torchBurn: [...torchBurn].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds until it burns down a stage], ...]
     furnaces: [...furnaces].map(([i, f]) => [i, f]),       // [[index, {fuel, fuelN, heat, queue, t}], ...]
     crops: [...crops].map(([i, t]) => [i, Math.round(t)]),   // [[index, lucky ticks so far in this stage], ...]
+    saplings: [...saplings],                               // [[index of a sapling, lucky ticks so far], ...]
+    grown: [...grown],                                     // [index, ...] of the blocks saplings grew (natural)
     fert: [...fertLeft],                                   // [[index of fertilized soil, ripe harvests it has left], ...]
     grazed: [...grazed].map(([i, t]) => [i, Math.round(t)]),   // [[index of grass a cow ate, seconds until it grows back], ...]
   };
@@ -8667,6 +9123,8 @@ function applySave(s) {
   for (const [i, left] of s.torchBurn || []) if (torchBurn.has(i)) torchBurn.set(i, Math.max(0, +left || 0));
   for (const [i, f] of s.furnaces || []) if (isFurnace(world.get(i)) && f) furnaces.set(i, f);
   for (const [i, left] of s.crops || []) if (crops.has(i)) crops.set(i, Math.max(0, +left || 0));
+  for (const [i, n] of s.saplings || []) if (saplings.has(i)) saplings.set(i, Math.max(0, Math.min(SAPLING.growHits - 1, n | 0)));   // (below its last tick)
+  for (const i of s.grown || []) if (edits.has(i)) grown.add(i);
   for (const [i, n] of s.fert || []) if (BLOCKS[world.get(i)] && BLOCKS[world.get(i)].fert) fertLeft.set(i, Math.max(1, n | 0));
   for (const [i, left] of s.grazed || []) if (world.get(i) === 2) grazed.set(i, Math.max(0, +left || 0));
   applyPlayerSave(s);
@@ -9411,7 +9869,7 @@ function frame(now) {
   if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
   if (worldLoaded && settings.autosave && performance.now() - lastSave > 30000) saveWorld();   // auto save every 30 seconds
   if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); tickTorches(dt); tickFarm(dt); }   // (not while paused)
-  if (worldLoaded) { tickEverSparks(dt); spinSaw(dt); }
+  if (worldLoaded) { tickEverSparks(dt); spinSaw(dt); tickDoorSwings(dt); }
   pumpRebuildSoon();
 
   // movement intent
@@ -9582,7 +10040,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
     axeStages[m] = stagesPerSwing(4);
   }
   HOTBAR[act] = keep;
-  table('numbers', { STACK_MAX, SMELT_TIME, BURN_TIMES, FARM, DURABILITY, ARMOR_DURABILITY, ARMOR_SHARE, PICK_TIER, STRATA_PICKAXE, PICK_STAGES,
+  table('numbers', { STACK_MAX, SMELT_TIME, BURN_TIMES, FARM, SAPLING, DURABILITY, ARMOR_DURABILITY, ARMOR_SHARE, PICK_TIER, STRATA_PICKAXE, PICK_STAGES,
     AXE_STAGES: axeStages, LOG_STAGES, STONE_STAGES, HEARTS });
   // smelting: the fuel and the smelts by key, in the Kiln's and Foundry's order (the deep layers' smelts, tall: true, are
   // in SMELTS only while tall worlds are on, so they're also checked on their own against the strata)
@@ -9683,20 +10141,20 @@ if (/[?&]datacheck\b/.test(location.search)) {
   const BL = D.blocks, bd = [];
   const BLOCK_FIELDS = ['id', 'name', 'pictures', 'icon', 'transparent', 'noCollide', 'liquid', 'shape', 'box', 'drop', 'places', 'handDrop', 'item', 'food',
     'tool', 'material', 'damage', 'pick', 'layer', 'level', 'front', 'facing', 'lit', 'wall', 'wi', 'count', 'burn', 'axis', 'layers', 'soil', 'wet', 'fert',
-    'stage', 'dye', 'armor', 'pack', 'belt', 'tools', 'piece', 'form', 'of', 'snowed', 'inner', 'needs', 'shovel', 'leaves', 'sound', 'inventory', 'look'];
+    'stage', 'dye', 'armor', 'pack', 'belt', 'tools', 'piece', 'form', 'of', 'snowed', 'inner', 'needs', 'shovel', 'leaves', 'sound', 'inventory', 'look', 'log', 'fruit', 'hinge', 'open', 'half', 'grows', 'sand', 'sapling'];
   const blockAsData = id => {
     const b = BLOCKS[id]; if (!b) return undefined;
     return Object.fromEntries(Object.entries(b).map(([f, v]) => f === 't' ? ['pictures', v.map(t => TILE_NAMES[t])] : f === 'icon' ? [f, TILE_NAMES[v]]
-      : ['drop', 'places', 'piece', 'of', 'inner', 'dye'].includes(f) ? [f, key(v)] : f === 'handDrop' ? [f, [key(v[0]), v[1], v[2]]] : [f, v]));
+      : ['drop', 'places', 'piece', 'of', 'inner', 'dye', 'fruit', 'sapling'].includes(f) ? [f, key(v)] : f === 'handDrop' ? [f, [key(v[0]), v[1], v[2]]] : [f, v]));
   };
   const rowAsData = ({ id, pictures, ...r }) => ({ ...r, pictures: typeof pictures === 'string' ? [pictures, pictures, pictures] : pictures });
   // (in the order the game loads them, which is the file's order: a row can only name blocks loaded before it or with it)
   // (FORMS' rows each make 7 items: they're checked as those items, see formRows)
   const BLOCK_TABLES = ['BASE', 'KILN', 'TORCHES', 'WATER', 'LYING_LOGS', 'SNOW', 'TOOLS', 'DEEP_STONE', 'SOILS', 'GRAIN', 'COLOURS', 'METALS', 'DEEP_ORES', 'FOUNDRY',
-    'GEAR', 'FLOWERS', 'SNOWY', 'FORMS'];
+    'GEAR', 'FLOWERS', 'WOODS', 'DOORS', 'SNOWY', 'FORMS'];
   if (!BL) bd.push('blocks: not in textures.js');
   else {
-    const made = { SNOWY: () => snowyRows(BL.SNOWY || []), FORMS: () => formRows(BL.FORMS || []) };
+    const made = { DOORS: () => doorRows(BL.DOORS || []), SNOWY: () => snowyRows(BL.SNOWY || []), FORMS: () => formRows(BL.FORMS || []) };
     const madeRows = {};
     const rowsOf = table => {
       if (!made[table]) return BL[table] || [];
@@ -9717,15 +10175,20 @@ if (/[?&]datacheck\b/.test(location.search)) {
       diff(blockAsData(r.id), rowAsData(r), `blocks.${table} ${r.id}`, bd);
       if (typeof r.name === 'string' && rowKey(r) !== key(r.id)) bd.push(`${at}: its key is "${rowKey(r)}", but the game's block ${r.id} is "${key(r.id)}"`);
     });
-    for (const table of BLOCK_TABLES) fieldsKnown(BL[table] || [], table === 'FORMS' ? ['of', ...FORMS] : table === 'SNOWY' ? ['id', 'inner', 'drop', 'box'] : BLOCK_FIELDS, `blocks.${table}`, bd);
+    for (const table of BLOCK_TABLES) fieldsKnown(BL[table] || [], table === 'FORMS' ? ['of', ...FORMS] : table === 'SNOWY' ? ['id', 'inner', 'drop', 'box'] : table === 'DOORS' ? ['of', 'item', 'first'] : BLOCK_FIELDS, `blocks.${table}`, bd);
     // what blocks are: needs is the tool you must hold (axe or pickaxe); shovel, leaves and inventory are true when they're there;
     // sound is one the game has; a look is another look (1 up, each once) of the block it drops, which has no look of its own
     const looked = new Set();
     for (const table of BLOCK_TABLES) for (const r of rowsOf(table)) {
       const at = `blocks ${r.id}`;
       if (r.needs !== undefined && r.needs !== 'axe' && r.needs !== 'pickaxe') bd.push(`${at}: needs is axe or pickaxe, not ${JSON.stringify(r.needs)}`);
-      for (const f of ['shovel', 'leaves', 'inventory']) if (r[f] !== undefined && r[f] !== true) bd.push(`${at}: ${f} is true or left out, not ${JSON.stringify(r[f])}`);
+      for (const f of ['shovel', 'leaves', 'inventory', 'log']) if (r[f] !== undefined && r[f] !== true) bd.push(`${at}: ${f} is true or left out, not ${JSON.stringify(r[f])}`);
       if (r.sound !== undefined && !Sound.hasSound(r.sound)) bd.push(`${at}: the game has no sound ${JSON.stringify(r.sound)}`);
+      if (r.fruit !== undefined && (!r.leaves || !blockKeyKnown(r.fruit) || !(BLOCKS[idOf(r.fruit)] || {}).food)) bd.push(`${at}: fruit is food that leaves drop`);
+      if (r.sapling !== undefined && (!r.leaves || !blockKeyKnown(r.sapling) || !(BLOCKS[idOf(r.sapling)] || {}).grows)) bd.push(`${at}: sapling is the sapling leaves drop`);
+      if (r.grows !== undefined && (r.shape !== 'plant' || r.item || !(['oak', 'fir', 'palm', 'willow'].includes(r.grows) || TREE_SHAPE[r.grows]))) bd.push(`${at}: grows is the tree a sapling (a plant) grows into: oak, fir, palm, willow or a worldgen.json TREE_SHAPES tree`);
+      if (r.sand !== undefined && (r.sand !== true || r.grows === undefined)) bd.push(`${at}: sand is true on a sapling that grows on Sand too, or left out`);
+      if (r.log !== undefined && (r.item || r.axis)) bd.push(`${at}: log is for a standing log (a lying one counts through its drop)`);
       if (r.look !== undefined) {
         const of = blockKeyKnown(r.drop) ? rowOf.get(idOf(r.drop)) : null;
         if (!Number.isInteger(r.look) || r.look < 1 || !of || of.look !== undefined) bd.push(`${at}: a look (1 up) is another look of the block it drops, which has no look of its own`);
@@ -9733,6 +10196,13 @@ if (/[?&]datacheck\b/.test(location.search)) {
         looked.add(r.drop + '#' + r.look);
       }
     }
+    // doors: each made of planks the game has, its carried door an item, and its 32 states right after that
+    (BL.DOORS || []).forEach((r, k) => {
+      const at = `blocks.DOORS.${k} (${r.of})`, item = rowOf.get(r.item);
+      if (!blockKeyKnown(r.of)) bd.push(`${at}: of is the planks it's made of`);
+      if (!item || !item.item) bd.push(`${at}: item is the door you carry (an item)`);
+      if (r.first !== r.item + 1) bd.push(`${at}: first is the id after its item`);
+    });
     // every block the game has comes from the file (one made in the code would be the editions' own)
     for (const id of Object.keys(BLOCKS).map(Number)) if (BLOCKS[id] && !blockRows.has(id)) bd.push(`blocks: ${id} (${key(id)}) isn't in data/blocks.json`);
     // snow-logged: the ids saved worlds have (from SNOW_LOGGED_1: the torches and flowers in id order; then pieces, the Cutter
@@ -9753,7 +10223,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
     const FN = BL.FORM_NAMES || {};
     if (Object.keys(FN).filter(f => !f.startsWith('_')).join() !== FORMS.join()) bd.push(`blocks.FORM_NAMES: should name the forms ${FORMS.join(', ')}, in that order`);
     for (const f of FORMS) if (typeof FN[f] !== 'string' || !FN[f]) bd.push(`blocks.FORM_NAMES.${f}: should be a name`);
-    (BL.FORMS || []).forEach((r, k) => { const b = blockKeyKnown(r.of) && idOf(r.of); if (b) for (const f of FORMS) if (r[f] !== formItem(f, b)) bd.push(`blocks.FORMS.${k} (${r.of}): ${f} should be ${formItem(f, b)} (see formItem), not ${r[f]}`); });
+    (BL.FORMS || []).forEach((r, k) => { const b = blockKeyKnown(r.of) && idOf(r.of); if (b) for (const f of FORMS) if (r[f] !== formSum(f, b)) bd.push(`blocks.FORMS.${k} (${r.of}): ${f} should be ${formSum(f, b)} (see formItem), not ${r[f]}`); });
     // the families: the code still finds their blocks by number (WATER + level, soilId, GRAIN_STAGES, the colours' lists...),
     // so each table must be just those blocks, each the one the code expects there
     const span = (a, n) => Array.from({ length: n }, (_, k) => a + k), sorted = ids => [...ids].sort((a, c) => a - c).join(', ');
@@ -9851,11 +10321,54 @@ if (/[?&]datacheck\b/.test(location.search)) {
     });
     if (!Array.isArray(W.BADLANDS_BANDS) || !W.BADLANDS_BANDS.length) wd.push('worldgen.BADLANDS_BANDS: should be a list of blocks');
     else W.BADLANDS_BANDS.forEach((b, k) => { if (!blockKeyKnown(b)) wd.push(`worldgen.BADLANDS_BANDS.${k}: "${b}" isn't a block`); });
+    // the trees (land 3 on): each shape's numbers are the ones its code reads (a pair: [shortest, tallest] or [across, up and down]),
+    // its log a log and its leaves leaves; the mixes' and extra rows' trees are shapes the code knows (or the biome's own tree),
+    // each mix's shares add up to 1 at most, and the extra rows' rules are numbers the code reads
+    const NEEDS = { maple: ['trunk', 'crown'], cedar: ['trunk', 'tiers', 'gap'], birch: ['trunk', 'crown2'], cherry: ['trunk', 'crown2'], orange: ['trunk', 'crown2'],
+      aspen: ['trunk', 'crown2'], redwood: ['trunk', 'crown'], cypress: ['trunk', 'crown'], juniper: ['trunk', 'crown'], larch: ['trunk', 'crown', 'sparse?'],
+      holly: ['trunk', 'crown', 'sparse?'], palo_verde: ['trunk', 'crown', 'branch', 'sparse'], dead: ['trunk', 'branches', 'branch'], prairie_oak: ['trunk', 'crown2'], shrub: ['crown2'] };
+    const pair = v => Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && n >= 0) && v[0] <= v[1];
+    const shapes = new Set();
+    (W.TREE_SHAPES || []).forEach((r, k) => {
+      const at = `worldgen.TREE_SHAPES.${k} (${r.tree})`, needs = NEEDS[r.tree];
+      if (!needs) { wd.push(`${at}: the game has no tree shape "${r.tree}"`); return; }
+      if (shapes.has(r.tree)) wd.push(`${at}: more than once`);
+      shapes.add(r.tree);
+      const known = ['tree', 'log', ...(r.tree === 'dead' ? [] : ['leaves']), ...needs.map(f => f.replace(/[2?]$/, ''))];
+      for (const f of Object.keys(r)) if (!f.startsWith('_') && !known.includes(f)) wd.push(`${at}: "${f}" isn't something this tree reads`);
+      if (!blockKeyKnown(r.log) || !BLOCKS[idOf(r.log)].log) wd.push(`${at}: log should be a log`);
+      if (r.tree !== 'dead' && (!blockKeyKnown(r.leaves) || !isLeaves(idOf(r.leaves)))) wd.push(`${at}: leaves should be leaves`);
+      for (const n of needs) {
+        const f = n.replace(/[2?]$/, ''), v = r[f];
+        if (v === undefined && n.endsWith('?')) continue;
+        const ok = f === 'trunk' || f === 'branch' || f === 'branches' ? pair(v) && v.every(Number.isInteger) : f === 'tiers' ? Array.isArray(v) && v.length > 0 && v.every(x => x > 0)
+          : f === 'sparse' ? typeof v === 'number' && v >= 0 && v < 1 : n === 'crown2' ? Array.isArray(v) && v.length === 2 && v.every(x => x > 0) : typeof v === 'number' && v > 0;
+        if (!ok) wd.push(`${at}: ${f} can't be ${JSON.stringify(v)}`);
+      }
+    });
+    const own = (bi, tree) => OWN_TREE[BIOME_NAMES.indexOf(bi)] === tree;
+    if (!(Number.isInteger(W.TREE_PATCH) && W.TREE_PATCH >= 1)) wd.push('worldgen.TREE_PATCH: a whole number of blocks, 1 or more');
+    for (const [bi, mix] of Object.entries(W.TREE_MIX || {})) {
+      if (bi.startsWith('_')) continue;
+      if (!BIOME_NAMES.includes(bi)) { wd.push(`worldgen.TREE_MIX.${bi}: isn't a biome`); continue; }
+      let sum = 0;
+      for (const [tree, share] of mix) { sum += share; if (!shapes.has(tree) && !own(bi, tree)) wd.push(`worldgen.TREE_MIX.${bi}: "${tree}" isn't a tree shape or the biome's own tree`); if (!(share > 0)) wd.push(`worldgen.TREE_MIX.${bi}: ${tree}'s share should be above 0`); }
+      if (sum > 1 + 1e-9) wd.push(`worldgen.TREE_MIX.${bi}: the shares add up to ${sum}, more than 1`);
+    }
+    fieldsKnown(W.TREE_EXTRA || [], ['tree', 'biome', 'chance', 'grove', 'spacing', 'edge', 'coast'], 'worldgen.TREE_EXTRA', wd);
+    (W.TREE_EXTRA || []).forEach((r, k) => {
+      const at = `worldgen.TREE_EXTRA.${k} (${r.tree})`;
+      if (!shapes.has(r.tree)) wd.push(`${at}: isn't a tree shape`);
+      if (!BIOME_NAMES.includes(r.biome)) wd.push(`${at}: "${r.biome}" isn't a biome`);
+      if (!(r.chance > 0 && r.chance <= 1)) wd.push(`${at}: chance is above 0, at most 1`);
+      if (r.grove !== undefined && !(Array.isArray(r.grove) && r.grove.length === 2 && r.grove[0] > 0 && typeof r.grove[1] === 'number')) wd.push(`${at}: grove is [size, above]`);
+      for (const f of ['spacing', 'edge', 'coast']) if (r[f] !== undefined && !(Number.isInteger(r[f]) && r[f] >= 1)) wd.push(`${at}: ${f} is a whole number of blocks, 1 or more`);
+    });
   }
   out.worldgen = wd;
   // every file's own fields (numbers: its diff already covers them), and no data file the game doesn't read
   const TOP = { smelting: ['FUEL', 'SMELTS'], recipes: ['RECIPES', 'CUTTER'], creative: ['TABS'], mobs: ['MOBS', 'LAYER_BOOST', 'GLOOM_FADE', 'COW'],
-    'texture-names': ['TEXTURE_SPELLINGS', 'TEXTURE_BORROWS', 'FONT_NAMES'], blocks: [...BLOCK_TABLES, 'FORM_NAMES'], worldgen: ['ORE_VEINS', 'BADLANDS_BANDS'] };
+    'texture-names': ['TEXTURE_SPELLINGS', 'TEXTURE_BORROWS', 'FONT_NAMES'], blocks: [...BLOCK_TABLES, 'FORM_NAMES'], worldgen: ['ORE_VEINS', 'BADLANDS_BANDS', 'TREE_PATCH', 'TREE_MIX', 'TREE_EXTRA', 'TREE_SHAPES'] };
   for (const [name, known] of Object.entries(TOP)) for (const f of Object.keys(D[name] || {})) if (!f.startsWith('_') && !known.includes(f)) out[name].push(`${name}.${f}: isn't something the game reads`);
   out.files = Object.keys(D).filter(name => !(name in out)).map(name => `data/${name}.json isn't a file the game reads`);
   window.DATACHECK = out;

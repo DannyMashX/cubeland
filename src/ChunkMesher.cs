@@ -86,6 +86,15 @@ public class ChunkMesher
 			}
 			else if (b.Shape == "torch") { AddTorch(x, y, z, id, P, anyLight, sky); continue; }
 			if (b.Shape == "flat") { AddFlat(x, y, z, b, P, anyLight, sky); continue; }
+			if (b.Shape == "door")
+			{   // (a door swinging open or shut is drawn by Main while it swings)
+				if (!Swinging.ContainsKey(World.Idx(x, y, z)))
+				{
+					var (pv, pw, pn) = DoorPose(b.Facing, b.Hinge, b.Open == 1);
+					DoorPanel(P, b, new Vector3(x, y, z), pv, pw, pn, anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, W.SkyExposure(x, y, z, sky));
+				}
+				continue;
+			}
 			if (b.Shape == "plant") { AddPlant(x, y, z, b, P, anyLight, sky); continue; }
 			if (b.Liquid) { AddWater(x, y, z, id, Wt, anyLight, sky); continue; }
 			if (Blocks.IsPieces(id)) { AddPieces(x, y, z, P, anyLight, sky); if (id == Blocks.SnowyPieces) AddSnowUnder(x, y, z, P, anyLight, sky); continue; }
@@ -211,6 +220,37 @@ public class ChunkMesher
 				}
 				P.Quad(bas);
 			}
+	}
+	// ---- doors: a 4-pixel panel. Its pose: where its hinge is (in its block, x and z), the way it reaches from the hinge to its
+	// free edge (w), and the way its front faces (n). Its big faces show its picture with the picture's left edge at the hinge
+	// (so a door hinged on the right is mirrored, and its back is the mirror of its front); its edges show the planks ----
+	public static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> Swinging = new();   // (doors Main draws while they swing)
+	public static (Vector2 pivot, Vector2 w, Vector2 n) DoorPose(int facing, int hinge, bool open)
+	{
+		var (fx, fz) = Blocks.DoorFront(facing); var (rx, rz) = Blocks.DoorRight(facing);
+		Vector2 f = new(fx, fz), side = hinge == 0 ? new Vector2(-rx, -rz) : new Vector2(rx, rz), c = new(0.5f, 0.5f);
+		// shut: across the middle of the block; open: lying against its hinge side, its hinge at the front
+		return open ? (c + side * 0.375f + f * 0.5f, -f, -side) : (c + side * 0.5f, -side, f);
+	}
+	public static void DoorPanel(Part P, BlockDef b, Vector3 at, Vector2 pivot, Vector2 w, Vector2 n, float light, float sky)
+	{
+		const float T = 0.125f;   // (half its thickness)
+		Vector3 Pt(float u, float y, float s) => at + new Vector3(pivot.X + u * w.X + s * n.X, y, pivot.Y + u * w.Y + s * n.Y);
+		void Quad(Vector3 a, Vector3 b2, Vector3 c, Vector3 d, int tile, Vector2 ua, Vector2 ub, Vector2 uc, Vector2 ud, float shade)
+		{   // (a, b2 along the bottom, c, d along the top; drawn from both sides)
+			int bas = P.Pos.Count;
+			P.V(a.X, a.Y, a.Z, Atlas.UV(tile, ua.X, ua.Y), shade, light, sky); P.V(b2.X, b2.Y, b2.Z, Atlas.UV(tile, ub.X, ub.Y), shade, light, sky);
+			P.V(c.X, c.Y, c.Z, Atlas.UV(tile, uc.X, uc.Y), shade, light, sky); P.V(d.X, d.Y, d.Z, Atlas.UV(tile, ud.X, ud.Y), shade, light, sky);
+			P.Quad(bas); P.Ind.Add(bas); P.Ind.Add(bas + 1); P.Ind.Add(bas + 2); P.Ind.Add(bas + 2); P.Ind.Add(bas + 1); P.Ind.Add(bas + 3);
+		}
+		int pic = b.T[3], edge = b.T[0];
+		float lo = 0.5f - T, hi = 0.5f + T;   // (the planks' middle 4 pixels, for the edges)
+		foreach (float s in new[] { T, -T })   // its front and back
+			Quad(Pt(0, 0, s), Pt(1, 0, s), Pt(0, 1, s), Pt(1, 1, s), pic, new(0, 0), new(1, 0), new(0, 1), new(1, 1), 0.9f);
+		foreach (float u in new[] { 0f, 1f })   // its hinge edge and its free edge
+			Quad(Pt(u, 0, -T), Pt(u, 0, T), Pt(u, 1, -T), Pt(u, 1, T), edge, new(lo, 0), new(hi, 0), new(lo, 1), new(hi, 1), 0.7f);
+		foreach (float y in new[] { 0f, 1f })   // its top and bottom
+			Quad(Pt(0, y, -T), Pt(1, y, -T), Pt(0, y, T), Pt(1, y, T), edge, new(0, lo), new(1, lo), new(0, hi), new(1, hi), y > 0 ? 1 : 0.6f);
 	}
 	// something lying flat on the ground (a rock): its picture just above the block under it, turned a random way
 	void AddFlat(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky, float lift = 0)

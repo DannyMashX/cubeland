@@ -125,7 +125,7 @@ public partial class Main
 		foreach (var m in skFig.Mats) m.SetShaderParameter("haze_amount", 0f);
 		SkChoose(skTool); SkSetColour(skColour, false); Skin.Pickable(skMirrorBtn, skMirror);
 		skinPanel.Visible = true;
-		Input.MouseMode = Input.MouseModeEnum.Visible;
+		Unlock();
 		SkPlaceCamera();
 	}
 	void CloseSkinEditor(bool keep)

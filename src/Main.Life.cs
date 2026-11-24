@@ -31,7 +31,7 @@ public partial class Main
 	public void HurtPlayer(int amount, Vector3? from = null)
 	{
 		if (!inv.Survival || dead) return;
-		if (Input.MouseMode != LockMode && !invOpen) return;   // nothing hurts you while paused
+		if (!Locked && !invOpen) return;   // nothing hurts you while paused
 		if (from is { } f)
 		{
 			var d = new Vector2(player.Pos.X - f.X, player.Pos.Z - f.Z); float l = d.Length(); if (l == 0) l = 1;
@@ -76,7 +76,7 @@ public partial class Main
 		if (!inv.Survival || dead) return;
 		if (changeTime > 0 && (changeTime -= dt) <= 0) DrawHearts();   // the red/green part turns back to normal
 		if (player.Pos.Y < -20) HurtPlayer(99);   // fell out of the world
-		if (Input.MouseMode != LockMode && !invOpen) return;   // (not while paused)
+		if (!Locked && !invOpen) return;   // (not while paused)
 		if ((gloomCheck -= dt) <= 0) { gloomCheck = 0.5f; inDark = LightHere() < GloomDark; }
 		if (inDark)
 		{
@@ -115,7 +115,7 @@ public partial class Main
 		gloomDeath = false;
 		if (invOpen) CloseInventory();
 		deathScreen.Visible = true;
-		Input.MouseMode = Input.MouseModeEnum.Visible;
+		Unlock();
 	}
 	void Respawn()
 	{
@@ -126,7 +126,7 @@ public partial class Main
 		health = MaxHealth; dead = false; gloom = 0; darkTime = 0; lightTime = 0;
 		deathScreen.Visible = false;
 		DrawHearts();
-		Input.MouseMode = LockMode;
+		Lock();
 	}
 
 	// ---- the hearts: your pictures in textures/gui/heart_atlas.png ----

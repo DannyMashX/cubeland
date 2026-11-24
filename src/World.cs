@@ -62,13 +62,17 @@ public partial class World
 	public static double ValidBiomes(double b) => b >= MinBiomes && b <= MaxBiomes && Math.Abs(b * 4 - Math.Round(b * 4)) < 1e-9 ? Math.Round(b * 4) / 4 : 1;
 	// The land's version: which features a world grows with. 0 = worlds made before Beta 0.1.1.3 (they keep growing exactly as they did);
 	// 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. New worlds get NewLand.
-	public const int LandVersion = 2;   // 2 = the ores as common at every depth, and in every layer of stone (deep ores). The newest this code knows.
+	// 2 = the ores as common at every depth, and in every layer of stone (deep ores: "the ore spread"). 3 = the Trees and Leaves
+	// trees (Biomes worlds), without the ore spread; 4 = the trees and the ore spread. LandVersion: the newest this code knows.
+	public const int LandVersion = 4;
 	public static int ValidLand(int l) => Math.Clamp(l, 0, LandVersion);   // (a saved world keeps the land it was made with, up to the newest)
-	// The ore spread (land 2) is held back for now (until the Survival & light update): while OreSpreadReady is false, new worlds are made
-	// with land 1, as in Beta 0.1.2.0. --orespread turns it on for testing.
+	public static bool OreSpread(int land) => land == 2 || land >= 4;   // (lands with the ore spread)
+	public static bool NewTrees(int land) => land >= 3;                  // (lands with the Trees and Leaves trees)
+	// The ore spread is held back for now (until the Survival & light update): while OreSpreadReady is false, new worlds are made
+	// with land 3 (the new trees, no ore spread). --orespread turns it on for testing (land 4). The same as the web version.
 	public const bool OreSpreadReady = false;
 	public static readonly bool OreSpreadOn = OreSpreadReady || System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--orespread") >= 0;
-	public static int NewLand => OreSpreadOn ? 2 : 1;
+	public static int NewLand => OreSpreadOn ? 4 : 3;
 
 	// height: 640 for tall worlds, 192 otherwise; size: how far across (see ValidSize); biomes: how big the biomes are
 	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1, int land = 0)
@@ -101,8 +105,27 @@ public partial class World
 		{
 			var (bytes, uniform) = Blocks.Usage();
 			Godot.GD.Print($"BLOCKSTORE {bytes / 1048576.0:0.0} MB (was {Blocks.Length / 1048576.0:0.0} MB), {uniform} chunks all one block, packed in {packTime.ElapsedMilliseconds} ms");
-			uint h2 = 2166136261; for (int i = 0; i < Blocks.Length; i++) h2 = (h2 ^ (byte)Blocks[i]) * 16777619;
-			Godot.GD.Print($"PACKEDHASH {h2:x8}");		}
+			uint h2 = 2166136261; var count = new SortedDictionary<int, int>();
+			for (int i = 0; i < Blocks.Length; i++) { int b = Blocks[i]; h2 = (h2 ^ (byte)b) * 16777619; if (b >= 2200 && b < 3700) count[b] = count.GetValueOrDefault(b) + 1; }
+			Godot.GD.Print($"PACKEDHASH {h2:x8}");
+			// (and how many of each block of the Trees and Leaves woods there are: to compare with the web version's)
+			var parts = new List<string>(); foreach (var (b, n) in count) parts.Add($"{Cubeland.Blocks.B[b].Name} {b}: {n}");
+			Godot.GD.Print("TREECOUNT " + string.Join(" | ", parts));
+		}
+		if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--treeplans") >= 0)
+		{   // (testing: each tree a sapling grows, planned at (500, 100, 500) into empty space: its blocks as "x,y,z:key" lines sorted
+			//  in ordinal order, joined by \n, and an FNV-1a of their UTF-16 letters, to check the web version plans the same)
+			var names = new List<string>(WorldGen.OldTrees) { "prairie_oak" };
+			foreach (var t in Nums.Worldgen.TREE_SHAPES ?? Array.Empty<TreeShapeRow>()) if (!names.Contains(t.tree)) names.Add(t.tree);
+			foreach (var name in names)
+			{
+				var lines = new List<string>();
+				foreach (var p in Gen.PlanTree(name, 500, 100, 500, (a, b, c) => 0, (a, c) => 100) ?? new()) lines.Add($"{p.x},{p.y},{p.z}:{DataKeys.KeyOf(p.id)}");
+				lines.Sort(string.CompareOrdinal);
+				uint h3 = 2166136261; foreach (char c in string.Join("\n", lines)) h3 = (h3 ^ c) * 16777619;
+				Godot.GD.Print($"TREEPLAN {name} {lines.Count} {h3:x8}");
+			}
+		}
 		RecomputeHeights();
 		Array.Clear(ChunkTop);
 		for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++)
@@ -140,7 +163,7 @@ public partial class World
 		if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0) return true;   // invisible walls at the world's edge
 		if (y >= WY) return false;
 		int b = Blocks.Get(x, y, z);
-		return b != 0 && !Cubeland.Blocks.B[b].NoCollide;
+		return b != 0 && !Cubeland.Blocks.B[b].NoCollide && !(Cubeland.Blocks.B[b].Shape == "door" && Cubeland.Blocks.B[b].Open == 1);   // (an open door can be walked past)
 	}
 	// the block at a spot on the half-block grid (2x the world position): a piece, or the whole block there
 	public int SubBlock(int X, int Y, int Z)
@@ -254,7 +277,7 @@ public partial class World
 		if (!Inside(x, y, z)) return;
 		int i = Idx(x, y, z), old = Blocks.Get(x, y, z);
 		Blocks.Set(x, y, z, id);
-		Edits[i] = id;
+		Edits[i] = id; Grown.Remove(i);   // (changed: no longer as a sapling grew it)
 		if (!Cubeland.Blocks.IsPieces(id)) PieceMap.Remove(i);
 		if (Cubeland.Blocks.IsTorch(old)) Torches.Remove(i);
 		if (Cubeland.Blocks.IsTorch(id)) Torches.Add(i);
@@ -282,6 +305,9 @@ public partial class World
 		WakeWater(x, y, z);
 		WakeFall(x, y, z);
 	}
+
+	// the chunks round (x, y, z) drawn again (nothing changed in the world: a door that's finished swinging)
+	public void Redraw(int x, int y, int z) { var dirty = new HashSet<int>(); MarkDirty(x, y, z, dirty); ChunksChanged?.Invoke(dirty); }
 
 	// a change only for show (the lone doorway): not saved, not one of your edits, not sent to anyone, nothing else told
 	public void SetLooks(int x, int y, int z, int id)

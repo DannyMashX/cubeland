@@ -364,7 +364,7 @@ public partial class Main
 		if (panel != kilnPanel) kilnAt = -1;
 		invName.Text = ""; benchName.Text = ""; kilnName.Text = "";
 		RefreshPanels();
-		Input.MouseMode = Input.MouseModeEnum.Visible;
+		Unlock();
 	}
 	void CloseInventory()
 	{
@@ -372,7 +372,7 @@ public partial class Main
 		if (howPanel?.Visible == true) howPanel.Visible = false;
 		invOpen = false; kilnAt = -1;
 		dim.Visible = false;
-		Input.MouseMode = LockMode;
+		Lock();
 	}
 	// redraw whichever screen is open (after crafting, or when your hotbar changes)
 	void RefreshPanels()

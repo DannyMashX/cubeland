@@ -22,7 +22,7 @@ public partial class Main
 	}
 	void ShowTip()
 	{
-		if (tipSlot == null || !GodotObject.IsInstanceValid(tipSlot) || !tipSlot.IsVisibleInTree() || tipSlot.ShownId == 0 || Input.MouseMode != Input.MouseModeEnum.Visible)
+		if (tipSlot == null || !GodotObject.IsInstanceValid(tipSlot) || !tipSlot.IsVisibleInTree() || tipSlot.ShownId == 0 || Locked)
 		{ tipBox.Visible = false; return; }
 		tipText.Text = TipFor(tipSlot.ShownId, tipSlot.TipWear);
 		tipBox.ResetSize();
@@ -33,7 +33,7 @@ public partial class Main
 	void PlaceTip()
 	{
 		if (tipBox == null || !tipBox.Visible) return;
-		if (tipSlot == null || !GodotObject.IsInstanceValid(tipSlot) || !tipSlot.IsVisibleInTree() || Input.MouseMode != Input.MouseModeEnum.Visible) { tipBox.Visible = false; return; }
+		if (tipSlot == null || !GodotObject.IsInstanceValid(tipSlot) || !tipSlot.IsVisibleInTree() || Locked) { tipBox.Visible = false; return; }
 		var m = tipBox.GetViewport().GetMousePosition(); var s = tipBox.GetViewportRect().Size; var z = tipBox.Size;
 		var at = m + new Vector2(14, 14);
 		if (at.X + z.X > s.X - 4) at.X = m.X - 10 - z.X;

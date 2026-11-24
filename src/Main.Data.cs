@@ -18,7 +18,7 @@ namespace Cubeland;
 //    "files" flags a data/*.json the game doesn't read.
 //    (--datashow also prints the smelting, recipe, creative and mob tables the game uses; --dataplant puts mistakes in
 //    smelting.json, recipes.json, creative.json, mobs.json, texture-names.json, blocks.json and worldgen.json as they're read, not on disk
-//    (2, 4, 5, 5, 5, 59 and 10; blocks: 6 in BASE, 44 in the family tables, 8 in the fields that were lists and one in the tables' order), and pretends there's a
+//    (2, 4, 5, 5, 5, 67 and 14; blocks: 6 in BASE, 49 in the family tables, 3 in DOORS, 8 in the fields that were lists and one in the tables' order), and pretends there's a
 //    data/stray.json, all of which the check has to find)
 public partial class Main
 {
@@ -110,6 +110,8 @@ public partial class Main
 		Same("FARM.dryRate", n.FARM?.dryRate, World.DryRate); Same("FARM.fertRate", n.FARM?.fertRate, World.FertRate);
 		Same("FARM.wetReach", n.FARM?.wetReach, World.WetReach); Same("FARM.fertHarvests", n.FARM?.fertHarvests, World.FertHarvests);
 		Same("FARM.revertTime", n.FARM?.revertTime, World.RevertTime); Same("FARM.seedChance", n.FARM?.seedChance, SeedChance);
+		Same("SAPLING.dropChance", n.SAPLING?.dropChance, SaplingDrop); Same("SAPLING.boneAshChance", n.SAPLING?.boneAshChance, BoneAshGrows);
+		Same("SAPLING.growTime", n.SAPLING?.growTime, World.SaplingTime); Same("SAPLING.growHits", n.SAPLING?.growHits, World.SaplingHits);
 		// wear: each tool and piece of armor, by what it's made of
 		var dur = new Dictionary<string, int>(); var adur = new Dictionary<string, int>();
 		foreach (int t in Blocks.Tools.Append(Blocks.CrudeAxe)) dur[Blocks.B[t].Material] = Inventory.MaxWear(t);
@@ -371,6 +373,11 @@ public partial class Main
 			v[2]["per"] = 71; v[0]["rich"] = true; v[4]["allDepths"] = true; v[3]["top"] = 1000; v[4]["takesDirt"] = 1; v[1]["size"] = 0;
 			pb[3] = "orange_terracota"; pb.RemoveAt(pb.Count - 1); node["CAVES"] = 1;
 		}
+		if (OS.GetCmdlineUserArgs().Contains("--dataplant") && node?["TREE_SHAPES"] is System.Text.Json.Nodes.JsonArray tsp && tsp.Count > 0
+			&& node["TREE_EXTRA"] is System.Text.Json.Nodes.JsonArray tep && tep.Count > 1 && node["TREE_MIX"]?["woods"] is System.Text.Json.Nodes.JsonArray wm && wm.Count > 1)
+		{   // (four more, in the trees: a log that isn't a log, a tree the code can't grow, a biome misspelt, shares over 1)
+			tsp[0]["log"] = "maple_planks"; tep[0]["tree"] = "baobab"; tep[1]["biome"] = "meadows"; wm[1][1] = 0.6;
+		}
 		using var doc = JsonDocument.Parse(node?.ToJsonString() ?? "null");
 		var root = doc.RootElement;
 		if (root.ValueKind != JsonValueKind.Object) { found.Add("data/worldgen.json isn't { ORE_VEINS, BADLANDS_BANDS }"); return found; }
@@ -423,6 +430,65 @@ public partial class Main
 			if (f != g) found.Add($"ORE_VEINS {k}: file {f}, game {g}");
 		}
 		if (!bands.SequenceEqual(WorldGen.BadlandsBands)) found.Add($"BADLANDS_BANDS: file [{string.Join(" ", bands.Select(Key))}], game [{string.Join(" ", WorldGen.BadlandsBands.Select(Key))}]");
+		// the trees (land 3 and up): values that make sense (the game grows straight from these; the world fingerprints check
+		// what they grow): each shape a tree the code grows, once, with an upright log and leaves (if any) for its wood, a trunk
+		// [shortest, tallest] and the numbers its shape needs; TREE_MIX's biomes and trees, the shares adding up to 1 at most;
+		// TREE_EXTRA's biomes and trees, a chance from 0 to 1, a grove [size, above]
+		try
+		{
+			T Part<T>(string table) => root.TryGetProperty(table, out var e) ? e.Deserialize<T>(GameData.Opts) : default;   // (each table on its own: a mistake elsewhere doesn't hide these)
+			var wg = new WorldgenData { TREE_PATCH = Part<int>("TREE_PATCH"), TREE_MIX = Part<Dictionary<string, JsonElement[][]>>("TREE_MIX"), TREE_EXTRA = Part<TreeExtraRow[]>("TREE_EXTRA"), TREE_SHAPES = Part<TreeShapeRow[]>("TREE_SHAPES") };
+			var shapes = wg.TREE_SHAPES ?? Array.Empty<TreeShapeRow>();
+			if (wg.TREE_PATCH < 1) found.Add($"worldgen.TREE_PATCH: should be a whole number from 1, not {wg.TREE_PATCH}");
+			var named = new HashSet<string>();
+			for (int k = 0; k < shapes.Length; k++)
+			{
+				var t = shapes[k]; string at = $"worldgen.TREE_SHAPES.{k} ({t.tree})";
+				if (t.tree == null || !WorldGen.GrownTrees.Contains(t.tree)) found.Add($"{at}: isn't a tree the code grows ({string.Join(", ", WorldGen.GrownTrees)})");
+				if (t.tree != null && !named.Add(t.tree)) found.Add($"{at}: is there twice");
+				int log = -1, lv = -1;
+				try { log = DataKeys.IdOf(t.log); } catch (InvalidOperationException) { found.Add($"{at}: log \"{t.log}\" isn't a block"); }
+				if (log > 0 && Blocks.Get(log)?.Log != true) found.Add($"{at}: log {t.log} isn't an upright log (\"log\")");
+				if (t.leaves != null) { try { lv = DataKeys.IdOf(t.leaves); } catch (InvalidOperationException) { found.Add($"{at}: leaves \"{t.leaves}\" isn't a block"); } }
+				if (lv > 0 && !Blocks.IsLeaves(lv)) found.Add($"{at}: leaves {t.leaves} aren't leaves");
+				if (t.leaves == null && t.tree != "dead") found.Add($"{at}: needs leaves");
+				if (t.trunk != null && (t.trunk.Length != 2 || t.trunk[0] < 1 || t.trunk[1] < t.trunk[0])) found.Add($"{at}: trunk should be [shortest, tallest], from 1");
+				if (t.trunk == null && t.tree != "shrub") found.Add($"{at}: needs a trunk");
+				var c = WorldGen.CrownOf(t);
+				int crowns = t.tree is "birch" or "cherry" or "orange" or "aspen" or "prairie_oak" or "shrub" ? 2 : t.tree == "dead" ? 0 : t.tree == "cedar" ? -1 : 1;
+				if (crowns >= 0 && (c.Length != crowns || c.Any(n => n <= 0))) found.Add($"{at}: crown should be {(crowns == 2 ? "[across, up and down]" : crowns == 1 ? "a number" : "left out")}, more than 0");
+				if (t.tree == "cedar" && (t.tiers == null || t.tiers.Length == 0 || t.gap < 1)) found.Add($"{at}: needs tiers and a gap");
+				if (t.tree is "palo_verde" or "dead" && (t.branch is not { Length: 2 } || t.branch[1] < t.branch[0])) found.Add($"{at}: needs branch [shortest, longest]");
+				if (t.tree == "dead" && (t.branches is not { Length: 2 } || t.branches[1] < t.branches[0])) found.Add($"{at}: needs branches [fewest, most]");
+				if (t.sparse < 0 || t.sparse >= 1) found.Add($"{at}: sparse should be from 0 to under 1");
+			}
+			string[] biomes = { "woods", "plains", "desert", "snowy", "swamp", "taiga", "meadow", "badlands" }, own = { "oak", "palm", "fir", "willow" };
+			foreach (var (b, mix) in wg.TREE_MIX ?? new())
+			{
+				string at = $"worldgen.TREE_MIX.{b}";
+				if (Array.IndexOf(biomes, b) < 0) found.Add($"{at}: isn't a biome ({string.Join(", ", biomes)})");
+				double sum = 0;
+				foreach (var e in mix)
+				{
+					if (e.Length != 2 || e[0].ValueKind != JsonValueKind.String || e[1].ValueKind != JsonValueKind.Number) { found.Add($"{at}: each should be [tree, share]"); continue; }
+					string tr = e[0].GetString(); double sh = e[1].GetDouble(); sum += sh;
+					if (!named.Contains(tr) && Array.IndexOf(own, tr) < 0) found.Add($"{at}: {tr} isn't a tree in TREE_SHAPES (or a biome's own: {string.Join(", ", own)})");
+					if (sh <= 0) found.Add($"{at}: {tr}'s share should be more than 0");
+				}
+				if (sum > 1 + 1e-9) found.Add($"{at}: the shares add up to {sum}, more than 1");
+			}
+			var extra = wg.TREE_EXTRA ?? Array.Empty<TreeExtraRow>();
+			for (int k = 0; k < extra.Length; k++)
+			{
+				var r = extra[k]; string at = $"worldgen.TREE_EXTRA.{k} ({r.tree} in {r.biome})";
+				if (Array.IndexOf(biomes, r.biome) < 0) found.Add($"{at}: {r.biome} isn't a biome");
+				if (r.tree == null || !named.Contains(r.tree)) found.Add($"{at}: {r.tree} isn't a tree in TREE_SHAPES");
+				if (!(r.chance > 0 && r.chance <= 1)) found.Add($"{at}: chance should be more than 0, at most 1");
+				if (r.grove != null && (r.grove.Length != 2 || r.grove[0] <= 0)) found.Add($"{at}: grove should be [size, above]");
+				if (r.spacing < 0 || r.edge < 0 || r.coast < 0) found.Add($"{at}: spacing, edge and coast are whole numbers from 1, or left out");
+			}
+		}
+		catch (Exception x) when (x is JsonException or InvalidOperationException or FormatException) { found.Add($"the trees in data/worldgen.json can't be read: {x.Message}"); }
 		// and the game can read it
 		try { root.Deserialize<WorldgenData>(GameData.Opts); } catch (Exception x) { found.Add($"the game can't read data/worldgen.json: {x.Message}"); }
 		return found;
@@ -596,6 +662,12 @@ public partial class Main
 				if (sn.FirstOrDefault(s => s.inner == "red_flower") is { } rf) rf.drop = null;
 				d.SNOWY = sn[..^1];
 			}
+			if (d.WOODS is { Length: > 0 } && d.DOORS is { Length: > 3 })
+			{   // (step 2: the trees' logs and fruit, the doors)
+				Row(2200).log = false; Row(2703).fruit = "stick";
+				if (d.WOODS.Any(r => r.grows != null)) { Row(2303).sapling = "maple_log"; Row(2408).grows = "birchh"; Row(195).sand = true; }
+				d.DOORS[1].first += 1; d.DOORS[2].of = "oak_log"; d.DOORS = d.DOORS[..^1];
+			}
 			if (Blocks.AllRows(d).Any(r => r.sound != null))
 			{   // (7c: the fields that were lists)
 				Row(4).needs = "pickaxe"; Row(61).needs = "hoe"; Row(5).leaves = null; Row(11).shovel = null; Row(7).sound = "woood";
@@ -640,7 +712,7 @@ public partial class Main
 		var families = new Dictionary<string, int[]>
 		{
 			["KILN"] = Span(Blocks.Furnace, 8), ["TORCHES"] = Span(Blocks.Torch, 20).Concat(Span(Blocks.SmolderingTorch, 12)).Concat(Span(Blocks.BurntTorch, 12)).Concat(Span(Blocks.EverTorch, 12)).ToArray(),
-			["WATER"] = Span(Blocks.Water, 8), ["LYING_LOGS"] = Span(Blocks.TurnedLogs, 2 * Blocks.Logs.Length),
+			["WATER"] = Span(Blocks.Water, 8), ["LYING_LOGS"] = Span(Blocks.TurnedLogs, 16),   // (the older woods': the newer ones lie in WOODS)
 			["SNOW"] = Span(Blocks.Snow, Blocks.SnowBlock - Blocks.Snow), ["DEEP_STONE"] = Blocks.DeepBlocks, ["SOILS"] = Blocks.Soils, ["GRAIN"] = Blocks.GrainStages,
 			["COLOURS"] = Blocks.Dye.Concat(Blocks.NewColourBlocks).ToArray(),
 			["METALS"] = Blocks.Ores.Concat(Blocks.Metals.SelectMany(m => new[] { Blocks.Chunk[m], Blocks.MetalBrick[m] })).ToArray(),
@@ -772,7 +844,8 @@ public partial class Main
 					{
 						string form = item.Piece > 0 ? "piece" : item.Form, at = $"FORMS {k} ({f.of}).{form} {id}";
 						fileDef.TryAdd(id, item);
-						if (id != Blocks.FormItem(form, of)) found.Add($"{at}: should be {Blocks.FormItem(form, of)} (where FormItem finds it)");
+						int sum = of >= 2200 && of < 3400 && of % 100 < 4 ? of - of % 100 + 10 * (of % 100 + 1) + Array.IndexOf(Blocks.Forms, form) : Blocks.FormSum(form, of);
+						if (id != sum) found.Add($"{at}: should be {sum} (the older blocks': 100 + b, 1000 + b..., or from 1800 or 2000; the newer woods': B + 10 to B + 46)");
 						if (rowOf.ContainsKey(id) || !itemIds.Add(id)) found.Add($"{at}: id {id} is another block's or item's too");
 						if (Blocks.Get(id) is not { } game) { found.Add($"{at}: the game has no block {id}"); continue; }
 						if (BlockVal(typeof(BlockDef).GetField("T"), game) is var gp && gp != pics) found.Add($"{at} pictures: file {pics}; game {gp}");
@@ -824,6 +897,72 @@ public partial class Main
 				if (k >= has.Count || k >= should.Count || has[k] != should[k])
 					found.Add($"SNOWY {k}: should be block {(k < should.Count ? $"{should[k].id} holding {DataKeys.KeyOf(should[k].inner)}" : "nothing")} (the torches and flowers by number from {Blocks.SnowLogged1}, then {string.Join(", ", Blocks.SnowLoggedOthers)} from {Blocks.SnowyPieces}), not {(k < has.Count ? $"{has[k].id} holding {DataKeys.KeyOf(has[k].inner)}" : "nothing")}");
 			foreach (int id in snowIds) fromFile.Add(id);
+		}
+		// doors: each DOORS row's 32 blocks against the game's, field by field (pictures by name); a row's planks are a row, its
+		// item an item row named "... Door", its states start just after the item (first = item + 1) and overlap nothing
+		if (d.DOORS != null)
+		{
+			var defOf = new Dictionary<int, BlockDef>();
+			foreach (var (_, r, b) in defs) defOf.TryAdd(r.id, b);
+			var doorIds = new HashSet<int>(); var doorItems = new HashSet<int>();
+			for (int k = 0; k < d.DOORS.Length; k++)
+			{
+				var dr = d.DOORS[k]; string at = $"DOORS {k} ({dr.of}, item {dr.item})";
+				int of;
+				try { of = Blocks.KeyRef(keys, dr.of, at); }
+				catch (InvalidOperationException x) { found.Add(x.Message); continue; }
+				if (!rowOf.TryGetValue(of, out var ofRow) || !defOf.TryGetValue(of, out var ofDef)) { found.Add($"{at}: its planks aren't a row"); continue; }
+				if (!rowOf.TryGetValue(dr.item, out var itemRow) || !itemRow.item || !defOf.TryGetValue(dr.item, out var itemDef)) { found.Add($"{at}: its item isn't an item row"); continue; }
+				if (itemRow.name == null || !itemRow.name.EndsWith(" Door")) found.Add($"{at}: its item is {itemRow.name}, not a door");
+				if (dr.first != dr.item + 1) found.Add($"{at}: first should be {dr.item + 1} (just after its item), not {dr.first}");
+				if (!doorItems.Add(dr.item)) found.Add($"{at}: item {dr.item} has another DOORS row too");
+				if (Blocks.DoorFirst(dr.item) != dr.first) found.Add($"{at}: the game's door {dr.item} stands from {Blocks.DoorFirst(dr.item)}, not {dr.first}");
+				string itemKey = keys.First(kv => kv.Value == dr.item).Key, edge = Blocks.RowPictures(ofRow)[0];
+				foreach (var (id, want) in Blocks.DoorBlocks(dr, of, ofDef, dr.item, itemDef, itemKey, n => new int[n.Length]))
+				{
+					string sat = $"{at} {id}";
+					if (rowOf.ContainsKey(id) || fromFile.Contains(id) || !doorIds.Add(id)) { found.Add($"{sat}: id {id} is another block's or item's too"); continue; }
+					fileDef.TryAdd(id, want);
+					if (Blocks.Get(id) is not { } game) { found.Add($"{sat}: the game has no block {id}"); continue; }
+					string fp = $"{edge} {edge} {edge} {itemKey}_{(want.Half == 0 ? "bottom" : "top")}", gp = BlockVal(typeof(BlockDef).GetField("T"), game);
+					if (fp != gp) found.Add($"{sat} pictures: file {fp}; game {gp}");
+					foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name != "T"))
+						if (BlockVal(fi, want) is var fv && BlockVal(fi, game) is var gv && fv != gv) found.Add($"{sat}.{fi.Name}: file {fv}, game {gv}");
+					string sk = $"{itemKey}#facing={want.Facing},half={want.Half},hinge={want.Hinge},open={want.Open}";
+					if (DataKeys.KeyOf(id) is var gk && sk != gk) found.Add($"{sat}: its key is \"{sk}\", but the game's block {id} is \"{gk}\"");
+				}
+			}
+			for (int id = 1; id < Blocks.MaxId; id++)
+				if (Blocks.Get(id) is { Shape: "door" } g && !doorItems.Contains(g.Drop)) { found.Add($"DOORS: the game's door {g.Drop} (standing from {Blocks.DoorFirst(g.Drop)}) has no row"); doorItems.Add(g.Drop); }
+			foreach (int id in doorIds) fromFile.Add(id);
+		}
+		// the trees' logs (the rows with "log"): each upright, lying both ways (a row on each axis that drops it); fruit: food
+		{
+			string Ids(IEnumerable<int> ids) => string.Join(", ", ids.Order());
+			var fileLogs = all.Where(x => x.r.log).Select(x => x.r.id).ToList();
+			if (Ids(fileLogs) is var fl && Ids(Blocks.Logs) is var gl && fl != gl) found.Add($"blocks: the logs (\"log\") are {fl} in the file, {gl} in the game");
+			foreach (var (t, r) in all.Where(x => x.r.log && x.r.axis != 0)) found.Add($"{t} {r.id} ({r.name}): a log (\"log\") stands upright (no axis); its lying rows drop it");
+			foreach (var (t, r) in all.Where(x => x.r.fruit != null))
+			{
+				if (!keys.TryGetValue(r.fruit, out int fr) || !rowOf.TryGetValue(fr, out var frow)) { found.Add($"{t} {r.id} ({r.name}): its fruit \"{r.fruit}\" isn't a row"); continue; }
+				if (!frow.item || frow.food <= 0) found.Add($"{t} {r.id} ({r.name}): its fruit {r.fruit} isn't food (an item row with food)");
+				if (r.leaves != true) found.Add($"{t} {r.id} ({r.name}): fruit only falls from leaves");
+			}
+			// saplings: a leaves row's sapling is a sapling row; a sapling grows into a tree there's a shape for (the older four, or
+			// worldgen.json TREE_SHAPES); only saplings have sand; and each is planted like a flower (a plant you walk through)
+			foreach (var (t, r) in all.Where(x => x.r.sapling != null))
+			{
+				if (!keys.TryGetValue(r.sapling, out int sp) || !rowOf.TryGetValue(sp, out var srow)) { found.Add($"{t} {r.id} ({r.name}): its sapling \"{r.sapling}\" isn't a row"); continue; }
+				if (srow.grows == null) found.Add($"{t} {r.id} ({r.name}): its sapling {r.sapling} isn't a sapling (a row with grows)");
+				if (r.leaves != true) found.Add($"{t} {r.id} ({r.name}): saplings only fall from leaves");
+			}
+			var shapes = (Nums.Worldgen.TREE_SHAPES ?? Array.Empty<TreeShapeRow>()).Select(s => s.tree).Concat(WorldGen.OldTrees).ToHashSet();
+			foreach (var (t, r) in all.Where(x => x.r.grows != null))
+			{
+				if (!shapes.Contains(r.grows)) found.Add($"{t} {r.id} ({r.name}): it grows into \"{r.grows}\", which isn't oak, fir, palm, willow or a worldgen.json TREE_SHAPES tree");
+				if (r.shape != "plant" || !r.noCollide || r.item) found.Add($"{t} {r.id} ({r.name}): a sapling is a plant you walk through (shape plant, noCollide, not an item)");
+			}
+			foreach (var (t, r) in all.Where(x => x.r.sand && x.r.grows == null)) found.Add($"{t} {r.id} ({r.name}): sand is only for saplings");
 		}
 		// the block lists the game uses, against the blocks' fields: the tool a block needs, the shovel's blocks, leaves, sounds,
 		// Items (inventory, not snow-logged, layer 1 unless tall worlds are on), looks, and the creative inventory (Items and

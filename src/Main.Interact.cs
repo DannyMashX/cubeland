@@ -55,10 +55,14 @@ public partial class Main
 		int id = DropFor(b); var hand = Blocks.Get(b)?.HandDrop;
 		if (Survival && hand != null && !inv.Holding("shovel"))   // (Fireclay by hand: a few Fireclay Balls)
 			for (int n = hand[1] + rnd.Next(hand[2] - hand[1] + 1); n > 0; n--) Collect(hand[0], x, y, z);
-		else if (Survival && Diggable(b) && !inv.Holding("shovel") && Blocks.Get(Blocks.PieceItem + id) != null)
-			for (int n = 1 + rnd.Next(8); n > 0; n--) Collect(Blocks.PieceItem + id, x, y, z);
+		else if (Survival && Diggable(b) && !inv.Holding("shovel") && Blocks.FormItem("piece", id) > 0)
+			for (int n = 1 + rnd.Next(8); n > 0; n--) Collect(Blocks.FormItem("piece", id), x, y, z);
 		else Collect(id, x, y, z);
 	}
+	// saplings (data/numbers.json SAPLING): the chance leaves broken without a hoe drop theirs; the chance one Bone Ash grows one
+	static readonly double SaplingDrop = Nums.N.SAPLING.dropChance, BoneAshGrows = Nums.N.SAPLING.boneAshChance;
+	// the ground a sapling can be planted on (sand: one that grows on Sand too)
+	static bool SaplingGround(int b, bool sand) => Blocks.IsGrassy(b) || b == Blocks.Dirt || b == Blocks.Mud || b == Blocks.Peat || (sand && b == Blocks.Sand);
 	// the tool block b can't be broken without in survival ("axe", "pickaxe"; null: any)
 	static string NeededTool(int b) => Blocks.Get(b)?.Needs;
 	// a shovel is block b's tool (and dug by hand it comes up as pieces, if it has a piece item)
@@ -71,13 +75,14 @@ public partial class Main
 	void WearTool(int cost) { if (inv.WearTool(cost) is { } name) { Sound.I?.Break(Blocks.Stone); ShowNote($"Your {name} broke", 2); } }
 	// armor took a hit
 	void WearArmor() { foreach (var name in inv.WearArmor()) { Sound.I?.Break(Blocks.Stone); ShowNote($"Your {name} broke", 2); } }
-	// which slot a click uses (survival): right-click uses the picked offhand item if there is one; breaking a block uses the
-	// best tool of the right kind from your tool slots when your hand isn't holding one; hitting a mob uses your best sword
+	// which slot a click uses (survival): right-click puts down what's in your hand if it's something you can put down, and
+	// otherwise uses the picked offhand item if there is one; breaking a block uses the best tool of the right kind from your
+	// tool slots when your hand isn't holding one; hitting a mob uses your best sword
 	int ActSlot(MouseButton button)
 	{
 		int sel = inv.Selected;
 		if (!Survival) return sel;
-		if (button == MouseButton.Right) return inv.Id[Inventory.Off0 + inv.OffSel] != 0 ? Inventory.Off0 + inv.OffSel : sel;
+		if (button == MouseButton.Right) return CanPutDown(inv.Id[sel]) || inv.Id[Inventory.Off0 + inv.OffSel] == 0 ? sel : Inventory.Off0 + inv.OffSel;
 		if (button != MouseButton.Left) return sel;
 		string kind;
 		if (MobInSights() != null) kind = "sword";
@@ -92,6 +97,9 @@ public partial class Main
 		int k = inv.BestTool(kind);
 		return k >= 0 ? k : sel;
 	}
+	// something you can put down: a block (torches, snow...), a shape or piece, a door, or an item that lies on the ground
+	// (a Rock, Clay Ball or Brick). (Tools, food, Snowballs, Sticks, seeds... aren't: with those the offhand gets the right-click.)
+	static bool CanPutDown(int id) => Blocks.Get(id) is { } b && (!b.Item || b.Form != null || b.Piece > 0 || b.Places != 0 || Blocks.DoorFirst(id) > 0);
 	// ---- Offhand: R picks the next offhand slot, F swaps it with the selected hotbar slot ----
 	void CycleOffhand()
 	{
@@ -163,12 +171,14 @@ public partial class Main
 		if (Survival && staged && Blocks.OreIndex(hb) >= 0) for (int n = Blocks.B[hb].Layer; n > 1; n--) Collect(DropFor(hb), h.X, h.Y, h.Z);   // (an ore in layer n gives n Chunks)
 		Sound.I?.Break(hb);
 		if (Blocks.IsLeaves(hb) && !inv.Holding("hoe") && rnd.NextDouble() < 0.2) Collect(Blocks.Stick, h.X, h.Y, h.Z);
-		if (hb == Blocks.PalmLeaves && !inv.Holding("hoe") && rnd.NextDouble() < 0.25) Collect(Blocks.Dates, h.X, h.Y, h.Z);   // Palm Leaves: a 1 in 4 chance of Dates
+		if (Blocks.B[hb].Fruit > 0 && !inv.Holding("hoe") && rnd.NextDouble() < 0.25) Collect(Blocks.B[hb].Fruit, h.X, h.Y, h.Z);
+		if (Blocks.B[hb].Sapling > 0 && !inv.Holding("hoe") && rnd.NextDouble() < SaplingDrop) Collect(Blocks.B[hb].Sapling, h.X, h.Y, h.Z);   // and now and then their sapling   // fruit trees' leaves (Palm: Dates): a 1 in 4 chance of their fruit
 		if (hb == Blocks.GrainRipe) for (int n = 1 + rnd.Next(2); n > 0; n--) Collect(Blocks.GrainSeeds, h.X, h.Y, h.Z);   // ripe Grain: 1-2 seeds too
 		var b = Blocks.B[hb];
 		if (Blocks.IsTorch(hb) && b.Count > 1) world.SetBlock(h.X, h.Y, h.Z, Blocks.WithSnow(Blocks.TorchVariant(b.Wi, b.Count - 1, b.Burn), b.Snowed));   // take one torch off
 		else if (b.Snowed > 0) world.SetBlock(h.X, h.Y, h.Z, Blocks.Snow);   // snow-logged: the torch, flower, rock or Cutter comes out, the snow stays
 		else { world.SetBlock(h.X, h.Y, h.Z, 0); world.DropTorchesAround(h.X, h.Y, h.Z, DropFor); }
+		if (b.Shape == "door") BreakDoorHalf(h.X, h.Y, h.Z, b);   // (a door: its other half goes too)
 		WearTool(cost);
 		if (Survival && TreeFellingOn && natural && Blocks.IsLogBlock(hb) && !NaturalLog(h.X, h.Y - 1, h.Z)) Fell(h.X, h.Y, h.Z);   // (a tree's bottom log: the whole tree comes down)
 	}
@@ -196,6 +206,14 @@ public partial class Main
 			Sound.I?.Place(Blocks.Grass); MobNoise(x, y + 1, z); inv.UseOne();
 			return true;
 		}
+		if (held == Blocks.BoneAsh && Blocks.Get(hb)?.Grows != null)
+		{   // Bone Ash on a sapling: used up, and now and then it grows into its tree at once (not used if it couldn't grow)
+			var could = world.GrowSapling(x, y, z, justLook: true);
+			if (could != World.Growth.Grew) { ShowNote(could == World.Growth.NeedsFour ? "A Redwood needs four saplings in a square" : "There's no room for this tree to grow", 2); return true; }
+			Sound.I?.Place(Blocks.Grass); MobNoise(x, y, z); inv.UseOne();
+			if (rnd.NextDouble() < BoneAshGrows) world.GrowSapling(x, y, z);
+			return true;
+		}
 		if (held == Blocks.BoneAsh && Blocks.IsSoil(target))
 		{
 			if (Blocks.SoilFert(target)) world.FertLeft[World.Idx(x, ty, z)] = World.FertHarvests;   // (topped up)
@@ -216,6 +234,8 @@ public partial class Main
 			h = new Player.Hit { X = h.X, Y = h.Y - 1, Z = h.Z, Ny = 1, Sub = -1, Id = world.GetBlock(h.X, h.Y - 1, h.Z), Pt = new Vector3(h.Pt.X, h.Y, h.Pt.Z) };
 		lastAim = h;
 		int hb = h.Id, id = inv.Held;
+		// right-click a door to open or shut it (hold Shift to build against it instead)
+		if (Blocks.IsDoor(hb) && !ShiftDown) { ToggleDoor(h.X, h.Y, h.Z); return; }
 		// right-click a Crafting Bench (survival: its recipes) or a Cutter to use it (hold Shift to build against it instead)
 		if ((Blocks.Plain(hb) == Blocks.Cutter || hb == Blocks.CraftingBench && inv.Survival) && !ShiftDown) { OpenBench(Blocks.Plain(hb) == Blocks.Cutter); return; }
 		// right-click a lit (burning) kiln holding a Stick: the stick catches fire and becomes a Torch
@@ -250,6 +270,7 @@ public partial class Main
 			if (world.SetPiece(x, y, z, (p.X - 2 * x) + (p.Y - 2 * y) * 2 + (p.Z - 2 * z) * 4, Blocks.B[id].Piece)) Placed(Blocks.B[id].Piece);
 			return;
 		}
+		if (Blocks.DoorFirst(id) > 0) { PlaceDoor(h, id); return; }   // a door: 2 blocks tall, facing you
 		if (Blocks.IsItem(id) && Blocks.B[id].Places == 0) return;   // items that don't go down on the ground
 		int bx = h.X + h.Nx, by = h.Y + h.Ny, bz = h.Z + h.Nz;
 		if (Blocks.IsTorch(id))
@@ -293,6 +314,11 @@ public partial class Main
 			{   // a rock: only on top of a solid block
 				if (by != h.Y + 1 || !world.Solid(bx, by - 1, bz) || Blocks.IsWater(there)) return;
 				world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid); return;   // (on a layer of snow: it lies on it)
+			}
+			if (Blocks.B[pid].Grows != null)
+			{   // a sapling: on top of Grass, Dirt, Snowy Grass, Swamp Grass, Mud or Peat (Palm, Orange and Palo Verde on Sand too), into air
+				if (by != h.Y + 1 || there != 0 || !SaplingGround(world.GetBlock(bx, by - 1, bz), Blocks.B[pid].Sand)) return;
+				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
 			}
 			if (Blocks.B[pid].Shape == "plant")
 			{   // a flower: planted on top of grass or dirt

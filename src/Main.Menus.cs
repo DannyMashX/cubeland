@@ -361,7 +361,7 @@ public partial class Main
 	{
 		menuOpen = open; mainMenu.Visible = open;
 		uiLayer.Visible = !open;   // (no hotbar behind the main menu)
-		if (open) { pauseMenu.Visible = false; Input.MouseMode = Input.MouseModeEnum.Visible; }
+		if (open) { pauseMenu.Visible = false; Unlock(); }
 	}
 	// into the game
 	void Play()
@@ -371,7 +371,7 @@ public partial class Main
 		pauseTitle.Text = "Paused"; resumeBtn.Text = "Back to game";
 		if (!ready) { wantPlay = true; loading.Visible = true; return; }   // (still growing: goes in once it's ready)
 		pauseMenu.Visible = false;
-		Input.MouseMode = LockMode;
+		Lock();
 	}
 	void Resume() { if (dead) return; Play(); }
 	// open another world: save this one, then start the game over with the other one
@@ -386,7 +386,7 @@ public partial class Main
 			return;
 		}
 		openWorldId = id; playOnLoad = play;
-		Input.MouseMode = Input.MouseModeEnum.Visible;
+		Unlock();
 		GetTree().ReloadCurrentScene();
 	}
 	(string id, bool play) leaveTo;
@@ -395,7 +395,7 @@ public partial class Main
 	// called every frame: the pause screen shows whenever you're not playing (and not in a menu); auto save
 	void UpdateScreens(float dt)
 	{
-		bool playing = ready && Input.MouseMode == LockMode;
+		bool playing = ready && Locked;
 		bool paused = ready && !menuOpen && !invOpen && !dead && !playing;
 		if (paused && !pauseMenu.Visible && settings.Autosave) SaveWorld();   // paused: save (if auto save is on)
 		pauseMenu.Visible = paused && !wantPlay;
@@ -425,6 +425,7 @@ public partial class Main
 			Drying = new(world.Drying), TorchBurn = world.TorchBurn.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
 			Crops = world.Crops.ToDictionary(k => k.Key, k => MathF.Round(k.Value)), Fert = new(world.FertLeft),
 			Grazed = world.Grazed.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
+			Saplings = new(world.Saplings), Grown = world.Grown.ToArray(),
 			Kilns = new(kilns.All),
 		};
 		try { if (!Worlds.WriteSave(current, s)) return false; unsaved = false; return true; }
@@ -452,6 +453,8 @@ public partial class Main
 			if (s.Crops != null) foreach (var (i, left) in s.Crops) if (world.Crops.ContainsKey(i)) world.Crops[i] = Math.Max(0, left);
 			if (s.Fert != null) foreach (var (i, n) in s.Fert) if (world.FertLeft.ContainsKey(i)) world.FertLeft[i] = Math.Max(1, n);
 			if (s.Grazed != null) foreach (var (i, left) in s.Grazed) if (i >= 0 && i < world.Blocks.Length && world.Blocks[i] == Blocks.Dirt) world.Grazed[i] = Math.Max(0, left);
+			if (s.Saplings != null) foreach (var (i, n) in s.Saplings) if (world.Saplings.ContainsKey(i)) world.Saplings[i] = Math.Clamp(n, 0, World.SaplingHits - 1);
+			if (s.Grown != null) foreach (int i in s.Grown) if (world.Edits.ContainsKey(i)) world.Grown.Add(i);
 			pendingSave = s;
 		}
 		catch (Exception e) { GD.PrintErr("Could not load the world (it will still play, but may not save): " + e.Message); }
@@ -503,5 +506,8 @@ public partial class Main
 		if (what == NotificationWMCloseRequest && settings?.Autosave == true) SaveWorld();
 		if (what == NotificationWMCloseRequest || what == NotificationPredelete) peer?.Destroy();
 		if (what == NotificationExitTree) PlayerSkin.Changed -= SkinChanged;   // (the scene restarts when you switch worlds)
+		// the window lost the focus (Alt+Tab, another window clicked): the pointer is let go at once, so it's yours again;
+		// you're still playing, and a click back in the game takes it again (see HoldMouse)
+		if (what == NotificationWMWindowFocusOut || what == NotificationApplicationFocusOut) ReleaseMouse();
 	}
 }

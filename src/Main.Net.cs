@@ -343,7 +343,7 @@ public partial class Main
 		};
 		lastHeard = Now;
 	}
-	void GiveUp(string text) { if (netLeft || !IsInsideTree()) return; Ask(text, LeaveGame); onCancel = LeaveGame; Input.MouseMode = Input.MouseModeEnum.Visible; netLeft = true; }
+	void GiveUp(string text) { if (netLeft || !IsInsideTree()) return; Ask(text, LeaveGame); onCancel = LeaveGame; Unlock(); netLeft = true; }
 	void HostGone()
 	{
 		if (netLeft) return;
@@ -356,7 +356,7 @@ public partial class Main
 		joinInfo = null;
 		discarding = true;   // (nothing of theirs to save here)
 		openWorldId = null; playOnLoad = false;
-		Input.MouseMode = Input.MouseModeEnum.Visible;
+		Unlock();
 		GetTree().ReloadCurrentScene();
 	}
 	void ClientGot(Dictionary<string, object> d)

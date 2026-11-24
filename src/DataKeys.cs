@@ -14,7 +14,7 @@ public static class DataKeys
 	//  0 is "air"; snow-logged: "snowy:" + its inner block's key; a shape item: form + ":" + its block's key ("slab:grass");
 	//  a piece item: "piece:" + its block's key; anything else: its name in lower case with _ between words, then any
 	//  states that aren't the usual one after a #, in this order: layer (deep sets, 2-8), wall and count (torches), facing
-	//  and lit (anything with a front), level (water), stage (Grain, always), layers (snow, 2-7), axis (lying logs),
+	//  and lit (anything with a front), facing, half, hinge and open (a door as it stands, always all four), level (water), stage (Grain, always), layers (snow, 2-7), axis (lying logs),
 	//  look (Red Bricks' other looks), placed (a flat block whose drop is an item of the same name).
 	public static string KeyOf(int id)
 	{
@@ -34,6 +34,7 @@ public static class DataKeys
 		if (d.Layer >= 2) states.Add($"layer={d.Layer}");
 		if (d.Shape == "torch") { if (d.Wi > 0) states.Add($"wall={d.Wi}"); if (d.Count > 1) states.Add($"count={d.Count}"); }
 		if (d.Front != null) { if (d.Facing > 0) states.Add($"facing={d.Facing}"); if (d.Lit) states.Add("lit"); }
+		if (d.Shape == "door") states.Add($"facing={d.Facing},half={d.Half},hinge={d.Hinge},open={d.Open}");   // (a door as it stands: always all four)
 		if (d.Liquid && d.Level > 0) states.Add($"level={d.Level}");
 		if (Blocks.IsCrop(id)) states.Add($"stage={Array.IndexOf(Blocks.GrainStages, id)}");
 		if (d.Shape == "snow" && d.Layers >= 2) states.Add($"layers={d.Layers}");

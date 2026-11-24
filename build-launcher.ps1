@@ -3,6 +3,7 @@
 #   builds\CubeLand-<version>-windows.zip       - the game, which the launcher downloads
 #                                                 (version = the same as the web game's, e.g. CubeLand-Alpha-0.0.5.1-windows.zip)
 # The launcher uses your font and gui pictures: they're copied from textures\ into launcher\textures\ first.
+# (and data\texture-names.json into launcher\data\: the font's letter names)
 # Needs Godot 4.7.2 (.NET) and its export templates, at the paths below.
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
@@ -17,6 +18,9 @@ foreach ($d in 'font', 'gui') {
   New-Item -ItemType Directory -Force $dst | Out-Null
   Copy-Item -Recurse "textures\$d\*" $dst -Exclude *.import
 }
+# and the font's letter names (data\texture-names.json's FONT_NAMES, read by Skin.cs)
+New-Item -ItemType Directory -Force launcher\data | Out-Null
+Copy-Item data\texture-names.json launcher\data\texture-names.json
 
 function Export($path, $out) {
   $ErrorActionPreference = 'Continue'   # (Godot prints harmless warnings, like skipping the launcher folder, which mustn't stop this)

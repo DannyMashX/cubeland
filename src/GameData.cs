@@ -37,8 +37,17 @@ public sealed class NumbersData
 	public float SMELT_TIME;
 	public float[][] BURN_TIMES;
 	public FarmNumbers FARM;
+	public SaplingNumbers SAPLING;
 	public Dictionary<string, int> DURABILITY, ARMOR_DURABILITY, PICK_TIER, STRATA_PICKAXE, PICK_STAGES, AXE_STAGES;
 	public float[] ARMOR_SHARE;
+}
+// saplings: the chance leaves drop theirs; growTime seconds a sapling takes on average, in growHits lucky ticks; the chance
+// one Bone Ash grows it at once
+public sealed class SaplingNumbers
+{
+	public double dropChance, boneAshChance;
+	public float growTime;
+	public int growHits;
 }
 public sealed class FarmNumbers
 {
@@ -119,7 +128,8 @@ public sealed class TextureNamesData
 public sealed class BlocksData
 {
 	public BlockRow[] BASE;            // the ones written out one by one
-	public BlockRow[] KILN, TORCHES, WATER, LYING_LOGS, SNOW, TOOLS, DEEP_STONE, SOILS, GRAIN, COLOURS, METALS, DEEP_ORES, FOUNDRY, GEAR, FLOWERS;   // families, every member written out (in the order the game loads them)
+	public BlockRow[] KILN, TORCHES, WATER, LYING_LOGS, SNOW, TOOLS, DEEP_STONE, SOILS, GRAIN, COLOURS, METALS, DEEP_ORES, FOUNDRY, GEAR, FLOWERS, WOODS;   // families, every member written out (in the order the game loads them)
+	public DoorRow[] DOORS;            // the doors as they stand: each door's 32 states, made from one row
 	public Dictionary<string, string> FORM_NAMES;   // the forms (piece, slab, ...) in order, each with the word its items' names end in
 	public SnowyRow[] SNOWY;           // the snow-logged blocks: a torch, flower or other small thing with snow lying round it
 	public FormRow[] FORMS;            // each block you can cut (in Blocks.Splittable's order), with its piece and shape items' ids
@@ -141,6 +151,11 @@ public sealed class BlockRow
 	public string needs, sound;        // needs: the tool it can't be broken without ("axe", "pickaxe"); sound: its dig, step and place sound (left out: "stone")
 	public bool? shovel, leaves, inventory;   // (true, or left out) a shovel's block; leaves; you can have it in your inventory
 	public int look;                   // another look of the block it drops (Red Bricks' 13-15: 1-3)
+	public bool log;                   // a tree's log, standing (lying logs count through their drop)
+	public string fruit;               // leaves: what they drop now and then (1 in 4, broken without a hoe), by key
+	public string sapling;             // leaves: their sapling (dropped now and then, broken without a hoe: numbers.json SAPLING), by key
+	public string grows;               // a sapling: the tree it grows into (oak, fir, palm, willow, or a worldgen.json TREE_SHAPES tree)
+	public bool sand;                  // a sapling that can be planted on Sand too
 }
 // a SNOWY row: a snow-logged block. It's its inner block (by key) with that block's fields, then this row's own (only drop and
 // box so far), with inner and snowed 1
@@ -152,6 +167,13 @@ public sealed class SnowyRow
 }
 // a FORMS row: a block you can cut (by key), and the ids of its piece and shape items (each named after the block, then
 // FORM_NAMES' word; the block's pictures)
+// a DOORS row: a door as it stands, made of planks `of` (its edges look like them; by key), carried as `item`, with its 32
+// states from `first`: first + facing x 8 + hinge x 4 + open x 2 + half (see Blocks.DoorBlocks)
+public sealed class DoorRow
+{
+	public string of;
+	public int item, first;
+}
 public sealed class FormRow
 {
 	public string of;
@@ -163,6 +185,34 @@ public sealed class WorldgenData
 {
 	public OreVeinRow[] ORE_VEINS;     // in the order they're grown (a row's place is in its veins' seeds)
 	public string[] BADLANDS_BANDS;    // the badlands' stripes, from the bottom up (they repeat)
+	// Trees and Leaves (Biomes worlds from land 3): the same kind of tree in patches this many blocks square; each biome's
+	// trees at its usual tree spots ([tree, share], in order); the trees with spots of their own (in order: a row's place is
+	// in its seeds); how each new tree looks (a row's place is in its seeds too)
+	public int TREE_PATCH;
+	public Dictionary<string, JsonElement[][]> TREE_MIX;
+	public TreeExtraRow[] TREE_EXTRA;
+	public TreeShapeRow[] TREE_SHAPES;
+}
+// a TREE_EXTRA row: tree grows in biome on a chance per column of its ground; grove [size, above]: only where a slow noise
+// that size is above that; spacing: one spot in each square this many across; edge: within that many of another biome;
+// coast: low down, with sea within that many (with both: either)
+public sealed class TreeExtraRow
+{
+	public string tree, biome;
+	public double chance;
+	public double[] grove;
+	public int spacing, edge, coast;
+}
+// a TREE_SHAPES row: a tree's log and leaves (keys; leaves left out: none), trunk [shortest, tallest]; crown: a number, or
+// [across, up and down]; tiers and gap (cedar), sparse, branch [shortest, longest], branches [fewest, most]
+public sealed class TreeShapeRow
+{
+	public string tree, log, leaves;
+	public int[] trunk, branch, branches;
+	public JsonElement crown;
+	public double[] tiers;
+	public int gap;
+	public double sparse;
 }
 // an ORE_VEINS row: veins per 10,000 columns, blocks per vein, shallowest and deepest (blocks below the surface); takesDirt: it
 // turns Dirt into its ore too; allDepths: from land 2, 3 below the surface all the way down (more in a taller world), and

@@ -8,7 +8,7 @@ config_version=5
 
 config/name="CubeLand Alpha"
 config/description="A block-building game."
-config/version="Beta 0.1.3.0"
+config/version="Beta 0.1.4.0"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 
