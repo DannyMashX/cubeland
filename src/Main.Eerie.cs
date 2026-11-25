@@ -5,13 +5,20 @@ using System.Linq;
 
 namespace Cubeland;
 
-// Now and then, something strange: footsteps behind you, the cows all stopping to look at you, the music going a little
-// wrong, or a doorway standing on its own that's gone once you look away. Never explained.
+// Rare events (footsteps, cows, the music, a doorway), only while WorldGen.EerieOn, and only on a visit whose roll came up.
 public partial class Main
 {
 	const float EerieEvery = 8;     // a roll every this many seconds of play...
 	const int EerieOdds = 1000;     // ...that comes up 1 time in this many
+	const int VisitOdds = 10;       // these events and the staircases' (Main.Stairs) can happen on 1 visit to a world in this many
 	float eerieTimer = EerieEvery;
+	bool eerieVisit;                // this visit's roll (made each time a world is opened or joined; not saved)
+
+	// (test: `--eerieroll=1` or `--eerieroll=0` sets the roll)
+	void RollVisit() => eerieVisit = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--eerieroll=")) is { } a ? a[12..] == "1" : VisitRolls(rnd);
+	static bool VisitRolls(Random r) => r.Next(VisitOdds) == 0;
+	bool EerieChance() => eerieVisit && rnd.Next(EerieOdds) == 0;
+	bool StairChance() => eerieVisit && rnd.Next(StairOdds) == 0;
 
 	// (test: `--eerie=N` makes thing N happen a few seconds in, 0-3)
 	int EerieForce => OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--eerie=")) is { } a ? int.Parse(a[8..]) : -1;
@@ -23,6 +30,17 @@ public partial class Main
 	{
 		eerieTested = true;
 		void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+		// the roll: 1 visit in 10; on a miss, never; on a hit, the usual odds
+		var r = new Random(5); int hits = Enumerable.Range(0, 20000).Count(_ => VisitRolls(r));
+		Check($"a visit's roll comes up 1 time in {VisitOdds} ({hits} in 20000)", hits is > 1700 and < 2300);
+		bool was = eerieVisit;
+		eerieVisit = false; int e0 = Enumerable.Range(0, 200000).Count(_ => EerieChance()), s0 = Enumerable.Range(0, 200000).Count(_ => StairChance());
+		eerieVisit = true; int e1 = Enumerable.Range(0, 200000).Count(_ => EerieChance()), s1 = Enumerable.Range(0, 200000).Count(_ => StairChance());
+		eerieVisit = was;
+		Check($"on a missed visit nothing can happen ({e0}, {s0} in 200000)", e0 == 0 && s0 == 0);
+		Check($"on a visit that came up: 1 in {EerieOdds} ({e1} in 200000), and 1 in {StairOdds} per climb ({s1})", e1 is > 120 and < 300 && s1 is > 300 and < 520);
+		var rollArg = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--eerieroll="));
+		if (rollArg != null) Check($"this visit's roll was set ({rollArg})", eerieVisit == (rollArg[12..] == "1"));
 		player.Flying = false;
 		float camWas = camSky; camSky = 0.2f;   // (as if underground)
 		Check("footsteps start (alone, underground)", StartSteps() && stepsLeft > 0);
@@ -38,7 +56,8 @@ public partial class Main
 		Check("  turning to face you", cow != null && MathF.Abs(Mathf.Wrap(cow.Yaw - toward, -MathF.PI, MathF.PI)) < 0.2f && !cow.Walking);
 		Check($"the music goes out of tune (music playing here: {Sound.I?.MusicPlaying})", Sound.I == null || !Sound.I.MusicPlaying || MusicWrong());
 		int edits = world.Edits.Count;
-		Check("a doorway stands somewhere behind you", PlaceDoor() && door.Count == 7 && door.All(c => world.GetBlock(c.x, c.y, c.z) == DoorBlock));
+		bool placed = PlaceDoor(); string doorWhy = placed ? $" ({door.Count} cells: {string.Join(" ", door.Select(c => world.GetBlock(c.x, c.y, c.z)))})" : $" (no spot: you at {player.Pos.X:0},{player.Pos.Y:0},{player.Pos.Z:0}, ground {StairGround(Mathf.FloorToInt(player.Pos.Z) * World.WX + Mathf.FloorToInt(player.Pos.X))}, sea {world.SeaLevel})";
+		Check("a doorway stands somewhere behind you" + (placed && door.Count == 7 ? "" : doorWhy), placed && door.Count == 7 && door.All(c => world.GetBlock(c.x, c.y, c.z) == DoorBlock));
 		Check("  not saved as one of your changes", world.Edits.Count == edits);
 		var (dx, _, dz) = door[^1];
 		void Face(float x, float z) { player.Yaw = MathF.Atan2(player.Pos.X - x, player.Pos.Z - z); cam.Rotation = new Vector3(0, player.Yaw, 0); cam.Position = player.EyePos; }
@@ -54,7 +73,7 @@ public partial class Main
 
 	void UpdateEerie(float dt)
 	{
-		if (!WorldGen.EerieOn) return;   // (held back for now: see WorldGen.EerieReady)
+		if (!WorldGen.EerieOn) return;   // (see WorldGen.EerieReady)
 		if (!eerieTested && HasArg("--eerietest")) EerieTest();
 		TickSteps(dt); TickDoor(dt);
 		if (world == null || dead) return;
@@ -62,14 +81,14 @@ public partial class Main
 		eerieTimer = EerieEvery;
 		int force = EerieForce;
 		if (force >= 0) { if (eerieForced) return; eerieForced = true; Eerie(force); return; }
-		if (rnd.Next(EerieOdds) != 0) return;
+		if (!EerieChance()) return;
 		// one of them, picked at random (if it can't happen right now, another that can)
 		foreach (int k in Enumerable.Range(0, 4).OrderBy(_ => rnd.Next())) if (Eerie(k)) return;
 	}
 	bool Eerie(int which) => which switch { 0 => StartSteps(), 1 => CowsStare(), 2 => MusicWrong(), 3 => PlaceDoor(), _ => false };
 	bool Alone => !(hosting && friends.Count > 0) && !netClient;
 
-	// ---- Footsteps behind you: alone, at night or underground. They stop if you turn around. ----
+	// ---- Footsteps behind the player: alone, at night or underground. They stop if the player turns round. ----
 	int stepsLeft; float stepIn, stepsYaw;
 	bool StartSteps()
 	{
@@ -81,14 +100,14 @@ public partial class Main
 	void TickSteps(float dt)
 	{
 		if (stepsLeft <= 0) return;
-		if (dead || MathF.Abs(Mathf.Wrap(player.Yaw - stepsYaw, -MathF.PI, MathF.PI)) > 1.3f) { stepsLeft = 0; return; }   // (you turned round: nothing there)
+		if (dead || MathF.Abs(Mathf.Wrap(player.Yaw - stepsYaw, -MathF.PI, MathF.PI)) > 1.3f) { stepsLeft = 0; return; }   // (the player turned round: stop)
 		if ((stepIn -= dt) > 0) return;
 		stepIn = 0.52f + (float)rnd.NextDouble() * 0.08f;
 		stepsLeft--;
 		Sound.I?.StepBehind(player.BlockUnder() is int b && b != 0 ? b : Blocks.Dirt, 0.16f + (10 - stepsLeft) * 0.015f);   // (getting a little closer)
 	}
 
-	// ---- Every cow nearby stops and turns to look at you for a few seconds ----
+	// ---- Nearby cows face the player for a few seconds (the host's game only: it runs the cows) ----
 	bool CowsStare()
 	{
 		if (netClient) return false;
@@ -98,7 +117,7 @@ public partial class Main
 		return true;
 	}
 
-	// ---- The music plays a few notes slightly out of tune, then carries on ----
+	// ---- The music's pitch wobbles for a moment ----
 	bool MusicWrong()
 	{
 		if (Sound.I == null || !Sound.I.MusicPlaying) return false;
@@ -106,8 +125,8 @@ public partial class Main
 		return true;
 	}
 
-	// ---- A doorway standing on its own, somewhere behind you. Once you've seen it and look away, it's gone. ----
-	// It's only in your game: not saved, and not sent to anyone you're playing with.
+	// ---- A doorway frame behind the player, removed once it has been seen and is out of view ----
+	// Local only: not saved, and not sent to anyone else in the game.
 	readonly List<(int x, int y, int z)> door = new();
 	bool doorSeen; float doorAge, doorLook;
 	const int DoorBlock = Blocks.StrippedLog;

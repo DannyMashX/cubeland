@@ -63,16 +63,21 @@ public partial class World
 	// The land's version: which features a world grows with. 0 = worlds made before Beta 0.1.1.3 (they keep growing exactly as they did);
 	// 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. New worlds get NewLand.
 	// 2 = the ores as common at every depth, and in every layer of stone (deep ores: "the ore spread"). 3 = the Trees and Leaves
-	// trees (Biomes worlds), without the ore spread; 4 = the trees and the ore spread. LandVersion: the newest this code knows.
-	public const int LandVersion = 4;
+	// trees (Biomes worlds), without the ore spread; 4 = the trees and the ore spread; 5 and 6 = lands 3 and 4 with the Farming
+	// & animals update's world growth (so far: the staircases, Biomes worlds). Until that update is out, more can still be added
+	// to lands 5 and 6. LandVersion: the newest this code knows.
+	public const int LandVersion = 6;
 	public static int ValidLand(int l) => Math.Clamp(l, 0, LandVersion);   // (a saved world keeps the land it was made with, up to the newest)
-	public static bool OreSpread(int land) => land == 2 || land >= 4;   // (lands with the ore spread)
+	public static bool OreSpread(int land) => land == 2 || land == 4 || land == 6;   // (lands with the ore spread)
 	public static bool NewTrees(int land) => land >= 3;                  // (lands with the Trees and Leaves trees)
+	public static bool Staircases(int land) => land >= 5;   // (lands with the staircases)
+	public static bool WildCrops(int land) => land >= 5;   // (Farming & animals: crops growing wild, and Dead Bushes, in Biomes worlds)
 	// The ore spread is held back for now (until the Survival & light update): while OreSpreadReady is false, new worlds are made
-	// with land 3 (the new trees, no ore spread). --orespread turns it on for testing (land 4). The same as the web version.
+	// without it (land 3, or 5). --orespread turns it on for testing (land 4, or 6). Likewise the staircases: new worlds get them
+	// (land 5 or 6) only once WorldGen.EerieReady. The same as the web version.
 	public const bool OreSpreadReady = false;
 	public static readonly bool OreSpreadOn = OreSpreadReady || System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--orespread") >= 0;
-	public static int NewLand => OreSpreadOn ? 4 : 3;
+	public static int NewLand => (OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0);
 
 	// height: 640 for tall worlds, 192 otherwise; size: how far across (see ValidSize); biomes: how big the biomes are
 	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1, int land = 0)
@@ -96,6 +101,7 @@ public partial class World
 			foreach (var l in late) { h = (h ^ (uint)l.i) * 16777619; h = (h ^ (uint)l.id) * 16777619; }
 			Godot.GD.Print($"WORLDHASH {h:x8}");
 			Godot.GD.Print($"STRUCTURES {Gen.Built.Count}: " + string.Join(" | ", Gen.Built));
+			Godot.GD.Print("WILD " + string.Join(", ", System.Linq.Enumerable.Select(System.Linq.Enumerable.GroupBy(late.FindAll(l => l.stand == WorldGen.WildStand || l.stand == WorldGen.MelonStand), l => DataKeys.KeyOf(l.id)), g => $"{g.Key} {System.Linq.Enumerable.Count(g)} (at {System.Linq.Enumerable.First(g).i % WX},{System.Linq.Enumerable.First(g).i / (WX * WZ)},{System.Linq.Enumerable.First(g).i / WX % WZ})")));   // (what grew wild: crops, melons, Dead Bushes)
 			Godot.GD.Print($"STAIRS {Gen.StairSpots.Count} spots: " + string.Join(" ", Gen.StairSpots.FindAll(s => s.Placed).ConvertAll(s => $"{s.X},{s.Y},{s.Z},{s.Dir},{s.N},{s.Mat}")));
 		}
 		var packTime = System.Diagnostics.Stopwatch.StartNew();
@@ -344,7 +350,7 @@ public partial class World
 		foreach (int c in cols)
 		{
 			int x = c % WX, z = c / WX;
-			SkyTop[c] = (short)ComputeSkyTop(x, z);
+			SkyTop[c] = (short)ComputeSkyTop(x, z, WY - 1);   // (from the top: something built higher than the land grew is a roof too)
 			int y = WY - 1; while (y > 0 && Blocks.Get(x, y, z) == 0) y--; Heights[c] = y;
 		}
 		if (Torches.Count > 0) Relight(new HashSet<int>());

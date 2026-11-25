@@ -17,6 +17,10 @@ public partial class World
 	public readonly HashSet<int> Soils = new();
 	public readonly Dictionary<int, int> FertLeft = new();     // fertilized soil -> harvests left
 	readonly Dictionary<int, float> soilIdle = new();
+	public void SoilWorked(int i) => soilIdle.Remove(i);   // (a chicken scratching it: its turn-back-to-Dirt timer starts again)
+	// a grown duck swimming near soil i (Main.DuckNear): a crop on it, if it's wet, grows DuckRate times as fast
+	public System.Func<int, bool> DuckNear;
+	public static readonly float DuckRate = Nums.Mobs.ANIMALS?.GetValueOrDefault("duck")?.duckRate ?? 1;
 	// grass a cow ate: Dirt spot -> seconds until it's Grass again (if nothing has been put on it)
 	public readonly Dictionary<int, float> Grazed = new();
 	public static readonly float RegrowMin = Nums.Mobs.COW.regrowMin, RegrowMax = Nums.Mobs.COW.regrowMax;   // (data/mobs.json's COW)
@@ -64,7 +68,7 @@ public partial class World
 	// next stage. On average a stage still takes StageTime / GrowRate seconds, but some plants get ahead and some lag a
 	// little, so a field doesn't all ripen at the same moment. (Needing 3 ticks, not 1, keeps the randomness gentle.)
 	public static readonly int StageHits = Nums.N.FARM.stageHits;
-	public static float StageChance(float rate, float step) => System.Math.Min(1, step * rate * StageHits / StageTime);
+	public static float StageChance(float rate, float step, float stageTime = 0) => System.Math.Min(1, step * rate * StageHits / (stageTime > 0 ? stageTime : StageTime));
 
 	// keeps the lists above up to date when a block changes (loading: while a save is being put back)
 	void FarmChanged(int i, int old, int id, bool loading)
@@ -72,18 +76,21 @@ public partial class World
 		if (B.IsSoil(id)) Soils.Add(i); else { Soils.Remove(i); soilIdle.Remove(i); }
 		if (!B.SoilFert(id)) FertLeft.Remove(i);
 		else if (!FertLeft.ContainsKey(i)) FertLeft[i] = FertHarvests;
-		if (B.IsCrop(id) && id != B.GrainRipe) { if (old != id) Crops[i] = 0; } else Crops.Remove(i);
+		if (B.CropGrows(id)) { if (old != id) Crops[i] = 0; } else Crops.Remove(i);
 		if (B.Get(id)?.Grows != null) { if (old != id) Saplings[i] = 0; } else Saplings.Remove(i);
-		// a ripe Grain harvested (or knocked away) from fertilized soil uses up one of the fertilizer's harvests
-		if (!loading && old == B.GrainRipe && id != B.GrainRipe && i >= Up && FertLeft.TryGetValue(i - Up, out int n))
-		{
-			if (--n > 0) FertLeft[i - Up] = n;
-			else { var (x, y, z) = FromIdx(i - Up); SetBlock(x, y, z, B.SoilId(B.SoilWet(Blocks[i - Up]), false)); }
-		}
+		// a ripe crop harvested (or knocked away) from fertilized soil uses up one of the fertilizer's harvests (a Cantaloupe
+		// Vine's melons use them as they grow)
+		if (!loading && B.CropHarvest(old) && id != old && i >= Up) UseFertilizer(i - Up);
+	}
+	void UseFertilizer(int soil)
+	{
+		if (!FertLeft.TryGetValue(soil, out int n)) return;
+		if (--n > 0) FertLeft[soil] = n;
+		else { var (x, y, z) = FromIdx(soil); SetBlock(x, y, z, B.SoilId(B.SoilWet(Blocks[soil]), false)); }
 	}
 
-	// how fast Grain grows on this soil (0 = not on soil: it doesn't grow)
-	public static float GrowRate(int soil) => !B.IsSoil(soil) ? 0 : (B.SoilWet(soil) ? 1 : DryRate) * (B.SoilFert(soil) ? FertRate : 1);
+	// how fast a crop grows on this soil (0 = not on soil: it doesn't grow; crop: its own dry rate, if it has one)
+	public static float GrowRate(int soil, int crop = 0) => !B.IsSoil(soil) ? 0 : (B.SoilWet(soil) ? 1 : B.CropNums(crop)?.dryRate ?? DryRate) * (B.SoilFert(soil) ? FertRate : 1);
 
 	void TickFarm(float dt)
 	{
@@ -93,13 +100,21 @@ public partial class World
 		foreach (int i in new List<int>(Crops.Keys))
 		{
 			int id = Blocks[i];
-			if (!B.IsCrop(id) || id == B.GrainRipe) { Crops.Remove(i); continue; }
-			if (farmRnd.NextDouble() >= StageChance(i >= Up ? GrowRate(Blocks[i - Up]) : 0, step)) continue;
+			if (!B.CropGrows(id)) { Crops.Remove(i); continue; }
+			var (x, y, z) = FromIdx(i);
+			var cn = B.CropNums(id);
+			bool vine = B.B[id] is { Crop: "cantaloupe", Stage: 3 };   // (a grown vine: its lucky ticks make melons, one at a time)
+			if (vine && MelonBeside(x, y, z)) { Crops[i] = 0; continue; }
+			float rate = i >= Up ? GrowRate(Blocks[i - Up], id) * (B.SoilWet(Blocks[i - Up]) && DuckNear?.Invoke(i - Up) == true ? DuckRate : 1) : 0;   // (a duck near wet soil: faster)
+			if (farmRnd.NextDouble() >= StageChance(rate, step, vine ? cn.melonTime : cn?.stageTime ?? 0)) continue;
 			int hits = (int)Crops[i] + 1;
 			if (Crops[i] >= StageHits) hits = 1;   // (a save from before random growth held seconds left here)
 			if (hits < StageHits) { Crops[i] = hits; continue; }
-			var (x, y, z) = FromIdx(i);
-			SetBlock(x, y, z, id + 1);
+			if (vine) { if (GrowMelon(x, y, z)) { Crops[i] = 0; UseFertilizer(i - Up); } else Crops[i] = StageHits - 1; continue; }   // (no room: it tries at its next lucky tick)
+			int next = B.CropNext(id);
+			if (B.B[next] is { Crop: "corn", Stage: 2 } && (!Inside(x, y + 1, z) || GetBlock(x, y + 1, z) != 0)) { Crops[i] = StageHits - 1; continue; }   // (Corn grows its top into air only)
+			SetBlock(x, y, z, next);
+			if (B.B[next] is { Crop: "corn", Stage: >= 2 } nb) SetBlock(x, y + 1, z, B.CropBlock("corn", nb.Stage, true));
 		}
 		foreach (int i in new List<int>(Saplings.Keys))
 		{
@@ -129,6 +144,23 @@ public partial class World
 		}
 	}
 
+	// ---- Cantaloupe: a grown vine grows a melon on a free side (air, with Dirt, grass, Sand or tilled soil under it), trying the 4
+	// sides from a random one; only when none touches it already ----
+	static readonly (int, int)[] sides4 = { (1, 0), (-1, 0), (0, 1), (0, -1) };
+	bool MelonBeside(int x, int y, int z) { foreach (var (dx, dz) in sides4) if (GetBlock(x + dx, y, z + dz) == B.Cantaloupe) return true; return false; }
+	bool GrowMelon(int x, int y, int z)
+	{
+		if (MelonBeside(x, y, z)) return false;
+		int s0 = farmRnd.Next(4);
+		for (int k = 0; k < 4; k++)
+		{
+			var (dx, dz) = sides4[(s0 + k) % 4]; int mx = x + dx, mz = z + dz;
+			if (!Inside(mx, y, mz) || GetBlock(mx, y, mz) != 0 || !B.MelonGround(GetBlock(mx, y - 1, mz))) continue;
+			SetBlock(mx, y, mz, B.Cantaloupe);
+			return true;
+		}
+		return false;
+	}
 	static readonly (int, int, int)[] wetTouch = { (0, 1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1) };
 	static readonly (int, int, int)[] around6 = { (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0), (0, -1, 0) };
 	// which soil is wet: soil touching water (above or beside it), and soil joined to that through other tilled soil

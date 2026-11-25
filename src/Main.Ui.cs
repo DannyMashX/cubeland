@@ -433,7 +433,7 @@ public partial class Main
 	// Offsets are rounded to whole UI units from the hotbar's left edge, so everything stays on the hotbar's pixel grid.
 	void PlaceToolRow()
 	{
-		if (hotBarBox == null) return;
+		if (hotBarBox == null || !hotBarBox.IsInsideTree()) return;   // (not while the HUD is out of the scene, joining a game)
 		var bar = hotBarBox.GetGlobalRect(); float screen = hotBarBox.GetViewportRect().Size.X;
 		float line = bar.Position.Y - 4, iconFoot = line, top = float.MaxValue;
 		Rect2? hearts = heartsRect != null && heartsRect.IsVisibleInTree() ? heartsRect.GetGlobalRect() : null;
@@ -526,6 +526,7 @@ public partial class Main
 			int max = Inventory.MaxWear(inv.Id[i]);   // a worn tool or piece of armor: a bar of what's left
 			sl.ShowWear(inv.Survival && max > 0 && inv.Wear[i] > 0 ? 1 - (float)inv.Wear[i] / max : -1);
 			sl.TipWear = inv.Survival ? inv.Wear[i] : -1;
+			ShowBag(sl, inv.Id[i], inv.Data[i]);
 			if (i < Inventory.Slots) continue;
 			sl.Visible = inv.SlotOpen(i);
 			sl.Num.Text = inv.Id[i] == 0 ? SlotWord(i) : ""; sl.Num.Modulate = new Color(1, 1, 1, 0.4f);
@@ -540,6 +541,7 @@ public partial class Main
 		{
 			int o = Inventory.Off0 + inv.OffSel;
 			offSlot.Show(inv.Id[o], inv.Counted(inv.Id[o]) ? inv.Count[o] : 0);
+			ShowBag(offSlot, inv.Id[o], inv.Data[o]);
 			offSlot.Num.Text = inv.OffCount > 1 ? $"R{inv.OffSel + 1}" : "R";
 		}
 	}

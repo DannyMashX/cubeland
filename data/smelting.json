@@ -24,7 +24,10 @@
     "dead_log": 4,
     "oak_door": 2, "fir_door": 2, "palm_door": 2, "willow_door": 2, "cedar_door": 2, "maple_door": 2, "birch_door": 2, "aspen_door": 2,
     "redwood_door": 2, "cherry_door": 2, "cypress_door": 2, "juniper_door": 2, "larch_door": 2, "holly_door": 2, "orange_door": 2, "palo_verde_door": 2,
-    "peat": 8
+    "peat": 8,
+    "oak_fence": 1, "fir_fence": 1, "palm_fence": 1, "willow_fence": 1, "cedar_fence": 1, "maple_fence": 1, "birch_fence": 1, "aspen_fence": 1,
+    "redwood_fence": 1, "cherry_fence": 1, "cypress_fence": 1, "juniper_fence": 1, "larch_fence": 1, "holly_fence": 1, "orange_fence": 1, "palo_verde_fence": 1,
+    "dead_bush": 1
   },
   "SMELTS": [
     { "out": "brick", "from": "clay_ball" },
@@ -40,6 +43,10 @@
     { "out": "stone#layer=6", "from": "cobblestone#layer=6", "tall": true },
     { "out": "stone#layer=7", "from": "cobblestone#layer=7", "tall": true },
     { "out": "stone#layer=8", "from": "cobblestone#layer=8", "tall": true },
+    { "out": "baked_potato", "from": "potato" },
+    { "out": "roasted_corn", "from": "corn" },
+    { "out": "cooked_egg", "from": "egg" },
+    { "out": "clay_jug", "needs": [["clay_ball", 3]] },
     { "out": "fireclay_brick", "from": "fireclay_ball" },
     { "out": "fireclay_terracotta", "from": "fireclay" },
     { "out": "smooth_sandstone", "from": "sandstone" },

@@ -37,6 +37,7 @@ public sealed class NumbersData
 	public float SMELT_TIME;
 	public float[][] BURN_TIMES;
 	public FarmNumbers FARM;
+	public Dictionary<string, CropNumbers> CROPS;   // the crops besides Grain, by their blocks' crop
 	public SaplingNumbers SAPLING;
 	public Dictionary<string, int> DURABILITY, ARMOR_DURABILITY, PICK_TIER, STRATA_PICKAXE, PICK_STAGES, AXE_STAGES;
 	public float[] ARMOR_SHARE;
@@ -48,6 +49,14 @@ public sealed class SaplingNumbers
 	public double dropChance, boneAshChance;
 	public float growTime;
 	public int growHits;
+}
+// a crop's own numbers (with FARM's): seconds a stage takes on wet soil; dryRate (if given) in place of FARM's; what a ripe one
+// gives, [[thing, fewest, most], ...]; a Cantaloupe Vine's seconds between melons
+public sealed class CropNumbers
+{
+	public float stageTime, melonTime;
+	public float? dryRate;
+	public JsonElement[][] harvest;
 }
 public sealed class FarmNumbers
 {
@@ -103,16 +112,35 @@ public sealed class MobsData
 	public float LAYER_BOOST;
 	public GloomFadeNumbers GLOOM_FADE;
 	public CowNumbers COW;
+	public Dictionary<string, AnimalNumbers> ANIMALS;   // the six animals besides the cow (Farming & animals): see Main.Animals.cs
 }
 public sealed class MobEntry
 {
 	public string type, name, growl;
 	public int health, max, damage;
 	public float speed, sight, reach, hearing, lightRange, near, far, faint, scale = 1;
-	public bool hostile, dark, night, deep, burns, shamble, glow, curious, thrower, snuffer, cow;
+	public bool hostile, dark, night, deep, burns, shamble, glow, curious, thrower, snuffer, cow, animal;
 	public JsonElement[][] drops;      // [[key, fewest, most, chance]] (chance left out: always)
 }
 public sealed class GloomFadeNumbers { public float range, time; }
+// an animal's numbers (data/mobs.json ANIMALS: what each means is in its notes). The cow's where they mean the same; then its
+// spawning; then its own (chicken: layTime..peckChance; duck: layTime, eggReach..waterRange; deer: logNear..nibbleRange; goat:
+// minHeight, milkTime; boar: logs..angerTime; bear: cubs..angerTime)
+public sealed class AnimalNumbers
+{
+	public int perChunk, crowdedAt, fedMax, babyHealth, nearMax;
+	public float nearRange, happyMax, mateCooldown, mateCost, babyTime, babyFoodBoost, foodHappy, spawnWeight;
+	public string[] food, biomes, ground, logs, prey;
+	public ForageNumbers forage;
+	public int[] group, cubs;
+	public float cubChance;
+	public float[] layTime, scratchTime, peckTime;
+	public float fertChance, peckChance, duckRate, followRange, shyRange, sowEvery, sowChance, nibbleEvery, nibbleChance, nibbleRange, milkTime;
+	public int eggReach, duckReach, waterRange, sowClear, rootNear;
+	public int? logNear, minHeight;
+	public float truffleChance, angerTime, preyFlee, huntCool, huntRange, huntHeight, chaseTime, retry, mealHappy, cubRange, cubNear;
+}
+public sealed class ForageNumbers { public float time, below, happy; public float[] every; }
 public sealed class CowNumbers
 {
 	public int perChunk, crowdedAt, fatAt, fedMax, calfHealth;
@@ -129,6 +157,7 @@ public sealed class BlocksData
 {
 	public BlockRow[] BASE;            // the ones written out one by one
 	public BlockRow[] KILN, TORCHES, WATER, LYING_LOGS, SNOW, TOOLS, DEEP_STONE, SOILS, GRAIN, COLOURS, METALS, DEEP_ORES, FOUNDRY, GEAR, FLOWERS, WOODS;   // families, every member written out (in the order the game loads them)
+	public BlockRow[] CROPS, FENCES;   // the crops besides Grain, and the fences (found by their fields, not by number)
 	public DoorRow[] DOORS;            // the doors as they stand: each door's 32 states, made from one row
 	public Dictionary<string, string> FORM_NAMES;   // the forms (piece, slab, ...) in order, each with the word its items' names end in
 	public SnowyRow[] SNOWY;           // the snow-logged blocks: a torch, flower or other small thing with snow lying round it
@@ -146,7 +175,12 @@ public sealed class BlockRow
 	public int food, damage, level, layers, facing, axis, pick, layer, wi, count, burn, pack, belt, tools;
 	public int? armor;                 // gear: which piece of armor (0 helmet .. 3 boots; left out: not armor)
 	public int[] front, wall;          // [x, z] (wall: a torch leaning off a wall, the way to it; null standing)
-	public int stage;                  // Grain: its stage (desktop finds it by its place in Blocks.GrainStages; the check compares)
+	public int stage;                  // Grain: its stage (desktop finds it by its place in Blocks.GrainStages; the check compares); CROPS: its stage (0-3)
+	public string crop;                // CROPS: which crop it is (numbers.json CROPS)
+	public bool top;                   // CROPS: Corn's upper block
+	public string of;                  // FENCES: the planks it's made of, by key
+	public string plants, returns;     // items: the crop a seed puts down; what's left in your hand after eating it (by key)
+	public bool bag; public string full;   // a bag (holds a mix of things, up to one stack's worth); its picture while it holds anything
 	public bool soil, wet, fert;       // tilled soils (desktop: Blocks.Tilled + wet + 2 * fert; the check compares)
 	public string needs, sound;        // needs: the tool it can't be broken without ("axe", "pickaxe"); sound: its dig, step and place sound (left out: "stone")
 	public bool? shovel, leaves, inventory;   // (true, or left out) a shovel's block; leaves; you can have it in your inventory
@@ -192,6 +226,23 @@ public sealed class WorldgenData
 	public Dictionary<string, JsonElement[][]> TREE_MIX;
 	public TreeExtraRow[] TREE_EXTRA;
 	public TreeShapeRow[] TREE_SHAPES;
+	// Farming & animals (Biomes worlds from land 5): crops growing wild, in patches, and Dead Bushes (see the file's notes)
+	public WildCropRow[] WILD_CROPS;
+	public DeadBushNumbers DEAD_BUSHES;
+}
+public sealed class WildCropRow
+{
+	public string crop;
+	public int seed, within, spread;
+	public string[] biomes, near, ground;
+	public double chance;
+	public int[] tries;
+}
+public sealed class DeadBushNumbers
+{
+	public int seed;
+	public string[] biomes, ground;
+	public double chance;
 }
 // a TREE_EXTRA row: tree grows in biome on a chance per column of its ground; grove [size, above]: only where a slow noise
 // that size is above that; spacing: one spot in each square this many across; edge: within that many of another biome;

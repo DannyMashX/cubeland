@@ -1,0 +1,154 @@
+{
+	"format_version": "26.3",
+	"credit": "Made with Blockbench",
+	"texture_size": [64, 64],
+	"textures": {
+		"1": "Game:entity/mobs/Duck/duck_baby",
+		"particle": "Game:entity/mobs/Duck/duck_baby"
+	},
+	"elements": [
+		{
+			"name": "body",
+			"from": [6, 2, 6],
+			"to": [10, 5, 11],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 2, 8]},
+			"faces": {
+				"north": {"uv": [1.25, 1.25, 2.25, 2], "texture": "#1"},
+				"east": {"uv": [0, 1.25, 1.25, 2], "texture": "#1"},
+				"south": {"uv": [2.25, 1.25, 3.25, 2], "texture": "#1"},
+				"west": {"uv": [3.25, 1.25, 4.5, 2], "texture": "#1"},
+				"up": {"uv": [1.25, 0, 2.25, 1.25], "texture": "#1"},
+				"down": {"uv": [2.25, 0, 3.25, 1.25], "texture": "#1"}
+			}
+		},
+		{
+			"name": "wing_left",
+			"from": [5, 3, 7],
+			"to": [6, 5, 10],
+			"rotation": {"angle": 0, "axis": "y", "origin": [6, 5, 7]},
+			"faces": {
+				"north": {"uv": [8.75, 0.75, 9, 1.25], "texture": "#1"},
+				"east": {"uv": [8, 0.75, 8.75, 1.25], "texture": "#1"},
+				"south": {"uv": [9, 0.75, 9.25, 1.25], "texture": "#1"},
+				"west": {"uv": [9.25, 0.75, 10, 1.25], "texture": "#1"},
+				"up": {"uv": [8.75, 0, 9, 0.75], "texture": "#1"},
+				"down": {"uv": [9, 0, 9.25, 0.75], "texture": "#1"}
+			}
+		},
+		{
+			"name": "wing_right",
+			"from": [10, 3, 7],
+			"to": [11, 5, 10],
+			"rotation": {"angle": 0, "axis": "y", "origin": [10, 5, 7]},
+			"faces": {
+				"north": {"uv": [8.75, 0.75, 9, 1.25], "texture": "#1"},
+				"east": {"uv": [8, 0.75, 8.75, 1.25], "texture": "#1"},
+				"south": {"uv": [9, 0.75, 9.25, 1.25], "texture": "#1"},
+				"west": {"uv": [9.25, 0.75, 10, 1.25], "texture": "#1"},
+				"up": {"uv": [8.75, 0, 9, 0.75], "texture": "#1"},
+				"down": {"uv": [9, 0, 9.25, 0.75], "texture": "#1"}
+			}
+		},
+		{
+			"name": "head",
+			"from": [6, 4, 4],
+			"to": [10, 8, 7],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 5, 6]},
+			"faces": {
+				"north": {"uv": [5.25, 0.75, 6.25, 1.75], "texture": "#1"},
+				"east": {"uv": [4.5, 0.75, 5.25, 1.75], "texture": "#1"},
+				"south": {"uv": [6.25, 0.75, 7.25, 1.75], "texture": "#1"},
+				"west": {"uv": [7.25, 0.75, 8, 1.75], "texture": "#1"},
+				"up": {"uv": [5.25, 0, 6.25, 0.75], "texture": "#1"},
+				"down": {"uv": [6.25, 0, 7.25, 0.75], "texture": "#1"}
+			}
+		},
+		{
+			"name": "bill",
+			"from": [7, 5, 2],
+			"to": [9, 6, 4],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 5, 6]},
+			"faces": {
+				"north": {"uv": [11.5, 0.5, 12, 0.75], "texture": "#1"},
+				"east": {"uv": [11, 0.5, 11.5, 0.75], "texture": "#1"},
+				"south": {"uv": [12, 0.5, 12.5, 0.75], "texture": "#1"},
+				"west": {"uv": [12.5, 0.5, 13, 0.75], "texture": "#1"},
+				"up": {"uv": [11.5, 0, 12, 0.5], "texture": "#1"},
+				"down": {"uv": [12, 0, 12.5, 0.5], "texture": "#1"}
+			}
+		},
+		{
+			"name": "leg_left",
+			"from": [6, 0, 8],
+			"to": [7, 2, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [6.5, 2, 8.5]},
+			"faces": {
+				"north": {"uv": [10.25, 0.25, 10.5, 0.75], "texture": "#1"},
+				"east": {"uv": [10, 0.25, 10.25, 0.75], "texture": "#1"},
+				"south": {"uv": [10.5, 0.25, 10.75, 0.75], "texture": "#1"},
+				"west": {"uv": [10.75, 0.25, 11, 0.75], "texture": "#1"},
+				"up": {"uv": [10.25, 0, 10.5, 0.25], "texture": "#1"},
+				"down": {"uv": [10.5, 0, 10.75, 0.25], "texture": "#1"}
+			}
+		},
+		{
+			"name": "leg_right",
+			"from": [9, 0, 8],
+			"to": [10, 2, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [9.5, 2, 8.5]},
+			"faces": {
+				"north": {"uv": [10.25, 0.25, 10.5, 0.75], "texture": "#1"},
+				"east": {"uv": [10, 0.25, 10.25, 0.75], "texture": "#1"},
+				"south": {"uv": [10.5, 0.25, 10.75, 0.75], "texture": "#1"},
+				"west": {"uv": [10.75, 0.25, 11, 0.75], "texture": "#1"},
+				"up": {"uv": [10.25, 0, 10.5, 0.25], "texture": "#1"},
+				"down": {"uv": [10.5, 0, 10.75, 0.25], "texture": "#1"}
+			}
+		}
+	],
+	"groups": [
+		{
+			"name": "DuckBaby",
+			"origin": [8, 0, 8],
+			"scope": 0,
+			"color": 0,
+			"children": [
+				{
+					"name": "body",
+					"origin": [8, 2, 8],
+					"scope": 0,
+					"color": 0,
+					"children": [0]
+				},
+				{
+					"name": "wing_left",
+					"origin": [6, 5, 7],
+					"scope": 0,
+					"color": 0,
+					"children": [1]
+				},
+				{
+					"name": "wing_right",
+					"origin": [10, 5, 7],
+					"scope": 0,
+					"color": 0,
+					"children": [2]
+				},
+				{
+					"name": "head",
+					"origin": [8, 8, 7],
+					"scope": 0,
+					"color": 0,
+					"children": [3, 4]
+				},
+				{
+					"name": "legs",
+					"origin": [8, 2, 8],
+					"scope": 0,
+					"color": 0,
+					"children": [5, 6]
+				}
+			]
+		}
+	]
+}

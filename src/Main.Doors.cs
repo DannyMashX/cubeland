@@ -5,7 +5,8 @@ namespace Cubeland;
 
 // Doors (one for each wood, data/blocks.json's DOORS): 2 blocks tall, a 4-pixel panel across the middle of its block. Its
 // front faces you when you put it down, and its hinge goes on the side of the face you clicked. Right-click opens or shuts it:
-// open, it lies against its hinge side. It swings away from you: a shut door opened from behind is turned round first
+// open, it's turned a quarter about its hinge, so it reaches half a block out of its block, into whatever is there (see
+// Blocks.DoorPose). It swings away from you: a shut door opened from behind is turned round first
 // (facing + 2, the hinge the other side, which looks the same shut). A door beside it on its other side with the other hinge
 // (a double door) goes with it. Breaking either half takes the whole door. Mobs can't open them. (The same as the web version.)
 public partial class Main
@@ -58,10 +59,10 @@ public partial class Main
 		world.SetBlock(x, by, z, Blocks.DoorWith(id, facing, hinge, open, 0));
 		if (World.Inside(x, by + 1, z) && Blocks.IsDoor(world.GetBlock(x, by + 1, z))) world.SetBlock(x, by + 1, z, Blocks.DoorWith(id, facing, hinge, open, 1));
 	}
-	// ---- the swing (only for show): for a moment the panel turns about its hinge into its new pose, away from whoever opened
-	// it; the chunk leaves that door out meanwhile (ChunkMesher.Swinging) ----
+	// ---- the swing (only for show): for a moment the panel turns about its hinge pin (Blocks.DoorHinge) into its new pose, away
+	// from whoever opened it; the chunk leaves that door out meanwhile (ChunkMesher.Swinging) ----
 	const float DoorSwingTime = 0.15f;
-	sealed class DoorSwing { public int X, Y, Z, Bottom, Top; public (Vector2 p, Vector2 w, Vector2 n) From, To; public float T; public MeshInstance3D Node; }
+	sealed class DoorSwing { public int X, Y, Z, Bottom, Top; public (Vector2 p, Vector2 w, Vector2 n) From, To; public Vector2 Pin; public float T; public MeshInstance3D Node; }
 	readonly System.Collections.Generic.List<DoorSwing> swings = new();
 	void StartDoorSwing(int x, int by, int z, int id, int facing, int hinge, bool open)
 	{
@@ -69,7 +70,7 @@ public partial class Main
 		var s = new DoorSwing
 		{
 			X = x, Y = by, Z = z, Bottom = Blocks.DoorWith(id, facing, hinge, open, 0), Top = top,
-			From = ChunkMesher.DoorPose(facing, hinge, !open), To = ChunkMesher.DoorPose(facing, hinge, open),
+			From = ChunkMesher.DoorPose(facing, hinge, !open), To = ChunkMesher.DoorPose(facing, hinge, open), Pin = Blocks.DoorHinge(facing, hinge),
 			Node = new MeshInstance3D { MaterialOverride = blockMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
 		};
 		AddChild(s.Node);
@@ -95,7 +96,8 @@ public partial class Main
 	void DrawSwing(DoorSwing s)
 	{
 		float k = Math.Clamp(s.T / DoorSwingTime, 0, 1), a = k * MathF.PI / 2, c = MathF.Cos(a), sn = MathF.Sin(a);
-		var pivot = s.From.p.Lerp(s.To.p, k); var w = s.From.w * c + s.To.w * sn; var n = s.From.n * c + s.To.n * sn;
+		// (a turn: the new pose is the old one turned a quarter, so each part goes old * cos + new * sin, the pivot about the pin)
+		var pivot = s.Pin + (s.From.p - s.Pin) * c + (s.To.p - s.Pin) * sn; var w = s.From.w * c + s.To.w * sn; var n = s.From.n * c + s.To.n * sn;
 		var part = new ChunkMesher.Part(); var sky = new System.Collections.Generic.Dictionary<int, float>();
 		ChunkMesher.DoorPanel(part, Blocks.B[s.Bottom], new Vector3(s.X, s.Y, s.Z), pivot, w, n, World.LightCurve(world.LightAt(s.X, s.Y, s.Z)), world.SkyExposure(s.X, s.Y, s.Z, sky));
 		if (s.Top != 0) ChunkMesher.DoorPanel(part, Blocks.B[s.Top], new Vector3(s.X, s.Y + 1, s.Z), pivot, w, n, World.LightCurve(world.LightAt(s.X, s.Y + 1, s.Z)), world.SkyExposure(s.X, s.Y + 1, s.Z, sky));

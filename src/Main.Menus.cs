@@ -80,12 +80,13 @@ public partial class Main
 		{   // testing: a throwaway world that isn't in your list and never saves
 			tempWorld = true;
 			current = new Worlds.Info { Id = "test", Name = "Test world", Seed = sa != null ? int.Parse(sa[7..]) : Random.Shared.Next(), Gen = HasArg("--biomes") ? 3 : 2, H = HasArg("--tall") || (World.TallWorlds && !HasArg("--short")) ? 640 : 192, S = HasArg("--small") ? 640 : ArgInt("--size=", 1280), B = ArgInt("--biomescale=", 100) / 100.0, Land = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--land=")) is { } la ? World.ValidLand(int.Parse(la[7..])) : HasArg("--oldland") ? 0 : World.NewLand, Mode = HasArg("--survival") ? "survival" : "creative" };
+			if (HasArg("--os")) { current.Os = true; current.OsSkip = Worlds.TidyChunks((OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--osskip=")) ?? "--osskip=")[9..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse)); }   // (testing: an older world given the staircases)
 			menuOpen = HasArg("--menu");
 			return;
 		}
 		if (joinInfo != null && openWorldId == "join-" + joinInfo.Code)
 		{   // a friend's world you're joining: it isn't one of your worlds and isn't saved here
-			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, S = joinInfo.S, B = joinInfo.B, Land = joinInfo.Land, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version };
+			current = new Worlds.Info { Id = openWorldId, Name = $"{joinInfo.Host}'s world", Seed = joinInfo.Seed, Gen = joinInfo.Gen, H = joinInfo.H, S = joinInfo.S, B = joinInfo.B, Land = joinInfo.Land, Mode = joinInfo.Mode == "survival" ? "survival" : "creative", Ver = Version, Os = joinInfo.Os, OsSkip = joinInfo.OsSkip };
 			menuOpen = false; wantPlay = true; playOnLoad = false;
 			return;
 		}
@@ -95,6 +96,7 @@ public partial class Main
 		if ((openWorldId == null || Worlds.Get(openWorldId) == null) && !HasArg("--play")) { current = null; menuOpen = true; playOnLoad = false; return; }
 		current = (openWorldId != null ? Worlds.Get(openWorldId) : null) ?? Worlds.Last();
 		Worlds.MarkOpened(current);
+		if (WorldGen.EerieOn) Worlds.OldStairs(current);   // (an older Biomes world: the staircases, decided once)
 		if (HasArg("--play")) menuOpen = false;   // (testing: straight into the game)
 		if (playOnLoad) { menuOpen = false; wantPlay = true; playOnLoad = false; }
 	}
@@ -415,12 +417,13 @@ public partial class Main
 			Seed = current.Seed, SavedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 			Idxs = world.Edits.Keys.ToArray(), Ids = world.Edits.Values.ToArray(),
 			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => (int)v))).ToArray(),
-			Stairs = SaveExtraStairs(),
+			Stairs = SaveExtraStairs(), Os = current.Os, OsSkip = current.OsSkip,
 			Player = new() { X = player.Pos.X, Y = player.Pos.Y, Z = player.Pos.Z, Yaw = player.Yaw, Pitch = player.Pitch, Fly = player.Flying, Health = health, Gloom = gloom, DarkTime = darkTime, LightTime = lightTime },
 			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Wear = inv.Wear.ToArray(), Selected = inv.Selected, OffSel = inv.OffSel,
 			Data = Enumerable.Range(0, Inventory.NS).Where(i => inv.Data[i] != null).ToDictionary(i => i, i => inv.Data[i]),
 			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health, Layer = m.Layer,
-				Baby = m.Baby, Happy = MathF.Round(m.Happy), Room = MathF.Round(Math.Max(0, m.Room) * 100) / 100, MateCool = MathF.Round(m.MateCool), Fed = m.Fed }).ToList(),
+				Baby = m.Baby, Happy = MathF.Round(m.Happy), Room = MathF.Round(Math.Max(0, m.Room) * 100) / 100, MateCool = MathF.Round(m.MateCool), Fed = m.Fed,
+				EggIn = MathF.Round(m.EggIn), Milky = MathF.Round(m.Milky), HungerIn = m.Type == "bear" ? MathF.Round(Math.Max(0, m.HungerIn)) : null, Sow = m.Sow > 0 ? DataKeys.KeyOf(m.Sow) : null }).ToList(),
 			Drops = drops.All.Select(d => new Worlds.DropSave { Id = d.Id, X = d.P.X, Y = d.P.Y, Z = d.P.Z, Age = d.Age, Wear = d.Wear, Data = d.Data, Keep = d.Keep }).ToList(),
 			Drying = new(world.Drying), TorchBurn = world.TorchBurn.ToDictionary(k => k.Key, k => MathF.Round(k.Value)),
 			Crops = world.Crops.ToDictionary(k => k.Key, k => MathF.Round(k.Value)), Fert = new(world.FertLeft),
@@ -492,6 +495,15 @@ public partial class Main
 		{
 			if (!MobTypes.ContainsKey(m.Type) || !models.ContainsKey(m.Type)) continue;
 			var t = MobTypes[m.Type];
+			if (t.Animal)
+			{   // another animal, as it was kept
+				if (t.A == null) continue;
+				var a = SpawnAnimal(m.Type, m.X, m.Y, m.Z, Math.Max(0, m.Baby));
+				a.Yaw = m.Yaw; a.Health = m.Health > 0 ? m.Health : a.Health; a.Fed = Math.Clamp(m.Fed, 0, t.A.fedMax); a.Happy = Math.Max(0, m.Happy); a.MateCool = Math.Max(0, m.MateCool);
+				a.EggIn = Math.Max(0, m.EggIn); a.Milky = Math.Max(0, m.Milky); if (m.HungerIn is { } hi) a.HungerIn = Math.Max(0, hi);
+				a.Sow = m.Sow != null && DataKeys.TryIdOf(m.Sow, out int sw) ? sw : 0;
+				continue;
+			}
 			var mob = SpawnMob(m.Type, m.X, m.Y, m.Z, t.Cow ? (m.Baby > 0 ? 1 : m.Fed >= FatAt ? 2 : 0) : 0, Math.Clamp(m.Layer, 1, Blocks.StrataLayers));
 			mob.Yaw = m.Yaw; mob.Health = m.Health > 0 ? m.Health : mob.Health;
 			if (t.Cow) { mob.Baby = Math.Max(0, m.Baby); mob.Fed = Math.Clamp(m.Fed, 0, FedMax); mob.Happy = Math.Max(0, m.Happy); mob.Room = Math.Clamp(m.Room, 0, 1); mob.MateCool = Math.Max(0, m.MateCool); }

@@ -8,7 +8,16 @@ namespace Cubeland;
 public partial class Drops : Node3D
 {
 	// K: its own number, so players in a multiplayer game know which one is which. T: (joined game) where the host's game says it is
-	public class Drop { public int Id, K, Wear; public Inventory.PackData Data; public Vector3 P, V, T; public float Age, Spin, LightT; public bool Asked, Keep; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
+	public class Drop
+	{
+		public int Id, K, Wear; public Vector3 P, V, T; public float Age, Spin, LightT; public bool Asked, Keep; public MeshInstance3D Mesh; public ShaderMaterial Mat;
+		Inventory.PackData data;
+		// what it holds (a backpack's slots, a bag's things); a bag holding anything shows its full picture
+		public Inventory.PackData Data { get => data; set { data = value; Look(value != null); } }
+		// a bag: its full picture while it holds anything (in a friend's world the host says so, with no Data)
+		public bool Full { get; private set; }
+		public void Look(bool full) { if (!Blocks.IsBag(Id) || full == Full) return; Full = full; Mat?.SetShaderParameter("tex", Atlas.BagIcon(Id, full)); }
+	}
 	int count;
 	public bool Client;                      // in a friend's world: their game moves the items; walking into one asks them for it
 	public Action<Drop> AskPickup;
@@ -40,6 +49,14 @@ public partial class Drops : Node3D
 		return d;
 	}
 	public void Remove(Drop d) { d.Mesh.QueueFree(); All.Remove(d); }
+	// a bag that's going: what it holds comes out where it was, each thing a drop of its own (with its own 5 minutes)
+	public void Spill(Drop d)
+	{
+		if (!Blocks.IsBag(d.Id) || d.Data?.Id == null) return;
+		for (int k = 0; k < d.Data.Id.Length; k++)
+			for (int n = 0; n < d.Data.N[k]; n++) { var s = Add(d.Data.Id[k], d.P.X, d.P.Y + 0.1f, d.P.Z); s.Wear = d.Data.W != null && k < d.Data.W.Length ? d.Data.W[k] : 0; }
+		d.Data = null;
+	}
 	public void Clear() { foreach (var d in All.ToArray()) Remove(d); }
 
 	public void Update(float dt)
@@ -55,7 +72,7 @@ public partial class Drops : Node3D
 				if (!d.Asked && MathF.Abs(d.P.X - cp.X) < 1.1f && MathF.Abs(d.P.Y + 0.25f - cp.Y) < 1.4f && MathF.Abs(d.P.Z - cp.Z) < 1.1f) { d.Asked = true; AskPickup?.Invoke(d); }
 			}
 			else {
-			if (d.Age > 300 && !d.Keep) { Remove(d); continue; }   // gone after 5 minutes (unless it must stay)
+			if (d.Age > 300 && !d.Keep) { Spill(d); Remove(d); continue; }   // gone after 5 minutes (unless it must stay)
 			// fall and slide to a stop, resting on top of blocks
 			d.V.Y = Math.Max(-30, d.V.Y - 22 * dt);
 			float nx = d.P.X + d.V.X * dt, nz = d.P.Z + d.V.Z * dt, ny = d.P.Y + d.V.Y * dt;

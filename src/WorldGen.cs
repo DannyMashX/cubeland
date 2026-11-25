@@ -155,21 +155,37 @@ public class WorldGen
 		Trees();
 		Rocks();
 		Flowers();
+		if (gen == 3 && World.WildCrops(Land)) { WildCrops(); DeadBushes(); }
 		if (gen == 3 && Land >= 1) Structures();
 		if (gen == 3 && Land >= 1) SnowCover();
-		if (gen == 3 && EerieOn) Staircases();
+		if (gen == 3 && HasStairs) Staircases();
 		Progress?.Invoke(0.9f);
 	}
 
-	// --- Staircases: now and then, deep in a forest high up in the world, a short flight of stairs stands on its own ---
-	// Spots are tried on a grid; the few that get a staircase are picked by hash, far apart. The rest are kept as places a
-	// staircase could later turn up (see Main.Stairs). Exactly as the web version, so both grow the same world.
-	// The eerie update (the staircases, and the strange things in Main.Eerie.cs) is held back for now: while EerieReady is
-	// false, worlds grow without staircases and none of it happens. It must match EERIE_READY in the web game's index.html,
-	// or web and desktop grow different worlds. (Test: `--eerieon` turns it on anyway.)
-	public const bool EerieReady = false;
+	// --- Staircases (lands 5 and 6, Biomes worlds): a short flight of stairs on its own, in a forest high above the sea ---
+	// Spots are tried on a grid; the few that get a staircase are picked by hash, far apart. The rest are kept as spare spots
+	// (see Main.Stairs). Exactly as the web version, so both grow the same world.
+	// EerieReady: while false, new worlds are made without staircases (land 3 or 4) and Main.Eerie and Main.Stairs' events
+	// don't run. It must match EERIE_READY in the web game's index.html. (Test: `--eerieon` turns it on anyway.)
+	public const bool EerieReady = true;
 	public static readonly bool EerieOn = EerieReady || Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--eerieon") >= 0;
 	public class StairSpot { public int X, Y, Z, Dir, N, Mat; public double Order; public bool Placed; }
+	// an older Biomes world given the staircases (see Worlds.OldStairs): no spot within 2 chunks of a chunk in its skip set
+	public bool Os; HashSet<int> osSkip;
+	public bool HasStairs => World.Staircases(Land) || Os;
+	public void OldStairs(int[] skip) { Os = true; osSkip = new HashSet<int>(skip ?? Array.Empty<int>()); }
+	// is a chunk in this set within 2 chunks (a 5 x 5 square) of the chunk at x, z?
+	public static bool NearChunks(HashSet<int> chunks, int x, int z)
+	{
+		if (chunks == null || chunks.Count == 0) return false;
+		int n = World.WX / World.CS, m = World.WZ / World.CS, cx = x / World.CS, cz = z / World.CS;
+		for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++)
+		{
+			int a = cx + dx, b = cz + dz;
+			if (a >= 0 && b >= 0 && a < n && b < m && chunks.Contains(b * n + a)) return true;
+		}
+		return false;
+	}
 	public readonly List<StairSpot> StairSpots = new();
 	public const int StairMinUp = 6;    // how far above the sea the ground must be at least (they go on the highest forest ground there is)
 	public static readonly int[][] StairDirs = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 } };
@@ -200,6 +216,7 @@ public class WorldGen
 		for (int gz = 0; gz < WZ / Cell; gz++) for (int gx = 0; gx < WX / Cell; gx++)
 		{
 			int x = gx * Cell + 2 + (int)Math.Floor(Hash(gx, gz, 7700) * 12), z = gz * Cell + 2 + (int)Math.Floor(Hash(gx, gz, 7701) * 12);
+			if (NearChunks(osSkip, x, z)) continue;   // (an older world: not near what had changed in it)
 			if (!Forest(x, z)) continue;
 			int g = W.Heights[z * WX + x];
 			if (g < SeaLevel + StairMinUp) continue;
@@ -258,7 +275,8 @@ public class WorldGen
 	//   Swamps: hollows, mounds of peat and mud with a dead willow trunk, ringed by still water
 	const int StructCell = 64;
 	public readonly List<string> Built = new();   // (what was built where, for testing: printed with --worldhash)
-	bool Plant(int b) => b == 0 || Blocks.IsLeaves(b) || b == Blocks.Log || b == Blocks.FirLog || b == Blocks.PalmLog || b == Blocks.WillowLog || Blocks.IsFlower(b) || b == Blocks.RockBlock;
+	bool Plant(int b) => b == 0 || Blocks.IsLeaves(b) || b == Blocks.Log || b == Blocks.FirLog || b == Blocks.PalmLog || b == Blocks.WillowLog || Blocks.IsFlower(b) || b == Blocks.RockBlock
+		|| b == WildStand;   // (a wild crop or a Dead Bush, from land 5: see WildCrops)
 	// the ground under a spot (under any trees, flowers or rocks; the top of the water at sea)
 	int GroundAt(int x, int z) { int y = W.Heights[z * WX + x]; while (y > 0 && Plant(world[Idx(x, y, z)])) y--; return y; }
 	bool Inside(int x, int z, int m) => x >= m && z >= m && x < WX - m && z < WZ - m;
@@ -790,7 +808,7 @@ public class WorldGen
 	// over 255, so a log grows as an Oak Log and a leaf as Oak Leaves, and the real block takes its place once the world is packed
 	// (see Late). The same maths as the web version, in the same order: both must grow the same worlds.
 	bool NewTreesHere => gen == 3 && World.NewTrees(Land);
-	static readonly string[] BiomeNames = { "woods", "plains", "desert", "snowy", "swamp", "taiga", "meadow", "badlands" };   // (biomeMap's numbers)
+	public static readonly string[] BiomeNames = { "woods", "plains", "desert", "snowy", "swamp", "taiga", "meadow", "badlands" };   // (biomeMap's numbers)
 	static readonly string[] OwnTree = { "oak", "oak", "palm", "fir", "willow", "fir", "oak", null };   // the tree each biome grew before (its code is below)
 	// the trees GrowTree knows how to grow (a TREE_SHAPES row must be one of these: see the data check)
 	public static readonly string[] GrownTrees = { "maple", "cedar", "birch", "cherry", "orange", "aspen", "redwood", "cypress", "juniper", "larch", "holly", "palo_verde", "dead", "prairie_oak", "shrub" };
@@ -1199,6 +1217,76 @@ public class WorldGen
 		}
 	}
 	// --- Flowers: small patches of one colour on grass (exactly as the web version, so both grow the same world) ---
+	// --- Farming & animals (Biomes worlds from land 5): crops growing wild, in patches, then Dead Bushes here and there ---
+	// Exactly as data/worldgen.json's notes say (the same maths as the web version, in the same order: both must grow the same
+	// worlds). Their blocks are numbered over 255, so each grows as a stand-in: a crop (both of Corn's halves) or a Dead Bush as
+	// ripe Grain, a Cantaloupe as Bricks; the real block takes its place once the world is packed (see Late). Later on,
+	// structures build over the stand-in Grain as over a flower (see Plant), and snow stops at it; the Bricks are a block.
+	public const int WildStand = Blocks.GrainRipe, MelonStand = Blocks.BricksBlock;
+	static readonly int[][] MelonSides = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 } };   // (+x, -x, +z, -z)
+	void WildBlock(int x, int y, int z, int id, int stand)
+	{
+		int i = Idx(x, y, z);
+		world[i] = (byte)stand; Late.Add((i, id, (byte)stand));
+		if (y > W.Heights[z * WX + x]) W.Heights[z * WX + x] = y;   // (the column's height goes up to its top)
+	}
+	void WildCrops()
+	{
+		foreach (var r in Nums.Worldgen.WILD_CROPS ?? Array.Empty<WildCropRow>())
+		{
+			var ground = new HashSet<int>(Array.ConvertAll(r.ground, DataKeys.IdOf));
+			var biomes = new HashSet<int>(Array.ConvertAll(r.biomes ?? Array.Empty<string>(), b => Array.IndexOf(BiomeNames, b)));
+			var near = new HashSet<int>(Array.ConvertAll(r.near ?? Array.Empty<string>(), b => Array.IndexOf(BiomeNames, b)));
+			bool corn = r.crop == "corn", melon = r.crop == "cantaloupe";
+			int ripe = Blocks.CropBlock(r.crop, 3), top = corn ? Blocks.CropBlock(r.crop, 3, true) : 0;
+			bool Near(int x, int z)
+			{   // (a column of a near biome within the square, on the map; columns outside the world aren't looked at)
+				for (int dz = -r.within; dz <= r.within; dz++) for (int dx = -r.within; dx <= r.within; dx++)
+				{
+					int cx = x + dx, cz = z + dz;
+					if (cx >= 0 && cz >= 0 && cx < WX && cz < WZ && near.Contains(biomeMap[cz * WX + cx])) return true;
+				}
+				return false;
+			}
+			for (int z = 8; z < WZ - 8; z++) for (int x = 8; x < WX - 8; x++)
+			{
+				int bi = biomeMap[z * WX + x];
+				if (r.near != null ? near.Contains(bi) : !biomes.Contains(bi)) continue;
+				if (Hash(x, z, r.seed) > r.chance) continue;
+				if (r.near != null && !Near(x, z)) continue;
+				int n = r.tries[0] + (int)Math.Floor(Hash(x, z, r.seed + 1) * (r.tries[1] - r.tries[0] + 1));
+				for (int k = 0; k < n; k++)
+				{
+					int px = x + (int)Math.Floor((Hash(x + k, z, r.seed + 2) - 0.5) * 2 * r.spread + 0.5), pz = z + (int)Math.Floor((Hash(x, z + k, r.seed + 3) - 0.5) * 2 * r.spread + 0.5);
+					int h = W.Heights[pz * WX + px];
+					if (!ground.Contains(world[Idx(px, h, pz)]) || world[Idx(px, h + 1, pz)] != 0 || (corn && world[Idx(px, h + 2, pz)] != 0)) continue;
+					WildBlock(px, h + 1, pz, ripe, WildStand);
+					if (corn) WildBlock(px, h + 2, pz, top, WildStand);
+					if (!melon) continue;
+					int s0 = (int)Math.Floor(Hash(px, pz, r.seed + 4) * 4);   // (the melon: on the first free side, from a random one)
+					for (int t = 0; t < 4; t++)
+					{
+						var d = MelonSides[(s0 + t) % 4]; int mx = px + d[0], mz = pz + d[1];
+						if (world[Idx(mx, h + 1, mz)] != 0 || !ground.Contains(world[Idx(mx, h, mz)])) continue;
+						WildBlock(mx, h + 1, mz, Blocks.Cantaloupe, MelonStand); break;
+					}
+				}
+			}
+		}
+	}
+	void DeadBushes()
+	{
+		var r = Nums.Worldgen.DEAD_BUSHES; if (r == null) return;
+		var ground = new HashSet<int>(Array.ConvertAll(r.ground, DataKeys.IdOf));
+		var biomes = new HashSet<int>(Array.ConvertAll(r.biomes, b => Array.IndexOf(BiomeNames, b)));
+		for (int z = 8; z < WZ - 8; z++) for (int x = 8; x < WX - 8; x++)
+		{
+			if (!biomes.Contains(biomeMap[z * WX + x]) || Hash(x, z, r.seed) > r.chance) continue;
+			int h = W.Heights[z * WX + x];
+			if (!ground.Contains(world[Idx(x, h, z)]) || world[Idx(x, h + 1, z)] != 0) continue;
+			WildBlock(x, h + 1, z, Blocks.DeadBush, WildStand);
+		}
+	}
 	void Flowers()
 	{
 		const double PATCH_CHANCE = 0.0012;   // out of every grass spot, how many are the middle of a patch

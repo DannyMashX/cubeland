@@ -5,10 +5,11 @@ using System.Linq;
 
 namespace Cubeland;
 
-// The staircases in the woods (WorldGen.Staircases grows them). Reaching the top step of one now and then does something.
+// The staircases (WorldGen.Staircases grows them, in lands 5 and 6). Events on reaching a top step (while WorldGen.EerieOn,
+// on a visit whose roll came up: see Main.Eerie), and no music near a standing one (always).
 public partial class Main
 {
-	const int StairOdds = 500;      // 1 time in this many
+	const int StairOdds = 500;      // an event 1 time in this many on reaching a top step
 	int stairOn = -1;               // the staircase whose top step you're on (-1: none)
 	bool stairFall;                 // (the staircase just went from under you: no fall damage for that drop)
 
@@ -31,7 +32,7 @@ public partial class Main
 	float stairNearCheck; bool stairNear;
 	bool NearStair()
 	{
-		if (world == null || menuOpen || !WorldGen.EerieOn) return false;
+		if (world == null || menuOpen || StairList.Count == 0) return false;
 		if ((stairNearCheck -= (float)GetProcessDeltaTime()) > 0) return stairNear;
 		stairNearCheck = 0.5f;
 		stairNear = StairList.Any(s => Math.Abs(s.X - player.Pos.X) < 32 && Math.Abs(s.Z - player.Pos.Z) < 32 && Math.Abs(s.Y - player.Pos.Y) < 24 && StairStanding(s));
@@ -50,7 +51,7 @@ public partial class Main
 	}
 	void UpdateStairs()
 	{
-		if (world == null || !WorldGen.EerieOn || StairList.Count == 0 || dead) { stairOn = -1; return; }   // (held back for now: see WorldGen.EerieReady)
+		if (world == null || !WorldGen.EerieOn || StairList.Count == 0 || dead) { stairOn = -1; return; }   // (see WorldGen.EerieReady)
 		if (!stairTested && HasArg("--stairtest")) StairTest();
 		int on = player.OnGround ? StairUnder() : -1;
 		if (on == stairOn) return;
@@ -58,7 +59,7 @@ public partial class Main
 		if (on < 0) return;
 		// (test: `--stairevent=N` makes event N happen every time, 0-4)
 		int force = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--stairevent=")) is { } fa ? int.Parse(fa[13..]) : -1;
-		if (force < 0 && rnd.Next(StairOdds) != 0) return;
+		if (force < 0 && !StairChance()) return;
 		StairEvent(force >= 0 ? force : rnd.Next(5), StairList[on]);
 	}
 
@@ -68,6 +69,7 @@ public partial class Main
 	{
 		stairTested = true;
 		void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+		Check($"this world is land {current.Land}, with staircases{(world.Gen.Os ? " (an older world given them)" : "")}", world.Gen.HasStairs);
 		var s = StairList.First(o => o.Placed);
 		int standing = StairList.Count(StairStanding);
 		Check($"staircases stand in the world ({standing} of {StairList.Count} spots)", standing >= 1 && StairStanding(s));
@@ -83,7 +85,7 @@ public partial class Main
 		Check("the time of day jumps", sky.TimeOfDay != t0);
 		player.Pos = new Vector3(x + 0.5f, y + 1.01f, z + 0.5f); var p0 = player.Pos; StairEvent(1, s);
 		int px = Mathf.FloorToInt(player.Pos.X), py = Mathf.FloorToInt(player.Pos.Y), pz = Mathf.FloorToInt(player.Pos.Z);
-		Check("you're sent somewhere else, onto dry ground", (player.Pos - p0).Length() > 30 && world.GetBlock(px, py, pz) == 0 && world.Solid(px, py - 1, pz) && !Blocks.IsWater(world.GetBlock(px, py - 1, pz)));
+		Check($"you're sent somewhere else, onto dry ground (from {p0.X:0},{p0.Y:0},{p0.Z:0} to {player.Pos.X:0.0},{player.Pos.Y:0.00},{player.Pos.Z:0.0}: in {world.GetBlock(px, py, pz)}, on {world.GetBlock(px, py - 1, pz)})", (player.Pos - p0).Length() > 1 && world.GetBlock(px, py, pz) == 0 && world.Solid(px, py - 1, pz) && !Blocks.IsWater(world.GetBlock(px, py - 1, pz)));
 		health = 3; gloom = 0; StairEvent(3, s);
 		Check("it hurts, but never kills", health >= 2 && !dead);
 		health = MaxHealth; StairEvent(3, s);
@@ -92,8 +94,10 @@ public partial class Main
 		inv.SetSlot(4, Blocks.Planks, 5);
 		int kept = drops.All.Count(d => d.Keep); StairEvent(4, s);
 		Check("an item leaves your inventory and lies somewhere else", inv.Id[4] == 0 && drops.All.Count(d => d.Keep && d.Id == Blocks.Planks) == kept + 5);
-		var far = drops.All.Where(d => d.Keep).Select(d => d.P).FirstOrDefault();
-		Check("  (far from you, and it stays)", (far - player.Pos).Length() > 30);
+		// (anywhere in the world on dry ground, as RandomDryGround picks it: no distance from you is promised)
+		var lies = drops.All.Where(d => d.Keep && d.Id == Blocks.Planks).Select(d => d.P).FirstOrDefault();
+		int lx = Mathf.FloorToInt(lies.X), ly = Mathf.FloorToInt(lies.Y), lz = Mathf.FloorToInt(lies.Z);
+		Check($"  (on dry ground, and it stays: at {lies.X:0},{lies.Y:0},{lies.Z:0})", world.GetBlock(lx, ly, lz) == 0 && world.Solid(lx, ly - 1, lz) && !Blocks.IsWater(world.GetBlock(lx, ly - 1, lz)));
 		StairEvent(2, s);
 		Check("the staircase is gone", !StairStanding(s) && world.GetBlock(x, y, z) == 0);
 		Check("and stands somewhere else", StairList.Count(StairStanding) == standing);
@@ -103,22 +107,22 @@ public partial class Main
 	{
 		switch (which)
 		{
-			case 0:   // the time of day jumps
+			case 0:   // a random time of day
 				float t = (float)rnd.NextDouble();
 				if (netClient) hostConn?.Send(new Dictionary<string, object> { ["t"] = "stime", ["time"] = t });
 				else sky.TimeOfDay = t;
 				break;
-			case 1:   // you're somewhere else
+			case 1:   // the player moves to random dry ground
 				if (RandomDryGround() is { } to) { player.Pos = to; player.Vel = Vector3.Zero; player.Flying = false; stairOn = -1; }
 				break;
-			case 2:   // the staircase is gone, and stands somewhere else
+			case 2:   // the staircase moves to another spot
 				StairMove(s);
 				break;
-			case 3:   // it hurts (never enough to kill you)
+			case 3:   // damage (never fatal)
 				int most = health - gloom - 2;
 				if (most >= 1) HurtPlayer(Math.Min(most, 2 + rnd.Next(7)));
 				break;
-			case 4:   // something you carry turns up somewhere else in the world
+			case 4:   // one inventory stack moves to random ground
 				StairTakeItem();
 				break;
 		}
@@ -160,10 +164,12 @@ public partial class Main
 			for (int y = s.Y + k - 1; y >= s.Y - 1; y--) if (world.GetBlock(cx, y, cz) == s.Mat) world.SetBlock(cx, y, cz, 0);
 		}
 		stairFall = true; stairOn = -1;
+		// (never within 2 chunks of a chunk with anything changed in it now)
+		var changed = new HashSet<int>(world.Edits.Keys.Select(i => i / World.WX % World.WZ / World.CS * (World.WX / World.CS) + i % World.WX / World.CS));
 		// and stand it up again in another high forest, somewhere it still fits: one of the spots the world kept for it...
 		foreach (var o in StairList.Where(o => o != s && Math.Abs(o.X - s.X) + Math.Abs(o.Z - s.Z) > World.WX / 10).OrderBy(_ => rnd.Next()))
 		{
-			if (StairStanding(o) || !WorldGen.StairFits(o, StairGround, world.GetBlock)) continue;
+			if (StairStanding(o) || WorldGen.NearChunks(changed, o.X, o.Z) || !WorldGen.StairFits(o, StairGround, world.GetBlock)) continue;
 			world.Gen.BuildStair(o, (x, y, z, id) => world.SetBlock(x, y, z, id), StairGround);
 			return;
 		}
@@ -171,7 +177,7 @@ public partial class Main
 		for (int tries = 0; tries < 4000; tries++)
 		{
 			int x = 16 + rnd.Next(World.WX - 32), z = 16 + rnd.Next(World.WZ - 32);
-			if (Math.Abs(x - s.X) + Math.Abs(z - s.Z) <= World.WX / 10 || !world.Gen.StairForest(x, z)) continue;
+			if (Math.Abs(x - s.X) + Math.Abs(z - s.Z) <= World.WX / 10 || WorldGen.NearChunks(changed, x, z) || !world.Gen.StairForest(x, z)) continue;
 			int g = StairGround(z * World.WX + x);
 			if (g < world.SeaLevel + WorldGen.StairMinUp) continue;
 			var o = new WorldGen.StairSpot { X = x, Y = g + 1, Z = z, N = 5 + rnd.Next(4), Mat = world.Gen.StairMat(x, z), Placed = true };

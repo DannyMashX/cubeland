@@ -16,7 +16,7 @@ public partial class Slot : Panel
 	public Action Hover, Leave;
 	bool sel, hot;
 	// the tooltip: what this slot shows (ShownId), its tool or armor wear if known (-1: not known), and the game's tooltip
-	public int ShownId, TipWear = -1;
+	public int ShownId, TipWear = -1; public Inventory.PackData TipData;   // (TipData: what a bag holds)
 	public static Action<Slot> TipShow; public static Action TipHide;
 	readonly ColorRect wearBg, wearBar;
 
@@ -64,6 +64,16 @@ public partial class Slot : Panel
 		wearBar.Size = new Vector2(Math.Max(1, MathF.Round(left * wearBg.Size.X)), 2);
 		wearBar.Color = Color.FromHsv(left / 3, 0.9f, 0.85f);
 	}
+	// a bag: how full it is (0-1), in the wear bar's place, in bright blue (hidden when empty, or below 0)
+	public void ShowFill(float full)
+	{
+		wearBg.Visible = full > 0;
+		if (full <= 0) return;
+		wearBar.Size = new Vector2(Math.Max(1, MathF.Round(Math.Min(1, full) * wearBg.Size.X)), 2);
+		wearBar.Color = Color.FromHtml("3FA9FF");   // (bright blue: it stands out on the bag, and no wear bar is blue)
+	}
+	public float BarShown => wearBg.Visible ? wearBar.Size.X / wearBg.Size.X : -1;   // (tests: the bar's length, 0-1, or -1 hidden)
+	public Color BarColor => wearBar.Color;
 	public bool Selected { get => sel; set { sel = value; Restyle(); } }
 	public bool Interactive = true;
 	void Restyle()

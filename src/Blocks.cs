@@ -36,6 +36,11 @@ public class BlockDef
 	public int Look;                // another look of the block it drops (Red Bricks: 1-3; see LooksOf)
 	public int Axis;               // logs: which way it lies (0 upright, 1 along x, 2 along z)
 	public int Layers;             // snow: how many layers deep (1-7; a full block is the Snow Block)
+	public string Crop;            // a crop growing (data/blocks.json CROPS): which crop; Stage 0-3 (3 ripe); Top: Corn's upper block
+	public int Stage;
+	public bool Top;
+	public bool Bag; public int Full = -1;   // a bag (see Inventory's bag rules); its picture while it holds anything (its atlas place, -1 none)
+	public int Plants, Returns;    // an item: the crop it plants on tilled soil; what's left in your hand after eating it
 	public int Inner, Snowed;      // snow-logged: the torch or flower it holds, and how many layers of snow are round it
 	public bool Log;               // a tree's log, standing (lying ones: see Blocks.IsLogBlock)
 	public int Fruit;              // leaves: what they drop now and then (1 in 4, broken without a hoe)
@@ -72,20 +77,24 @@ public static partial class Blocks
 	public static int BenchOut(string mode, int b) => FormItem(mode == "pieces" ? "piece" : mode, b);   // what a bench mode makes from block b
 	// (from data/blocks.json's FORMS rows; 0: b can't be cut into that form. The older blocks' ids still follow the old sums,
 	// FormSum, which the data check holds them to: 100 + b, 1000 + b..., and the deep stone sets' and ExtraFormBlocks' from
-	// 1800 and 2000; the newer woods' are B + 10 to B + 46, in their WOODS block)
+	// 1800 and 2000, the cloths' from 3800; the newer woods' are B + 10 to B + 46, in their WOODS block)
 	public static int FormItem(string form, int b) => formItem.TryGetValue((form, b), out int id) ? id : 0;
 	static readonly Dictionary<(string form, int b), int> formItem = new();
 	public static int FormSum(string form, int b)
 	{
 		int i = Array.IndexOf(DeepBlocks, b), e = Array.IndexOf(ExtraFormBlocks, b);
 		return i >= 0 ? DeepFormItem + 7 * i + Array.IndexOf(Forms, form) : e >= 0 ? ExtraFormItem + 7 * e + Array.IndexOf(Forms, form)
+			: b >= FirstCloth && b < FirstCloth + Cloths ? ClothFormItem + 7 * (b - FirstCloth) + Array.IndexOf(Forms, form)
 			: (form == "piece" ? PieceItem : ShapeItem[form]) + b;
 	}
-	// Blocks numbered where 100 + b and 1000 + b would clash too (the desert and swamp blocks, and Sandstone): their piece, slab, stairs...
+	// Linen Cloth and its 12 colours (3740-3752, plain first): their piece, slab, stairs... items are 3800 + 7 x (the cloth's place)
+	// + the form, 3800-3890 (agreed with the web version)
+	public const int ClothFormItem = 3800, FirstCloth = 3740, Cloths = 13;
+	// Blocks numbered where 100 + b and 1000 + b would clash too (the desert and swamp blocks, Sandstone, and Ice): their piece, slab, stairs...
 	// items are 2000 + 7 x (the block's place in this list) + the form, like the deep stone sets. (Only ever add to the end of this list.)
 	public const int ExtraFormItem = 2000;
 	public static readonly int[] ExtraFormBlocks = { Sandstone, PalmLog, PalmLeaves, PalmPlanks, StrippedPalmLog, WillowLog, WillowLeaves, WillowPlanks, StrippedWillowLog,
-		SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat };
+		SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat, Ice };
 	public static int StoneLayer(int b) => b == 3 ? 1 : Get(b)?.Layer ?? 0;
 	// the deepest layer each pickaxe can mine, by what it's made of (copper and up are still to come)
 	public static readonly Dictionary<string, int> StrataPickaxe = Nums.N.STRATA_PICKAXE;   // (data/numbers.json)
@@ -196,7 +205,22 @@ public static partial class Blocks
 	public static readonly int[] GrainStages = { 42, 43, 44, 45, 46, 47, 48, 49 };
 	public static readonly int[] Soils = { Tilled, WetTilled, Fertilized, WetFertilized };
 	public static bool IsSoil(int id) => id >= Tilled && id <= WetFertilized;
-	public static bool IsCrop(int id) => id >= 42 && id <= GrainRipe;
+	public static bool IsCrop(int id) => id >= 42 && id <= GrainRipe;   // (Grain: IsAnyCrop takes the other crops too)
+	// ---- the other crops (data/blocks.json CROPS, numbers.json CROPS): Potato, Turnip, Flax, Corn (two blocks tall from stage 2:
+	// its top is a block of its own, which follows the bottom) and the Cantaloupe Vine (grown, it makes melons beside it) ----
+	public const int Cantaloupe = 3722, DeadBush = 3723;
+	static readonly Dictionary<(string, int, bool), int> cropIds = new();
+	public static int CropBlock(string crop, int stage, bool top = false) => cropIds.TryGetValue((crop, stage, top), out int id) ? id : 0;
+	public static bool IsAnyCrop(int id) => IsCrop(id) || Get(id)?.Crop != null;
+	public static bool CropRipe(int id) => id == GrainRipe || Get(id) is { Crop: not null, Stage: 3 };
+	// growing: it has a stage to go, or it's a grown Cantaloupe Vine (which goes on making melons). Corn's top doesn't grow by itself.
+	public static bool CropGrows(int id) => IsCrop(id) ? id != GrainRipe : Get(id) is { Crop: { } c, Top: false } d && (d.Stage < 3 || c == "cantaloupe");
+	// harvested when it goes (a ripe crop's bottom; not a Cantaloupe Vine, whose melons are its harvests)
+	public static bool CropHarvest(int id) => id == GrainRipe || Get(id) is { Crop: { } c, Stage: 3, Top: false } && c != "cantaloupe";
+	public static int CropNext(int id) => IsCrop(id) ? id + 1 : Get(id) is { Crop: { } c } d ? CropBlock(c, d.Stage + 1) : 0;
+	public static CropNumbers CropNums(int id) => Get(id)?.Crop is { } c && Nums.N.CROPS != null && Nums.N.CROPS.TryGetValue(c, out var n) ? n : null;
+	// the ground a Cantaloupe grows on, beside its vine
+	public static bool MelonGround(int b) => b == Dirt || IsGrassy(b) || b == Sand || IsSoil(b);
 	public static int SoilId(bool wet, bool fert) => Tilled + (wet ? 1 : 0) + (fert ? 2 : 0);
 	public static bool SoilWet(int id) => id == WetTilled || id == WetFertilized;
 	public static bool SoilFert(int id) => id == Fertilized || id == WetFertilized;
@@ -228,6 +252,41 @@ public static partial class Blocks
 	public static readonly string[] FlowerColours = { "red", "yellow", "aqua", "indigo", "magenta" };
 	public static readonly int[] Flowers = { 194, 195, 196, 197, 198 };
 	public static bool IsFlower(int id) => id >= 194 && id <= 198;
+	// ---- fences (data/blocks.json FENCES): a post 4/16 square the whole block tall, and toward each block it joins two rails
+	// 2/16 thick, 6/16-9/16 and 12/16-15/16 up. It joins another fence, a door (either half, open or shut: a gate) and any whole
+	// solid block that isn't see-through, worked out from the neighbours (nothing more is saved). For players it's solid 4/16
+	// wide (the post, and each joined side) up to 1.5 blocks; mobs take its whole space as solid and never hop onto one.
+	// The same as the web version. ----
+	public static bool IsFence(int id) => Get(id)?.Shape == "fence";
+	public static bool FenceJoins(int n) => n != 0 && Get(n) is { } d && (d.Shape is "fence" or "door" || (d.Shape == null && !d.Transparent && !d.Liquid && !d.NoCollide && !d.Item));
+	public static readonly int[][] FenceSides = { new[] { 1, 0 }, new[] { -1, 0 }, new[] { 0, 1 }, new[] { 0, -1 } };   // (the mask's bits: +x, -x, +z, -z)
+	public const float FenceTall = 1.5f;
+	public static int FenceMask(Func<int, int, int, int> get, int x, int y, int z)
+	{
+		int m = 0;
+		for (int k = 0; k < 4; k++) if (FenceJoins(get(x + FenceSides[k][0], y, z + FenceSides[k][1]))) m |= 1 << k;
+		return m;
+	}
+	// its boxes in the block, {x0, y0, z0, x1, y1, z1}: the post, then for each joined side its two rails (as drawn and aimed at),
+	// or (solid: for players) the post and each joined side 4/16 wide and 1.5 tall
+	public static List<float[]> FenceBoxes(int mask, bool solid)
+	{
+		const float a = 6 / 16f, b = 10 / 16f, r0 = 7 / 16f, r1 = 9 / 16f;
+		float top = solid ? FenceTall : 1;
+		var list = new List<float[]> { new[] { a, 0, a, b, top, b } };
+		for (int k = 0; k < 4; k++)
+		{
+			if ((mask & (1 << k)) == 0) continue;
+			int dx = FenceSides[k][0], dz = FenceSides[k][1];
+			float s0 = dx + dz > 0 ? b : 0, s1 = dx + dz > 0 ? 1 : a;   // (from the post to the block's edge)
+			if (solid) { list.Add(dx != 0 ? new[] { s0, 0, a, s1, top, b } : new[] { a, 0, s0, b, top, s1 }); continue; }
+			foreach (var (lo, hi) in new[] { (6 / 16f, 9 / 16f), (12 / 16f, 15 / 16f) })
+				list.Add(dx != 0 ? new[] { s0, lo, r0, s1, hi, r1 } : new[] { r0, lo, s0, r1, hi, s1 });
+		}
+		return list;
+	}
+	// a Terracotta (plain, the 12 colours' and Fireclay's; not the chiseled ones): what a Dead Bush may also be put down on
+	public static bool IsTerracotta(int id) => id == Terracotta || id == FireclayTerracotta || Array.IndexOf(ColourTerracotta, id) >= 0;
 	// set from data/blocks.json in the constructor: every block you can cut (FORMS' blocks, in order), and every block you can have
 	// in your inventory (the blocks with inventory, not snow-logged, and in layer 1 unless tall worlds are on; by id). Which tool a
 	// block needs, its sound, leaves and the shovel's blocks are its fields (Needs, Sound, Leaves, Shovel).
@@ -276,6 +335,8 @@ public static partial class Blocks
 		}
 		// the trees' logs (rows with "log"), and the lying logs: the rows that lie (axis) and drop a log
 		Logs = rows.Where(x => x.r.log).Select(x => x.r.id).ToArray();
+		// the crops besides Grain, by (crop, stage, top)
+		foreach (var (r, b) in rows) if (b.Crop != null && !cropIds.TryAdd((b.Crop, b.Stage, b.Top), r.id)) throw new InvalidOperationException($"data/blocks.json: {b.Name} {r.id} is crop {b.Crop} stage {b.Stage} twice");
 		foreach (var (r, b) in rows)
 			if (b.Axis > 0 && Get(b.Drop)?.Log == true)
 			{
@@ -303,6 +364,7 @@ public static partial class Blocks
 		// the gear (rows): the armor in the rows' order, then the backpacks and the belts
 		GearItems.AddRange((Nums.Blocks.GEAR ?? Array.Empty<BlockRow>()).Where(r => r.armor != null).Select(r => r.id));
 		GearItems.AddRange(Backpacks); GearItems.AddRange(Belts);
+		GearItems.AddRange((Nums.Blocks.BASE ?? Array.Empty<BlockRow>()).Where(r => r.pack > 0 || r.belt > 0).Select(r => r.id));   // (the Linen Backpack and Belt, found by their fields)
 		// piece and shape items: data/blocks.json's FORMS (each block you can cut, with its items' ids), named with FORM_NAMES
 		// (Pieces, block 70, is a row: which block fills each of its 8 spots is kept separately)
 		var formNames = Nums.Blocks.FORM_NAMES ?? throw new InvalidOperationException("data/blocks.json has no FORM_NAMES");
@@ -363,7 +425,8 @@ public static partial class Blocks
 	public static int TorchMax(int wi) => wi > 0 ? 2 : 4;
 	public static int WallIndex(int dx, int dz) { for (int i = 1; i < 5; i++) if (TorchWalls[i][0] == dx && TorchWalls[i][1] == dz) return i; return -1; }
 	public static int TorchDrop(int id) => B[id].Burn == 3 ? EverTorch : BurntTorch;
-	public static int StackMaxOf(int id) => IsTool(id) || IsGear(id) ? 1 : StackMax;
+	public static int StackMaxOf(int id) => IsTool(id) || IsGear(id) || IsBag(id) ? 1 : StackMax;
+	public static bool IsBag(int id) => Get(id)?.Bag == true;
 	// how high the water's surface sits in its block (water with more water on top fills the whole block)
 	public static float WaterHeight(int id, int above) => IsWater(above) ? 1 : id == Water ? 0.875f : Math.Max(0.15f, 0.875f * (8 - (id - Water)) / 8f);
 	public static string ShapeOfMask(int m) => ShapeMasks.FirstOrDefault(kv => kv.Value.Contains(m)).Key;

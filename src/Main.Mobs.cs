@@ -16,6 +16,7 @@ public partial class Main
 		public bool Hostile, Night, Dark, Burns, Shamble, Glow, Curious; public int Damage; public float Sight, Reach, Hearing, LightRange, Scale = 1;
 		public bool Thrower, Deep, Snuffer; public float Near, Far, Faint;   // (what each one means: data/mobs.json's notes)
 		public bool Cow;                                                     // (see Main.Cows.cs)
+		public bool Animal; public AnimalNumbers A;                          // (the other animals: see Main.Animals.cs)
 		public string Growl; public (int id, int lo, int hi, float chance)[] Drops = Array.Empty<(int, int, int, float)>();
 	}
 	// drops: (item, fewest, most, chance) dropped when killed. hostile: chases and attacks you, survival only. dark: spawns anywhere dark (caves any time, open ground at night).
@@ -37,6 +38,7 @@ public partial class Main
 				Name = m.name, Health = m.health, Speed = m.speed, Max = m.max, Hostile = m.hostile, Night = m.night, Dark = m.dark, Burns = m.burns, Shamble = m.shamble,
 				Glow = m.glow, Curious = m.curious, Damage = m.damage, Sight = m.sight, Reach = m.reach, Hearing = m.hearing, LightRange = m.lightRange, Scale = m.scale,
 				Thrower = m.thrower, Deep = m.deep, Snuffer = m.snuffer, Near = m.near, Far = m.far, Faint = m.faint, Cow = m.cow, Growl = m.growl,
+				Animal = m.animal, A = m.animal && d.ANIMALS != null && d.ANIMALS.TryGetValue(m.type, out var an) ? an : null,
 				Drops = (m.drops ?? Array.Empty<JsonElement[]>()).Select(Drop).ToArray(),
 			});
 		return types;
@@ -56,6 +58,7 @@ public partial class Main
 		public Node3D Root; public List<Limb> Legs = new(), Arms = new(); public List<ShaderMaterial> Mats = new();
 		public Node3D Head, Figure; public float Anim, HeadY;   // Head: nods/tilts from the neck. Figure: the scaled model inside Root (sways)
 		public int HeldId; public MeshInstance3D HeldMesh;     // the item shown in its right hand (other players)
+		public bool HeldFull;                                  // (a bag in its hand holds something: its full picture)
 		public float Cx, Cz; public Dictionary<string, Limb> LimbOf;   // the model's middle, and its arms and legs by name
 		public string GearKey = ""; public List<Node3D> GearMeshes = new();   // what armor, backpack and belt it wears (other players)
 		public Texture2D Skin;                                 // a picture of its own instead of the model's (your skin, a friend's)
@@ -66,6 +69,10 @@ public partial class Main
 		// (-1 = not worked out yet), Variant = which model it wears (see Main.Cows.cs)
 		public float Baby, Happy, Room, MateCool, MateCheck, MateFor, RoomIn, Grazing, GrazeIn, GrazeAnim, HeartIn; public int Fed, Near, Variant; public Mob Mate;
 		public float Stare;   // seconds it stands still, looking at you
+		// the other animals (see Main.Animals.cs): an egg on its way, a goat's milk, a bear's hunger (seconds); the sapling a deer
+		// carries; angry at you (boar, bear); running from (a bear); what a bear is chasing; and their own timers
+		public float EggIn, Milky, HungerIn, Angry, AlertIn, ScratchIn, PeckIn, LookIn, SowIn, NibbleIn, WaterCheck, ChaseT, HuntRetry, PreyCheck, BiteCool;
+		public int Sow; public bool Eaten, Chase, Ashore; public Mob FleeFrom, Prey; public Vector2? WaterGoal;
 	}
 	// an arm or leg: swings at Pivot (shoulder/hip); Lower (forearm/shin, if the model has one) bends at the elbow/knee
 	public class Limb { public Node3D Pivot, Lower; public float Phase; }
@@ -164,6 +171,9 @@ public partial class Main
 		var els = model.GetProperty("elements").EnumerateArray().ToList();
 		// Blockbench groups (outliner folders) named like "arms" / "legs" mark which parts are arms and legs
 		var groupOf = new Dictionary<int, string>();
+		// the "head" group's own pivot point (its origin; the first such group): the head turns from there, like where a cow's neck
+		// meets its body, so a grazing head takes its neck down with it and no gap opens behind it (agreed with the web version)
+		float[] headOrigin = null;
 		void Walk(JsonElement list, string tag)
 		{
 			if (list.ValueKind != JsonValueKind.Array) return;
@@ -171,6 +181,7 @@ public partial class Main
 			{
 				if (c.ValueKind == JsonValueKind.Number) { if (tag != null) groupOf[c.GetInt32()] = tag; continue; }
 				string gn = c.TryGetProperty("name", out var g) ? g.GetString() ?? "" : "";
+				if (headOrigin == null && gn.Equals("head", StringComparison.OrdinalIgnoreCase) && c.TryGetProperty("origin", out var og) && og.ValueKind == JsonValueKind.Array) headOrigin = Vec(og);
 				Walk(c.TryGetProperty("children", out var ch) ? ch : default, gn.Contains("arm", StringComparison.OrdinalIgnoreCase) ? "arm" : gn.Contains("leg", StringComparison.OrdinalIgnoreCase) ? "leg"
 					: gn.Equals("head", StringComparison.OrdinalIgnoreCase) ? "head" : tag);
 			}
@@ -253,9 +264,9 @@ public partial class Main
 			if (en.EndsWith("_lower")) { lowers.Add((e, mi, mid)); continue; }   // (joined on below, once its limb exists)
 			if (part == "head" && en != "head" && !angled) { headParts.Add((mi, mid)); continue; }   // (joined on below, once the head exists)
 			if (en == "head" && !angled)
-			{   // the head: turns from the middle of its bottom (the neck)
-				var pivot = new Node3D { Position = new Vector3(mid.X, from[1] / 16, mid.Z) };
-				mi.Position = new Vector3(0, h / 2, 0); pivot.AddChild(mi); body.AddChild(pivot);
+			{   // the head: turns from its group's pivot point, or (no head group with one) from the middle of its bottom
+				var pivot = new Node3D { Position = headOrigin is { } ho ? new Vector3((ho[0] - cx) / 16, ho[1] / 16, (ho[2] - cz) / 16) : new Vector3(mid.X, from[1] / 16, mid.Z) };
+				mi.Position = mid - pivot.Position; pivot.AddChild(mi); body.AddChild(pivot);
 				m.Head = pivot; m.HeadY = pivot.Position.Y;
 			}
 			else if (part == "leg" || (part == null && from[1] == 0 && to[1] < top))
@@ -421,13 +432,19 @@ public partial class Main
 	}
 	// shows item `id` in a body's right hand (0 = empty-handed). Needs a model with a right forearm (arm_right_lower).
 	static QuadMesh heldQuad;
-	static void SetHeld(Mob b, int id)
+	static void SetHeld(Mob b, int id, bool full = false)
 	{
-		if (b.HeldId == id) return;
-		b.HeldId = id;
+		full &= Blocks.IsBag(id);
+		if (b.HeldId == id)
+		{   // (the same thing: a bag that's been filled or emptied just changes its picture)
+			if (b.HeldFull != full && b.HeldMesh?.MaterialOverride is ShaderMaterial hm) hm.SetShaderParameter("tex", Atlas.BagIcon(id, full));
+			b.HeldFull = full; return;
+		}
+		b.HeldId = id; b.HeldFull = full;
 		if (b.HeldMesh != null) { b.Mats.Remove((ShaderMaterial)b.HeldMesh.MaterialOverride); b.HeldMesh.QueueFree(); b.HeldMesh = null; }
 		if (id == 0 || Blocks.Get(id) == null || b.Arms.Count < 2 || b.Arms[1].Lower == null) return;
 		var (mi, mat, cube) = HeldModel(id);
+		if (full) mat.SetShaderParameter("tex", Atlas.BagIcon(id, true));
 		if (cube) { mi.Position = new Vector3(0, -8f / 16, -0.06f); mi.Rotation = new Vector3(0, MathF.PI / 4, 0); }   // a block: a little cube in the fist
 		else if (IsHeldTool(id))
 		{   // a tool: gripped near the end of its handle, which points forward out of the fist
@@ -482,7 +499,7 @@ public partial class Main
 	static readonly Dictionary<int, Mesh> heldCubes = new();
 	// (a slab, stairs, quarter, piece, the Cutter, a layer of snow or a torch: held as a model of its shape; flowers stay pictures)
 	// (items, Rock, Clay Ball and Brick included, are flat pictures in the hand; only tools are made thick)
-	static bool IsHeldShape(int id) => Blocks.Get(id) is { } b && (Blocks.IsPiece(id) || Blocks.FormOf(id) != null || (!b.Item && b.Shape is "half" or "snow" or "torch")) && Atlas.Is3DIcon(id);
+	static bool IsHeldShape(int id) => Blocks.Get(id) is { } b && (Blocks.IsPiece(id) || Blocks.FormOf(id) != null || (!b.Item && b.Shape is "half" or "snow" or "torch" or "fence")) && Atlas.Is3DIcon(id);
 	static (MeshInstance3D mi, ShaderMaterial mat, bool cube) HeldModel(int id)
 	{
 		itemShader ??= GD.Load<Shader>("res://src/item.gdshader");
@@ -537,7 +554,7 @@ public partial class Main
 	// Same as the web's HAND_TOOL.
 	static readonly Vector3 HandTool = new(-2.07f, MathF.PI / 2, 0);
 	float testSwing = -1;
-	Node3D handRoot, handArm; Mob handBody; int handId = -1; float handSwing, handDip, handBob, handWalk, handLightTimer, handSky = 1, handTorch;
+	Node3D handRoot, handArm; Mob handBody; int handId = -1; bool handFull; float handSwing, handDip, handBob, handWalk, handLightTimer, handSky = 1, handTorch;
 	void SwingHand() => handSwing = 1;
 	// your skin changed: your hand is made again with it
 	void RemakeHand() { handRoot?.QueueFree(); handRoot = null; handBody = null; handId = -1; }
@@ -562,11 +579,15 @@ public partial class Main
 		}
 		handRoot.Visible = !dead && !menuOpen && !panoCapturing;   // (no hand in the main menu's panorama)
 		int id = inv.Held;
+		// (a bag: its full picture while it holds anything)
+		if (handBody.HeldMesh?.MaterialOverride is ShaderMaterial hm && Blocks.IsBag(id) && id == handId && (inv.Data[inv.ActSlot] != null) != handFull)
+			hm.SetShaderParameter("tex", Atlas.BagIcon(id, handFull = inv.Data[inv.ActSlot] != null));
 		if (id != handId)
 		{
 			if (handId != -1) handDip = 1;
 			handId = id;
 			SetHeld(handBody, id);
+			handFull = false;   // (SetHeld shows a bag's own picture; it's swapped above next time if it holds anything)
 			var m = handBody.HeldMesh;   // facing you, instead of side-on like other players'
 			if (m != null && (heldCubes.ContainsKey(id) && m.Mesh == heldCubes[id] || IsHeldShape(id))) { m.Position = new Vector3(0, -8.5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = new Vector3(-1.55f, MathF.PI / 4, 0); }   // (upright, its top tipped toward you)
 			else if (m != null && IsHeldTool(id)) { m.Position = new Vector3(0, -5f / 16, 0); m.RotationOrder = EulerOrder.Xyz; m.Rotation = HandTool; m.Scale = Vector3.One * 1.5f; }   // (by the handle, side-on, half as big again)
@@ -673,8 +694,9 @@ public partial class Main
 	{
 		m.Dead = 0.001f;
 		if (m.T.Cow) CowDrops(m);
+		if (m.T.Animal && m.Baby > 0) return;   // (an animal's young drop nothing; one a bear caught leaves only its Feathers: the bear ate the rest)
 		foreach (var (id, lo, hi, chance) in m.T.Drops)
-			if (rnd.NextDouble() < chance) for (int n = lo + rnd.Next(hi - lo + 1); n > 0; n--) drops.Add(id, m.X, m.Y + 0.5f, m.Z);
+			if ((!m.Eaten || id == Feather) && rnd.NextDouble() < chance) for (int n = lo + rnd.Next(hi - lo + 1); n > 0; n--) drops.Add(id, m.X, m.Y + 0.5f, m.Z);
 	}
 	bool MobBlocked(Mob m, float x, float y, float z)
 	{
@@ -687,7 +709,7 @@ public partial class Main
 	void MobGrowl(Mob m)
 	{
 		float d = new Vector3(m.X - player.Pos.X, m.Y - player.Pos.Y, m.Z - player.Pos.Z).Length();
-		float vol = 0.85f * MathF.Pow(Math.Max(0, 1 - d / 28), 1.5f) * (m.T.Growl == "hrr" ? 0.8f : m.T.Growl == "moo" ? 0.7f : 1);
+		float vol = 0.85f * MathF.Pow(Math.Max(0, 1 - d / 28), 1.5f) * m.T.Growl switch { "hrr" => 0.8f, "moo" => 0.7f, "cluck" or "quack" => 0.6f, "bleat" => 0.7f, "grunt" => 0.8f, _ => 1 };
 		Sound.I?.PlayAt(m.T.Growl, new Vector3(m.X, m.Y + m.Height * 0.8f, m.Z), vol);
 	}
 	// a block broke or was placed: curious mobs that can hear it go and check it out (newest sound wins)
@@ -721,6 +743,7 @@ public partial class Main
 		{
 			mobSpawnTimer = 3;
 			if (models.ContainsKey("cow")) SpawnCows();
+			SpawnAnimals();
 			foreach (var (type, t) in MobTypes)
 			{
 				if (!models.ContainsKey(type) || (t.Night && sky.SkyDay > 0.3f)) continue;
@@ -750,7 +773,7 @@ public partial class Main
 			else if (MathF.Sqrt((m.X - P.X) * (m.X - P.X) + (m.Z - P.Z) * (m.Z - P.Z)) > MobRange(t) && !NearAFriend(m))
 			{   // past the render distance from everyone: forgotten, except cows, which just wait where they are, unseen
 				// (they're saved with the world)
-				if (t.Cow) { m.Root.Visible = false; continue; }
+				if (t.Cow || t.Animal) { m.Root.Visible = false; continue; }
 				RemoveMob(m); continue;
 			}
 			else
@@ -759,8 +782,10 @@ public partial class Main
 				// wander: stand around, then walk somewhere for a bit. After being hit, run away from you.
 				m.Timer -= dt;
 				m.AttackCool = Math.Max(0, m.AttackCool - dt);
+				if (t.Animal) AnimalAlert(m, dt);   // (running from a bear, a deer from you, a bear guarding its cubs: see Main.Animals.cs)
 				float pdist = MathF.Sqrt((m.X - P.X) * (m.X - P.X) + (m.Z - P.Z) * (m.Z - P.Z));
-				bool hunting = t.Hostile && inv.Survival && !dead && !player.Flying && pdist < t.Sight && Math.Abs(P.Y - m.Y) < 6;
+				// (a boar or bear you've angered comes at you like a hostile mob, in survival)
+				bool hunting = (t.Hostile || m.Angry > 0) && inv.Survival && !dead && !player.Flying && pdist < (t.Sight > 0 ? t.Sight : 24) && Math.Abs(P.Y - m.Y) < 6;
 				m.Backing = false;
 				// a Gloomling: fades away when someone holding a lit torch comes near (it drops nothing)
 				if (t.Snuffer && m.Fade == 0 && TorchBearerNear(new Vector3(m.X, m.Y + 0.5f, m.Z), GloomFadeRange)) StartFade(m);
@@ -823,17 +848,19 @@ public partial class Main
 				else if (m.Flee > 0)
 				{
 					m.Flee -= dt; m.Walking = true;
-					float away = MathF.Atan2(-(m.X - P.X), -(m.Z - P.Z));
+					var from = m.FleeFrom is { Dead: 0 } fb ? new Vector3(fb.X, fb.Y, fb.Z) : P;   // (from you, or from a bear)
+					float away = MathF.Atan2(-(m.X - from.X), -(m.Z - from.Z));
 					m.Yaw += Turn(m.Yaw, away) * Math.Min(1, dt * 6);
 				}
 				else if (t.Cow && CowThink(m, dt)) { }   // (grazing, going to a mate, a calf following: see Main.Cows.cs)
+				else if (t.Animal && AnimalThink(m, dt)) { }   // (foraging, hunting, going to a mate, the young following, a duck keeping to the water)
 				else if (m.Timer <= 0)
 				{
 					if (!m.Walking) { m.Walking = true; m.Timer = 1.5f + (float)rnd.NextDouble() * 4; m.TurnTo = m.Yaw + ((float)rnd.NextDouble() - 0.5f) * MathF.PI * 1.6f; }
 					else { m.Walking = false; m.Timer = 1 + (float)rnd.NextDouble() * 5; }
 				}
 				if (m.Walking && m.Flee <= 0 && m.TurnTo is { } tt) m.Yaw += Turn(m.Yaw, tt) * Math.Min(1, dt * 3);
-				float sp = m.Walking ? t.Speed * (m.Flee > 0 ? 2.4f : hunting ? 1.6f : 1) * (hunting && pdist < t.Reach * 0.7f ? 0 : 1) * (m.Backing ? -0.6f : 1) : 0;
+				float sp = m.Walking ? t.Speed * (m.Flee > 0 ? 2.4f : hunting ? 1.6f : m.Chase ? 1.5f : 1) * (hunting && pdist < t.Reach * 0.7f ? 0 : 1) * (m.Backing ? -0.6f : 1) : 0;
 				float tvx = -MathF.Sin(m.Yaw) * sp, tvz = -MathF.Cos(m.Yaw) * sp;   // the front of the model is its north side
 				float acc = Math.Min(1, dt * (m.OnGround ? 10 : 2));
 				m.Vx += (tvx - m.Vx) * acc; m.Vz += (tvz - m.Vz) * acc;
@@ -841,13 +868,13 @@ public partial class Main
 				if (m.Bumped && m.OnGround)
 				{
 					int fx = (int)MathF.Floor(m.X - MathF.Sin(m.Yaw) * (m.Half + 0.3f)), fz = (int)MathF.Floor(m.Z - MathF.Cos(m.Yaw) * (m.Half + 0.3f)), fy = (int)MathF.Floor(m.Y);
-					if (world.Solid(fx, fy, fz) && !world.Solid(fx, fy + 1, fz) && !world.Solid(fx, fy + 2, fz)) m.Vy = 7.5f;
+					if (world.Solid(fx, fy, fz) && !Blocks.IsFence(world.GetBlock(fx, fy, fz)) && !world.Solid(fx, fy + 1, fz) && !world.Solid(fx, fy + 2, fz)) m.Vy = 7.5f;   // (never onto a fence)
 					else if (m.Flee <= 0) m.TurnTo = m.Yaw + MathF.PI * (0.6f + (float)rnd.NextDouble() * 0.8f);
 				}
 			}
 			// falling, swimming and bumping into blocks (in a joined game the host's game does this)
 			if (!netClient) {
-			if (player.WaterAt(m.X, m.Y + 0.5f, m.Z)) { m.Vy += (2 - m.Vy) * Math.Min(1, dt * 3); if (m.Bumped) m.Vy = 5; }   // float up, paddle out over edges
+			if (player.WaterAt(m.X, m.Y + 0.5f, m.Z)) { m.Vy += (2 - m.Vy) * Math.Min(1, dt * 3); if (m.Bumped && !(m.Type == "duck" && !m.Ashore)) m.Vy = 5; }   // float up, paddle out over edges (a duck stays in, unless it's coming to you for food)
 			else m.Vy = Math.Max(-40, m.Vy - 28 * dt);
 			ox = m.X; oz = m.Z; m.OnGround = false; m.Bumped = false;
 			int steps = Math.Max(1, (int)MathF.Ceiling(Math.Max(Math.Abs(m.Vx), Math.Max(Math.Abs(m.Vy), Math.Abs(m.Vz))) * dt / 0.3f));
@@ -878,13 +905,13 @@ public partial class Main
 				if (p >= 1) { m.ThrowT = 0; m.Thrown = false; }
 			}
 			PoseBody(m, dt, swipe, t.Shamble, throwing);
-			if (t.Cow) CowShow(m, dt);
+			if (t.Cow || t.Animal) CowShow(m, dt);   // (head down while eating, hearts while happy)
 			m.Root.Position = new Vector3(m.X, m.Y, m.Z);
 			if (m.Dead == 0) m.Root.Rotation = new Vector3(0, m.Yaw, 0);
 			if (t.Growl != null && m.Dead == 0)
 			{
 				if (m.GrowlIn < 0) m.GrowlIn = 2 + (float)rnd.NextDouble() * 8;
-				if ((m.GrowlIn -= dt) <= 0) { m.GrowlIn = (6 + (float)rnd.NextDouble() * 10) * (t.Cow ? 2.5f : 1); MobGrowl(m); }   // (cows moo less often)
+				if ((m.GrowlIn -= dt) <= 0) { m.GrowlIn = (6 + (float)rnd.NextDouble() * 10) * (t.Cow || t.Animal ? 2.5f : 1); MobGrowl(m); }   // (cows and the other animals call less often)
 			}
 			// lighting: the same as blocks (sky light x time of day, or torch light, whichever is brighter)
 			if ((m.LightTimer -= dt) <= 0)
@@ -1147,7 +1174,9 @@ public partial class Main
 		m.Vx = (m.X - P.X) / d * 6; m.Vz = (m.Z - P.Z) / d * 6; m.Vy = 5;
 		int dmg = from == null ? Blocks.Get(inv.Held)?.Damage ?? 0 : 0;   // a sword (or axe) hits harder; friends' hits count as 1
 		m.Hurt = 0.3f; m.Health -= dmg > 0 ? dmg : 1;
-		if (!m.T.Hostile) m.Flee = 4;   // peaceful mobs run off; hostile ones don't back down
+		// peaceful mobs run off; hostile ones don't back down. A grown boar or bear you hit turns on you (survival: see Main.Animals.cs)
+		if (m.T.A is { angerTime: > 0 } an && m.Baby <= 0 && from == null && inv.Survival) { m.Angry = an.angerTime; m.Flee = 0; }
+		else if (!m.T.Hostile) { m.Flee = 4; m.FleeFrom = null; }
 		if (m.T.Growl != null) { MobGrowl(m); m.GrowlIn = 4 + (float)rnd.NextDouble() * 6; }
 		if (m.Health <= 0) MobDies(m);
 	}

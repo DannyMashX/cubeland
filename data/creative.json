@@ -17,7 +17,9 @@
       "white_terracotta", "black_terracotta", "chiseled_terracotta", "chiseled_red_terracotta", "chiseled_orange_terracotta",
       "chiseled_yellow_terracotta", "chiseled_green_terracotta", "chiseled_aqua_terracotta", "chiseled_blue_terracotta",
       "chiseled_indigo_terracotta", "chiseled_purple_terracotta", "chiseled_magenta_terracotta", "chiseled_pink_terracotta",
-      "chiseled_white_terracotta", "chiseled_black_terracotta", "glass", "sandstone_bricks", "chiseled_sandstone", "smooth_sandstone", "mud_bricks",
+      "chiseled_white_terracotta", "chiseled_black_terracotta",
+      "linen_cloth", "red_linen_cloth", "orange_linen_cloth", "yellow_linen_cloth", "green_linen_cloth", "aqua_linen_cloth", "blue_linen_cloth",
+      "indigo_linen_cloth", "purple_linen_cloth", "magenta_linen_cloth", "pink_linen_cloth", "white_linen_cloth", "black_linen_cloth", "glass", "sandstone_bricks", "chiseled_sandstone", "smooth_sandstone", "mud_bricks",
       "fireclay_terracotta", "fireclay_bricks", "fireclay_casing", "chiseled_fireclay"
     ] },
     { "name": "Natural", "items": [
@@ -28,7 +30,7 @@
       "sand", "sandstone", "snowy_grass", "swamp_grass", "mud", "peat", "ice", "gravel", "clay", "fireclay", "snow", "snow_block", "water",
       "bedrock", "oak_sapling", "fir_sapling", "palm_sapling",
       "willow_sapling", "cedar_sapling", "maple_sapling", "birch_sapling", "aspen_sapling", "redwood_sapling",
-      "cherry_sapling", "cypress_sapling", "juniper_sapling", "larch_sapling", "holly_sapling", "orange_sapling", "palo_verde_sapling"
+      "cherry_sapling", "cypress_sapling", "juniper_sapling", "larch_sapling", "holly_sapling", "orange_sapling", "palo_verde_sapling", "cantaloupe", "dead_bush"
     ] },
     { "name": "Wood", "items": [
       "oak_log", "stripped_oak_log", "oak_planks", "oak_leaves", "fir_log", "stripped_fir_log", "fir_planks", "fir_leaves", "palm_log",
@@ -42,7 +44,8 @@
       "stripped_orange_log", "orange_planks", "orange_leaves", "palo_verde_log", "stripped_palo_verde_log", "palo_verde_planks",
       "palo_verde_leaves", "dead_log", "oak_door", "fir_door", "palm_door", "willow_door", "cedar_door", "maple_door", "birch_door",
       "aspen_door", "redwood_door", "cherry_door", "cypress_door", "juniper_door", "larch_door", "holly_door", "orange_door",
-      "palo_verde_door"
+      "palo_verde_door", "oak_fence", "fir_fence", "palm_fence", "willow_fence", "cedar_fence", "maple_fence",
+      "birch_fence", "aspen_fence", "redwood_fence", "cherry_fence", "cypress_fence", "juniper_fence", "larch_fence", "holly_fence", "orange_fence", "palo_verde_fence"
     ] },
     { "name": "Shapes", "forms": ["piece", "slab", "stairs", "quarter", "vslab", "vstairs", "vquarter"] },
     { "name": "Light & Decoration", "items": [
@@ -57,16 +60,18 @@
       "bronite_helmet", "bronite_chestplate", "bronite_leggings", "bronite_boots", "rosium_helmet", "rosium_chestplate", "rosium_leggings",
       "rosium_boots", "steel_helmet", "steel_chestplate", "steel_leggings", "steel_boots", "leather_backpack", "copper_backpack", "iron_backpack",
       "bronite_backpack", "rosium_backpack", "steel_backpack", "leather_utility_belt", "copper_utility_belt", "iron_utility_belt",
-      "bronite_utility_belt", "rosium_utility_belt", "steel_utility_belt"
+      "bronite_utility_belt", "rosium_utility_belt", "steel_utility_belt", "linen_bag"
     ] },
     { "name": "Food", "items": [
-      "chocolate", "bread", "raw_meat", "cooked_meat", "dates", "cherries", "oranges", "juniper_berries"
+      "chocolate", "bread", "raw_meat", "cooked_meat", "dates", "cherries", "oranges", "juniper_berries", "potato", "baked_potato",
+      "turnip", "roasted_corn", "cantaloupe_slice", "egg", "cooked_egg", "jug_of_milk", "truffle"
     ] },
     { "name": "Materials", "items": [
       "stick", "rock", "clay_ball", "brick", "fireclay_ball", "fireclay_brick", "copper_chunk", "iron_chunk", "gold_chunk", "tin_chunk",
       "copper_brick", "iron_brick", "gold_brick", "tin_brick", "bronite_brick", "rosium_brick", "steel_brick", "steel_scrap", "bone", "bone_ash",
       "gloom_wisp", "fire_essence", "leather", "red_dye", "orange_dye", "yellow_dye", "green_dye", "aqua_dye", "blue_dye", "indigo_dye",
-      "purple_dye", "magenta_dye", "pink_dye", "white_dye", "black_dye", "grain", "grain_seeds", "flour", "snowball"
+      "purple_dye", "magenta_dye", "pink_dye", "white_dye", "black_dye", "grain", "grain_seeds", "flour", "corn", "cantaloupe_seeds", "flax",
+      "flax_seeds", "linen", "string", "feather", "clay_jug", "snowball"
     ] },
     { "name": "Machines", "items": [
       "crafting_bench", "cutter", "kiln", "furnace"

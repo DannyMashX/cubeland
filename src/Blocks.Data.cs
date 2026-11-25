@@ -10,7 +10,7 @@ namespace Cubeland;
 public static partial class Blocks
 {
 	// the tables, in the order they're read (the same as the web version, and the order they come in the file)
-	public static readonly string[] RowTables = { "BASE", "KILN", "TORCHES", "WATER", "LYING_LOGS", "SNOW", "TOOLS", "DEEP_STONE", "SOILS", "GRAIN", "COLOURS", "METALS", "DEEP_ORES", "FOUNDRY", "GEAR", "FLOWERS", "WOODS" };
+	public static readonly string[] RowTables = { "BASE", "KILN", "TORCHES", "WATER", "LYING_LOGS", "SNOW", "TOOLS", "DEEP_STONE", "SOILS", "GRAIN", "COLOURS", "METALS", "DEEP_ORES", "FOUNDRY", "GEAR", "FLOWERS", "WOODS", "CROPS", "FENCES" };
 	// every table in the file, in its order there (the row tables, then the doors as they stand, the snow-logged blocks and the
 	// pieces and shapes)
 	public static readonly string[] FileTables = RowTables.Concat(new[] { "DOORS", "SNOWY", "FORMS" }).ToArray();
@@ -37,6 +37,8 @@ public static partial class Blocks
 		Armor = r.armor ?? -1, Pack = r.pack, Belt = r.belt, BeltTools = r.tools,
 		Needs = r.needs, Sound = r.sound, Shovel = r.shovel == true, Leaves = r.leaves == true, Inventory = r.inventory == true, Look = r.look,
 		Food = r.food, Tool = r.tool, Material = r.material, Damage = r.damage, Log = r.log, Grows = r.grows, Sand = r.sand,
+		Crop = r.crop, Stage = r.stage, Top = r.top,
+		Bag = r.bag, Full = r.full != null ? pics(new[] { r.full })[0] : -1,
 	};
 	// the key a row goes by: DataKeys' rules, from the block it makes (a flat block is "#placed" when its drop is the item of the
 	// same name). A key two rows share can't be pointed at (-1).
@@ -57,10 +59,11 @@ public static partial class Blocks
 	public static int KeyRef(Dictionary<string, int> keys, string key, string who) => key == null ? 0
 		: keys.TryGetValue(key, out int id) ? id >= 0 ? id : throw new InvalidOperationException($"data/blocks.json: {who} names \"{key}\", which more than one block is")
 		: throw new InvalidOperationException($"data/blocks.json: {who} names \"{key}\", which no block is");
-	// the other blocks a row names: drop, places, handDrop [thing, fewest, most], dye, fruit
+	// the other blocks a row names: drop, places, handDrop [thing, fewest, most], dye, fruit, sapling, plants, returns, of (a fence's planks)
 	public static void RowRefs(BlockDef b, BlockRow r, Dictionary<string, int> keys)
 	{
 		b.Drop = RowRef(keys, r.drop, r); b.Places = RowRef(keys, r.places, r); b.Dye = RowRef(keys, r.dye, r); b.Fruit = RowRef(keys, r.fruit, r); b.Sapling = RowRef(keys, r.sapling, r);
+		b.Plants = RowRef(keys, r.plants, r); b.Returns = RowRef(keys, r.returns, r); if (r.of != null) b.Of = RowRef(keys, r.of, r);
 		b.HandDrop = r.handDrop == null ? null : r.handDrop.Length == 3 && r.handDrop[0].ValueKind == JsonValueKind.String
 			? new[] { RowRef(keys, r.handDrop[0].GetString(), r), r.handDrop[1].GetInt32(), r.handDrop[2].GetInt32() }
 			: throw new InvalidOperationException($"data/blocks.json: block {r.id} ({r.name}) has a handDrop that isn't [thing, fewest, most]");
@@ -102,16 +105,32 @@ public static partial class Blocks
 	// the way a door's front faces (the Kiln's numbers: 0 +z, 1 +x, 2 -z, 3 -x), and its right as you look at its front
 	public static (int x, int z) DoorFront(int facing) => facing switch { 0 => (0, 1), 1 => (1, 0), 2 => (0, -1), _ => (-1, 0) };
 	public static (int x, int z) DoorRight(int facing) { var (fx, fz) = DoorFront(facing); return (fz, -fx); }
-	// a door's panel in its block: 4 pixels thick. Closed, across the middle of the block; open, lying against its hinge side
-	// (hinge 0: on the left as you look at its front, the -right side; 1: the +right side), the whole depth of the block
+	// A door's panel, 4 pixels thick, in its block (x and z): its pose is where its hinge edge is (pivot: the middle of the panel's
+	// thickness), the way it reaches from there to its free edge (w) and the way its front faces (n). Shut, it stands across the
+	// middle of the block. Open, it's the shut panel turned a quarter about its hinge pin (DoorHinge: the hinge-side corner of
+	// its back face), away from its front: it lies against its hinge side and reaches 10/16 of a block out of the back of its
+	// block, into whatever is there. (hinge 0: on the left as you look at its front, the -right side; 1: the +right side.
+	// The same as the web version.)
+	public const float DoorHalfThick = 0.125f;
+	public static Godot.Vector2 DoorSide(int facing, int hinge) { var (rx, rz) = DoorRight(facing); return hinge == 0 ? new(-rx, -rz) : new(rx, rz); }
+	public static Godot.Vector2 DoorHinge(int facing, int hinge)
+	{
+		var (fx, fz) = DoorFront(facing);
+		return new Godot.Vector2(0.5f, 0.5f) + DoorSide(facing, hinge) * 0.5f - new Godot.Vector2(fx, fz) * DoorHalfThick;
+	}
+	public static (Godot.Vector2 pivot, Godot.Vector2 w, Godot.Vector2 n) DoorPose(int facing, int hinge, bool open)
+	{
+		var (fx, fz) = DoorFront(facing); Godot.Vector2 f = new(fx, fz), side = DoorSide(facing, hinge), c = new(0.5f, 0.5f);
+		return open ? (c + side * (0.5f - DoorHalfThick) - f * DoorHalfThick, -f, -side) : (c + side * 0.5f, -side, f);
+	}
+	// its box: around the panel, the block's full height (open, it reaches out of the block's back)
 	public static float[] DoorBox(int facing, int hinge, bool open)
 	{
-		var (fx, _) = DoorFront(facing);
-		if (!open) return fx == 0 ? new[] { 0, 0, 0.375f, 1, 1, 0.625f } : new[] { 0.375f, 0, 0, 0.625f, 1, 1 };
-		var (rx, rz) = DoorRight(facing);
-		int sx = hinge == 0 ? -rx : rx, sz = hinge == 0 ? -rz : rz;   // (the side the hinge is on)
-		return sx < 0 ? new[] { 0, 0, 0, 0.25f, 1, 1 } : sx > 0 ? new[] { 0.75f, 0, 0, 1, 1, 1 }
-			: sz < 0 ? new[] { 0, 0, 0, 1, 1, 0.25f } : new[] { 0, 0, 0.75f, 1, 1, 1 };
+		var (p, w, n) = DoorPose(facing, hinge, open);
+		float x0 = float.MaxValue, z0 = float.MaxValue, x1 = float.MinValue, z1 = float.MinValue;
+		foreach (var q in new[] { p + n * DoorHalfThick, p - n * DoorHalfThick, p + w + n * DoorHalfThick, p + w - n * DoorHalfThick })
+		{ x0 = Math.Min(x0, q.X); z0 = Math.Min(z0, q.Y); x1 = Math.Max(x1, q.X); z1 = Math.Max(z1, q.Y); }
+		return new[] { x0, 0, z0, x1, 1, z1 };
 	}
 	// a FORMS row's item id for one form (piece, slab, ...)
 	public static int FormRowId(FormRow r, string form) => typeof(FormRow).GetField(form)?.GetValue(r) is int v ? v

@@ -20,7 +20,23 @@ public class ChunkMesher
 		new() { Dir = new[] { 0, 0, -1 }, Shade = 0.65f, C = new[] { new[] { 1,0,0,0,0 }, new[] { 0,0,0,1,0 }, new[] { 1,1,0,0,1 }, new[] { 0,1,0,1,1 } } },
 		new() { Dir = new[] { 0, 0,  1 }, Shade = 0.65f, C = new[] { new[] { 0,0,1,0,0 }, new[] { 1,0,1,1,0 }, new[] { 0,1,1,0,1 }, new[] { 1,1,1,1,1 } } },
 	};
-	static readonly float[] AoLevels = { 0.25f, 0.45f, 0.6f, 1.0f };
+	// Corner shadows: how bright a face's corner is with 3 (or 2 at the sides), 2, 1 or no blocks round it in front of the face.
+	// The darkest is 0.4 (it was 0.25); the others are the old levels (0.25, 0.45, 0.6, 1) with every corner's shadow
+	// (1 - level) shrunk by the same amount, so they still step evenly: 0.4, 0.56, 0.68, 1. (The same as the web
+	// version's AO_DARKEST and AO_LEVELS.) (test: --aodarkest=N draws with another darkest level, to compare pictures)
+	public const float AoDarkest = 0.4f;
+	static readonly float[] AoLevels = AoLevelsFor(TestAoDarkest() ?? AoDarkest);
+	public static float[] AoLevelsFor(float darkest)
+	{
+		float k = (1 - darkest) / 0.75f;
+		return new[] { 1 - 0.75f * k, 1 - 0.55f * k, 1 - 0.4f * k, 1f };
+	}
+	static float? TestAoDarkest()
+	{
+		foreach (var a in OS.GetCmdlineUserArgs())
+			if (a.StartsWith("--aodarkest=") && float.TryParse(a[12..], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float d)) return d;
+		return null;
+	}
 
 	public class Part
 	{
@@ -96,11 +112,12 @@ public class ChunkMesher
 				continue;
 			}
 			if (b.Shape == "plant") { AddPlant(x, y, z, b, P, anyLight, sky); continue; }
+			if (b.Shape == "fence") { AddFence(x, y, z, b, P, anyLight, sky); continue; }
 			if (b.Liquid) { AddWater(x, y, z, id, Wt, anyLight, sky); continue; }
-			if (Blocks.IsPieces(id)) { AddPieces(x, y, z, P, anyLight, sky); if (id == Blocks.SnowyPieces) AddSnowUnder(x, y, z, P, anyLight, sky); continue; }
+			if (Blocks.IsPieces(id)) { AddPieces(x, y, z, P, anyLight, sky, TintAt); if (id == Blocks.SnowyPieces) AddSnowUnder(x, y, z, P, anyLight, sky); continue; }
 			if (b.Shape == "half")   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top; in snow, the snow is all under it)
 			{
-				AddPieces(x, y, z, P, anyLight, sky, new[] { id, id, 0, 0, id, id, 0, 0 });
+				AddPieces(x, y, z, P, anyLight, sky, TintAt, new[] { id, id, 0, 0, id, id, 0, 0 });
 				if (Blocks.Plain(id) == Blocks.Cutter) AddSaw(x, y, z, P, anyLight, sky);
 				continue;
 			}
@@ -225,13 +242,8 @@ public class ChunkMesher
 	// free edge (w), and the way its front faces (n). Its big faces show its picture with the picture's left edge at the hinge
 	// (so a door hinged on the right is mirrored, and its back is the mirror of its front); its edges show the planks ----
 	public static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> Swinging = new();   // (doors Main draws while they swing)
-	public static (Vector2 pivot, Vector2 w, Vector2 n) DoorPose(int facing, int hinge, bool open)
-	{
-		var (fx, fz) = Blocks.DoorFront(facing); var (rx, rz) = Blocks.DoorRight(facing);
-		Vector2 f = new(fx, fz), side = hinge == 0 ? new Vector2(-rx, -rz) : new Vector2(rx, rz), c = new(0.5f, 0.5f);
-		// shut: across the middle of the block; open: lying against its hinge side, its hinge at the front
-		return open ? (c + side * 0.375f + f * 0.5f, -f, -side) : (c + side * 0.5f, -side, f);
-	}
+	// (shut: across the middle of the block; open: turned a quarter about its hinge pin, reaching out of the block's back: see Blocks.DoorPose)
+	public static (Vector2 pivot, Vector2 w, Vector2 n) DoorPose(int facing, int hinge, bool open) => Blocks.DoorPose(facing, hinge, open);
 	public static void DoorPanel(Part P, BlockDef b, Vector3 at, Vector2 pivot, Vector2 w, Vector2 n, float light, float sky)
 	{
 		const float T = 0.125f;   // (half its thickness)
@@ -251,6 +263,50 @@ public class ChunkMesher
 			Quad(Pt(u, 0, -T), Pt(u, 0, T), Pt(u, 1, -T), Pt(u, 1, T), edge, new(lo, 0), new(hi, 0), new(lo, 1), new(hi, 1), 0.7f);
 		foreach (float y in new[] { 0f, 1f })   // its top and bottom
 			Quad(Pt(0, y, -T), Pt(1, y, -T), Pt(0, y, T), Pt(1, y, T), edge, new(0, lo), new(1, lo), new(0, hi), new(1, hi), y > 0 ? 1 : 0.6f);
+	}
+	// ---- a fence (see Blocks.FenceBoxes): its post and rails, each face showing the planks by its place in the block (so the
+	// grain lines up with the planks'), in the block's own light, with no corner shadows. Faces nothing could see are left out:
+	// a rail's end against the post, a rail's far end against what it joins, the post's top and bottom against whole blocks ----
+	void AddFence(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky)
+	{
+		int mask = Blocks.FenceMask(W.GetBlock, x, y, z);
+		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, sk = W.SkyExposure(x, y, z, sky);
+		bool Whole(int n) => n != 0 && Blocks.B[n] is { Shape: null, Transparent: false, Liquid: false };
+		bool coverUp = Whole(W.GetBlock(x, y + 1, z)), coverDown = Whole(W.GetBlock(x, y - 1, z));
+		var boxes = Blocks.FenceBoxes(mask, false);
+		for (int k = 0; k < boxes.Count; k++)
+		{
+			var bx = boxes[k];
+			for (int fi = 0; fi < 6; fi++)
+			{
+				var f = Faces[fi];
+				if (k == 0 ? (f.Dir[1] > 0 && coverUp) || (f.Dir[1] < 0 && coverDown) : RailHidden(bx, f.Dir, x, y, z)) continue;
+				FenceFace(P, b, new Vector3(x, y, z), bx, fi, light, sk);
+			}
+		}
+	}
+	bool RailHidden(float[] bx, int[] d, int x, int y, int z)
+	{   // (against the post, or at the block's edge against another fence or a whole block)
+		bool alongX = bx[3] - bx[0] > bx[5] - bx[2];
+		if (d[1] != 0 || (alongX ? d[0] == 0 : d[2] == 0)) return false;   // (only its two ends can be hidden)
+		float at =d[0] > 0 ? bx[3] : d[0] < 0 ? bx[0] : d[2] > 0 ? bx[5] : bx[2];
+		if (at > 0.01f && at < 0.99f) return true;   // (its end inside the post)
+		int n = W.GetBlock(x + d[0], y, z + d[2]);
+		return Blocks.IsFence(n) || (n != 0 && Blocks.B[n] is { Shape: null, Transparent: false, Liquid: false });
+	}
+	public static void FenceFace(Part P, BlockDef b, Vector3 at, float[] bx, int fi, float light, float sky)
+	{
+		var f = Faces[fi]; var fu = FaceUv[fi];
+		int tile = f.Dir[1] > 0 ? b.T[1] : f.Dir[1] < 0 ? b.T[2] : b.T[0], bas = P.Pos.Count;
+		var lp = new float[3];
+		for (int i = 0; i < 4; i++)
+		{
+			var c = f.C[i];
+			lp[0] = c[0] != 0 ? bx[3] : bx[0]; lp[1] = c[1] != 0 ? bx[4] : bx[1]; lp[2] = c[2] != 0 ? bx[5] : bx[2];
+			float u = fu[0].flip ? 1 - lp[fu[0].axis] : lp[fu[0].axis], v = fu[1].flip ? 1 - lp[fu[1].axis] : lp[fu[1].axis];
+			P.V(at.X + lp[0], at.Y + lp[1], at.Z + lp[2], Atlas.UV(tile, u, v), f.Shade, light, sky);
+		}
+		P.Quad(bas);
 	}
 	// something lying flat on the ground (a rock): its picture just above the block under it, turned a random way
 	void AddFlat(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky, float lift = 0)
@@ -316,12 +372,31 @@ public class ChunkMesher
 		}
 		return r;
 	}
-	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky, int[] a = null)
+	// the biome tint at a corner that may be half-way between blocks: the average of the 4 whole-number corners round it
+	static Color CornerTint(Func<int, int, Color> tintAt, float px, float pz)
+	{
+		int x0 = (int)MathF.Floor(px), x1 = (int)MathF.Ceiling(px), z0 = (int)MathF.Floor(pz), z1 = (int)MathF.Ceiling(pz);
+		Color a = tintAt(x0, z0), b = tintAt(x1, z0), c = tintAt(x0, z1), d = tintAt(x1, z1);
+		return new Color((a.R + b.R + c.R + d.R) / 4, (a.G + b.G + c.G + d.G) / 4, (a.B + b.B + c.B + d.B) / 4);
+	}
+	// is half-cell (X, Y, Z) filled with something you can't see through (part of a whole block, or a piece)? (corner shadows)
+	int OccHalf(int X, int Y, int Z) { int b = W.SubBlock(X, Y, Z); return b != 0 && !Blocks.B[b].Transparent ? 1 : 0; }
+	// A pieces space's faces are lit the way whole blocks' faces are, at half-block size: each corner is shaded by the 3 half-cells
+	// touching it in front of the face, and takes the torch and sky light of the open ones (each by the block it's in) and of the
+	// half-cell in front, averaged. Grass and leaves take the biome tint. (The same as the web version.)
+	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky, Func<int, int, Color> tintAt, int[] a = null)
 	{
 		bool given = a != null;
 		if (a == null && !W.PieceMap.TryGetValue(World.Idx(x, y, z), out a)) return;
 		float depth = 0.75f + 0.25f * Math.Min(1, y / 20f);
-		var lp = new float[3];
+		var lp = new float[3]; var hp = new int[3]; var ao = new int[4]; var white = new Color(1, 1, 1);
+		float sum = 0, skySum = 0; int cnt = 0;
+		void LightFrom(int hx, int hy, int hz)
+		{
+			int bx = World.FloorDiv(hx, 2), by = World.FloorDiv(hy, 2), bz = World.FloorDiv(hz, 2);
+			if (anyLight) sum += W.LightAt(bx, by, bz);
+			skySum += W.SkyExposure(bx, by, bz, sky); cnt++;
+		}
 		bool cut = !given;   // (a pieces space: its faces use the cut-shape pictures)
 		// does spot s2 show its face fi? (something see-through, and not the same block, in front of it)
 		bool Shows(int s2, int fi)
@@ -360,15 +435,32 @@ public class ChunkMesher
 					}
 					tile = Atlas.ShapeTile(tile, mask);
 				}
-				int fx = World.FloorDiv(X + f.Dir[0], 2), fy = World.FloorDiv(Y + f.Dir[1], 2), fz = World.FloorDiv(Z + f.Dir[2], 2);
-				float light = anyLight ? World.LightCurve(W.LightAt(fx, fy, fz)) : 0, s2 = W.SkyExposure(fx, fy, fz, sky);
-				foreach (var c in f.C)
+				int na = f.Dir[0] != 0 ? 0 : f.Dir[1] != 0 ? 1 : 2, ta = na == 0 ? 1 : 0, tb = na == 2 ? 1 : 2;
+				bool tinted = Blocks.TakesBiomeTint(id);
+				for (int i = 0; i < 4; i++)
 				{
+					var c = f.C[i];
+					// the 3 half-cells touching this corner, in front of the face (corner shadows)
+					int sa = c[ta] != 0 ? 1 : -1, sb = c[tb] != 0 ? 1 : -1;
+					int FX = X + f.Dir[0], FY = Y + f.Dir[1], FZ = Z + f.Dir[2];
+					hp[0] = FX; hp[1] = FY; hp[2] = FZ;
+					hp[ta] += sa; int s1 = OccHalf(hp[0], hp[1], hp[2]);
+					hp[tb] += sb; int s3 = OccHalf(hp[0], hp[1], hp[2]);
+					hp[ta] -= sa; int s2 = OccHalf(hp[0], hp[1], hp[2]);
+					ao[i] = s1 == 1 && s2 == 1 ? 0 : 3 - (s1 + s2 + s3);
+					// the light: in front, then each open one of them (in the order: beside along ta, diagonal, beside along tb)
+					sum = skySum = 0; cnt = 0; LightFrom(FX, FY, FZ);
+					hp[0] = FX; hp[1] = FY; hp[2] = FZ; hp[ta] += sa;
+					if (s1 == 0) LightFrom(hp[0], hp[1], hp[2]);
+					hp[tb] += sb; if (s3 == 0 && !(s1 == 1 && s2 == 1)) LightFrom(hp[0], hp[1], hp[2]);
+					hp[ta] -= sa; if (s2 == 0) LightFrom(hp[0], hp[1], hp[2]);
 					lp[0] = (sx + c[0]) * 0.5f; lp[1] = (sy + c[1]) * 0.5f; lp[2] = (sz + c[2]) * 0.5f;
 					float u = fu[0].flip ? 1 - lp[fu[0].axis] : lp[fu[0].axis], v = fu[1].flip ? 1 - lp[fu[1].axis] : lp[fu[1].axis];
-					P.V(x + lp[0], y + lp[1], z + lp[2], Atlas.UV(tile, u, v), f.Shade * depth, light, s2);
+					P.V(x + lp[0], y + lp[1], z + lp[2], Atlas.UV(tile, u, v), f.Shade * depth * AoLevels[ao[i]], anyLight ? World.LightCurve(sum / cnt) : 0, skySum / cnt,
+						tinted ? CornerTint(tintAt, x + lp[0], z + lp[2]) : white);
 				}
-				P.Quad(bas);
+				// pick the quad diagonal that keeps the shading smooth (as whole blocks do)
+				if (ao[0] + ao[3] > ao[1] + ao[2]) P.QuadFlipped(bas); else P.Quad(bas);
 			}
 		}
 	}

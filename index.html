@@ -604,7 +604,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.4.0"></script>
+<script src="textures.js?v=beta-0.1.5.0"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -612,7 +612,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.4.0';
+const GAME_VERSION = 'Beta 0.1.5.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -663,16 +663,23 @@ const validBiomes = b => typeof b === "number" && b >= BIOMES_MIN && b <= BIOMES
 // The land's version: which features a world grows with. 0 (or none saved) = worlds made before Beta 0.1.1.3 (they keep growing
 // exactly as they did); 1 = natural structures (Biomes worlds) and trees whose trunks go up into their leaves. (As the desktop version.)
 // 2: ores as common at every depth, in every layer of stone (see placeOres). 3 (Trees and Leaves): land 1 plus the new trees
-// (see biomeTree), without the ore spread; 4: land 3 plus the ore spread. The ore spread is held back for the Survival & light
-// update: while ORE_SPREAD_READY is false, new worlds are made as land 3. A saved world always grows with the land it was made
-// with, up to the newest one this code knows (so a land 2 world made while testing, or one from a later version, is never grown
-// differently). It must match OreSpreadReady in the desktop version. (Test: ?orespread in the address makes new worlds land 4.)
-const LAND_KNOWN = 4;
+// (see biomeTree), without the ore spread; 4: land 3 plus the ore spread. 5 and 6 (Farming & animals): land 3 and land 4, plus
+// that update's world growth (the wild crops and Dead Bushes, see 8a, and the staircases, see Staircases). Land 5 is out (Beta 0.1.5.0), so
+// what it grows must never change; land 6 is still only made in testing. While ORE_SPREAD_READY is false, new worlds are made without the ore spread;
+// while EERIE_READY is false, without lands 5 and 6 (so: land 3). A saved world always grows with the land it was made with, up to the newest one this code
+// knows (so a world made while testing, or one from a later version, is never grown differently). Both switches must match the
+// desktop version's (OreSpreadReady, EerieReady). (Test: ?orespread in the address gives new worlds the ore spread, ?eerieon the
+// staircases; ?eerieon also turns on the rare events, see Rare events.)
+const LAND_KNOWN = 6;
 const ORE_SPREAD_READY = false;
-const LAND_VERSION = ORE_SPREAD_READY || /[?&]orespread\b/.test(location.search) ? 4 : 3;   // what new worlds are made as
+const EERIE_READY = true;
+const EERIE_ON = EERIE_READY || /[?&]eerieon\b/.test(location.search);
+const LAND_VERSION = (EERIE_ON ? 5 : 3) + (ORE_SPREAD_READY || /[?&]orespread\b/.test(location.search) ? 1 : 0);   // what new worlds are made as
 const validLand = l => Math.min(LAND_KNOWN, Math.max(0, l | 0));
-const oreSpread = land => land === 2 || land >= 4;   // (lands with the ore spread)
-const newTrees = land => land >= 3;                  // (lands with the Trees and Leaves trees)
+const oreSpread = land => land === 2 || land === 4 || land === 6;   // (lands with the ore spread)
+const newTrees = land => land >= 3;                                 // (lands with the Trees and Leaves trees)
+const hasStairs = land => land >= 5;                                // (lands with the staircases)
+const wildCrops = land => land >= 5;                                // (lands with crops growing wild, and Dead Bushes, in Biomes worlds)
 const Worlds = (() => {
   const LIST_KEY = 'cubeland-worlds', LAST_KEY = 'cubeland-last-world';
   let list = [];
@@ -707,7 +714,8 @@ const Worlds = (() => {
   try { joined = JSON.parse(sessionStorage.getItem('cubeland-join')); } catch (e) {}
   let current;
   if (joinCode && joined && joined.code === joinCode && isFinite(joined.seed)) {
-    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, s: joined.s, b: joined.b, land: joined.land, mode: joined.mode, temp: true, code: joinCode };
+    current = { id: 'join-' + joinCode, name: `${joined.host}'s world`, seed: joined.seed | 0, gen: joined.gen || 1, h: joined.h, s: joined.s, b: joined.b, land: joined.land, mode: joined.mode, temp: true, code: joinCode,
+      ...(joined.os === 1 && Array.isArray(joined.osSkip) ? { os: 1, osSkip: joined.osSkip } : {}) };   // (os, osSkip: see step 9 of the world's growth)
   } else if (list.some(w => w.id === want)) {
     current = list.find(w => w.id === want);
     current.played = Date.now(); saveList();
@@ -748,6 +756,7 @@ const Worlds = (() => {
       if (info.s != null) w.s = validSize(info.s, w.h);
       if (info.b != null) w.b = validBiomes(info.b);
       if (info.land != null) w.land = validLand(info.land);
+      if (info.os === 1 && Array.isArray(info.osSkip)) { w.os = 1; w.osSkip = [...new Set(info.osSkip.filter(v => Number.isInteger(v) && v >= 0))].sort((a, b) => a - b); }   // (see step 9 of the world's growth)
       if (typeof info.ver === 'string') w.ver = info.ver.slice(0, 32);
       if (data) await tx('readwrite', st => st.put(data, w.id));
       list.push(w); saveList();
@@ -764,6 +773,8 @@ const Worlds = (() => {
     },
     // ver = the newest game version that has saved this world (so older versions can warn before opening it)
     touch() { if (current.temp || current.menu) return; current.played = Date.now(); if (compareVersions(GAME_VERSION, current.ver) > 0) current.ver = GAME_VERSION; saveList(); },
+    // (fields settled about the open world, kept in its record: see settleOldStairs)
+    mark(fields) { if (current.temp || current.menu) return; Object.assign(current, fields); saveList(); },
   };
 })();
 
@@ -874,10 +885,10 @@ const WILLOW_LOG = 20, WILLOW_LEAVES = 21, WILLOW_PLANKS = 59, STRIPPED_WILLOW_L
 // the desert's building stone (made from Sandstone), and the swamp's ground: Mud (fired into Mud Bricks) and Peat (a long-burning fuel)
 const SANDSTONE_BRICKS = 162, CHISELED_SANDSTONE = 199, SMOOTH_SANDSTONE = 202, MUD = 203, MUD_BRICKS = 204, PEAT = 205;
 const DATES = 705;   // food, from Palm Leaves
-// These blocks are numbered where 100 + b and 1000 + b would clash with other things (and Sandstone too): their piece, slab, stairs...
-// items are 2000 + 7 x (the block's place in this list) + the form, like the deep stone sets (see formItem). (Only ever add to the end of this list.)
+// These blocks are numbered where 100 + b and 1000 + b would clash with other things (and Sandstone, 97, and Ice, 99, too): their piece,
+// slab, stairs... items are 2000 + 7 x (the block's place in this list) + the form, like the deep stone sets (see formItem). (Only ever add to the end of this list.)
 const EXTRA_FORM_ITEM = 2000, EXTRA_FORM_BLOCKS = [97, PALM_LOG, PALM_LEAVES, PALM_PLANKS, STRIPPED_PALM_LOG, WILLOW_LOG, WILLOW_LEAVES, WILLOW_PLANKS, STRIPPED_WILLOW_LOG,
-  SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT];
+  SANDSTONE_BRICKS, CHISELED_SANDSTONE, SMOOTH_SANDSTONE, MUD, MUD_BRICKS, PEAT, 99];
 const isLeaves = b => !!(BLOCKS[b] && BLOCKS[b].leaves);
 // The blocks and items are in data/blocks.json, a table for the ones written out one by one (BASE) and one for each family
 // (the Kiln, water, the coloured blocks...: what each field means is in the file's notes), each loaded where its family is below.
@@ -903,10 +914,11 @@ function rowIdFor(k, by) {
 }
 function addBlockRows(rows) {
   for (const row of rows) {
-    const { id, name, pictures, icon, ...r } = row;
+    const { id, name, pictures, icon, full, ...r } = row;
     if (BLOCKS[id]) throw new Error(`The game's data (data/blocks.json) has block ${id} twice`);
     BLOCKS[id] = { name, t: typeof pictures === 'string' ? P3(pictures) : P(...pictures), ...r };
     if (icon !== undefined) BLOCKS[id].icon = tile(icon);
+    if (full !== undefined) BLOCKS[id].full = tile(full);   // (a Linen Bag's picture while it holds something)
     blockRows.set(id, row);
   }
   rowIds = new Map();
@@ -948,7 +960,8 @@ const BURN_TIMES = NUMBERS.BURN_TIMES;   // [[900, 1500], [300, 600]]
 const burnTime = burn => { const [lo, hi] = BURN_TIMES[burn]; return lo + Math.random() * (hi - lo); };
 const torchBurn = new Map();   // world index of a lit or smoldering torch spot -> seconds until it burns down a stage
 // farming (Till & Tend, see farmChanged)
-const crops = new Map();      // world index of growing (not yet ripe) Grain -> lucky ticks it has had in this stage (see stageChance)
+const crops = new Map();      // world index of a growing (not yet ripe) crop -> lucky ticks it has had in this stage (see stageChance)
+const vines = new Map();      // world index of a grown Cantaloupe vine -> lucky ticks towards its next melon
 const saplings = new Map();   // world index of a sapling -> lucky ticks it has had (see Saplings)
 const grown = new Set();      // the blocks saplings grew into trees: saved like your changes, but natural, not put there by you (see isNatural)
 const soils = new Set();      // world index of every tilled / fertilized soil block
@@ -1041,8 +1054,28 @@ const FARM = NUMBERS.FARM;   // stageTime 40, stageHits 3, dryRate 0.5, fertRate
 const LEATHER = 627, RAW_MEAT = 628, COOKED_MEAT = 629;
 addBlockRows(BLOCK_DATA.SOILS);   // (soilId below)
 addBlockRows(BLOCK_DATA.GRAIN);   // (GRAIN_STAGES[stage])
+// ---- Farming & animals: the other crops (data/blocks.json CROPS, numbers.json CROPS) ----
+// Potatoes, Turnips, Flax, Corn and the Cantaloupe vine, 4 stages each (0-3). A row's crop and stage say which it is; Corn is
+// two blocks tall from stage 2 (its upper block's row says top). They grow like Grain: FARM's rates and lucky ticks, each
+// crop with its own stageTime (and the Turnip its own dryRate: dry soil doesn't slow it), and only on tilled soil, so the
+// wild ones the world grows (ripe, on Grass) never grow. A seed's row says which crop it plants (plants). Breaking an unripe
+// crop gives its drop (the seed back); a ripe one, its harvest (numbers.json). Stage 3 of the vine is a grown vine: it never
+// ripens, and now and then grows a Cantaloupe on free ground beside it (one at a time), which breaks into slices. (The same
+// as the desktop version.)
+// (Their rows load after the woods': see CROPS below.)
+const CROP = NUMBERS.CROPS || {};   // crop -> { stageTime, harvest: [[thing, fewest, most]...], dryRate?, melonTime? }
+const CROP_STAGES = {}, CORN_TOP = [];   // crop -> its stages' ids (the bottom block, for Corn); Corn's top block, by stage
+const CROP_HARVEST = {};   // crop -> its harvest with ids: [[id, fewest, most], ...]
+const CROP_RIPE = 3;
 const isSoil = id => !!(BLOCKS[id] && BLOCKS[id].soil);
-const isCrop = id => id >= GRAIN_STAGES[0] && id <= GRAIN_RIPE;
+const isGrain = id => id >= GRAIN_STAGES[0] && id <= GRAIN_RIPE;
+const isCrop = id => isGrain(id) || !!(BLOCKS[id] && BLOCKS[id].crop);
+const cropOf = id => isGrain(id) ? 'grain' : BLOCKS[id] && BLOCKS[id].crop;
+// ripe, to be harvested (Grain's last stage; the others' stage 3, but not the vine, which makes melons instead)
+const isRipeCrop = id => id === GRAIN_RIPE || !!(BLOCKS[id] && BLOCKS[id].crop && BLOCKS[id].crop !== 'cantaloupe' && BLOCKS[id].stage === CROP_RIPE && !BLOCKS[id].top);
+// still growing: gets lucky ticks (not ripe, not a grown vine, not Corn's top, which just follows its bottom)
+const isGrowingCrop = id => isGrain(id) ? id !== GRAIN_RIPE : !!(BLOCKS[id] && BLOCKS[id].crop && !BLOCKS[id].top && BLOCKS[id].stage < CROP_RIPE);
+const isGrownVine = id => !!(BLOCKS[id] && BLOCKS[id].crop === 'cantaloupe' && BLOCKS[id].stage === CROP_RIPE);
 // the soil block with this wetness and fertilizer
 const soilId = (wet, fert) => TILLED + (wet ? 1 : 0) + (fert ? 2 : 0);
 // ---- Colours (Brick & Bloom): 12 colours, each with a Terracotta, a Chiseled Terracotta, Bricks and a Dye ----
@@ -1106,14 +1139,28 @@ addBlockRows(BLOCK_DATA.FLOWERS);   // (dye: the Dye each one makes)
 addBlockRows(BLOCK_DATA.WOODS);   // Trees and Leaves: the fruit, the new woods, the Dead Log, the door items and the saplings
 // leaves name their sapling, which can come later in the file (BASE's leaves: WOODS' saplings), so it's looked up once they're all in
 for (const r of blockRows.values()) if (r.sapling !== undefined) BLOCKS[r.id].sapling = rowIdFor(r.sapling, r.id);
+// the crops (data/blocks.json CROPS: see Farming & animals' crops, by Grain above)
+addBlockRows(BLOCK_DATA.CROPS || []);
+for (const r of BLOCK_DATA.CROPS || []) { if (r.top) CORN_TOP[r.stage] = r.id; else (CROP_STAGES[r.crop] = CROP_STAGES[r.crop] || [])[r.stage] = r.id; }
+for (const c in CROP) CROP_HARVEST[c] = (CROP[c].harvest || []).map(([k, lo, hi]) => [rowIdFor(k, 'numbers.json CROPS'), lo, hi]);
+// Fences (data/blocks.json FENCES), one for each wood: a post, with two rails to each neighbour it joins (another fence, a
+// door, or a whole solid block you can't see through), worked out when it's drawn. You can't jump one (it's 1.5 blocks
+// tall to you) and animals can't hop one; a door in a fence line is its gate. Its faces are its planks' (of). See addFence.
+addBlockRows(BLOCK_DATA.FENCES || []);
+const isFence = id => !!(BLOCKS[id] && BLOCKS[id].shape === 'fence');
+// seeds (and a Potato or Turnip) name the crop they plant, and a food can name what's left in your hand after eating it
+// (a Jug of Milk: the Clay Jug); looked up now that the crops are in
+for (const r of blockRows.values()) for (const f of ['plants', 'returns']) if (r[f] !== undefined) BLOCKS[r.id][f] = rowIdFor(r[f], r.id);
 // The doors as they stand (data/blocks.json DOORS): each door's 32 states are first + facing x 8 + hinge x 4 + open x 2 + half
 // (facing: the Kiln's numbers, the way its front faces; hinge 0 = on the left as you look at its front; half 0 = the bottom).
-// Shut, it's 4px thick in the middle of its space; open, it lies against its hinge side. Its edges look like its planks, and its
-// big faces show <the door>_bottom / _top (see doorFaces). (The same as the desktop version.)
+// Shut, it's 4px thick in the middle of its space; open, it has swung a quarter turn about its hinge (see doorPose), so it lies
+// along its hinge side and reaches 10/16 out of the back of its space, into the space behind (whatever's there). Its box (aimed
+// at, and walked into) is the whole panel, so an open door's box pokes out of its own space. Its edges look like its planks, and
+// its big faces show <the door>_bottom / _top (see doorFaces). (The same as the desktop version.)
 const DOOR_SHUT_BOX = [[0, 0, 0.375, 1, 1, 0.625], [0.375, 0, 0, 0.625, 1, 1]];   // facing 0 and 2, facing 1 and 3
 const DOOR_OPEN_BOX = [   // [facing][hinge]
-  [[0, 0, 0, 0.25, 1, 1], [0.75, 0, 0, 1, 1, 1]], [[0, 0, 0.75, 1, 1, 1], [0, 0, 0, 1, 1, 0.25]],
-  [[0.75, 0, 0, 1, 1, 1], [0, 0, 0, 0.25, 1, 1]], [[0, 0, 0, 1, 1, 0.25], [0, 0, 0.75, 1, 1, 1]]];
+  [[0, 0, -0.625, 0.25, 1, 0.375], [0.75, 0, -0.625, 1, 1, 0.375]], [[-0.625, 0, 0.75, 0.375, 1, 1], [-0.625, 0, 0, 0.375, 1, 0.25]],
+  [[0.75, 0, 0.625, 1, 1, 1.625], [0, 0, 0.625, 0.25, 1, 1.625]], [[0.625, 0, 0, 1.625, 1, 0.25], [0.625, 0, 0.75, 1.625, 1, 1]]];
 function doorRows(rows) {
   return rows.flatMap(r => {
     const item = blockRows.get(r.item), planks = blockRows.get(rowIdFor(r.of, 'DOORS')), key = keySlug(item.name);
@@ -1139,7 +1186,8 @@ const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // (Which blocks: data/blocks.json's needs, axe or pickaxe, and shovel, the soil family.)
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
 const holding = kind => !!(BLOCKS[HOTBAR[act]] && BLOCKS[HOTBAR[act]].tool === kind);
-const stackMax = id => isTool(id) || isGear(id) ? 1 : STACK_MAX;
+const isBag = id => !!(BLOCKS[id] && BLOCKS[id].bag);   // (the Linen Bag: see "The Linen Bag" below)
+const stackMax = id => isTool(id) || isGear(id) || isBag(id) ? 1 : STACK_MAX;
 // ---- Pieces: every cube block can be split into 8 pieces (an eighth of a block each: half as wide, tall and deep)
 // at the Crafting Bench. Pieces are placed one at a time, and one block space can hold pieces of different blocks.
 // A space holding pieces is block 70 in the world; which block fills each of its 8 spots is kept in pieceMap.
@@ -1199,11 +1247,13 @@ const FORMS = ['piece', 'slab', 'vslab', 'stairs', 'quarter', 'vstairs', 'vquart
 const FORM_ITEMS = new Map(BLOCK_DATA.FORMS.map(r => [rowIdFor(r.of, 'FORMS'), r]));
 function formItem(form, b) { const r = FORM_ITEMS.get(b); return r ? r[form] : 0; }
 // how the older blocks' form items were numbered (the datacheck holds their rows to it; the Trees and Leaves woods' are at
-// their wood's first id + 10, 20, 30 or 40 for the log, stripped log, planks and leaves)
+// their wood's first id + 10, 20, 30 or 40 for the log, stripped log, planks and leaves; the Linen Cloths', 3740-3752, are at
+// 3800 + 7 x (the cloth's place) + the form)
 function formSum(form, b) {
   const i = DEEP_BLOCKS.indexOf(b);
   const e = EXTRA_FORM_BLOCKS.indexOf(b);
   if (b >= 2200 && b < 3400) return b - b % 100 + 10 * (b % 100 + 1) + FORMS.indexOf(form);
+  if (b >= 3740 && b <= 3752) return 3800 + 7 * (b - 3740) + FORMS.indexOf(form);
   return i >= 0 ? DEEP_FORM_ITEM + 7 * i + FORMS.indexOf(form) : e >= 0 ? EXTRA_FORM_ITEM + 7 * e + FORMS.indexOf(form)
     : (form === 'piece' ? PIECE_ITEM : SHAPE_ITEM[form]) + b;
 }
@@ -1245,8 +1295,8 @@ const formOf = id => BLOCKS[id] && BLOCKS[id].form;
 //   made from another block: snowy:<key> (snowlogged), piece:<key>, slab: vslab: stairs: vstairs: quarter: vquarter:<key>
 //   one of several states of a block: <key>#<state>,<state>... (in this order, each only when it isn't the usual one):
 //     layer=N (deep stone, deep cobblestone, bricks, chiseled, deep ores: layers 2-8), wall=N (torches: 1-4) and count=N
-//     (2-4), facing=N (Kiln and Furnace: 1-3) and lit, level=N (water: 1-7), stage=N (Grain: always, 0-7, so the plain key
-//     is the item), layers=N (snow: 2-7), axis=N (a lying log: 1-2), look=N (Red Bricks' other looks: 1-3), placed (a
+//     (2-4), facing=N (Kiln and Furnace: 1-3) and lit, level=N (water: 1-7), stage=N (Grain and the other crops: always, so
+//     the plain key is the item), top (Corn's upper block), layers=N (snow: 2-7), axis=N (a lying log: 1-2), look=N (Red Bricks' other looks: 1-3), placed (a
 //     Rock, Clay Ball or Brick put down: the plain key is the item)
 // keyTable(): "id<TAB>key" for every id, sorted by id (test: compare it with the desktop version's --keydump).
 function blockKey(id) {
@@ -1269,6 +1319,7 @@ function keyStates(b) {
   if (b.front) { if (b.facing) s.push('facing=' + b.facing); if (b.lit) s.push('lit'); }
   if (b.level) s.push('level=' + b.level);
   if (b.stage !== undefined) s.push('stage=' + b.stage);
+  if (b.top) s.push('top');   // (Corn's upper block)
   if (b.shape === 'snow' && b.layers > 1) s.push('layers=' + b.layers);
   if (b.axis) s.push('axis=' + b.axis);
   if (b.look) s.push('look=' + b.look);
@@ -2437,6 +2488,67 @@ for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
   }
 }
 
+// --- 8a. Farming & animals (Biomes worlds from land 5): crops growing wild, in patches, then Dead Bushes here and there ---
+// Exactly as data/worldgen.json's notes say (the same maths as the desktop version, in the same order: both must grow the same
+// worlds). z goes round outside x, each row over the whole world before the next, and the Dead Bushes after all the crops. Their
+// blocks are numbered over 255, so each grows as a stand-in (see late): a crop (both of Corn's halves, the lower one first) or a
+// Dead Bush as ripe Grain, a Cantaloupe as Bricks. Later on, the structures build over the stand-in Grain as over a flower (see
+// plant there), and snow stops at it; the Bricks are a block like any other.
+const WILD_STAND = GRAIN_RIPE, MELON_STAND = idOf('bricks');
+let wildGrown = 0;   // (how many grew, for testing: window.WILD with ?worldhash)
+if (GEN === 3 && wildCrops(LAND)) {
+  const wild = (x, y, z, id, stand) => {
+    const i = idx(x, y, z);
+    raw[i] = stand; late.push(i, id, stand); wildGrown++;
+    if (y > heights[z * WX + x]) heights[z * WX + x] = y;   // (the column's height goes up to its top)
+  };
+  const biomesOf = list => new Set((list || []).map(b => BIOME_NAMES.indexOf(b)));
+  const MELON_SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]], MELON = idOf('cantaloupe');   // (+x, -x, +z, -z)
+  for (const r of WORLDGEN.WILD_CROPS || []) {
+    const ground = new Set(r.ground.map(idOf)), biomes = biomesOf(r.biomes), near = biomesOf(r.near);
+    const corn = r.crop === 'corn', melon = r.crop === 'cantaloupe', ripe = CROP_STAGES[r.crop][CROP_RIPE], top = corn ? CORN_TOP[CROP_RIPE] : 0;
+    // a column of a near biome within the square, on the map (columns outside the world aren't looked at)
+    const isNear = (x, z) => {
+      for (let dz = -r.within; dz <= r.within; dz++) for (let dx = -r.within; dx <= r.within; dx++) {
+        const cx = x + dx, cz = z + dz;
+        if (cx >= 0 && cz >= 0 && cx < WX && cz < WZ && near.has(biomeMap[cz * WX + cx])) return true;
+      }
+      return false;
+    };
+    for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
+      const bi = biomeMap[z * WX + x];
+      if (r.near ? near.has(bi) : !biomes.has(bi)) continue;
+      if (hash(x, z, r.seed) > r.chance) continue;
+      if (r.near && !isNear(x, z)) continue;
+      const n = r.tries[0] + Math.floor(hash(x, z, r.seed + 1) * (r.tries[1] - r.tries[0] + 1));
+      for (let k = 0; k < n; k++) {
+        const px = x + Math.floor((hash(x + k, z, r.seed + 2) - 0.5) * 2 * r.spread + 0.5), pz = z + Math.floor((hash(x, z + k, r.seed + 3) - 0.5) * 2 * r.spread + 0.5);
+        const h = heights[pz * WX + px];
+        if (!ground.has(raw[idx(px, h, pz)]) || raw[idx(px, h + 1, pz)] || (corn && raw[idx(px, h + 2, pz)])) continue;
+        wild(px, h + 1, pz, ripe, WILD_STAND);
+        if (corn) wild(px, h + 2, pz, top, WILD_STAND);
+        if (!melon) continue;
+        const s0 = Math.floor(hash(px, pz, r.seed + 4) * 4);   // (the melon: on the first free side, from a random one)
+        for (let t = 0; t < 4; t++) {
+          const [dx, dz] = MELON_SIDES[(s0 + t) % 4], mx = px + dx, mz = pz + dz;
+          if (raw[idx(mx, h + 1, mz)] || !ground.has(raw[idx(mx, h, mz)])) continue;
+          wild(mx, h + 1, mz, MELON, MELON_STAND); break;
+        }
+      }
+    }
+  }
+  const D = WORLDGEN.DEAD_BUSHES;
+  if (D) {
+    const ground = new Set(D.ground.map(idOf)), biomes = biomesOf(D.biomes), bush = idOf('dead_bush');
+    for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
+      if (!biomes.has(biomeMap[z * WX + x]) || hash(x, z, D.seed) > D.chance) continue;
+      const h = heights[z * WX + x];
+      if (!ground.has(raw[idx(x, h, z)]) || raw[idx(x, h + 1, z)]) continue;
+      wild(x, h + 1, z, bush, WILD_STAND);
+    }
+  }
+}
+
 // --- 8b. Natural structures (Biomes worlds from LAND 1): things the land made by itself. One try in each 64 x 64 cell, at a
 // spot picked by hash; what grows there depends on the biome. Exactly as the desktop version, so both grow the same world.
 //   Deserts and badlands: stone arches and rock spires (Sandstone, or the badlands' terracotta stripes)
@@ -2448,7 +2560,8 @@ for (let z = 8; z < WZ - 8; z++) for (let x = 8; x < WX - 8; x++) {
 const STRUCT_CELL = 64;
 const structuresBuilt = [];   // (what was built where, for testing: window.STRUCTURES with ?worldhash)
 {
-  const plant = b => b === 0 || isLeaves(b) || b === 4 || b === FIR_LOG || b === PALM_LOG || b === WILLOW_LOG || isFlower(b) || b === ROCK_BLOCK;
+  const plant = b => b === 0 || isLeaves(b) || b === 4 || b === FIR_LOG || b === PALM_LOG || b === WILLOW_LOG || isFlower(b) || b === ROCK_BLOCK
+    || b === WILD_STAND;   // (a wild crop or a Dead Bush, from land 5: see 8a)
   // the ground under a spot (under any trees, flowers or rocks; the top of the water at sea)
   const groundAt = (x, z) => { let y = heights[z * WX + x]; while (y > 0 && plant(raw[idx(x, y, z)])) y--; return y; };
   const inside = (x, z, m) => x >= m && z >= m && x < WX - m && z < WZ - m;
@@ -2627,14 +2740,12 @@ if (GEN === 3 && LAND >= 1) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX;
   }
 }
 
-// --- 9. Staircases: now and then, deep in a forest high up in the world, a short flight of stairs stands on its own ---
-// Spots are tried on a grid; the few that get a staircase are the highest, far apart. The rest are kept as places a
-// staircase could later turn up (see the staircases further down). Exactly as the desktop version, so both grow the same world.
-// The eerie update (these staircases, and the strange things further down) is held back for now: while EERIE_READY is false,
-// worlds grow without staircases and none of it happens. It must match EerieReady in the desktop version's WorldGen.cs,
-// or web and desktop grow different worlds. (Test: ?eerieon in the address turns it on anyway.)
-const EERIE_READY = false;
-const EERIE_ON = EERIE_READY || /[?&]eerieon\b/.test(location.search);
+// --- 9. Staircases (Biomes worlds from land 5): a few short flights of stairs in the highest forests ---
+// Spots are tried on a grid; the few that get a staircase are the highest, far apart. The rest are kept as spare spots (see
+// Staircases further down). Exactly as the desktop version, so both grow the same world.
+// Older Biomes worlds (lands 0-4) get them too, laid over the land they always had: the first time one is opened in this
+// version, the chunks its save had changed are noted in its record (os: 1, osSkip: their indices), and no spot within 2 chunks
+// of one is used (stairSkipped), so they never stand by anything built. Nothing else about the old land changes.
 const STAIR_MIN_UP = 6;   // how far above the sea the ground must be at least (they go on the highest forest ground there is)
 const STAIR_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const STAIR_MASKS = [0x33 | 0x88, 0x33 | 0x44, 0x33 | 0xC0, 0x33 | 0x0C];   // (the step's high half faces the way it climbs)
@@ -2667,8 +2778,37 @@ function buildStair(s, set, groundAt) {
     heights[cz * WX + cx] = Math.max(heights[cz * WX + cx], s.y + k);
   }
 }
-if (GEN === 3 && EERIE_ON) {
-  const CELL = 16;
+// (an old world: lands 0-4, once EERIE_READY is on; os: 1 once its skipped chunks are settled. Never a land 5/6 world)
+const OLD_STAIRS = GEN === 3 && !hasStairs(LAND) && EERIE_ON && !MENU_ONLY;
+// chunk indices (z / 16 * chunks across + x / 16) from a record, a save or a friend's game: whole numbers in the world only
+const stairSkipSet = list => new Set((Array.isArray(list) ? list : []).filter(v => Number.isInteger(v) && v >= 0 && v < NCX * NCZ));
+function stairSkipped(x, z, skip) {   // is any chunk within 2 chunks of the one holding (x, z) in the set?
+  if (!skip.size) return false;
+  const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
+  for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    const nx = cx + dx, nz = cz + dz;
+    if (nx >= 0 && nz >= 0 && nx < NCX && nz < NCZ && skip.has(nz * NCX + nx)) return true;
+  }
+  return false;
+}
+// the spots that may get one (none in a skipped chunk's reach), the highest first; then the few that do, far apart
+function placeStairs(cands, skip, set, groundAt) {
+  for (const s of cands) if (!stairSkipped(s.x, s.z, skip)) stairSpots.push(s);
+  stairSpots.sort((a, b) => a.y !== b.y ? b.y - a.y : a.order !== b.order ? (a.order < b.order ? -1 : 1) : a.x !== b.x ? a.x - b.x : a.z - b.z);   // (the highest first, then by hash)
+  const want = Math.floor(WX * WZ / 320000) + 1;   // (6 in a 1280 world, 2 in a 640 one)
+  const placed = [];
+  for (const s of stairSpots) {
+    if (placed.length >= want) break;
+    if (placed.some(p => Math.abs(p.x - s.x) + Math.abs(p.z - s.z) < WX / 5)) continue;   // (far apart)
+    buildStair(s, set, groundAt);
+    s.placed = true; placed.push(s);
+  }
+}
+// an old world opened for the first time in this version: its spots, and the ground under them as it grew, until its save is read
+let stairCands = null;
+const stairGround0 = new Map();
+if (GEN === 3 && (hasStairs(LAND) || OLD_STAIRS)) {
+  const CELL = 16, cands = [];
   for (let gz = 0; gz < Math.floor(WZ / CELL); gz++) for (let gx = 0; gx < Math.floor(WX / CELL); gx++) {
     const x = gx * CELL + 2 + Math.floor(hash(gx, gz, 7700) * 12), z = gz * CELL + 2 + Math.floor(hash(gx, gz, 7701) * 12);
     if (!stairForest(x, z)) continue;
@@ -2684,17 +2824,13 @@ if (GEN === 3 && EERIE_ON) {
     const s = { x, y: g + 1, z, n: 5 + Math.floor(hash(x, z, 7702) * 4), order: hash(x, z, 7705), mat: stairMat(x, z), dir: 0, placed: false };
     const d0 = Math.floor(hash(x, z, 7703) * 4); let fits = false;   // (a random way first, then the others)
     for (let t = 0; t < 4 && !fits; t++) { s.dir = (d0 + t) % 4; fits = stairFits(s, c => heights[c], (a, b, c) => raw[idx(a, b, c)]); }
-    if (fits) stairSpots.push(s);
+    if (fits) cands.push(s);
   }
-  // the highest first (the staircases stand in the world's highest forests), then by hash
-  stairSpots.sort((a, b) => a.y !== b.y ? b.y - a.y : a.order !== b.order ? (a.order < b.order ? -1 : 1) : a.x !== b.x ? a.x - b.x : a.z - b.z);
-  const want = Math.floor(WX * WZ / 320000) + 1;   // (6 in a 1280 world, 2 in a 640 one)
-  const placed = [];
-  for (const s of stairSpots) {
-    if (placed.length >= want) break;
-    if (placed.some(p => Math.abs(p.x - s.x) + Math.abs(p.z - s.z) < WX / 5)) continue;   // (far apart)
-    buildStair(s, (x, y, z, id) => { raw[idx(x, y, z)] = id; }, c => heights[c]);
-    s.placed = true; placed.push(s);
+  if (hasStairs(LAND) || Worlds.current.os === 1)
+    placeStairs(cands, stairSkipSet(hasStairs(LAND) ? [] : Worlds.current.osSkip), (x, y, z, id) => { raw[idx(x, y, z)] = id; }, c => heights[c]);
+  else {   // (not settled yet: see settleOldStairs, once the save is read)
+    stairCands = cands;
+    for (const s of cands) { const [dx, dz] = STAIR_DIRS[s.dir]; for (let k = 0; k < s.n; k++) { const c = (s.z + dz * k) * WX + s.x + dx * k; stairGround0.set(c, heights[c]); } }
   }
 }
 
@@ -2995,6 +3131,13 @@ if (/[?&]worldhash\b/.test(location.search)) {   // (testing: a fingerprint of t
   for (let k = 0; k < lateKept.length; k++) h = Math.imul(h ^ lateKept[k], 16777619) >>> 0;
   window.WORLDHASH = h.toString(16).padStart(8, '0');
   window.STRUCTURES = structuresBuilt.slice();
+  // what grew wild (crops, melons, Dead Bushes) and is still there: by key, how many and where the first is (x,y,z)
+  const wildIds = new Set([...Object.values(CROP_STAGES).flat(), ...CORN_TOP.filter(Boolean), idOf('cantaloupe'), idOf('dead_bush')]), wildKept = {};
+  for (let k = 0; k < lateKept.length; k += 2) if (wildIds.has(lateKept[k + 1])) {
+    const i = lateKept[k], w = wildKept[blockKey(lateKept[k + 1])] = wildKept[blockKey(lateKept[k + 1])] || [0, `${i % WX},${Math.floor(i / (WX * WZ))},${Math.floor(i / WX) % WZ}`];
+    w[0]++;
+  }
+  window.WILD = { grown: wildGrown, kept: Object.values(wildKept).reduce((a, [n]) => a + n, 0), byKey: wildKept };
 }
 world.load(raw); raw = null;
 for (let k = 0; k < lateKept.length; k += 2) {
@@ -3011,7 +3154,11 @@ for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
 
 // Soft shadows in corners (ambient occlusion), smoothly blended across each face.
 // index = how open the corner is: 0 = tucked into an inside corner, 3 = nothing nearby
-const AO_LEVELS = [0.25, 0.45, 0.6, 1.0];
+// The darkest is 0.4 (AO_DARKEST). The others are the first levels (0.25, 0.45, 0.6, 1) with their shadow (1 - level)
+// shrunk in step, by as much as the darkest one's: 0.4, 0.56, 0.68, 1. Exactly as the desktop version. (Test:
+// ?aodarkest=0.25 gives the first levels back, ?aodarkest=0.3333 the third used before, for comparing.)
+const AO_DARKEST = +((/[?&]aodarkest=([\d.]+)/.exec(location.search) || [])[1] || 0.4);
+const AO_LEVELS = [0.25, 0.45, 0.6, 1.0].map(l => 1 - (1 - l) * (1 - AO_DARKEST) / 0.75);
 const occ = (x, y, z) => { const b = getBlock(x, y, z); return b && !BLOCKS[b].transparent ? 1 : 0; };
 
 // ---- Torch light: flood-fills out from every torch, losing one level per block, blocked by solid blocks ----
@@ -3197,7 +3344,8 @@ function addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
 // Nudged a little off-centre at random (always the same for the same spot) so a patch doesn't look like a grid.
 function addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
   const light = anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, sky = skyExposure(x, y, z, skyCache);
-  const tile = b.t[0], ox = (hash(x, z, y + 777) - 0.5) * 0.3, oz = (hash(x, z, y + 999) - 0.5) * 0.3, r = 0.45;
+  const hy = b.top ? y - 1 : y;   // (Corn's top sits exactly over its bottom)
+  const tile = b.t[0], ox = (hash(x, z, hy + 777) - 0.5) * 0.3, oz = (hash(x, z, hy + 999) - 0.5) * 0.3, r = 0.45;
   for (const [ax, az] of [[1, 1], [1, -1]]) {
     const base = pos.length / 3;
     for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
@@ -3217,9 +3365,12 @@ const DOOR_FRONT = [[0, 1], [1, 0], [0, -1], [-1, 0]];   // the way a door's fro
 const doorRight = f => [DOOR_FRONT[f][1], -DOOR_FRONT[f][0]];   // its right, as you look at its front
 function doorPose(facing, hinge, open) {
   const [fx, fz] = DOOR_FRONT[facing], [rx, rz] = doorRight(facing), sx = hinge ? rx : -rx, sz = hinge ? rz : -rz;   // (s: its hinge side)
-  // shut: across the middle of the block; open: lying against its hinge side, its hinge at the front
-  return open ? { p: [0.5 + sx * 0.375 + fx * 0.5, 0.5 + sz * 0.375 + fz * 0.5], w: [-fx, -fz], n: [-sx, -sz] }
-    : { p: [0.5 + sx * 0.5, 0.5 + sz * 0.5], w: [-sx, -sz], n: [fx, fz] };
+  // q: its hinge pin, the hinge-side corner of its back face (p is always q + its half-thickness along n)
+  const q = [0.5 + sx * 0.5 - fx * 0.125, 0.5 + sz * 0.5 - fz * 0.125];
+  // shut: across the middle of the block; open: turned a quarter turn about q, away from its front (lying along its hinge
+  // side, from just behind the middle of its space to 10/16 past its back edge)
+  return open ? { p: [0.5 + sx * 0.375 - fx * 0.125, 0.5 + sz * 0.375 - fz * 0.125], w: [-fx, -fz], n: [-sx, -sz], q }
+    : { p: [0.5 + sx * 0.5, 0.5 + sz * 0.5], w: [-sx, -sz], n: [fx, fz], q };
 }
 function addDoor(x, y, z, b, pose, pos, uv, col, lt, sk, ind, light, sky) {
   const T = 0.125, lo = 0.5 - T, hi = 0.5 + T, { p, w, n } = pose;   // (T: half its thickness; lo-hi: the planks' middle 4 pixels, for the edges)
@@ -3234,8 +3385,48 @@ function addDoor(x, y, z, b, pose, pos, uv, col, lt, sk, ind, light, sky) {
   for (const u of [0, 1]) quad([at(u, 0, -T), at(u, 0, T), at(u, 1, -T), at(u, 1, T)], edge, [[lo, 0], [hi, 0], [lo, 1], [hi, 1]], 0.7);   // its hinge edge and free edge
   for (const v of [0, 1]) quad([at(0, v, -T), at(1, v, -T), at(0, v, T), at(1, v, T)], edge, [[0, lo], [1, lo], [0, hi], [1, hi]], v ? 1 : 0.6);   // its bottom and top
 }
-// ---- the swing (only for show): for a moment the panel turns about its hinge into its new pose, away from whoever opened it;
-// the chunk leaves that door out meanwhile ----
+// ---- Fences: a post 4/16 square, and to each side it joins, two rails 2/16 thick (6/16-9/16 and 12/16-15/16 up). It joins
+// another fence (any wood), a door (either half, open or shut: a gate) and any whole solid block you can't see through (not
+// leaves, glass, slabs, pieces, torches or plants). Its faces show its planks, by where they are in the block (so the grain
+// lines up with planks next to it), lit by its own space's light, with no corner shadows. (The same as the desktop version.) ----
+const FENCE_LO = 6 / 16, FENCE_HI = 10 / 16;
+const fenceJoinsTo = n => isFence(n) || isDoor(n) || (!!n && !!BLOCKS[n] && !BLOCKS[n].shape && !BLOCKS[n].transparent && !BLOCKS[n].noCollide &&
+  !BLOCKS[n].item && !BLOCKS[n].liquid && !isLeaves(n) && !isWater(n) && !isPieces(n));
+// the sides (as [dx, dz], DOOR_FRONT's order) the fence at (x, y, z) joins
+const fenceJoins = (x, y, z) => DOOR_FRONT.filter(([dx, dz]) => fenceJoinsTo(getBlock(x + dx, y, z + dz)));
+// a fence's parts as boxes in its block (h: how tall the post and the joined sides are; 1 as drawn and aimed at, 1.5 to walk
+// into). With rails (as drawn): each side's two rails; without (walking into it, aiming), each side as a solid 4/16 arm.
+// (Each box has its part: 0 the post, 1-4 the side it joins, DOOR_FRONT's order plus 1.)
+function fenceBoxes(x, y, z, h, rails) {
+  const out = [Object.assign([FENCE_LO, 0, FENCE_LO, FENCE_HI, h, FENCE_HI], { part: 0 })];
+  for (const [dx, dz] of fenceJoins(x, y, z)) {
+    const part = 1 + DOOR_FRONT.findIndex(([a, c]) => a === dx && c === dz);
+    const ax = dx > 0 ? [FENCE_HI, 1] : dx < 0 ? [0, FENCE_LO] : [FENCE_LO, FENCE_HI], az = dz > 0 ? [FENCE_HI, 1] : dz < 0 ? [0, FENCE_LO] : [FENCE_LO, FENCE_HI];
+    if (!rails) { out.push(Object.assign([ax[0], 0, az[0], ax[1], h, az[1]], { part })); continue; }
+    const tx = dx ? ax : [7 / 16, 9 / 16], tz = dz ? az : [7 / 16, 9 / 16];
+    for (const [y0, y1] of [[6 / 16, 9 / 16], [12 / 16, 15 / 16]]) out.push(Object.assign([tx[0], y0, tz[0], tx[1], y1, tz[1]], { part }));
+  }
+  return out;
+}
+function addFence(x, y, z, b, pos, uv, col, lt, sk, ind, light, sky) {
+  const tile = b.t[0];
+  for (const [x0, y0, z0, x1, y1, z1] of fenceBoxes(x, y, z, 1, true)) {
+    // each face: its 4 corners (along the bottom, then the top) and their places on the picture (by position in the block)
+    const quad = (cs, uvs, shade) => {
+      const base = pos.length / 3;
+      cs.forEach((c, i) => { pos.push(x + c[0], y + c[1], z + c[2]); uv.push(...atlasUV(tile, uvs[i][0], uvs[i][1])); col.push(shade, shade, shade); lt.push(light); sk.push(sky); });
+      ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+    };
+    quad([[x0, y0, z1], [x1, y0, z1], [x0, y1, z1], [x1, y1, z1]], [[x0, y0], [x1, y0], [x0, y1], [x1, y1]], 0.65);   // +z
+    quad([[x1, y0, z0], [x0, y0, z0], [x1, y1, z0], [x0, y1, z0]], [[1 - x1, y0], [1 - x0, y0], [1 - x1, y1], [1 - x0, y1]], 0.65);   // -z
+    quad([[x1, y0, z1], [x1, y0, z0], [x1, y1, z1], [x1, y1, z0]], [[1 - z1, y0], [1 - z0, y0], [1 - z1, y1], [1 - z0, y1]], 0.8);   // +x
+    quad([[x0, y0, z0], [x0, y0, z1], [x0, y1, z0], [x0, y1, z1]], [[z0, y0], [z1, y0], [z0, y1], [z1, y1]], 0.8);   // -x
+    quad([[x0, y1, z1], [x1, y1, z1], [x0, y1, z0], [x1, y1, z0]], [[x0, 1 - z1], [x1, 1 - z1], [x0, 1 - z0], [x1, 1 - z0]], 1);   // top
+    quad([[x0, y0, z0], [x1, y0, z0], [x0, y0, z1], [x1, y0, z1]], [[x0, z0], [x1, z0], [x0, z1], [x1, z1]], 0.5);   // bottom
+  }
+}
+// ---- the swing (only for show): for a moment the panel turns about its hinge pin (q) into its new pose, away from whoever
+// opened it; the chunk leaves that door out meanwhile ----
 const DOOR_SWING_TIME = 0.15, doorSwings = [], doorSwinging = new Set();   // (doorSwinging: the cells of doors being drawn swinging)
 function startDoorSwing(x, by, z, bottom, top, from, to) {
   for (let i = doorSwings.length - 1; i >= 0; i--) if (doorSwings[i].x === x && doorSwings[i].y === by && doorSwings[i].z === z) { dropDoorSwing(doorSwings[i]); doorSwings.splice(i, 1); }   // (still swinging: this swing takes over)
@@ -3245,7 +3436,9 @@ function startDoorSwing(x, by, z, bottom, top, from, to) {
 }
 function drawDoorSwing(s) {
   const k = Math.min(1, s.t / DOOR_SWING_TIME), a = k * Math.PI / 2, c = Math.cos(a), sn = Math.sin(a), f = s.from, t = s.to;
-  const pose = { p: [f.p[0] + (t.p[0] - f.p[0]) * k, f.p[1] + (t.p[1] - f.p[1]) * k], w: [f.w[0] * c + t.w[0] * sn, f.w[1] * c + t.w[1] * sn], n: [f.n[0] * c + t.n[0] * sn, f.n[1] * c + t.n[1] * sn] };
+  // (a plain turn: w and n turn together, and p stays its half-thickness from the pin along n)
+  const n = [f.n[0] * c + t.n[0] * sn, f.n[1] * c + t.n[1] * sn];
+  const pose = { p: [f.q[0] + n[0] * 0.125, f.q[1] + n[1] * 0.125], w: [f.w[0] * c + t.w[0] * sn, f.w[1] * c + t.w[1] * sn], n };
   const pos = [], uv = [], col = [], lt = [], sk = [], ind = [], skyCache = new Map(), anyLight = lightMap.size > 0;
   for (const [id, y] of [[s.bottom, s.y], [s.top, s.y + 1]])
     if (id) addDoor(s.x, y, s.z, BLOCKS[id], pose, pos, uv, col, lt, sk, ind, anyLight ? LIGHT_CURVE(lightAt(s.x, y, s.z)) : 0, skyExposure(s.x, y, s.z, skyCache));
@@ -3276,6 +3469,7 @@ function buildChunk(cx, cy, cz) {
   const pos = [], uv = [], col = [], ind = [], lt = [], sk = [];
   const tn = [], tints = new Map();   // grass and leaves: how far the biome colour at each corner is from as-drawn (see grassTint)
   const tintAt = (x, z) => { const k = x * 65536 + z; let t = tints.get(k); if (!t) tints.set(k, t = grassTint(x, z)); return t; };
+  const tint = { tn, at: tintAt };   // (for pieces of grass and leaves)
   const wpos = [], wuv = [], wcol = [], wind = [], wlt = [], wsk = [];   // water goes in its own see-through mesh
   const p = [0, 0, 0], ao = [0, 0, 0, 0];
   const y0 = cy * CS, top = Math.min(y0 + CS, chunkTop[cz * NCX + cx]);   // (nothing above the column's highest block)
@@ -3292,11 +3486,11 @@ function buildChunk(cx, cy, cz) {
       else if (b.shape === 'flat') addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache, 1 / 8);   // (lying on top of the snow)
       else if (inner === PIECES) {   // pieces: snow on every upward surface in the space (see addSnowOnPieces)
         const a = pieceMap.get(idx(x, y, z));
-        addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a);
+        addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a, tint);
         addSnowOnPieces(x, y, z, a, pos, uv, col, lt, sk, ind, anyLight, skyCache);
         continue;
       } else if (b.shape === 'half') {   // the Cutter fills the bottom half: its snow is hidden inside it
-        addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [inner, inner, 0, 0, inner, inner, 0, 0]);
+        addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [inner, inner, 0, 0, inner, inner, 0, 0], tint);
         if (inner === CUTTER) addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache);
         continue;
       }
@@ -3307,11 +3501,12 @@ function buildChunk(cx, cy, cz) {
       if (!doorSwinging.has(idx(x, y, z))) addDoor(x, y, z, b, doorPose(b.facing, b.hinge, b.open), pos, uv, col, lt, sk, ind, anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, skyExposure(x, y, z, skyCache));
       continue;
     }
+    if (b.shape === 'fence') { addFence(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, skyExposure(x, y, z, skyCache)); continue; }
     if (b.shape === 'flat') { addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'plant') { addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
-    if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
-    if (b.shape === 'half') { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [id, id, 0, 0, id, id, 0, 0]); if (id === CUTTER) addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
+    if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, undefined, tint); continue; }
+    if (b.shape === 'half') { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [id, id, 0, 0, id, id, 0, 0], tint); if (id === CUTTER) addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
     const h = b.shape === 'snow' ? b.layers / 8 : 1, ax = b.axis || 0;   // (snow: only as deep as its layers; a lying log: which way)
     for (const f of FACES) {
       const n = getBlock(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
@@ -3421,9 +3616,20 @@ function quarterOf(s, fi) {
   const u = fu.u[1] ? 1 - lp[fu.u[0]] : lp[fu.u[0]], v = fu.v[1] ? 1 - lp[fu.v[0]] : lp[fu.v[0]];
   return v > 0.5 ? (u < 0.5 ? 1 : 2) : (u < 0.5 ? 4 : 8);
 }
-function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a = pieceMap.get(idx(x, y, z))) {
+// A spot's face is shaded and lit like a whole block's face, on the half-block grid: at each corner, the 3 half-block spots in
+// front of the face around it (filled by something that isn't see-through, or not) give the corner shadow, and the torch light
+// and sky are averaged over the block spaces holding the open ones. Grass and leaves take the biome colour (tint: the chunk's
+// list, see buildChunk), blended between the whole-block corners as a whole block's face is. Exactly as the desktop version.
+const halfFilled = h => { const n = subBlock(h[0], h[1], h[2]); return n && !BLOCKS[n].transparent ? 1 : 0; };
+function tintBetween(at, px, pz) {   // (the biome colour at a corner on the half-block grid: the 4 whole-block corners around it, averaged)
+  const x0 = Math.floor(px), x1 = Math.ceil(px), z0 = Math.floor(pz), z1 = Math.ceil(pz);
+  const a = at(x0, z0), b = at(x1, z0), c = at(x0, z1), d = at(x1, z1);
+  return [(a[0] + b[0] + c[0] + d[0]) / 4, (a[1] + b[1] + c[1] + d[1]) / 4, (a[2] + b[2] + c[2] + d[2]) / 4];
+}
+function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a = pieceMap.get(idx(x, y, z)), tint = null) {
   if (!a) return;
   const depth = 0.75 + 0.25 * Math.min(1, y / 20);
+  const ao = [0, 0, 0, 0], F = [0, 0, 0], q1 = [0, 0, 0], q2 = [0, 0, 0], q3 = [0, 0, 0];
   // which spot faces get drawn (not against the same block or a solid one)
   const shown = new Uint8Array(48);
   for (let s = 0; s < 8; s++) if (a[s] && BLOCKS[spotBlock(a[s])]) FACES.forEach((f, fi) => {
@@ -3445,19 +3651,37 @@ function addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, a = p
       const pic = f.dir[1] > 0 ? b.t[1] : f.dir[1] < 0 ? b.t[2] : b.t[0];
       const tile = (quarters === 3 || quarters === 12) && SLAB_SIDE_TILE[pic] !== undefined ? SLAB_SIDE_TILE[pic] : cutTile(pic, quarters);
       const fu = FACE_UV[fi], base = pos.length / 3;
-      // lit by the block space in front of the face (or its own space, for faces inside it)
-      const fx = Math.floor((X + f.dir[0]) / 2), fy = Math.floor((Y + f.dir[1]) / 2), fz = Math.floor((Z + f.dir[2]) / 2);
-      const light = anyLight ? LIGHT_CURVE(lightAt(fx, fy, fz)) : 0, sky = skyExposure(fx, fy, fz, skyCache);
-      const shade = f.shade * depth;
-      f.c.forEach(c => {
+      const na = f.dir[0] ? 0 : f.dir[1] ? 1 : 2, ta = na === 0 ? 1 : 0, tb = na === 2 ? 1 : 2;
+      const tinted = tint && takesBiomeTint(id);
+      if (tinted) while (tint.tn.length < base * 3) tint.tn.push(0, 0, 0);
+      F[0] = X + f.dir[0]; F[1] = Y + f.dir[1]; F[2] = Z + f.dir[2];   // (the half-block spot in front of the face)
+      f.c.forEach((c, i) => {
         const lp = [(sx + c[0]) * 0.5, (sy + c[1]) * 0.5, (sz + c[2]) * 0.5];   // corner, inside the block space
         pos.push(x + lp[0], y + lp[1], z + lp[2]);
         const u = fu.u[1] ? 1 - lp[fu.u[0]] : lp[fu.u[0]], v = fu.v[1] ? 1 - lp[fu.v[0]] : lp[fu.v[0]];
         uv.push(...atlasUV(tile, u, v));
-        col.push(shade, shade, shade);
-        lt.push(light); sk.push(sky);
+        // the 3 half-block spots touching this corner, in front of the face (as for a whole block's face)
+        const sa = c[ta] ? 1 : -1, sb = c[tb] ? 1 : -1;
+        for (let k = 0; k < 3; k++) q1[k] = q2[k] = F[k];
+        q1[ta] += sa; q2[tb] += sb; q3[0] = q1[0]; q3[1] = q1[1]; q3[2] = q1[2]; q3[tb] += sb;
+        const s1 = halfFilled(q1), s3 = halfFilled(q3), s2 = halfFilled(q2);
+        ao[i] = s1 && s2 ? 0 : 3 - (s1 + s2 + s3);
+        const s = f.shade * depth * AO_LEVELS[ao[i]];
+        col.push(s, s, s);
+        if (tinted) { const t = tintBetween(tint.at, x + lp[0], z + lp[2]); tint.tn.push(t[0] - 1, t[1] - 1, t[2] - 1); }
+        // torch light and sky light: averaged over the block spaces holding the open ones (and the one in front)
+        let sum = 0, skySum = 0, n = 0;
+        const add = h => { const hx = Math.floor(h[0] / 2), hy = Math.floor(h[1] / 2), hz = Math.floor(h[2] / 2); if (anyLight) sum += lightAt(hx, hy, hz); skySum += skyExposure(hx, hy, hz, skyCache); n++; };
+        add(F);
+        if (!s1) add(q1);
+        if (!s3 && !(s1 && s2)) add(q3);
+        if (!s2) add(q2);
+        lt.push(anyLight ? LIGHT_CURVE(sum / n) : 0);
+        sk.push(skySum / n);
       });
-      ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+      // pick the quad diagonal that keeps the shading smooth
+      if (ao[0] + ao[3] > ao[1] + ao[2]) ind.push(base, base + 1, base + 3, base, base + 3, base + 2);
+      else ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
     });
   }
 }
@@ -3560,7 +3784,7 @@ function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
 const renderBlocks = () => settings.renderDist * CS;   // (in blocks)
 const fogThickness = () => 0.045 * 10 / settings.renderDist;   // (the haze thins out as you see further, so 10 chunks looks like it always did)
 const FORGET_MOBS = 128;   // (mobs other than cows are forgotten past this, or the render distance if it's nearer)
-const mobRange = t => t.cow ? renderBlocks() : Math.min(renderBlocks(), FORGET_MOBS);   // (how far from everyone a mob keeps going)
+const mobRange = t => t.cow || t.animal ? renderBlocks() : Math.min(renderBlocks(), FORGET_MOBS);   // (how far from everyone a mob keeps going)
 let lastGroupAt = null;
 function applyRenderDist() {
   settings.renderDist = Math.min(32, Math.max(4, Math.round(+settings.renderDist) || 10));
@@ -3764,7 +3988,8 @@ function dropTorchesAround(x, y, z) {
   const above = getBlock(x, y + 1, z);
   if (isTorch(above) && !BLOCKS[above].wall) fall(x, y + 1, z, above);
   else if (isTorch(above) && snowIn(above)) { dropSnowOf(above, x, y + 1, z); setBlock(x, y + 1, z, plainOf(above)); }   // (snow round a wall torch, with nothing under it now)
-  if (BLOCKS[above] && (BLOCKS[above].shape === 'flat' || BLOCKS[above].shape === 'plant')) { collect(dropFor(above), x, y + 1, z); dropSnowOf(above, x, y + 1, z); setBlock(x, y + 1, z, 0); }   // a rock lying on it, or a flower growing in it (and its snow)
+  if (isCrop(above) && !isGrain(above)) { breakCrop(x, y + 1, z, above); setBlock(x, y + 1, z, 0); }   // a crop growing on it (Corn: both halves)
+  else if (BLOCKS[above] && (BLOCKS[above].shape === 'flat' || BLOCKS[above].shape === 'plant')) { collect(dropFor(above), x, y + 1, z); dropSnowOf(above, x, y + 1, z); setBlock(x, y + 1, z, 0); }   // a rock lying on it, or a flower growing in it (and its snow)
   if (isSnow(above)) { dropSnowballs(BLOCKS[above].layers, x, y + 1, z); setBlock(x, y + 1, z, 0); }   // snow lying on it (2-4 Snowballs a layer)
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const n = getBlock(x + dx, y, z + dz);
@@ -3888,20 +4113,37 @@ function solid(x, y, z) {
   const b = world.at(x, y, z);
   return b !== 0 && !BLOCKS[b].noCollide && !(BLOCKS[b].shape === 'door' && BLOCKS[b].open);   // torches don't block movement (and an open door can be walked past)
 }
+// a door's panel as a box in the world, tagged with its space (door: its world index), or null if (x, y, z) isn't a door
+function doorPanel(x, y, z) {
+  if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY || !isDoor(world.at(x, y, z))) return null;
+  const d = BLOCKS[world.at(x, y, z)].box, p = [x + d[0], y + d[1], z + d[2], x + d[3], y + d[4], z + d[5]];
+  p.door = idx(x, y, z);
+  return p;
+}
 // every solid box touching the box from (x0, y0, z0) to (x1, y1, z1): whole blocks, or single pieces
-// in a space that holds pieces. Each box is [x0, y0, z0, x1, y1, z1].
+// in a space that holds pieces. Each box is [x0, y0, z0, x1, y1, z1]. (A door's panel is tagged with its space: see doorPanel.)
 function solidBoxes(x0, y0, z0, x1, y1, z1) {
-  const out = [];
-  for (let y = Math.floor(y0); y <= Math.floor(y1 - 1e-6); y++)
-    for (let z = Math.floor(z0); z <= Math.floor(z1 - 1e-6); z++)
-      for (let x = Math.floor(x0); x <= Math.floor(x1 - 1e-6); x++) {
+  const out = [], touches = p => p[0] < x1 && p[3] > x0 && p[1] < y1 && p[4] > y0 && p[2] < z1 && p[5] > z0;
+  const xa = Math.floor(x0), xb = Math.floor(x1 - 1e-6), za = Math.floor(z0), zb = Math.floor(z1 - 1e-6);
+  // (each tagged .fence: its block and part, so one you're already inside can let you go, see fencesInside)
+  const fenceIn = (x, y, z) => { for (const d of fenceBoxes(x, y, z, 1.5, false)) { const p = [x + d[0], y + d[1], z + d[2], x + d[3], y + d[4], z + d[5]]; p.fence = idx(x, y, z) * 8 + d.part; if (touches(p)) out.push(p); } };
+  // a fence in the space under the box reaches half a block up into it (you can't jump one)
+  for (let z = za, y = Math.floor(y0) - 1; z <= zb; z++) for (let x = xa; x <= xb; x++)
+    if (x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY && isFence(world.at(x, y, z))) fenceIn(x, y, z);
+  for (let y = Math.floor(y0); y <= Math.floor(y1 - 1e-6); y++) {
+    // an open door beside the box can reach into it (its panel pokes out of its own space)
+    for (let z = za - 1; z <= zb + 1; z++) for (let x = xa - 1; x <= xb + 1; x++) {
+      if (x >= xa && x <= xb && z >= za && z <= zb) continue;
+      const p = doorPanel(x, y, z);
+      if (p && BLOCKS[world.at(x, y, z)].open && touches(p)) out.push(p);
+    }
+    for (let z = za; z <= zb; z++)
+      for (let x = xa; x <= xb; x++) {
         const sn = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY ? snowIn(world.at(x, y, z)) : 0;   // snowlogged: its snow, as snow
         if (sn > 1) { const h = (sn - 1) / 8; if (y < y1 && y + h > y0) out.push([x, y, z, x + 1, y + h, z + 1]); continue; }
-        if (x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY && isDoor(world.at(x, y, z))) {   // a door, open or shut: just its panel
-          const d = BLOCKS[world.at(x, y, z)].box, p = [x + d[0], y + d[1], z + d[2], x + d[3], y + d[4], z + d[5]];
-          if (p[0] < x1 && p[3] > x0 && p[1] < y1 && p[4] > y0 && p[2] < z1 && p[5] > z0) out.push(p);
-          continue;
-        }
+        const dp = doorPanel(x, y, z);   // a door, open or shut: just its panel
+        if (dp) { if (touches(dp)) out.push(dp); continue; }
+        if (x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY && isFence(world.at(x, y, z))) { fenceIn(x, y, z); continue; }   // a fence: its post and arms, 1.5 tall
         if (!solid(x, y, z)) continue;
         const inside = x >= 0 && z >= 0 && x < WX && z < WZ && y >= 0 && y < WY;
         const a = inside && isPieces(world.at(x, y, z)) ? pieceMap.get(idx(x, y, z)) : null;
@@ -3916,9 +4158,14 @@ function solidBoxes(x0, y0, z0, x1, y1, z1) {
           if (bx < x1 && bx + 0.5 > x0 && by < y1 && by + 0.5 > y0 && bz < z1 && bz + 0.5 > z0) out.push([bx, by, bz, bx + 0.5, by + 0.5, bz + 0.5]);
         }
       }
+  }
   return out;
 }
-const playerBoxes = p => solidBoxes(p.x - P_HALF, p.y, p.z - P_HALF, p.x + P_HALF, p.y + P_H, p.z + P_HALF);
+// doors whose panel you're already in (one swung into you): you can walk out of them, so they don't count for you until you're
+// out (worked out afresh at the start of each step, from where you are). (The same as the desktop version.)
+let doorsInside = new Set(), fencesInside = new Set();   // (a fence's part that appeared round you, when a neighbour was put down, lets you go too)
+const playerBoxes = p => solidBoxes(p.x - P_HALF, p.y, p.z - P_HALF, p.x + P_HALF, p.y + P_H, p.z + P_HALF)
+  .filter(b => (b.door === undefined || !doorsInside.has(b.door)) && (b.fence === undefined || !fencesInside.has(b.fence)));
 function collides(p) { return playerBoxes(p).length > 0; }
 function moveAxis(axis, d) {
   if (!d) return;
@@ -4333,9 +4580,97 @@ const Sound = (() => {
     return finish(out, sr, 0.85);
   }
 
+  // ---- the Farming & animals voices, made the same way as the moo: a throat (a train of little pulses at the voice's pitch,
+  // which follows pitch(p) over the call, p = 0-1; sharp: how buzzy) shaped by the mouth (band-pass filters) ----
+  function throat(r, sr, len, pitch, sharp = 0.3, jitter = 0.03) {
+    const n = Math.floor(sr * len), src = new Float32Array(n);
+    for (let t = 0.003; t < len;) {
+      const f = pitch(t / len) * (1 - jitter / 2 + r() * jitter), o = Math.floor(t * sr), plen = Math.floor(sr / f);
+      for (let i = 0; i < plen && o + i < n; i++) src[o + i] += Math.exp(-i / (plen * sharp));
+      t += 1 / f;
+    }
+    return src;
+  }
+  const noiseOf = (r, n) => { const b = new Float32Array(n); for (let i = 0; i < n; i++) b[i] = r() * 2 - 1; return b; };
+  // the Chicken's "buk-buk": two or three quick, clipped clucks
+  function cluck(r, sr) {
+    const k = 2 + Math.floor(r() * 2), each = 0.07, gap = 0.06 + r() * 0.03, len = k * (each + gap) + 0.05, n = Math.floor(sr * len);
+    const f0 = 420 + r() * 120, src = throat(r, sr, len, p => f0 * (1.05 - 0.1 * p), 0.25);
+    const a = filter(src.slice(), 'bp', 1100 + r() * 200, 2.5, sr), b = filter(src.slice(), 'bp', 2600, 3, sr), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, c = Math.floor(t / (each + gap)), tt = t - c * (each + gap);
+      const env = c < k && tt < each ? Math.min(1, tt / 0.008) * Math.pow(1 - tt / each, 1.5) * (c === k - 1 ? 1.15 : 1) : 0;
+      out[i] = env * (a[i] * 2 + b[i] * 0.8);
+    }
+    filter(out, 'hp', 300, 0.7, sr);
+    return finish(out, sr, 0.7);
+  }
+  // the Duck's "waak": a nasal, buzzy call that falls away
+  function quack(r, sr) {
+    const len = 0.22 + r() * 0.1, n = Math.floor(sr * len), f0 = 230 + r() * 60;
+    const src = throat(r, sr, len, p => f0 * (1.1 - 0.25 * p), 0.08, 0.05);
+    const a = filter(src.slice(), 'bp', 1050 + r() * 150, 3.5, sr), b = filter(src.slice(), 'bp', 2300, 4, sr), nasal = filter(src.slice(), 'bp', 600, 2, sr), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, env = Math.min(1, t / 0.015) * (t > len * 0.5 ? Math.pow(1 - (t - len * 0.5) / (len * 0.5), 1.3) : 1);
+      out[i] = env * (a[i] * 2.2 + b[i] * 1 + nasal[i] * 0.8);
+    }
+    filter(out, 'hp', 250, 0.7, sr);
+    return finish(out, sr, 0.75);
+  }
+  // the Goat's "meh-eh-eh": a wavering bleat
+  function bleat(r, sr) {
+    const len = 0.6 + r() * 0.25, n = Math.floor(sr * len), f0 = 300 + r() * 80, rate = 7 + r() * 2;
+    const src = throat(r, sr, len, p => f0 * (1 + 0.06 * Math.sin(2 * Math.PI * rate * p * len) - 0.08 * p), 0.2);
+    const a = filter(src.slice(), 'bp', 620 + r() * 60, 2.5, sr), b = filter(src.slice(), 'bp', 1750 + r() * 150, 3, sr), out = new Float32Array(n);
+    const breath = filter(noiseOf(r, n), 'bp', 2500, 0.8, sr);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, wob = 0.65 + 0.35 * Math.abs(Math.sin(Math.PI * rate * t));
+      const env = Math.min(1, t / 0.04) * (t > len * 0.7 ? Math.pow(1 - (t - len * 0.7) / (len * 0.3), 1.5) : 1);
+      out[i] = env * wob * (a[i] * 2 + b[i] * 1.1 + breath[i] * 0.06);
+    }
+    filter(out, 'hp', 200, 0.7, sr);
+    return finish(out, sr, 0.75);
+  }
+  // the Boar's grunt: a low, breathy "hrnk" or two
+  function grunt(r, sr) {
+    const k = 1 + Math.floor(r() * 2), each = 0.18 + r() * 0.08, len = k * (each + 0.07), n = Math.floor(sr * len), f0 = 95 + r() * 25;
+    const src = throat(r, sr, len, p => f0 * (1.1 - 0.2 * p), 0.15, 0.12);
+    const a = filter(src.slice(), 'lp', 450, 0.8, sr), b = filter(src.slice(), 'bp', 900, 2, sr), breath = filter(noiseOf(r, n), 'lp', 700, 0.7, sr), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, c = Math.floor(t / (each + 0.07)), tt = t - c * (each + 0.07);
+      const env = c < k && tt < each ? Math.min(1, tt / 0.02) * Math.pow(1 - tt / each, 1.2) : 0;
+      out[i] = env * (a[i] * 1.8 + b[i] * 0.9 + breath[i] * 0.35);
+    }
+    filter(out, 'hp', 50, 0.7, sr);
+    return finish(out, sr, 0.8);
+  }
+  // the Bear's roar: a long, rough, deep voice that swells and falls
+  function roar(r, sr) {
+    const len = 1.0 + r() * 0.4, n = Math.floor(sr * len), f0 = 75 + r() * 20;
+    const src = throat(r, sr, len, p => f0 * (0.9 + 0.35 * Math.sin(Math.PI * Math.min(1, p * 1.3)) - 0.15 * p), 0.12, 0.2);
+    const a = filter(src.slice(), 'bp', 420 + r() * 60, 1.8, sr), b = filter(src.slice(), 'bp', 950 + r() * 100, 2.2, sr);
+    const rasp = filter(noiseOf(r, n), 'bp', 700, 0.9, sr), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / sr, env = Math.min(1, t / 0.15) * (t > len * 0.6 ? Math.pow(1 - (t - len * 0.6) / (len * 0.4), 1.4) : 1);
+      const rough = 0.75 + 0.25 * Math.sin(2 * Math.PI * 31 * t);
+      out[i] = env * rough * (a[i] * 2 + b[i] * 1 + rasp[i] * 0.45);
+    }
+    filter(out, 'hp', 45, 0.7, sr);
+    return finish(out, sr, 0.9);
+  }
+  const ANIMAL_VOICES = { cluck: [cluck, 57000], quack: [quack, 58000], bleat: [bleat, 59000], grunt: [grunt, 60000], roar: [roar, 66000] };
   function buildBank() {
     bank = {};
     const sr = ctx.sampleRate;
+    for (const [name, [make, seed]] of Object.entries(ANIMAL_VOICES)) {
+      bank[name] = { say: [] };
+      for (let v = 0; v < VARIANTS; v++) {
+        const data = make(rng(seed + v * 41), sr);
+        const b = ctx.createBuffer(1, data.length, sr);
+        b.copyToChannel(data, 0);
+        bank[name].say.push(b);
+      }
+    }
     bank.moo = { say: [] };
     for (let v = 0; v < VARIANTS; v++) {
       const data = moo(rng(52000 + v * 31), sr);
@@ -4529,6 +4864,7 @@ const Sound = (() => {
   return {
     soundOf: mat,                   // a block's sound (its recipe's name)
     hasSound: name => !!RECIPES[name],
+    hasVoice: name => name in ANIMAL_VOICES || ['growl', 'hrr', 'moo'].includes(name),   // a mob's growl
     hush(on) {                      // (called every frame: true near a staircase)
       if (!ctx || !hushGain || hushed === on) return;
       hushed = on;
@@ -4563,8 +4899,8 @@ const Sound = (() => {
     },
     // player sounds: footsteps, jumping, landing, splashing and swimming
     step(id) { play(mat(id), 'step', 0.45, 1, 0, 'player'); },
-    stepBehind(id, vol) { play(mat(id), 'step', vol, 0.94, 0, 'player'); },   // (someone else's step)
-    // the music plays a little out of tune for a moment
+    stepBehind(id, vol) { play(mat(id), 'step', vol, 0.94, 0, 'player'); },   // (a quieter, lower step: rare event 0)
+    // the music's pitch dips for a moment (rare event 2)
     wobble(seconds) {
       if (!ctx || !current || !current.sources) return;
       const now = ctx.currentTime;
@@ -4865,8 +5201,25 @@ function rayBox(o, d, box, max) {
   if (ax >= 0) n[ax] = dir[ax] > 0 ? -1 : 1;
   return { t: t0, n };
 }
-// the part of a block space you can aim at, for things smaller than a whole block (null = the whole block)
+// the part of a block space you can aim at, for things smaller than a whole block (null = the whole block). An open door's
+// pokes out of its space: aimBox is just the part inside it (the rest is aimed at from the space it reaches into: doorsReaching)
 const hitBox = b => isTorch(b) ? torchGeo(b).box : BLOCKS[b] && BLOCKS[b].box || null;
+const clipBox = (d, ox = 0, oz = 0) => {   // box d, moved by (ox, oz), clipped to one block space (null if nothing's left)
+  const c = [Math.max(0, d[0] + ox), Math.max(0, d[1]), Math.max(0, d[2] + oz), Math.min(1, d[3] + ox), Math.min(1, d[4]), Math.min(1, d[5] + oz)];
+  return c[0] < c[3] && c[2] < c[5] ? c : null;
+};
+const aimBox = b => isDoor(b) ? clipBox(BLOCKS[b].box) : hitBox(b);
+// the open doors beside (x, y, z) whose panels reach into it: [door x, door z, the part in this space]
+function doorsReaching(x, y, z) {
+  const out = [];
+  for (const [dx, dz] of DOOR_FRONT) {
+    const b = getBlock(x + dx, y, z + dz);
+    if (!isDoor(b) || !BLOCKS[b].open) continue;
+    const c = clipBox(BLOCKS[b].box, dx, dz);
+    if (c) out.push([x + dx, z + dz, c]);
+  }
+  return out;
+}
 function raycast(max = 6) {
   const o = camera.position, d = new THREE.Vector3();
   camera.getWorldDirection(d);
@@ -4893,10 +5246,20 @@ function raycast(max = 6) {
       }
       if (best) return at(best, { slot });
     }
+    else if (isFence(b)) {   // a fence: only its post and its rails, as drawn (not the gaps between the rails)
+      let best = null;
+      for (const c of fenceBoxes(x, y, z, 1, true)) { const h = rayBox(o, d, [x + c[0], y + c[1], z + c[2], x + c[3], y + c[4], z + c[5]], max); if (h && (!best || h.t < best.t)) best = h; }
+      if (best) return at(best);
+    }
     // torches (and rocks) only count as hit if the ray actually touches them, not the whole block space
     // (snowlogged: its snow can be aimed at too)
-    else if (b && !isWater(b) && (!hitBox(b) || rayHitsBox(o, d, x, y, z, hitBox(b), max) || snowIn(b) && rayHitsBox(o, d, x, y, z, [0, 0, 0, 1, snowIn(b) / 8, 1], max)))
+    else if (b && !isWater(b) && (!aimBox(b) || rayHitsBox(o, d, x, y, z, aimBox(b), max) || snowIn(b) && rayHitsBox(o, d, x, y, z, [0, 0, 0, 1, snowIn(b) / 8, 1], max)))
       return at(rayBox(o, d, [x, y, z, x + 1, y + 1, z + 1], max + 2) || { t, n: [px - x, py - y, pz - z] });
+    // an open door next door reaching into this space: aiming at that part of it aims at the door
+    if (y >= 0) for (const [dx, dz, c] of doorsReaching(x, y, z)) {
+      const h = rayBox(o, d, [x + c[0], y + c[1], z + c[2], x + c[3], y + c[4], z + c[5]], max);
+      if (h) return { ...at(h), x: dx, z: dz };
+    }
     px = x; py = y; pz = z;
     if (tmx < tmy && tmx < tmz) { x += sx; t = tmx; tmx += tdx; }
     else if (tmy < tmz) { y += sy; t = tmy; tmy += tdy; }
@@ -4924,7 +5287,7 @@ function mobGrowl(m) {
   const dx = m.x - player.x, dz = m.z - player.z, d = Math.hypot(dx, dz, m.y - player.y);
   const vol = 0.85 * Math.pow(Math.max(0, 1 - d / 28), 1.5);
   const side = d > 0.5 ? (dx * Math.cos(player.yaw) - dz * Math.sin(player.yaw)) / Math.hypot(dx, dz) : 0;  // +1 = to your right
-  Sound.growl(vol * ({ hrr: 0.8, moo: 0.7 }[MOB_TYPES[m.type].growl] || 1), side * 0.8, MOB_TYPES[m.type].growl);
+  Sound.growl(vol * ({ hrr: 0.8, moo: 0.7, cluck: 0.6, quack: 0.6, bleat: 0.7, grunt: 0.8 }[MOB_TYPES[m.type].growl] || 1), side * 0.8, MOB_TYPES[m.type].growl);
 }
 // a block broke or was placed: curious mobs that can hear it go and check it out (newest sound wins)
 function mobNoise(x, y, z) {
@@ -5003,7 +5366,9 @@ function eat() {
   if (!SURVIVAL || !food || player.dead || player.health >= MAX_HEALTH) return false;
   showChange(player.health, 'green');
   player.health = Math.min(MAX_HEALTH, player.health + food);
-  if (--HOTBAR_COUNT[act] <= 0) { HOTBAR[act] = 0; HOTBAR_COUNT[act] = 0; selectSlot(selected); }
+  const left = BLOCKS[id].returns;   // (what's left in your hand: a Jug of Milk leaves its Clay Jug)
+  if (--HOTBAR_COUNT[act] <= 0) { HOTBAR[act] = left || 0; HOTBAR_COUNT[act] = left ? 1 : 0; HOTBAR_WEAR[act] = 0; selectSlot(selected); }
+  else if (left && !giveItem(left)) dropItem(left, player.x, player.y + 1, player.z);   // (no room for it: dropped at your feet)
   drawHotbarIcons(); drawHearts();
   return true;
 }
@@ -5278,10 +5643,16 @@ function buildMobMesh(type, opts = {}) {
   const els = model.elements;
   // Blockbench groups (outliner folders) named like "arms" / "legs" mark which parts are arms and legs
   const groupOf = {};
+  // the head (and the rest of its "head" group: a neck, snout, ears...) turns from the group's own pivot point, set in
+  // Blockbench where the head or neck meets the body (the first "head" group with one; without, from the middle of the
+  // head's bottom: see below)
+  let headOrigin = null;
   (function walk(list, tag) {
     for (const c of list || []) {
       if (typeof c === 'number') { if (tag) groupOf[c] = tag; continue; }
-      walk(c.children, /arm/i.test(c.name) ? 'arm' : /leg/i.test(c.name) ? 'leg' : /^head$/i.test(c.name) ? 'head' : tag);
+      const isHead = /^head$/i.test(c.name);
+      if (isHead && !headOrigin && Array.isArray(c.origin)) headOrigin = c.origin;
+      walk(c.children, /arm/i.test(c.name) ? 'arm' : /leg/i.test(c.name) ? 'leg' : isHead ? 'head' : tag);
     }
   })(model.groups);
   const partOf = (e, ei) => /arm/i.test(e.name || '') ? 'arm' : /leg/i.test(e.name || '') ? 'leg' : groupOf[ei];
@@ -5334,10 +5705,11 @@ function buildMobMesh(type, opts = {}) {
     // the rest of a "head" group (a cow's snout, ears, horns): they turn with the head (joined on below, once the head exists)
     if (part === 'head' && !/^head$/i.test(e.name || '') && !(e.rotation && e.rotation.angle)) { headParts.push({ mesh, mx, my, mz }); continue; }
     if (/^head$/i.test(e.name || '') && !(e.rotation && e.rotation.angle)) {
-      // the head: turns from the middle of its bottom (the neck)
+      // the head: turns from its group's pivot point, or (no "head" group) from the middle of its bottom
       const pivot = new THREE.Group();
-      pivot.position.set(mx, y0 / 16, mz);
-      mesh.position.set(0, h / 2, 0);
+      if (headOrigin) pivot.position.set((headOrigin[0] - cx) / 16, headOrigin[1] / 16, (headOrigin[2] - cz) / 16);
+      else pivot.position.set(mx, y0 / 16, mz);
+      mesh.position.set(mx - pivot.position.x, my - pivot.position.y, mz - pivot.position.z);
       pivot.add(mesh);
       body.add(pivot);
       head = pivot;
@@ -5478,24 +5850,17 @@ function setGear(b, gear) {
     }
   });
 }
-function setHeld(b, id) {
+function setHeld(b, id, full = false) {   // (full: a Linen Bag with something in it, shown full)
   id = id | 0;
-  if (b.heldId === id) return;
-  b.heldId = id;
+  if (b.heldId === id && !!b.heldFull === full) return;
+  b.heldId = id; b.heldFull = full;
   if (b.heldMesh) {
     b.heldMesh.parent.remove(b.heldMesh); if (!b.heldMesh.userData.sharedGeo) b.heldMesh.geometry.dispose();
     b.mats.splice(b.mats.indexOf(b.heldMesh.material), 1); b.heldMesh.material.dispose(); b.heldMesh = null;
   }
   const arm = b.arms[1];
   if (!id || !BLOCKS[id] || !arm || !arm.lower) return;
-  if (!dropTexCache[id]) {   // (the same picture a dropped item uses)
-    const c = document.createElement('canvas'); c.width = c.height = TILE;
-    drawIcon(c, id, true);   // (flat: it's shown in the world)
-    const tx = new THREE.CanvasTexture(c);
-    tx.magFilter = tx.minFilter = THREE.NearestFilter; tx.generateMipmaps = false;
-    dropTexCache[id] = tx;
-  }
-  const mesh = heldModel(id);
+  const mesh = heldModel(id, full);
   if (mesh.userData.cube) {          // a block: a little cube in the fist
     mesh.position.set(0, -8 / 16, -0.06);
     mesh.rotation.set(0, Math.PI / 4, 0);
@@ -5513,7 +5878,7 @@ function setHeld(b, id) {
 // whole block (a slab, stairs, quarter, piece, the Cutter, snow, a torch: the same one it drops as), otherwise its flat
 // picture (both sides: flowers and items; tools are pictures given thickness, see thickPicture). Items are never 3D in the
 // hotbar or inventory, tools included. As the desktop version: 0.3 of a block, a torch 0.5 (half its stick below the fist)
-function heldModel(id) {
+function heldModel(id, full = false) {
   const b = BLOCKS[id];
   if ((isPiece(id) || formOf(id) || (b && b.shape)) && iconBoxes(id)) {   // (the model is 1 for a whole block: shrunk to the held cube's size)
     const box = boxModel(id);
@@ -5539,19 +5904,13 @@ function heldModel(id) {
     mesh.userData.cube = true;
     return mesh;
   }
-  if (!dropTexCache[id]) {   // (the same picture a dropped item uses)
-    const c = document.createElement('canvas'); c.width = c.height = TILE;
-    drawIcon(c, id, true);   // (flat: it's shown in the world)
-    const tx = new THREE.CanvasTexture(c);
-    tx.magFilter = tx.minFilter = THREE.NearestFilter; tx.generateMipmaps = false;
-    dropTexCache[id] = tx;
-  }
-  const tool = isHeldTool(id), geo = tool ? thickPicture(dropTexCache[id].image) : new THREE.PlaneGeometry(0.5, 0.5);
+  const pic = iconTexture(id, full);   // (the same picture a dropped item uses; not "tex", the atlas the cube above uses)
+  const tool = isHeldTool(id), geo = tool ? thickPicture(pic.image) : new THREE.PlaneGeometry(0.5, 0.5);
   if (tool) {   // the picture's handle runs from the bottom-left corner: move its grip to the middle and stand the handle straight up
     geo.translate(-HELD_GRIP[0], -HELD_GRIP[1], 0); geo.rotateZ(Math.PI / 4);
     if (BLOCKS[id].tool === 'hoe') geo.rotateY(Math.PI);   // (the hoe's blade faces the other way, so it's turned round its handle)
   }
-  const mesh = new THREE.Mesh(geo, withHaze(new THREE.MeshBasicMaterial({ map: dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: tool })));
+  const mesh = new THREE.Mesh(geo, withHaze(new THREE.MeshBasicMaterial({ map: pic, alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: tool })));
   mesh.userData.tool = tool;
   return mesh;
 }
@@ -5612,11 +5971,11 @@ function updateHand(dt) {
     if (a && a.lower) { a.pivot.position.set(-a.lower.position.x, -a.lower.position.y, -a.lower.position.z); a.pivot.rotation.set(0, 0, 0); hand.arm.add(a.pivot); }
   }
   hand.root.visible = !player.dead && !mainMenuOpen;   // (no hand in the main menu's panorama)
-  const id = HOTBAR[selected] | 0;
-  if (id !== hand.id) {
-    if (hand.id !== -1) hand.dip = 1;
-    hand.id = id;
-    setHeld(hand.body, id);
+  const id = HOTBAR[selected] | 0, full = bagFull(id, HOTBAR_DATA[selected]);
+  if (id !== hand.id || full !== !!hand.full) {
+    if (hand.id !== -1 && id !== hand.id) hand.dip = 1;   // (not for a bag only filling up or emptying)
+    hand.id = id; hand.full = full;
+    setHeld(hand.body, id, full);
     const m = hand.body.heldMesh;   // facing you, instead of side-on like other players'
     if (m && m.userData.cube) { m.position.set(0, -8.5 / 16, 0); m.rotation.set(-1.55, Math.PI / 4, 0); }   // (upright, its top tipped toward you)
     else if (m && m.userData.tool) { m.position.set(0, -5 / 16, 0); m.rotation.set(HAND_TOOL[0], HAND_TOOL[1], HAND_TOOL[2], 'XYZ'); m.scale.setScalar(1.5); }   // (by the handle, side-on, half as big again)
@@ -6060,7 +6419,7 @@ const mobDamage = m => Math.round(MOB_TYPES[m.type].damage * layerBoost(m));
 function spawnMob(type, x, y, z, variant = 0, layer) {
   const t = MOB_TYPES[type];
   if (layer === undefined) layer = t.hostile || t.deep ? strataLayerAt(y) : 1;
-  const body = buildMobMesh(t.cow ? modelOf({ type, variant }) : type, { scale: t.scale });
+  const body = buildMobMesh(t.cow || t.animal ? modelOf({ type, variant }) : type, { scale: t.scale });
   // (cows: baby = seconds until a calf grows up (0 = grown), fed = Grain eaten, happy = seconds of happiness left,
   // room = 0 (crowded) .. 1 (-1 = not worked out yet), variant = which model it wears; see Cows)
   const m = { k: ++mobCount, type, variant, baby: 0, fed: 0, happy: 0, room: -1, mateCool: 0, mateCheck: 0, mateFor: 0, roomIn: 0, grazing: 0, grazeIn: 0,
@@ -6119,9 +6478,21 @@ function hurtMob(m, n) {
 }
 function mobDies(m) {
   m.dead = 0.001;
-  for (const [id, lo, hi, chance = 1] of MOB_TYPES[m.type].drops || [])
-    if (Math.random() < chance) for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) dropItem(id, m.x, m.y + 0.5, m.z);
+  const t = MOB_TYPES[m.type];
+  // (an animal's young drop nothing; one a bear caught leaves only its Feathers: the bear ate the rest)
+  if (!(t.animal && m.baby > 0)) for (const [id, lo, hi, chance = 1] of t.drops || [])
+    if ((!m.eaten || id === FEATHER) && Math.random() < chance) for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) dropItem(id, m.x, m.y + 0.5, m.z);
   if (MOB_TYPES[m.type].cow) cowDrops(m);
+}
+// ---- Ducks help the field: a crop on wet tilled soil grows ANIMALS.duck.duckRate times as fast while a grown duck swims within
+// duckReach blocks of it across (both ways: a square) and 2 up or down. More ducks don't add up. ----
+const ANIMALS = MOB_DATA.ANIMALS || {};   // the six new animals' numbers (data/mobs.json): see Animals
+const DUCK_RATE = ANIMALS.duck ? ANIMALS.duck.duckRate : 1;
+function duckNear(i) {
+  if (!ANIMALS.duck) return false;
+  const [x, y, z] = fromIdx(i), r = ANIMALS.duck.duckReach;
+  return mobs.some(m => m.type === 'duck' && !m.dead && !(m.baby > 0) && Math.abs(Math.floor(m.x) - x) <= r && Math.abs(Math.floor(m.z) - z) <= r &&
+    Math.abs(Math.floor(m.y) - y) <= 2 && waterAt(m.x, m.y + 0.3, m.z));
 }
 // ===================== Cows =====================
 // Cows live in herds on grassy ground and are saved with the world (they stay put when you walk away).
@@ -6140,7 +6511,9 @@ const COW = MOB_DATA.COW;   // the cows' numbers (data/mobs.json): what each one
 const grazed = new Map();   // world index of eaten grass (now Dirt) -> seconds until it grows back
 // which model a cow wears: 0 = cow, 1 = calf (cowbaby), 2 = fat cow (cowfat)
 const cowVariant = m => m.baby > 0 ? 1 : m.fed >= COW.fatAt ? 2 : 0;
-const modelOf = m => !MOB_TYPES[m.type].cow ? m.type : m.variant === 1 ? 'cowbaby' : m.variant === 2 ? 'cowfat' : 'cow';
+// the model a mob wears: a cow's by its variant; the other animals' young wear <type>baby (see Animals)
+const modelOf = m => MOB_TYPES[m.type].animal ? (m.variant === 1 ? m.type + 'baby' : m.type) :
+  !MOB_TYPES[m.type].cow ? m.type : m.variant === 1 ? 'cowbaby' : m.variant === 2 ? 'cowfat' : 'cow';
 // a cow grew up or got fat: it's built again in its new shape
 function setVariant(m, v) {
   if (m.variant === v) return;
@@ -6304,6 +6677,399 @@ function cowShow(m, dt) {
     addHeart(m.x + (Math.random() - 0.5) * 0.5, m.y + m.height + 0.1, m.z + (Math.random() - 0.5) * 0.5);
   }
 }
+// ===================== Animals =====================
+// Chickens, Ducks, Deer, Goats, Boar and Bears (data/mobs.json: their MOBS rows say animal; ANIMALS has their numbers, named
+// as in COW where they mean the same). They follow the cows' rules: kept with the world, happy from their food (right-click
+// holding it) or their own foraging, mating when happy and not crowded (counting their own kind), no young born once a chunk
+// holds perChunk of their kind, the young (the <type>baby model) growing up in babyTime (food takes babyFoodBoost off). Each
+// also helps or harms your land, in a loop you can tend:
+// - Chickens: fed Corn or seeds, they lay an Egg a while later. Scratching on empty tilled soil fertilizes it now and then;
+//   among young crops they peck them back a stage (a seedling is eaten).
+// - Ducks: live on water and turn back at the banks (ashore, they head for water). Fed, they lay an Egg on the nearest bank.
+//   Wet soil near one grows crops faster (see duckNear).
+// - Deer: run from you unless you hold their food. They carry the sapling of the leaves they last passed and now and then
+//   plant it where they roam (it counts as natural), and they nibble saplings (yours too).
+// - Goats: eat Dead Bushes and low leaves that grew there (not a hedge you planted). Fed, they're milky for a while: a Clay
+//   Jug used on one gives a Jug of Milk.
+// - Boar: near an Oak or a Maple they root up Grass to Dirt (ready to till), now and then turning up a Truffle. Hit, they
+//   fight back (survival).
+// - Bears: hungry now and then, they hunt Chickens, Ducks, Deer and Boar (never cows), which run from them; a kill leaves
+//   only its Feathers. They leave you alone unless you hit one or go near its cubs. They can't open doors either.
+// Spawned only in Biomes worlds. The host's game runs them. (The same as the desktop version.)
+const keyOr = (k, d = -1) => { try { return idOf(k); } catch (e) { return d; } };
+const FEATHER = keyOr('feather'), EGG = keyOr('egg'), TRUFFLE = keyOr('truffle'), CLAY_JUG = keyOr('clay_jug'), JUG_OF_MILK = keyOr('jug_of_milk');
+const DEAD_BUSH = keyOr('dead_bush');
+const ANIMAL_FOOD = {}, ANIMAL_GROUND = {}, ANIMAL_BIOMES = {}, ANIMAL_LOGS = {};
+for (const [type, a] of Object.entries(ANIMALS)) {
+  ANIMAL_FOOD[type] = new Set((a.food || []).map(idOf));
+  ANIMAL_GROUND[type] = new Set((a.ground || []).filter(k => k !== 'water').map(idOf));
+  ANIMAL_BIOMES[type] = (a.biomes || []).map(b => BIOME_NAMES.indexOf(b));
+  ANIMAL_LOGS[type] = new Set((a.logs || []).map(idOf));   // (boar: the trees they root under)
+}
+const isAnimal = m => !!MOB_TYPES[m.type].animal;
+const randIn = ([lo, hi]) => lo + Math.random() * (hi - lo);
+const kinNear = (m, r) => mobs.filter(o => o !== m && o.type === m.type && !o.dead && (o.x - m.x) ** 2 + (o.z - m.z) ** 2 < r * r).length;
+const kinInChunk = (type, c) => mobs.filter(o => o.type === type && !o.dead && chunkOf(o.x, o.z) === c).length;
+const grownBear = o => o.type === 'bear' && !o.dead && !(o.baby > 0);
+function spawnAnimal(type, x, y, z, baby = 0) {
+  const A = ANIMALS[type], m = spawnMob(type, x, y, z, baby > 0 ? 1 : 0);
+  m.baby = baby; if (baby > 0) m.health = A.babyHealth;
+  if (type === 'bear') m.hungerIn = A.huntCool;
+  return m;
+}
+// ---- spawning: now and then, a spot a little way off; one of the animals that live in its biome (weighted by spawnWeight),
+// if fewer than nearMax of them are about, comes as a group (some young), on their kind of ground ----
+let animalSpawnIn = 8;
+function spawnAnimals() {
+  if (GEN !== 3 || (animalSpawnIn -= 3) > 0) return;
+  animalSpawnIn = 20 + Math.random() * 40;
+  const none = !mobs.some(isAnimal);
+  const a = Math.random() * Math.PI * 2, r = none ? 12 + Math.random() * 20 : 30 + Math.random() * 30;
+  const x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
+  if (x < 3 || z < 3 || x >= WX - 3 || z >= WZ - 3) return;
+  const bi = biomeMap[z * WX + x], about = type => mobs.filter(m => m.type === type && !m.dead && (m.x - player.x) ** 2 + (m.z - player.z) ** 2 < 80 * 80).length;
+  const kinds = Object.keys(ANIMALS).filter(t => MOB_TYPES[t] && (window.MODELS || {})[t] && ANIMAL_BIOMES[t].includes(bi) && about(t) < ANIMALS[t].nearMax);
+  if (!kinds.length) return;
+  let w = Math.random() * kinds.reduce((s, t) => s + ANIMALS[t].spawnWeight, 0), type = kinds[kinds.length - 1];
+  for (const t of kinds) if ((w -= ANIMALS[t].spawnWeight) < 0) { type = t; break; }
+  const A = ANIMALS[type], s = animalSpot(type, x, z);
+  if (!s) return;
+  const n = A.group[0] + Math.floor(Math.random() * (A.group[1] - A.group[0] + 1));
+  const cubs = A.cubs && Math.random() < A.cubChance ? A.cubs[0] + Math.floor(Math.random() * (A.cubs[1] - A.cubs[0] + 1)) : 0;
+  for (let k = 0; k < n + cubs; k++) {
+    const px = s[0] + (k ? (Math.random() - 0.5) * 5 : 0), pz = s[2] + (k ? (Math.random() - 0.5) * 5 : 0);
+    const py = type === 'duck' ? s[1] : standSpot(px, s[1], pz);
+    if (py === null || (type === 'duck' && !waterAt(px, py, pz))) continue;
+    const young = k >= n || (k > 0 && !A.cubs && Math.random() < 0.25);
+    spawnAnimal(type, px, py, pz, young ? A.babyTime * (0.3 + Math.random() * 0.7) : 0);
+  }
+}
+// where a group of this kind could start at column (x, z): [x, y, z] (y: its feet), or null. Ducks: on top of water (not ice)
+// with land within 3. Deer: a log within 6. Boar: one of their trees within 8. Goats: at least minHeight above sea level.
+function animalSpot(type, x, z) {
+  const A = ANIMALS[type];
+  let y = WY - 1;
+  while (y > 0 && !getBlock(x, y, z)) y--;
+  const top = getBlock(x, y, z);
+  if (getBlock(x, y + 1, z) || getBlock(x, y + 2, z)) return null;
+  if (type === 'duck') {
+    if (!isWater(top)) return null;
+    let land = false;
+    for (let dz = -3; dz <= 3 && !land; dz++) for (let dx = -3; dx <= 3 && !land; dx++) { const b = getBlock(x + dx, y, z + dz); land = !!b && !isWater(b) && solid(x + dx, y, z + dz); }
+    return land ? [x + 0.5, y + 0.6, z + 0.5] : null;
+  }
+  if (!ANIMAL_GROUND[type].has(top)) return null;
+  if (A.minHeight !== undefined && y < SEA_LEVEL + A.minHeight) return null;
+  if (A.logNear !== undefined && !logNear(x, y + 1, z, A.logNear, ANIMAL_LOGS[type].size ? ANIMAL_LOGS[type] : null)) return null;
+  return [x + 0.5, y + 1, z + 0.5];
+}
+// a log (any, or one of these) within r across of (x, y, z), from 2 below to 8 above
+function logNear(x, y, z, r, which) {
+  for (let dy = -2; dy <= 8; dy++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+    const b = getBlock(x + dx, y + dy, z + dz);
+    if (which ? which.has(b) : isLogBlock(b)) return true;
+  }
+  return false;
+}
+// ---- each frame, before it thinks: what an animal notices. Prey run from a grown bear within the bear's preyFlee; deer run
+// from you within shyRange unless you hold their food; a bear turns on you if you go near its cubs (survival) ----
+function animalAlert(m, dt) {
+  if (m.angry > 0) m.angry = Math.max(0, m.angry - dt);
+  m.chase = false;
+  if ((m.alertIn = (m.alertIn || 0) - dt) > 0) return;
+  m.alertIn = 0.5;
+  const bearA = ANIMALS.bear;
+  if (bearA && bearA.prey.includes(m.type)) {
+    const b = mobs.find(o => grownBear(o) && (o.x - m.x) ** 2 + (o.z - m.z) ** 2 < bearA.preyFlee ** 2);
+    if (b) { m.flee = 1; m.fleeFrom = b; return; }
+  }
+  const A = ANIMALS[m.type], pd = Math.hypot(player.x - m.x, player.z - m.z);
+  if (m.type === 'deer' && !player.dead && pd < A.shyRange && !ANIMAL_FOOD.deer.has(HOTBAR[act])) { m.flee = 1; m.fleeFrom = null; }
+  if (m.type === 'bear' && !(m.baby > 0) && SURVIVAL && !player.dead &&
+      mobs.some(o => o.type === 'bear' && o.baby > 0 && !o.dead && Math.hypot(o.x - m.x, o.z - m.z) < A.cubNear && Math.hypot(o.x - player.x, o.z - player.z) < A.cubRange))
+    m.angry = A.angerTime;
+}
+// ---- an animal's own thinking each frame (the host's game). Returns true while it's busy (foraging, chasing, going to a
+// mate, a young one following, a duck heading for water), so the usual wandering waits ----
+function animalThink(m, dt) {
+  const A = ANIMALS[m.type], grown = !(m.baby > 0);
+  m.happy = Math.max(0, m.happy - dt);
+  m.mateCool = Math.max(0, m.mateCool - dt);
+  if (m.baby > 0 && (m.baby -= dt) <= 0) { m.baby = 0; m.health = MOB_TYPES[m.type].health; setVariant(m, 0); }
+  if (m.milky > 0) m.milky = Math.max(0, m.milky - dt);
+  if (m.eggIn > 0 && (m.eggIn -= dt) <= 0) { m.eggIn = 0; layEgg(m); }
+  const bx = Math.floor(m.x), by = Math.floor(m.y), bz = Math.floor(m.z);
+  // the animals' own work, on their own timers
+  if (m.type === 'chicken' && grown) chickenWork(m, dt, bx, by, bz);
+  if (m.type === 'deer') deerWork(m, dt, bx, by, bz);
+  if (m.type === 'bear' && grown && bearHunt(m, dt)) return true;
+  // foraging: head down for a moment, then its good done (see forageDone)
+  if (m.grazing > 0) {
+    m.state = 'idle';
+    if ((m.grazing -= dt) <= 0) { forageDone(m, bx, by, bz); m.timer = 1 + Math.random() * 2; }
+    return true;
+  }
+  // a duck: keeps to the water
+  if (m.type === 'duck' && duckWater(m, dt)) return true;
+  // looking for a mate (grown, happy, not crowded, with room in the chunk for young)
+  const mate = m.mate;
+  if (mate) {
+    if (mate.dead || mate.mate !== m || (m.mateFor -= dt) <= 0 || !mobs.includes(mate)) { m.mate = null; if (mate.mate === m) mate.mate = null; return false; }
+    if (Math.hypot(mate.x - m.x, mate.z - m.z) < 1.6) { animalYoung(m, mate); return false; }
+    walkToward(m, mate.x, mate.z, dt);
+    return true;
+  }
+  if (grown && m.happy > 0 && m.mateCool <= 0 && (m.mateCheck -= dt) <= 0) {
+    m.mateCheck = 3 + Math.random() * 3;
+    if (canMateA(m) && Math.random() < 0.5) {
+      const d2 = o => (o.x - m.x) ** 2 + (o.z - m.z) ** 2;
+      const other = mobs.filter(o => o !== m && o.type === m.type && !o.mate && d2(o) < 64 && canMateA(o)).sort((a, b) => d2(a) - d2(b))[0];
+      if (other) { m.mate = other; other.mate = m; m.mateFor = other.mateFor = 20; m.grazing = other.grazing = 0; return true; }
+    }
+  }
+  // the young keep near a grown one of their kind
+  if (!grown) {
+    const d2 = o => (o.x - m.x) ** 2 + (o.z - m.z) ** 2;
+    const mum = mobs.filter(o => o.type === m.type && !(o.baby > 0) && !o.dead && d2(o) < 16 * 16).sort((a, b) => d2(a) - d2(b))[0];
+    if (mum && d2(mum) > 16) { walkToward(m, mum.x, mum.z, dt); return true; }
+  }
+  // standing about: forage now and then (while not very happy, for most)
+  if (A.forage && m.state !== 'walk' && m.happy < A.forage.below && (m.grazeIn -= dt) <= 0) {
+    m.grazeIn = randIn(A.forage.every);
+    if (canForage(m, bx, by, bz)) { m.grazing = A.forage.time; return true; }
+  }
+  return false;
+}
+const canMateA = m => { const A = ANIMALS[m.type]; return !m.dead && !(m.baby > 0) && m.happy > 0 && m.mateCool <= 0 && m.flee <= 0 && !(m.angry > 0) &&
+  kinNear(m, A.nearRange) < A.crowdedAt && kinInChunk(m.type, chunkOf(m.x, m.z)) < A.perChunk; };
+// two met: young between them (if the chunk has room), and neither wants to again for a while
+function animalYoung(a, b) {
+  const A = ANIMALS[a.type];
+  a.mate = b.mate = null;
+  a.mateCool = b.mateCool = A.mateCooldown;
+  a.happy = Math.max(0, a.happy - A.mateCost); b.happy = Math.max(0, b.happy - A.mateCost);
+  const x = (a.x + b.x) / 2, z = (a.z + b.z) / 2, y = a.type === 'duck' ? Math.max(a.y, b.y) : standSpot(x, Math.max(a.y, b.y), z);
+  if (y === null || kinInChunk(a.type, chunkOf(x, z)) >= A.perChunk) return;
+  spawnAnimal(a.type, x, y, z, A.babyTime);
+  for (let k = 0; k < 4; k++) addHeart(x, y + 1, z, k * 0.15);
+}
+// can it forage here, now? (chickens: on Grass; ducks: in water; deer: by leaves; goats: something to clear; boar: Grass
+// near their trees)
+function canForage(m, x, y, z) {
+  const A = ANIMALS[m.type], under = getBlock(x, y - 1, z);
+  if (m.type === 'chicken') return grassy(under);
+  if (m.type === 'duck') return waterAt(m.x, m.y + 0.3, m.z);
+  if (m.type === 'deer') { for (let dy = 0; dy <= 3; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) if (isLeaves(getBlock(x + dx, y + dy, z + dz))) return true; return false; }
+  if (m.type === 'goat') return !!goatTarget(x, y, z);
+  if (m.type === 'boar') return under === 1 && logNear(x, y, z, A.rootNear, ANIMAL_LOGS.boar);
+  return false;
+}
+// foraging done: happier, and for some, a change to the land
+function forageDone(m, x, y, z) {
+  const A = ANIMALS[m.type];
+  if (m.type === 'goat') { const t = goatTarget(x, y, z); if (!t) return; setBlock(t[0], t[1], t[2], 0); Sound.place(5); }
+  if (m.type === 'boar') {
+    if (getBlock(x, y - 1, z) !== 1) return;
+    setBlock(x, y - 1, z, 2); Sound.place(2);   // (rooted up: Dirt, which stays Dirt)
+    if (TRUFFLE > 0 && Math.random() < A.truffleChance) dropItem(TRUFFLE, x + 0.5, y + 0.3, z + 0.5);
+  }
+  m.happy = Math.min(A.happyMax, m.happy + A.forage.happy);
+}
+// what a goat would eat within 2 of it: a Dead Bush, or a natural leaf block with the ground at most 2 below (a shrub, not a
+// tree's crown, and never a hedge someone planted). [x, y, z] or null
+function goatTarget(x, y, z) {
+  for (let dy = -1; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    const xx = x + dx, yy = y + dy, zz = z + dz, b = getBlock(xx, yy, zz);
+    if (b === DEAD_BUSH && DEAD_BUSH > 0) return [xx, yy, zz];
+    if (!isLeaves(b) || !isNatural(xx, yy, zz)) continue;
+    const g1 = getBlock(xx, yy - 1, zz), g2 = getBlock(xx, yy - 2, zz), ground = g => !!g && !isLeaves(g) && !isLogBlock(g) && solid(xx, yy, zz) !== undefined && !isWater(g) && BLOCKS[g] && !BLOCKS[g].noCollide;
+    if (ground(g1) || (!g1 || isLeaves(g1)) && ground(g2)) return [xx, yy, zz];
+  }
+  return null;
+}
+// an egg laid: a chicken's where it stands; a duck's on the nearest dry ground within eggReach (or where it is)
+function layEgg(m) {
+  if (EGG <= 0) return;
+  let at = [m.x, m.y + 0.3, m.z];
+  if (m.type === 'duck') {
+    const A = ANIMALS.duck, x = Math.floor(m.x), y = Math.floor(m.y + 0.3), z = Math.floor(m.z);
+    let best = Infinity;
+    for (let dy = -1; dy <= 1; dy++) for (let dz = -A.eggReach; dz <= A.eggReach; dz++) for (let dx = -A.eggReach; dx <= A.eggReach; dx++) {
+      const g = getBlock(x + dx, y + dy - 1, z + dz), d = dx * dx + dz * dz;
+      if (d < best && g && solid(x + dx, y + dy - 1, z + dz) && !isWater(g) && !getBlock(x + dx, y + dy, z + dz)) { best = d; at = [x + dx + 0.5, y + dy + 0.3, z + dz + 0.5]; }
+    }
+  }
+  dropItem(EGG, ...at);
+}
+// a chicken's scratching and pecking (grown ones)
+function chickenWork(m, dt, x, y, z) {
+  const A = ANIMALS.chicken;
+  if ((m.scratchIn = (m.scratchIn ?? randIn(A.scratchTime)) - dt) <= 0) {
+    m.scratchIn = randIn(A.scratchTime);
+    const i = idx(x, y - 1, z), s = getBlock(x, y - 1, z);
+    if (isSoil(s) && !getBlock(x, y, z)) {   // empty tilled soil: it stays tilled, and now and then it's fertilized
+      soilIdle.delete(i);
+      if (!BLOCKS[s].fert && Math.random() < A.fertChance) setBlock(x, y - 1, z, soilId(BLOCKS[s].wet, true));
+    }
+  }
+  if ((m.peckIn = (m.peckIn ?? randIn(A.peckTime)) - dt) <= 0) {
+    m.peckIn = randIn(A.peckTime);
+    if (Math.random() >= A.peckChance) return;
+    for (const [dx, dz] of [[0, 0], ...DOOR_FRONT]) {
+      const b = getBlock(x + dx, y, z + dz);
+      if (isCrop(b) && !isRipeCrop(BLOCKS[b].top ? getBlock(x + dx, y - 1, z + dz) : b) && !isGrownVine(b)) { peckCrop(x + dx, BLOCKS[b].top ? y - 1 : y, z + dz); return; }
+    }
+  }
+}
+// a crop pecked: back a stage (Corn keeps its top only while that stage has one); a crop at its first stage is eaten
+function peckCrop(x, y, z) {
+  const id = getBlock(x, y, z), c = cropOf(id);
+  if (!isCrop(id) || isRipeCrop(id)) return;
+  const st = isGrain(id) ? id - GRAIN_STAGES[0] : BLOCKS[id].stage, up = getBlock(x, y + 1, z), hasTop = BLOCKS[up] && BLOCKS[up].top;
+  if (st === 0) { setBlock(x, y, z, 0); Sound.place(1); return; }
+  setBlock(x, y, z, c === 'grain' ? id - 1 : CROP_STAGES[c][st - 1]);
+  if (hasTop) setBlock(x, y + 1, z, CORN_TOP[st - 1] || 0);
+  Sound.place(1);
+}
+// a deer: remembers the sapling of the last leaves it passed, plants it now and then, and nibbles saplings
+function deerWork(m, dt, x, y, z) {
+  const A = ANIMALS.deer;
+  if ((m.lookIn = (m.lookIn || 0) - dt) <= 0) {
+    m.lookIn = 5;
+    for (let dy = 0; dy <= 6; dy++) for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+      const b = BLOCKS[getBlock(x + dx, y + dy, z + dz)];
+      if (b && b.leaves && b.sapling) { m.sow = b.sapling; dy = 99; dz = 99; break; }
+    }
+  }
+  if (m.baby > 0) return;
+  if ((m.sowIn = (m.sowIn ?? A.sowEvery) - dt) <= 0) {
+    m.sowIn = A.sowEvery;
+    if (m.sow && Math.random() < A.sowChance && grassy(getBlock(x, y - 1, z)) && !getBlock(x, y, z) && skyTop[z * WX + x] < y && !logNear(x, y, z, A.sowClear, null) && !saplingNear(x, y, z, A.sowClear)) {
+      setBlock(x, y, z, m.sow); grown.add(idx(x, y, z));   // (planted by a deer: natural, like a tree a sapling grew)
+    }
+  }
+  if ((m.nibbleIn = (m.nibbleIn ?? A.nibbleEvery) - dt) <= 0) {
+    m.nibbleIn = A.nibbleEvery;
+    for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const b = getBlock(x + dx, y + dy, z + dz);
+      if (!(BLOCKS[b] && BLOCKS[b].grows) || Math.hypot(x + dx + 0.5 - m.x, z + dz + 0.5 - m.z) > A.nibbleRange) continue;
+      if (Math.random() < A.nibbleChance) { setBlock(x + dx, y + dy, z + dz, 0); Sound.place(1); m.happy = Math.min(A.happyMax, m.happy + A.forage.happy); }
+      return;
+    }
+  }
+}
+function saplingNear(x, y, z, r) {
+  for (let dy = -2; dy <= 2; dy++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) if ((BLOCKS[getBlock(x + dx, y + dy, z + dz)] || {}).grows) return true;
+  return false;
+}
+// a duck keeps to the water: in it, it turns back at the banks; ashore, it heads for the nearest water within waterRange. It
+// comes ashore only to follow someone holding its food (within followRange). Returns true while busy.
+function duckWater(m, dt) {
+  const A = ANIMALS.duck, wet = waterAt(m.x, m.y + 0.3, m.z);
+  m.ashore = false;
+  if (!player.dead && ANIMAL_FOOD.duck.has(HOTBAR[act]) && Math.hypot(player.x - m.x, player.z - m.z) < A.followRange) {
+    m.ashore = true;
+    if (Math.hypot(player.x - m.x, player.z - m.z) > 1.5) { walkToward(m, player.x, player.z, dt); return true; }
+    m.state = 'idle'; return true;
+  }
+  if (wet) {
+    m.waterGoal = null;
+    if (m.state === 'walk') {
+      const fx = Math.floor(m.x - Math.sin(m.yaw) * (m.half + 0.4)), fz = Math.floor(m.z - Math.cos(m.yaw) * (m.half + 0.4));
+      if (!isWater(getBlock(fx, Math.floor(m.y + 0.3), fz))) { m.turnTo = m.yaw + Math.PI * (0.6 + Math.random() * 0.8); m.yaw = m.turnTo; }
+    }
+    return false;
+  }
+  if (!m.waterGoal && (m.waterCheck = (m.waterCheck || 0) - dt) <= 0) {
+    m.waterCheck = 3;
+    const x = Math.floor(m.x), y = Math.floor(m.y), z = Math.floor(m.z), R = A.waterRange;
+    let best = Infinity;
+    for (let dy = -3; dy <= 1; dy++) for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const d = dx * dx + dz * dz;
+      if (d < best && isWater(getBlock(x + dx, y + dy, z + dz)) && !getBlock(x + dx, y + dy + 1, z + dz)) { best = d; m.waterGoal = [x + dx + 0.5, z + dz + 0.5]; }
+    }
+  }
+  if (!m.waterGoal) return false;
+  walkToward(m, m.waterGoal[0], m.waterGoal[1], dt);
+  return true;
+}
+// a grown bear: hungry huntCool after its last meal; then it looks for prey (the nearest within huntRange, and huntHeight up or
+// down), chases it for up to chaseTime and bites it once a second in reach. A kill is a meal (the prey leaves only Feathers).
+// Giving up, it tries again retry seconds later. Returns true while chasing.
+function bearHunt(m, dt) {
+  const A = ANIMALS.bear;
+  if (m.hungerIn > 0) { m.hungerIn -= dt; m.prey = null; return false; }
+  const p = m.prey;
+  if (p && (p.dead || !mobs.includes(p) || (m.chaseT -= dt) <= 0)) {
+    if (p.dead && p.eaten) { m.hungerIn = A.huntCool; m.happy = Math.min(A.happyMax, m.happy + A.mealHappy); }
+    else m.huntRetry = A.retry;
+    m.prey = null;
+    return false;
+  }
+  if (!p) {
+    if ((m.huntRetry = (m.huntRetry || 0) - dt) > 0 || (m.preyCheck = (m.preyCheck || 0) - dt) > 0) return false;
+    m.preyCheck = 3;
+    const d2 = o => (o.x - m.x) ** 2 + (o.z - m.z) ** 2;
+    m.prey = mobs.filter(o => A.prey.includes(o.type) && !o.dead && d2(o) < A.huntRange ** 2 && Math.abs(o.y - m.y) <= A.huntHeight).sort((a, b) => d2(a) - d2(b))[0] || null;
+    m.chaseT = A.chaseTime;
+    if (!m.prey) return false;
+  }
+  const q = m.prey, d = Math.hypot(q.x - m.x, q.z - m.z);
+  m.chase = true; m.grazing = 0;
+  walkToward(m, q.x, q.z, dt);
+  if (d < MOB_TYPES.bear.reach && (m.biteCool = (m.biteCool || 0) - dt) <= 0) {
+    m.biteCool = 1; m.swing = 0.35;
+    q.eaten = true; hurtMob(q, mobDamage(m));
+    if (!q.dead) q.eaten = false;
+  }
+  return true;
+}
+// right-click holding an animal's food, looking at it: it eats it (unless it's had all it wants). Holding a Clay Jug, looking
+// at a milky goat: a Jug of Milk.
+function feedAnimalClick() {
+  if (player.dead) return false;
+  const id = HOTBAR[act], m = mobInSights();
+  if (!m || !isAnimal(m)) return false;
+  if (id === CLAY_JUG && CLAY_JUG > 0 && m.type === 'goat') {
+    if (Net.client) { Net.feed(m, id); useOne(); return true; }   // (the host's game milks it, and sends the jug back full or empty)
+    if (milkGoat(m)) { useOne(); giveOrDrop(JUG_OF_MILK); }
+    return true;
+  }
+  if (!ANIMAL_FOOD[m.type].has(id)) return false;
+  if (Net.client) { Net.feed(m, id); useOne(); return true; }
+  if (feedAnimal(m)) useOne();
+  return true;
+}
+const giveOrDrop = id => { if (!giveItem(id)) dropItem(id, player.x, player.y + 1, player.z); };
+function milkGoat(m) {
+  if (m.dead || m.baby > 0 || !(m.milky > 0)) return false;
+  m.milky = 0; Sound.place(1);
+  return true;
+}
+function feedAnimal(m) {
+  const A = ANIMALS[m.type];
+  if (m.dead || (m.fed >= A.fedMax && m.happy > A.happyMax / 2 && !(m.baby > 0))) return false;
+  m.happy = Math.min(A.happyMax, m.happy + A.foodHappy);
+  if (m.baby > 0) m.baby = Math.max(0.01, m.baby - A.babyFoodBoost);
+  else {
+    m.fed = Math.min(A.fedMax, m.fed + 1);
+    if (A.layTime && !(m.eggIn > 0)) m.eggIn = randIn(A.layTime);   // (chickens and ducks: an egg on its way)
+    if (A.milkTime) m.milky = A.milkTime;                         // (goats: milky for a while)
+    if (m.type === 'bear') { m.hungerIn = A.huntCool; m.prey = null; }   // (a bear: a meal)
+  }
+  m.grazing = 0.6;   // (a quick munch)
+  for (let k = 0; k < 3; k++) addHeart(m.x, m.y + m.height, m.z, k * 0.2);
+  Sound.place(1);
+  return true;
+}
+// what other players' games need to show an animal: 1 while young, +4 happy, +8 eating, +16 angry
+const animalLook = m => (m.baby > 0 ? 1 : 0) | (m.happy > 0 ? 4 : 0) | (m.grazing > 0 ? 8 : 0) | (m.angry > 0 ? 16 : 0);
+function applyAnimalLook(m, look) {
+  setVariant(m, look & 1);
+  m.happy = look & 4 ? 1 : 0;
+  m.grazing = look & 8 ? 0.2 : 0;
+  m.angry = look & 16 ? 1 : 0;
+}
 // ---- pink hearts (the pink row, FF00FF, of textures/gui/heart_atlas.png): float up and fade ----
 const hearts = [], HEART_LIFE = 1.3;
 let heartMat = null;
@@ -6358,6 +7124,7 @@ function updateMobs(dt) {
       }
     }
     if ((window.MODELS || {}).cow) spawnCows();
+    spawnAnimals();
   }
   for (const m of [...mobs]) {
     const t = MOB_TYPES[m.type];
@@ -6374,7 +7141,7 @@ function updateMobs(dt) {
     if (Net.client || m.dead) { /* no thinking or walking of its own */ }
     else if (Math.hypot(m.x - player.x, m.z - player.z) > Math.max(mobRange(t), Net.farthestPlayer(m))) {
       // past the render distance from everyone: forgotten, except cows, which wait where they are, unseen (they're saved)
-      if (t.cow) { m.root.visible = false; continue; }
+      if (t.cow || t.animal) { m.root.visible = false; continue; }
       removeMob(m); continue;
     }
     else {
@@ -6382,8 +7149,10 @@ function updateMobs(dt) {
       // wander: stand around for a bit, then walk somewhere for a bit. After being hit, run away from the player.
       m.timer -= dt;
       m.attackCool = Math.max(0, (m.attackCool || 0) - dt);
+      if (t.animal) animalAlert(m, dt);   // (running from a bear, a deer from you, a bear guarding its cubs: see Animals)
       const pdist = Math.hypot(m.x - player.x, m.z - player.z);
-      const hunting = t.hostile && gameMode === 'survival' && !player.fly && pdist < t.sight && Math.abs(player.y - m.y) < 6;
+      // (a boar or bear you've angered comes at you like a hostile mob, in survival)
+      const hunting = (t.hostile || m.angry > 0) && gameMode === 'survival' && !player.fly && pdist < (t.sight || 24) && Math.abs(player.y - m.y) < 6;
       m.backing = false;
       // a Gloomling: fades away when someone holding a lit torch comes near (it drops nothing)
       if (t.snuffer && !m.fade && torchBearerNear(m.x, m.y + 0.5, m.z, GLOOM_FADE_RANGE)) startFade(m);
@@ -6391,7 +7160,7 @@ function updateMobs(dt) {
       if (m.fade) {
         m.state = 'idle';
       } else if (m.stare > 0) {
-        // stands still and turns to look at you
+        // stands still, facing the player (rare event 1)
         m.stare -= dt; m.state = 'idle'; m.grazing = 0;
         const toward = Math.atan2(m.x - player.x, m.z - player.z);
         m.yaw += Math.atan2(Math.sin(toward - m.yaw), Math.cos(toward - m.yaw)) * Math.min(1, dt * 5);
@@ -6447,31 +7216,34 @@ function updateMobs(dt) {
       } else if (m.flee > 0) {
         m.flee -= dt;
         m.state = 'walk';
-        const away = Math.atan2(-(m.x - player.x), -(m.z - player.z));
+        const from = m.fleeFrom && !m.fleeFrom.dead ? m.fleeFrom : player;   // (from you, or from a bear)
+        const away = Math.atan2(-(m.x - from.x), -(m.z - from.z));
         m.yaw += Math.atan2(Math.sin(away - m.yaw), Math.cos(away - m.yaw)) * Math.min(1, dt * 6);
       } else if (t.cow && cowThink(m, dt)) {
         // (grazing, going to a mate, a calf following: see Cows)
+      } else if (t.animal && animalThink(m, dt)) {
+        // (foraging, hunting, going to a mate, the young following, a duck keeping to the water: see Animals)
       } else if (m.timer <= 0) {
         if (m.state === 'idle') { m.state = 'walk'; m.timer = 1.5 + Math.random() * 4; m.turnTo = m.yaw + (Math.random() - 0.5) * Math.PI * 1.6; }
         else { m.state = 'idle'; m.timer = 1 + Math.random() * 5; }
       }
       if (m.state === 'walk' && m.flee <= 0 && m.turnTo !== undefined)
         m.yaw += Math.atan2(Math.sin(m.turnTo - m.yaw), Math.cos(m.turnTo - m.yaw)) * Math.min(1, dt * 3);
-      const sp = m.state === 'walk' ? t.speed * (m.flee > 0 ? 2.4 : hunting ? 1.6 : 1) * (hunting && pdist < t.reach * 0.7 ? 0 : 1) * (m.backing ? -0.6 : 1) : 0;
+      const sp = m.state === 'walk' ? t.speed * (m.flee > 0 ? 2.4 : hunting ? 1.6 : m.chase ? 1.5 : 1) * (hunting && pdist < t.reach * 0.7 ? 0 : 1) * (m.backing ? -0.6 : 1) : 0;
       const tvx = -Math.sin(m.yaw) * sp, tvz = -Math.cos(m.yaw) * sp;   // front of the model is its north side
       const acc = Math.min(1, dt * (m.onGround ? 10 : 2));
       m.vx += (tvx - m.vx) * acc; m.vz += (tvz - m.vz) * acc;
       // hop up one-block steps; turn around at anything taller
       if (m.bumped && m.onGround) {
         const fx = Math.floor(m.x - Math.sin(m.yaw) * (m.half + 0.3)), fz = Math.floor(m.z - Math.cos(m.yaw) * (m.half + 0.3)), fy = Math.floor(m.y);
-        if (solid(fx, fy, fz) && !solid(fx, fy + 1, fz) && !solid(fx, fy + 2, fz)) m.vy = 7.5;
+        if (solid(fx, fy, fz) && !isFence(getBlock(fx, fy, fz)) && !solid(fx, fy + 1, fz) && !solid(fx, fy + 2, fz)) m.vy = 7.5;   // (never over a fence)
         else if (m.flee <= 0) m.turnTo = m.yaw + Math.PI * (0.6 + Math.random() * 0.8);
       }
     }
     if (!Net.client) {   // falling, swimming and bumping into blocks (in a joined game the host's game does this)
     if (waterAt(m.x, m.y + 0.5, m.z)) {    // in water: float up to the surface, and paddle out over edges
       m.vy += (2 - m.vy) * Math.min(1, dt * 3);
-      if (m.bumped) m.vy = 5;
+      if (m.bumped && !(m.type === 'duck' && !m.ashore)) m.vy = 5;   // (a duck stays in the water, unless it's coming to you for food)
     } else m.vy = Math.max(-40, m.vy - 28 * dt);
     // move one axis at a time, stopping at blocks
     ox = m.x; oz = m.z;
@@ -6509,12 +7281,12 @@ function updateMobs(dt) {
       if (p >= 1) { m.throwT = 0; m.thrown = false; }
     }
     poseBody(m, dt, swipe, t.shamble, throwing);
-    if (t.cow) cowShow(m, dt);
+    if (t.cow || t.animal) cowShow(m, dt);   // (head down while eating, hearts while happy)
     m.root.position.set(m.x, m.y, m.z);
     m.root.rotation.y = m.yaw;
     if (t.growl && !m.dead) {
       if (m.growlIn === undefined) m.growlIn = 2 + Math.random() * 8;
-      if ((m.growlIn -= dt) <= 0) { m.growlIn = (6 + Math.random() * 10) * (t.cow ? 2.5 : 1); mobGrowl(m); }   // (cows moo less often)
+      if ((m.growlIn -= dt) <= 0) { m.growlIn = (6 + Math.random() * 10) * (t.cow || t.animal ? 2.5 : 1); mobGrowl(m); }   // (cows and the other animals call less often)
     }
     // lighting: same rules as blocks (sky light x time of day, or torch light, whichever is brighter)
     m.lightTimer -= dt;
@@ -6749,7 +7521,10 @@ function hitMob(m, from = player) {
   // a sword (or axe) hits harder; friends' hits in a hosted game count as 1
   const held = from === player ? BLOCKS[HOTBAR[act]] : null;
   m.hurt = 0.3; m.health -= (held && held.damage) || 1;
-  if (!MOB_TYPES[m.type].hostile) m.flee = 4;   // peaceful mobs run off; hostile ones don't back down
+  // peaceful mobs run off; hostile ones don't back down. A grown boar or bear you hit turns on you (survival: see Animals)
+  const A = ANIMALS[m.type];
+  if (A && A.angerTime && !(m.baby > 0) && from === player && SURVIVAL) { m.angry = A.angerTime; m.flee = 0; }
+  else if (!MOB_TYPES[m.type].hostile) { m.flee = 4; m.fleeFrom = null; }
   if (MOB_TYPES[m.type].growl) { mobGrowl(m); m.growlIn = 4 + Math.random() * 6; }   // growls when hit
   if (m.health <= 0) mobDies(m);
 }
@@ -6758,15 +7533,16 @@ function hitMob(m, from = player) {
 const drops = [];
 const dropTexCache = {};
 // an item's flat picture as a texture for things in the world (dropped items, thrown Rocks)
-function iconTexture(id) {
-  if (!dropTexCache[id]) {
+function iconTexture(id, full = false) {   // (full: a Linen Bag's picture while it holds something)
+  const k = full ? id + 'full' : id;
+  if (!dropTexCache[k]) {
     const c = document.createElement('canvas'); c.width = c.height = TILE;
-    drawIcon(c, id, true);   // (flat: it's shown in the world)
+    drawIcon(c, id, true, full);   // (flat: it's shown in the world)
     const t = new THREE.CanvasTexture(c);
     t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
-    dropTexCache[id] = t;
+    dropTexCache[k] = t;
   }
-  return dropTexCache[id];
+  return dropTexCache[k];
 }
 function dropItem(id, x, y, z) {
   iconTexture(id);
@@ -6789,6 +7565,8 @@ function removeDrop(d) {
 function updateDrops(dt) {
   for (const d of [...drops]) {
     d.age += dt;
+    // a bag holding something looks full (netFull: in a friend's game, the host's tick says so)
+    if (isBag(d.id) && (bagFull(d.id, d.data) || !!d.netFull) !== !!d.full) { d.full = !d.full; d.mesh.material.map = iconTexture(d.id, d.full); d.mesh.material.needsUpdate = true; }
     if (Net.client) {
       // joined game: the host's game moves drops around; walking into one asks the host for it
       const a = Math.min(1, dt * 10);
@@ -6797,7 +7575,7 @@ function updateDrops(dt) {
         d.asked = true; Net.pickup(d);
       }
     } else {
-    if (d.age > 300 && !d.keep) { removeDrop(d); continue; }   // gone after 5 minutes (unless it must stay)
+    if (d.age > 300 && !d.keep) { spillBag(d); removeDrop(d); continue; }   // gone after 5 minutes (unless it must stay; a Linen Bag spills what's in it)
     // fall and slide to a stop, resting on top of blocks
     d.vy = Math.max(-30, d.vy - 22 * dt);
     const nx = d.x + d.vx * dt, nz = d.z + d.vz * dt, ny = d.y + d.vy * dt;
@@ -6842,6 +7620,8 @@ addEventListener('mousedown', e => {
   if (e.button === 1) { e.preventDefault(); pickBlock(); return; }   // middle-click: pick block
   if (e.button === 0) { const m = mobInSights(); if (m) { const t = BLOCKS[HOTBAR[act]]; hitMob(m); if (t && t.tool) wearTool(t.tool === 'sword' ? 1 : 2); return; } }   // (a sword is made for hitting; other tools wear twice as fast)
   if (e.button === 2 && feedCow()) return;   // holding Grain, looking at a cow: feed it
+  if (e.button === 2 && feedAnimalClick()) return;   // holding its food, looking at another animal (or a Clay Jug at a milky goat)
+  if (e.button === 2 && plantInstead()) return;   // a Potato or Turnip aimed at bare tilled soil: planted, not eaten
   if (e.button === 2 && eat()) return;   // holding food (survival): right-click eats it
   if (e.button === 2 && useFireEssence()) return;   // holding Fire Essence while gloomed: right-click lifts the gloom
   if (e.button === 2 && throwSnowball()) return;   // holding a Snowball: throw it
@@ -6924,7 +7704,9 @@ addEventListener('mousedown', e => {
     Sound.break(plainOf(hb));
     const cost = breakWear(plainOf(hb));   // (the tool wears after the block is broken, so its last use still counts as that tool)
     // leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
-    if ((!isLeaves(hb) || holding('hoe')) && !isSnow(hb) && hb !== SNOW_BLOCK) collectBlock(hb, hit.x, hit.y, hit.z);
+    if (isCrop(hb) && !isGrain(hb)) breakCrop(hit.x, hit.y, hit.z, hb);   // (a crop: the seed back, or its harvest; Corn's other half goes too)
+    else if (CROP.cantaloupe && hb === idOf('cantaloupe')) giveHarvest('cantaloupe', hit.x, hit.y, hit.z);   // (a melon: its slices)
+    else if ((!isLeaves(hb) || holding('hoe')) && !isSnow(hb) && hb !== SNOW_BLOCK) collectBlock(hb, hit.x, hit.y, hit.z);
     if (isLeaves(hb) && !holding('hoe') && Math.random() < 0.2) collect(STICK, hit.x, hit.y, hit.z);
     if (BLOCKS[hb].fruit && !holding('hoe') && Math.random() < 0.25) collect(BLOCKS[hb].fruit, hit.x, hit.y, hit.z);   // leaves with fruit: a 1 in 4 chance of it
     if (BLOCKS[hb].sapling && !holding('hoe') && Math.random() < SAPLING.dropChance) collect(BLOCKS[hb].sapling, hit.x, hit.y, hit.z);   // and now and then their sapling
@@ -6985,15 +7767,18 @@ addEventListener('mousedown', e => {
       if (by !== hit.y + 1 || there || !(grassy(under) || under === 2 || under === MUD || under === PEAT || (BLOCKS[id].sand && under === 6))) return;
       setBlock(bx, by, bz, id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;
     }
-    if (BLOCKS[id].shape === 'plant') {   // a flower: planted on top of grass or dirt
+    if (BLOCKS[id].shape === 'plant') {   // a flower: planted on top of grass or dirt (a Dead Bush: Sand or Terracotta too, any colour or Fireclay, not chiseled)
       const under = getBlock(bx, by - 1, bz);
-      if (by !== hit.y + 1 || (!grassy(under) && under !== 2) || (there && BLOCKS[there].layers !== 1)) return;
+      const ground = grassy(under) || under === 2 || (id === DEAD_BUSH && (under === 6 || STAGE_TERRACOTTA.has(under) || under === FIRECLAY_TERRACOTTA));
+      if (by !== hit.y + 1 || !ground || (there && BLOCKS[there].layers !== 1)) return;
       setBlock(bx, by, bz, isSnow(there) ? withSnow(id, 1) : id); Sound.place(id); mobNoise(bx, by, bz); useOne(); return;   // (into snow: it stays round the flower)
     }
+    const fence = isFence(placeId(id));   // (a fence: 1.5 tall to you, and not into a layer of snow)
+    if (fence && isSnow(there)) return;
     const overlapsPlayer =
       bx < player.x + P_HALF && bx + 1 > player.x - P_HALF &&
       bz < player.z + P_HALF && bz + 1 > player.z - P_HALF &&
-      by < player.y + P_H && by + 1 > player.y;
+      by < player.y + P_H && by + (fence ? 1.5 : 1) > player.y;
     // (a furnace turns its front towards you)
     let pid = placeId(HOTBAR[act]);
     pid = turned(pid, hit.n[1] ? 0 : hit.n[0] ? 1 : 2);   // a log lies pointing out from the side you put it against
@@ -7281,7 +8066,7 @@ function needAxe(b, natural = false) {   // (natural: a block the world grew, wh
 // 1-8 pieces of it instead of the whole block.
 function collectBlock(b, x, y, z) {
   const id = dropFor(b), hand = BLOCKS[b] && BLOCKS[b].handDrop;
-  if (SURVIVAL && hand && !holding('shovel')) {   // (Fireclay by hand: a few Fireclay Balls)
+  if (SURVIVAL && hand && !holding('shovel')) {   // (Fireclay by hand: a few Fireclay Balls; a Dead Bush: a few Sticks. A shovel digs either up whole)
     for (let n = hand[1] + Math.floor(Math.random() * (hand[2] - hand[1] + 1)); n > 0; n--) collect(hand[0], x, y, z);
   } else if (SURVIVAL && BLOCKS[b] && BLOCKS[b].shovel && !holding('shovel') && BLOCKS[PIECE_ITEM + id]) {
     for (let n = 1 + Math.floor(Math.random() * 8); n > 0; n--) collect(PIECE_ITEM + id, x, y, z);
@@ -7302,16 +8087,17 @@ const hotbarIcons = [], hotbarCounts = [], hotbarWears = [];
 // Fir, Palm and Willow Leaves (and their pieces, slabs and stairs) share the Oak Leaves picture: their icons and drops get its green in their own colour
 // each picture is drawn once and copied after that (lists like the recipes are redrawn often, and a 3D icon takes a while);
 // forgotten when the textures change (see loadCustomTextures below)
-function drawIcon(canvas, id, flat) {
+function drawIcon(canvas, id, flat, full = false) {   // (full: a Linen Bag holding something: its "full" picture)
   if (!id) { drawIconPlain(canvas, 0, flat); return; }
-  const cache = drawIcon.cache || (drawIcon.cache = new Map()), key = flat ? -id : id;
+  full = full && BLOCKS[id] && BLOCKS[id].full !== undefined;
+  const cache = drawIcon.cache || (drawIcon.cache = new Map()), key = (flat ? -id : id) + (full ? 'full' : '');
   let c = cache.get(key);
-  if (!c) { c = document.createElement('canvas'); drawIconPlain(c, id, flat); cache.set(key, c); }
+  if (!c) { c = document.createElement('canvas'); drawIconPlain(c, id, flat, full); cache.set(key, c); }
   if (canvas.width !== c.width || canvas.height !== c.height) { canvas.width = c.width; canvas.height = c.height; }
   canvas.style.imageRendering = c.style.imageRendering;
   const g = canvas.getContext('2d'); g.clearRect(0, 0, canvas.width, canvas.height); g.drawImage(c, 0, 0);
 }
-function drawIconPlain(canvas, id, flat) {
+function drawIconPlain(canvas, id, flat, full) {
   if (!flat && iconBoxes(id)) { drawBoxIcon(canvas, id); return; }
   if (canvas.width !== TILE) canvas.width = canvas.height = TILE;
   canvas.style.imageRendering = '';
@@ -7329,7 +8115,7 @@ function drawIconPlain(canvas, id, flat) {
     else ctx.drawImage(atlas, sx, h, TILE, h, 0, h, TILE, h);                   // the bottom half...
     if (form === 'stairs') ctx.drawImage(atlas, sx + h, 0, h, h, h, 0, h, h);  // ...plus the step
   }
-  else if (id) ctx.drawImage(atlas, (BLOCKS[id].icon ?? BLOCKS[id].t[0]) * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
+  else if (id) ctx.drawImage(atlas, (full ? BLOCKS[id].full : BLOCKS[id].icon ?? BLOCKS[id].t[0]) * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
 }
 // ordinary whole blocks (not items, shapes, liquids, pieces, slabs or stairs, nor ones with a picture of their own)
 // (a block with a front face, like the kiln, is a cube too even though it has a picture of its own; torches are a
@@ -7355,6 +8141,7 @@ function iconBoxes(id) {
   }
   if (b.shape === 'half') return [[0, 16, 0, 16, 0, 8]];   // the Cutter: half a block tall
   if (b.shape === 'snow') return [[0, 16, 0, 16, 0, 2 * b.layers]];   // snow: as deep as its layers
+  if (b.shape === 'fence') return [[6, 10, 6, 10, 0, 16], [0, 6, 7, 9, 6, 9], [0, 6, 7, 9, 12, 15], [10, 16, 7, 9, 6, 9], [10, 16, 7, 9, 12, 15]];   // a fence: its post, and its rails both ways along x (as the desktop version)
   if (!isCubeIcon(id)) return null;
   return isTorch(id) ? [[6, 10, 6, 10, 0, 16]] : [[0, 16, 0, 16, 0, 16]];
 }
@@ -7554,16 +8341,21 @@ function swapSlots(i, j) {
   for (const a of [HOTBAR, HOTBAR_COUNT, HOTBAR_WEAR, HOTBAR_DATA]) [a[i], a[j]] = [a[j], a[i]];
 }
 // the worn backpack takes its slots' contents with it when it comes off...
+// (what its slots carry of their own, a Linen Bag's contents, goes in d.d: { slot within the pack, from 0: that data })
 function packBack() {
   if (!HOTBAR[BACK_SLOT]) return;
   const d = { id: [], n: [], w: [] };
-  for (let k = PACK0; k < TOOL0; k++) { d.id.push(HOTBAR[k]); d.n.push(HOTBAR_COUNT[k]); d.w.push(HOTBAR_WEAR[k]); HOTBAR[k] = HOTBAR_COUNT[k] = HOTBAR_WEAR[k] = 0; HOTBAR_DATA[k] = null; }
+  for (let k = PACK0; k < TOOL0; k++) {
+    d.id.push(HOTBAR[k]); d.n.push(HOTBAR_COUNT[k]); d.w.push(HOTBAR_WEAR[k]);
+    if (HOTBAR_DATA[k]) (d.d = d.d || {})[k - PACK0] = HOTBAR_DATA[k];
+    HOTBAR[k] = HOTBAR_COUNT[k] = HOTBAR_WEAR[k] = 0; HOTBAR_DATA[k] = null;
+  }
   HOTBAR_DATA[BACK_SLOT] = d.id.some(x => x) ? d : null;
 }
 // ...and a backpack put on spreads what it carries back into them
 function unpackBack() {
   const d = HOTBAR_DATA[BACK_SLOT]; HOTBAR_DATA[BACK_SLOT] = null;
-  if (d) d.id.forEach((id, k) => { HOTBAR[PACK0 + k] = id | 0; HOTBAR_COUNT[PACK0 + k] = (d.n || [])[k] | 0; HOTBAR_WEAR[PACK0 + k] = (d.w || [])[k] | 0; });
+  if (d) d.id.forEach((id, k) => { HOTBAR[PACK0 + k] = id | 0; HOTBAR_COUNT[PACK0 + k] = (d.n || [])[k] | 0; HOTBAR_WEAR[PACK0 + k] = (d.w || [])[k] | 0; HOTBAR_DATA[PACK0 + k] = (d.d || {})[k] || null; });
 }
 // a smaller belt (or none): what was in the offhand and tool slots it gave drops out
 function fitBelt() {
@@ -7608,6 +8400,7 @@ function tipLines(id, slot) {
   const d = BLOCKS[id];
   if (!d) return [];
   const lines = [d.name], max = maxWear(id);
+  if (isBag(id)) lines.push(...bagLines(slot >= 0 && HOTBAR[slot] === id ? HOTBAR_DATA[slot] : null));   // (what's in a Linen Bag)
   if (max) lines.push(`Durability ${max - (slot >= 0 && HOTBAR[slot] === id ? HOTBAR_WEAR[slot] : 0)} / ${max}`);
   if (d.food) lines.push(`Heals ${heartsText(d.food)}`);
   if (FUEL[id]) lines.push(`Fuel: smelts ${FUEL[id]} (${FUEL[id] * SMELT_TIME} s)`);
@@ -7655,11 +8448,12 @@ function placeHeld() { heldEl.style.left = mouseX / uiZoom - 22 + 'px'; heldEl.s
 function drawHeld() {
   heldEl.style.display = held && invOpen ? 'block' : 'none';
   if (!held) return;
-  drawIcon(heldIcon, held.id);
+  drawIcon(heldIcon, held.id, false, bagFull(held.id, held.data));
   heldCount.textContent = held.n > 1 ? held.n : '';
   const max = maxWear(held.id), left = max ? 1 - held.wear / max : 1;
   heldWear.style.display = max && held.wear > 0 ? 'block' : 'none';
   if (max) { heldWear.firstChild.style.width = Math.max(1, Math.round(left * 28)) + 'px'; heldWear.firstChild.style.background = `hsl(${Math.round(left * 120)}, 90%, 45%)`; }
+  if (isBag(held.id)) bagBar(heldWear, held.data, 28);   // (how full a Linen Bag is)
   placeHeld();
 }
 // can slot i take (some of) the held stack as it is?
@@ -7686,6 +8480,7 @@ function slotDown(i, e) {
     return;
   }
   if (!HOTBAR[i] || (e.button !== 0 && e.button !== 2)) return;
+  if (e.button === 2 && bagFull(HOTBAR[i], HOTBAR_DATA[i])) { bagOut(i); slotsChanged(); return; }   // (out of a Linen Bag)
   if (e.button === 0 && e.shiftKey) { quickMove(i); slotsChanged(); return; }
   const n = HOTBAR_COUNT[i] || 1, take = e.button === 2 ? Math.ceil(n / 2) : n;
   if (i === BACK_SLOT) packBack();   // (a backpack keeps what was in it)
@@ -7715,6 +8510,7 @@ addEventListener('mouseup', e => {
 });
 // a click on slot i with a stack held
 function clickHeld(i, button) {
+  if (isBag(HOTBAR[i]) && !isBag(held.id)) { bagIn(i, button); return; }   // (into a Linen Bag)
   const id = HOTBAR[i], no = () => slotNote("That doesn't go there");
   if (button === 2) { if (takesHeld(i)) putIn(i, 1); else if (!fits(i, held.id)) no(); return; }   // put down one
   if (!fits(i, held.id)) { no(); return; }
@@ -7735,6 +8531,76 @@ function gather() {
     const t = Math.min(HOTBAR_COUNT[k], max - held.n);
     held.n += t; if (!(HOTBAR_COUNT[k] -= t)) clearSlot(k);
   }
+}
+// ---- The Linen Bag (data/blocks.json: bag): one slot holding a mix of things, up to one full stack (STACK_MAX) in all. A
+// thing that stacks takes 1 of that room; one that doesn't (a tool, armor, a backpack, a belt) takes all of it. Not another
+// bag, nor anything carrying things of its own (a backpack with things in it). What's in it is its slot's data, { id: [],
+// n: [], w: [] } in the order put in (an unworn thing that stacks joins its own entry). With a stack held (the survival
+// inventory): left-click the bag puts in as much as fits, right-click one ("The bag is full", or "That can't go in a bag":
+// nothing happens; a held bag swaps as usual). Nothing held, right-click takes the last thing put in back out, all of it
+// (an empty bag is just picked up). Its tooltip lists what's in it, newest first; a bright bar under it shows how full it is,
+// and once it holds anything it shows its "full" picture, everywhere. A dropped bag whose time is up spills what's in it.
+// Exactly as the desktop version.
+const BAG_ROOM = STACK_MAX;
+function bagUnits(id) { return STACK_MAX / stackMax(id); }   // (1, or all of it)
+function bagUsed(d) { return d && d.id ? d.id.reduce((s, id, k) => s + (d.n[k] | 0) * bagUnits(id), 0) : 0; }
+function bagFull(id, d) { return isBag(id) && !!d && !!d.id && d.id.length > 0; }   // (holds something)
+// up to k of (id, wear) into bag contents d: [the new contents, how many went in]
+function bagPut(d, id, k, wear = 0) {
+  k = Math.min(k, Math.floor((BAG_ROOM - bagUsed(d)) / bagUnits(id)));
+  if (k <= 0) return [d, 0];
+  d = d ? { id: d.id.slice(), n: d.n.slice(), w: d.w.slice() } : { id: [], n: [], w: [] };
+  const e = stackMax(id) > 1 && !wear ? d.id.findIndex((x, j) => x === id && !d.w[j]) : -1;
+  if (e >= 0) d.n[e] += k; else { d.id.push(id); d.n.push(k); d.w.push(wear | 0); }
+  return [d, k];
+}
+// a click on bag slot i with a stack held (not a bag): in it goes (left: all that fits; right: one)
+function bagIn(i, button) {
+  if (isBag(held.id) || held.data) { slotNote("That can't go in a bag"); return; }
+  const [d, k] = bagPut(HOTBAR_DATA[i], held.id, button === 2 ? 1 : held.n, held.wear);
+  if (!k) { slotNote('The bag is full'); return; }
+  HOTBAR_DATA[i] = d;
+  if ((held.n -= k) <= 0) held = null;
+}
+// right-click on bag slot i with nothing held: the last thing put in comes out onto the mouse, all of it
+function bagOut(i) {
+  const d = HOTBAR_DATA[i], k = d.id.length - 1;
+  held = { id: d.id[k], n: d.n[k], wear: d.w[k] | 0, data: null, from: i };
+  HOTBAR_DATA[i] = k ? { id: d.id.slice(0, k), n: d.n.slice(0, k), w: d.w.slice(0, k) } : null;
+}
+// its tooltip, after its name: what's in it, newest first (8 at most), then how much room is left
+function bagLines(d) {
+  if (!bagUsed(d)) return ['Empty'];
+  const all = d.id.map((id, k) => (d.n[k] > 1 ? d.n[k] + ' ' : '') + ((BLOCKS[id] || {}).name || '?')).reverse();
+  const lines = all.slice(0, 8), room = BAG_ROOM - bagUsed(d);
+  if (all.length > 8) lines.push(`and ${all.length - 8} more`);
+  lines.push(room > 0 ? `Room for ${room} more` : 'Full');
+  return lines;
+}
+// the bar under its picture: how full it is, bright blue on the wear bar's black (a colour no wear bar has)
+function bagBar(bar, d, width) {
+  const used = bagUsed(d);
+  if (!used) return;
+  bar.style.display = 'block';
+  bar.firstChild.style.width = Math.max(1, Math.round(used / BAG_ROOM * width)) + 'px'; bar.firstChild.style.background = '#3FA9FF';
+}
+// a bag's contents from a friend's game: kept only if they make sense (whole numbers, real things, none a bag, at most a full
+// bag's worth); otherwise the bag comes empty
+function cleanBag(b) {
+  if (!b || !Array.isArray(b.id) || !Array.isArray(b.n) || !Array.isArray(b.w)) return null;
+  const L = b.id.length;
+  if (!L || L > BAG_ROOM || b.n.length !== L || b.w.length !== L) return null;
+  for (let k = 0; k < L; k++) {
+    const id = b.id[k], n = b.n[k], w = b.w[k];
+    if (![id, n, w].every(Number.isInteger) || !BLOCKS[id] || isBag(id) || n < 1 || w < 0 || (w > 0 && w >= maxWear(id))) return null;
+  }
+  const d = { id: b.id.slice(), n: b.n.slice(), w: b.w.slice() };
+  return bagUsed(d) <= BAG_ROOM ? d : null;
+}
+// a dropped bag whose time is up: what's in it spills out where it lay, each thing with its own time
+function spillBag(d) {
+  if (!bagFull(d.id, d.data) || Net.client) return;
+  d.data.id.forEach((id, k) => { if (BLOCKS[id]) for (let n = d.data.n[k]; n > 0; n--) Object.assign(dropItem(id, d.x, d.y + 0.2, d.z), { wear: d.data.w[k] | 0 }); });
 }
 // shift-click: the whole stack to where it fits. Its gear slot first (a tool to a free tool slot; armor, a backpack or a belt
 // to its own slot if that's empty), then: from the hotbar to pockets, then the backpack; from pockets to the hotbar, then the
@@ -7828,7 +8694,8 @@ function carried() {
 const offhandEl = document.getElementById('offhand');
 const offIcon = document.createElement('canvas'); offIcon.width = offIcon.height = TILE;
 const offLabel = document.createElement('span'), offCountEl = document.createElement('span'); offCountEl.className = 'count';
-offhandEl.append(offIcon, offLabel, offCountEl);
+const offWear = document.createElement('div'); offWear.className = 'wear'; offWear.append(document.createElement('i'));   // (a bag's fill bar)
+offhandEl.append(offIcon, offLabel, offCountEl, offWear);
 var toolRowEl = document.getElementById('tool-row'), toolRowSlots = [];   // (var: drawHotbarIcons can run before this line)
 var autoTool = -1, autoToolId = 0;
 if (SURVIVAL) { document.getElementById('offhand-box').style.display = 'block'; toolRowEl.style.display = 'flex'; layoutHearts(); }   // (the tool row fills in with the hotbar: see drawHotbarIcons)
@@ -7866,9 +8733,11 @@ function toolPicked(i) {
 function drawOffhand() {
   if (!SURVIVAL) return;
   const i = OFF0 + offSel, id = HOTBAR[i];
-  drawIcon(offIcon, id);
+  drawIcon(offIcon, id, false, bagFull(id, HOTBAR_DATA[i]));
   offLabel.textContent = offCount() > 1 ? `R${offSel + 1}` : 'R';
   offCountEl.textContent = counted(id) && HOTBAR_COUNT[i] > 1 ? HOTBAR_COUNT[i] : '';
+  offWear.style.display = 'none';
+  if (isBag(id)) bagBar(offWear, HOTBAR_DATA[i], 28);
 }
 function showNote(text, secs = 1.5) { nameEl.textContent = text; nameEl.style.opacity = 1; nameTimer = secs; }
 function cycleOffhand() {
@@ -7942,12 +8811,13 @@ function drawHotbarIcons() {
   slotEls.forEach((sl, i) => {
     if (!sl) return;
     const id = HOTBAR[i];
-    drawIcon(sl.icon, id);
+    drawIcon(sl.icon, id, false, bagFull(id, HOTBAR_DATA[i]));
     sl.count.textContent = counted(id) && !infinitePiece(id) && HOTBAR_COUNT[i] > 1 ? HOTBAR_COUNT[i] : '';
     // a worn tool or piece of armor: a bar of what's left, green when new through yellow to red
     const max = maxWear(id), left = max ? 1 - HOTBAR_WEAR[i] / max : 1, bar = sl.wear;
     bar.style.display = SURVIVAL && max && HOTBAR_WEAR[i] > 0 ? 'block' : 'none';
     if (max) { bar.firstChild.style.width = Math.max(1, Math.round(left * 28)) + 'px'; bar.firstChild.style.background = `hsl(${Math.round(left * 120)}, 90%, 45%)`; }
+    if (isBag(id)) bagBar(bar, HOTBAR_DATA[i], 28);   // (a Linen Bag: how full it is)
     if (i >= 10) { sl.el.style.display = slotOpen(i) ? '' : 'none'; sl.el.classList.toggle('empty-gear', !id && !!SLOT_PH(i)); }
   });
   if (SURVIVAL) {
@@ -8415,25 +9285,31 @@ function farmChanged(i, old, id, loading) {
   if (isSoil(id)) soils.add(i); else { soils.delete(i); soilIdle.delete(i); }
   if (!(BLOCKS[id] && BLOCKS[id].fert)) fertLeft.delete(i);
   else if (!fertLeft.has(i)) fertLeft.set(i, FARM.fertHarvests);
-  if (isCrop(id) && id !== GRAIN_RIPE) { if (old !== id) crops.set(i, 0); } else crops.delete(i);
+  if (isGrowingCrop(id)) { if (old !== id) crops.set(i, 0); } else crops.delete(i);
+  if (isGrownVine(id)) { if (old !== id) vines.set(i, 0); } else vines.delete(i);
   if (BLOCKS[id] && BLOCKS[id].grows) { if (old !== id) saplings.set(i, 0); } else saplings.delete(i);
-  // a ripe Grain harvested (or trampled away) from fertilized soil uses up one of the fertilizer's harvests
-  if (!loading && old === GRAIN_RIPE && id !== GRAIN_RIPE && fertLeft.has(i - WX * WZ) && !Net.client) {
-    const n = fertLeft.get(i - WX * WZ) - 1;
-    if (n > 0) fertLeft.set(i - WX * WZ, n);
-    else { const [x, y, z] = fromIdx(i - WX * WZ); setBlock(x, y, z, soilId(BLOCKS[world.get(i - WX * WZ)].wet, false)); }
-  }
+  // a ripe crop harvested (or trampled away) from fertilized soil uses up one of the fertilizer's harvests
+  if (!loading && isRipeCrop(old) && id !== old && !Net.client) useFertilizer(i - WX * WZ);
 }
-// how fast Grain grows on this soil (0 = not on soil: it doesn't grow)
-function growRate(soil) {
+// one of fertilized soil's harvests used up (a ripe crop off it, or a melon from a vine on it); the last one leaves plain soil
+function useFertilizer(i) {
+  if (!fertLeft.has(i)) return;
+  const n = fertLeft.get(i) - 1;
+  if (n > 0) fertLeft.set(i, n);
+  else { const [x, y, z] = fromIdx(i); setBlock(x, y, z, soilId(BLOCKS[world.get(i)].wet, false)); }
+}
+// how fast a crop grows on this soil (0 = not on soil: it doesn't grow). c: the crop (Grain if left out); i: where it is
+// (wet soil with a duck in the water nearby grows it a little faster: see Ducks)
+function growRate(soil, c = 'grain', i = -1) {
   const b = BLOCKS[soil];
   if (!b || !b.soil) return 0;
-  return (b.wet ? 1 : FARM.dryRate) * (b.fert ? FARM.fertRate : 1);
+  const dry = CROP[c] && CROP[c].dryRate !== undefined ? CROP[c].dryRate : FARM.dryRate;
+  return (b.wet ? 1 : dry) * (b.fert ? FARM.fertRate : 1) * (b.wet && i >= 0 && duckNear(i) ? DUCK_RATE : 1);
 }
 // Random growth: every second each crop has a small chance of a lucky tick, and FARM.stageHits lucky ticks take it to
 // its next stage. On average a stage still takes stageTime / growRate seconds, but some plants get ahead and some lag a
 // little, so a field doesn't all ripen at the same moment. (Needing 3 ticks, not 1, keeps the randomness gentle.)
-const stageChance = (rate, step) => Math.min(1, step * rate * FARM.stageHits / FARM.stageTime);
+const stageChance = (rate, step, c = 'grain') => Math.min(1, step * rate * FARM.stageHits / (CROP[c] ? CROP[c].stageTime : FARM.stageTime));
 function tickFarm(dt) {
   if (Net.client) return;   // (in a friend's world their game does it)
   if ((wetTimer -= dt) <= 0) { wetTimer = 2; updateWetSoil(); }
@@ -8441,13 +9317,29 @@ function tickFarm(dt) {
   const step = farmTimer; farmTimer = 0;
   // growing
   for (const [i, got] of [...crops]) {
-    const id = world.get(i);
-    if (!isCrop(id) || id === GRAIN_RIPE) { crops.delete(i); continue; }
-    if (Math.random() >= stageChance(growRate(world.get(i - WX * WZ)), step)) continue;
+    const id = world.get(i), c = cropOf(id);
+    if (!isGrowingCrop(id)) { crops.delete(i); continue; }
+    if (Math.random() >= stageChance(growRate(world.get(i - WX * WZ), c, i), step, c)) continue;
     const hits = got >= FARM.stageHits ? 1 : got + 1;   // (a save from before random growth held seconds left here)
     if (hits < FARM.stageHits) { crops.set(i, hits); continue; }
     const [x, y, z] = fromIdx(i);
-    setBlock(x, y, z, id + 1);
+    if (c === 'grain') { setBlock(x, y, z, id + 1); continue; }
+    const st = BLOCKS[id].stage + 1, top = CORN_TOP[st];
+    if (c === 'corn' && top) {   // Corn growing a top: it needs the space above it free (or its own top), or waits for its next lucky tick
+      const up = getBlock(x, y + 1, z);
+      if (up && !(BLOCKS[up] && BLOCKS[up].crop === 'corn' && BLOCKS[up].top)) { crops.set(i, FARM.stageHits - 1); continue; }
+      setBlock(x, y, z, CROP_STAGES[c][st]); setBlock(x, y + 1, z, top);
+    } else setBlock(x, y, z, CROP_STAGES[c][st]);
+  }
+  // grown Cantaloupe vines: lucky ticks (melonTime on average, the soil's rates) towards a melon. Every FARM.stageHits of them
+  // it tries for one, beside it on free ground, if none touches it already
+  for (const [i, got] of [...vines]) {
+    if (!isGrownVine(world.get(i))) { vines.delete(i); continue; }
+    if (Math.random() >= Math.min(1, step * growRate(world.get(i - WX * WZ), 'cantaloupe', i) * FARM.stageHits / CROP.cantaloupe.melonTime)) continue;
+    if (got + 1 < FARM.stageHits) { vines.set(i, got + 1); continue; }
+    vines.set(i, 0);
+    const [x, y, z] = fromIdx(i);
+    growMelon(x, y, z);
   }
   // saplings: lucky ticks, like Grain's; on the last one it grows if it can, and if not it tries again at its next lucky tick
   for (const [i, got] of [...saplings]) {
@@ -8502,11 +9394,53 @@ function updateWetSoil() {
     if (world.get(i) !== want) { const [x, y, z] = fromIdx(i); setBlock(x, y, z, want); }
   }
 }
-// right-click farming: a Hoe tills Grass or Dirt, Grain Seeds are planted in tilled soil, Bone Ash fertilizes it.
+// a crop's harvest (numbers.json CROPS: each thing, fewest to most), dropped at (x, y, z). A Cantaloupe's is its slices.
+function giveHarvest(c, x, y, z) {
+  for (const [h, lo, hi] of CROP_HARVEST[c]) for (let n = lo + Math.floor(Math.random() * (hi - lo + 1)); n > 0; n--) collect(h, x, y, z);
+}
+// a grown Cantaloupe vine at (x, y, z) tries to grow a melon: on the first free spot beside it (starting from a random side),
+// with Dirt, Grass (any), Sand or tilled soil under it. Not if a melon touches it already (one at a time). A melon uses up
+// one of the vine's fertilizer's harvests. Returns true if it grew one.
+function growMelon(x, y, z) {
+  const melon = idOf('cantaloupe'), sides = DOOR_FRONT, k0 = Math.floor(Math.random() * 4);
+  if (sides.some(([dx, dz]) => getBlock(x + dx, y, z + dz) === melon)) return false;
+  for (let k = 0; k < 4; k++) {
+    const [dx, dz] = sides[(k0 + k) % 4], under = getBlock(x + dx, y - 1, z + dz);
+    if (getBlock(x + dx, y, z + dz) || !(grassy(under) || under === 2 || under === 6 || isSoil(under))) continue;
+    setBlock(x + dx, y, z + dz, melon);
+    useFertilizer(idx(x, y - 1, z));
+    return true;
+  }
+  return false;
+}
+// a crop (any half of Corn) at (x, y, z) is broken or knocked off: what it gives (survival), and Corn's other half goes too.
+// The caller empties (x, y, z) itself. Unripe: its drop (the seed back); ripe: its harvest; a vine: its seed.
+// (Not Grain, which has its own: see the breaking code.)
+function breakCrop(x, y, z, id) {
+  const b = BLOCKS[id], by = b.top ? y - 1 : y, bottom = b.top ? getBlock(x, by, z) : id;
+  if (isRipeCrop(bottom)) giveHarvest(cropOf(bottom), x, by, z);
+  else if (isCrop(bottom)) collect(dropFor(bottom), x, by, z);
+  if (cropOf(bottom) === 'corn') {   // Corn: both halves go (the harvest once)
+    const other = b.top ? by : y + 1, ob = BLOCKS[getBlock(x, other, z)];
+    if (other !== y && ob && ob.crop === 'corn') setBlock(x, other, z, 0);
+  }
+}
+// the crop a thing plants (its first stage), or 0 (Grain Seeds plant Grain even before their row says so)
+const plantsOf = id => BLOCKS[id] && BLOCKS[id].plants || (id === GRAIN_SEEDS ? GRAIN_STAGES[0] : 0);
+const isFood = id => !!(BLOCKS[id] && BLOCKS[id].food);
+// holding food that can be planted (a Potato, a Turnip), aimed at bare tilled soil: it's planted, not eaten
+function plantInstead() {
+  if (!isFood(HOTBAR[act]) || !plantsOf(HOTBAR[act]) || player.dead) return false;
+  const hit = raycast();
+  if (!hit || !isSoil(getBlock(hit.x, hit.y, hit.z)) || getBlock(hit.x, hit.y + 1, hit.z)) return false;
+  return farmUse(hit, getBlock(hit.x, hit.y, hit.z));
+}
+// right-click farming: a Hoe tills Grass or Dirt, seeds are planted in tilled soil, Bone Ash fertilizes it.
 // Returns true if it did something (or should stop the click there).
 function farmUse(hit, hb) {
   const held = HOTBAR[act], above = getBlock(hit.x, hit.y + 1, hit.z);
-  const target = isCrop(hb) ? getBlock(hit.x, hit.y - 1, hit.z) : hb, ty = isCrop(hb) ? hit.y - 1 : hit.y;
+  const down = isCrop(hb) ? (BLOCKS[hb].top ? 2 : 1) : 0;   // (aiming at a crop: its soil, under it; Corn's top: two down)
+  const target = down ? getBlock(hit.x, hit.y - down, hit.z) : hb, ty = hit.y - down;
   if (holding('hoe')) {
     if ((!grassy(hb) && hb !== 2) || (above && !isWater(above) && !isFlower(above))) return false;
     if (isFlower(above)) { collect(above, hit.x, hit.y + 1, hit.z); setBlock(hit.x, hit.y + 1, hit.z, 0); }
@@ -8515,9 +9449,9 @@ function farmUse(hit, hb) {
     if (grassy(hb) && Math.random() < FARM.seedChance) collect(GRAIN_SEEDS, hit.x, hit.y + 1, hit.z);   // turned up some seeds
     return true;
   }
-  if (held === GRAIN_SEEDS) {
-    if (!isSoil(hb) || above) return true;
-    setBlock(hit.x, hit.y + 1, hit.z, GRAIN_STAGES[0]); Sound.place(1); mobNoise(hit.x, hit.y + 1, hit.z); useOne();
+  if (plantsOf(held)) {   // seeds (or a Potato, Turnip...): its crop's first stage, on tilled soil with nothing on it
+    if (!isSoil(hb) || above) return !isFood(held);   // (food that can't be planted here: eaten instead)
+    setBlock(hit.x, hit.y + 1, hit.z, plantsOf(held)); Sound.place(1); mobNoise(hit.x, hit.y + 1, hit.z); useOne();
     return true;
   }
   if (held === BONE_ASH && BLOCKS[hb] && BLOCKS[hb].grows) {   // Bone Ash on a sapling: used up, and now and then it grows into its tree at once (not used if it couldn't grow)
@@ -8807,8 +9741,9 @@ function selectSlot(i) {
 }
 selectSlot(0);
 
-// ===================== The staircases in the woods =====================
-// (stairSpots: grown with the terrain.) Reaching the top step of one now and then does something.
+// ===================== Staircases =====================
+// (stairSpots: grown with the terrain, land 5 on.) Reaching the top step of a standing one can start one of the events in
+// stairEvent: 1 time in STAIR_ODDS, during a visit whose roll came up (eerieVisit, see Rare events).
 const STAIR_ODDS = 500;   // 1 time in this many
 let stairOn = -1;         // the staircase whose top step you're on (-1: none)
 let stairFall = false;    // (the staircase just went from under you: no fall damage for that drop)
@@ -8830,23 +9765,23 @@ function stairUnder() {       // which staircase's top step you're standing on (
   return -1;
 }
 let stairNearAt = 0, stairNear = false;
-function nearStair() {        // no music near a staircase (within 32 blocks across, 24 up or down)
-  if (mainMenuOpen || !worldLoaded || !EERIE_ON) return false;
+function nearStair() {        // no music near a standing staircase (within 32 blocks across, 24 up or down)
+  if (mainMenuOpen || !worldLoaded || !stairSpots.length) return false;
   const now = performance.now();
   if (now < stairNearAt) return stairNear;
   stairNearAt = now + 500;
   stairNear = stairSpots.some(s => Math.abs(s.x - player.x) < 32 && Math.abs(s.z - player.z) < 32 && Math.abs(s.y - player.y) < 24 && stairStanding(s));
   return stairNear;
 }
-const STAIR_FORCE = (/[?&]stairevent=(\d)/.exec(location.search) || [])[1];   // (test: ?stairevent=N makes event N happen every time, 0-4)
+const STAIR_FORCE = (/[?&]stairevent=(\d)/.exec(location.search) || [])[1];   // (test: ?stairevent=N makes event N happen every time, 0-4, whatever the roll)
 function updateStairs() {
-  if (!EERIE_ON || !stairSpots.length || player.dead) { stairOn = -1; return; }   // (held back for now: see EERIE_READY)
+  if (!EERIE_ON || !stairSpots.length || player.dead) { stairOn = -1; return; }   // (see EERIE_READY)
   const on = player.onGround ? stairUnder() : -1;
   if (on === stairOn) return;
   stairOn = on;
   if (on < 0) return;
   const force = STAIR_FORCE !== undefined ? +STAIR_FORCE : -1;
-  if (force < 0 && Math.floor(Math.random() * STAIR_ODDS) !== 0) return;
+  if (force < 0 && (!eerieVisit || Math.floor(Math.random() * STAIR_ODDS) !== 0)) return;
   stairEvent(force >= 0 ? force : Math.floor(Math.random() * 5), stairSpots[on]);
 }
 function stairEvent(which, s) {
@@ -8895,8 +9830,9 @@ function stairMove(s) {
   }
   stairFall = true; stairOn = -1;
   const put = (x, y, z, id) => setBlock(x, y, z, id);
+  const built = editedChunks();   // (never within 2 chunks of anything changed: see stairSkipped)
   // and stand it up again in another high forest, somewhere it still fits: one of the spots the world kept for it...
-  const spare = stairSpots.filter(o => o !== s && Math.abs(o.x - s.x) + Math.abs(o.z - s.z) > WX / 10)
+  const spare = stairSpots.filter(o => o !== s && Math.abs(o.x - s.x) + Math.abs(o.z - s.z) > WX / 10 && !stairSkipped(o.x, o.z, built))
     .map(o => [Math.random(), o]).sort((a, b) => a[0] - b[0]).map(e => e[1]);
   for (const o of spare) {
     if (stairStanding(o) || !stairFits(o, stairGround, getBlock)) continue;
@@ -8906,7 +9842,7 @@ function stairMove(s) {
   // ...or, if none fit any more, anywhere else in a forest high above the sea (kept in the save as an extra spot)
   for (let t = 0; t < 4000; t++) {
     const x = 16 + Math.floor(Math.random() * (WX - 32)), z = 16 + Math.floor(Math.random() * (WZ - 32));
-    if (Math.abs(x - s.x) + Math.abs(z - s.z) <= WX / 10 || !stairForest(x, z)) continue;
+    if (Math.abs(x - s.x) + Math.abs(z - s.z) <= WX / 10 || !stairForest(x, z) || stairSkipped(x, z, built)) continue;
     const g = stairGround(z * WX + x);
     if (g < SEA_LEVEL + STAIR_MIN_UP) continue;
     const o = { x, y: g + 1, z, n: 5 + Math.floor(Math.random() * 4), mat: stairMat(x, z), dir: 0, placed: true };
@@ -8933,28 +9869,34 @@ function stairDrop(id, n, wear, data, [x, y, z]) {
   if (!BLOCKS[id]) return;
   for (let k = 0; k < Math.min(64, Math.max(1, n | 0)); k++) Object.assign(dropItem(id, x, y, z), { vx: 0, vy: 0, vz: 0, wear, data, keep: true });
 }
-// ===================== Strange things =====================
-// Now and then, something strange: footsteps behind you, the cows all stopping to look at you, the music going a little
-// wrong, or a doorway standing on its own that's gone once you look away. Never explained.
+// ===================== Rare events =====================
+// Each visit to a world (opening or joining it: the page loads afresh each time) rolls once, 1 time in EERIE_VISIT_ODDS
+// (eerieVisit, not saved). Only in a visit whose roll came up: every EERIE_EVERY seconds, 1 time in EERIE_ODDS, one of the
+// events below (eerie: 0 footsteps sound, 1 nearby cows turn to the player, 2 the music's pitch wobbles, 3 a doorway that isn't
+// saved), and the staircase events (see Staircases). In a joined game each player rolls for their own game (the cows: the host's).
+// Same as the desktop version. (see EERIE_READY)
+const EERIE_VISIT_ODDS = 10;   // a visit's roll comes up 1 time in this many
 const EERIE_EVERY = 8;     // a roll every this many seconds of play...
 const EERIE_ODDS = 1000;   // ...that comes up 1 time in this many
+const EERIE_ROLL = (/[?&]eerieroll=([01])/.exec(location.search) || [])[1];   // (test: ?eerieroll=1 / ?eerieroll=0: the visit's roll comes up / doesn't)
+const eerieVisit = EERIE_ON && (EERIE_ROLL !== undefined ? EERIE_ROLL === '1' : Math.floor(Math.random() * EERIE_VISIT_ODDS) === 0);
 let eerieTimer = EERIE_EVERY, eerieForced = false;
-const EERIE_FORCE = (/[?&]eerie=(\d)/.exec(location.search) || [])[1];   // (test: ?eerie=N makes thing N happen 8 seconds in, 0-3)
+const EERIE_FORCE = (/[?&]eerie=(\d)/.exec(location.search) || [])[1];   // (test: ?eerie=N makes event N happen 8 seconds in, 0-3, whatever the roll)
 function updateEerie(dt) {
-  if (!EERIE_ON) return;   // (held back for now: see EERIE_READY)
+  if (!EERIE_ON) return;   // (see EERIE_READY)
   tickSteps(dt); tickDoor(dt);
   if (player.dead) return;
   if ((eerieTimer -= dt) > 0) return;
   eerieTimer = EERIE_EVERY;
   if (EERIE_FORCE !== undefined) { if (!eerieForced) { eerieForced = true; eerie(+EERIE_FORCE); } return; }
-  if (Math.floor(Math.random() * EERIE_ODDS) !== 0) return;
+  if (!eerieVisit || Math.floor(Math.random() * EERIE_ODDS) !== 0) return;
   // one of them, picked at random (if it can't happen right now, another that can)
   for (const k of [0, 1, 2, 3].map(k => [Math.random(), k]).sort((a, b) => a[0] - b[0]).map(e => e[1])) if (eerie(k)) return;
 }
 const eerie = k => k === 0 ? startSteps() : k === 1 ? cowsStare() : k === 2 ? musicWrong() : k === 3 ? placeDoor() : false;
 const eerieAlone = () => !Net.client && !(Net.hosting && Net.friendCount && Net.friendCount() > 0);
 
-// ---- Footsteps behind you: alone, at night or underground. They stop if you turn around. ----
+// ---- 0: footstep sounds behind the player (playing alone, at night or underground); they stop if the player turns round ----
 let stepsLeft = 0, stepIn = 0, stepsYaw = 0;
 function startSteps() {
   if (!eerieAlone() || stepsLeft > 0 || !(skyDay < 0.3 || camSky < 0.35) || player.fly || waterAt(player.x, player.y + 0.5, player.z)) return false;
@@ -8964,14 +9906,14 @@ function startSteps() {
 function tickSteps(dt) {
   if (stepsLeft <= 0) return;
   const turned = Math.abs(Math.atan2(Math.sin(player.yaw - stepsYaw), Math.cos(player.yaw - stepsYaw)));
-  if (player.dead || turned > 1.3) { stepsLeft = 0; return; }   // (you turned round: nothing there)
+  if (player.dead || turned > 1.3) { stepsLeft = 0; return; }   // (turned round: stop)
   if ((stepIn -= dt) > 0) return;
   stepIn = 0.52 + Math.random() * 0.08;
   stepsLeft--;
-  Sound.stepBehind(blockUnderPlayer() || 2, 0.16 + (10 - stepsLeft) * 0.015);   // (getting a little closer)
+  Sound.stepBehind(blockUnderPlayer() || 2, 0.16 + (10 - stepsLeft) * 0.015);   // (a little louder each step)
 }
 
-// ---- Every cow nearby stops and turns to look at you for a few seconds ----
+// ---- 1: nearby cows stop and face the player for a few seconds (the host's game decides) ----
 function cowsStare() {
   if (Net.client) return false;
   const near = mobs.filter(m => MOB_TYPES[m.type].cow && !m.dead && m.root.visible && Math.hypot(m.x - player.x, m.y - player.y, m.z - player.z) < 28);
@@ -8980,15 +9922,15 @@ function cowsStare() {
   return true;
 }
 
-// ---- The music plays a few notes slightly out of tune, then carries on ----
+// ---- 2: the music's pitch wobbles for a few notes ----
 function musicWrong() {
   if (!Sound.musicPlaying()) return false;
   Sound.wobble(1.8);
   return true;
 }
 
-// ---- A doorway standing on its own, somewhere behind you. Once you've seen it and look away, it's gone. ----
-// It's only in your game: not saved, and not sent to anyone you're playing with.
+// ---- 3: a doorway frame on open ground behind the player, removed once it has been seen and is out of view (or after 4 minutes) ----
+// Only in this player's game: not saved, and not sent to anyone they're playing with.
 const door = [];   // its blocks: [x, y, z], ...
 let doorSeen = false, doorAge = 0, doorLook = 0;
 const DOOR_BLOCK = 61;   // Stripped Oak Log
@@ -9035,7 +9977,7 @@ function tickDoor(dt) {
   const look = (f.x * dx + f.y * dy + f.z * dz) / dist;
   if (look > 0.82 && dist < 90) doorLook += dt;   // (in front of you)
   if (doorLook > 0.3) doorSeen = true;
-  // gone the moment it's out of sight after you've seen it (or, if you never turn round, after a while)
+  // removed once out of view after being seen (or after 4 minutes)
   if ((doorSeen || doorAge > 240) && look < 0.4) clearDoor();
 }
 function clearDoor() {
@@ -9043,6 +9985,34 @@ function clearDoor() {
   door.length = 0;
 }
 
+// the chunk (z / 16 * chunks across + x / 16) holding block index i
+const chunkOfIndex = i => Math.floor((Math.floor(i / WX) % WZ) / CS) * NCX + Math.floor((i % WX) / CS);
+// the chunks holding a block changed since the world grew, as things are now
+function editedChunks() {
+  const out = new Set();
+  for (const i of edits.keys()) out.add(chunkOfIndex(i));
+  return out;
+}
+// An old world (lands 0-4) opened for the first time in this version (see step 9 of the world's growth): the chunks its save had
+// changed are settled once, in its record (and so its save), and its staircases go up away from them, before the changes are put
+// back on top. (If the record lost them but the save has them, the save's are kept.) After this, the world grows them itself.
+function settleOldStairs(s) {
+  if (!stairCands) return;
+  let skip;
+  if (s && s.os === 1 && Array.isArray(s.osSkip)) skip = stairSkipSet(s.osSkip);
+  else {
+    skip = new Set();
+    if (s && s.idxs) for (const i of new Uint32Array(s.idxs)) if (i < world.length) skip.add(chunkOfIndex(i));
+  }
+  Worlds.mark({ os: 1, osSkip: [...skip].sort((a, b) => a - b) });
+  const cols = new Set();
+  placeStairs(stairCands, skip, (x, y, z, id) => {
+    world.set(idx(x, y, z), id); cols.add(z * WX + x);
+    const c = Math.floor(z / CS) * NCX + Math.floor(x / CS); chunkTop[c] = Math.max(chunkTop[c], y + 1);
+  }, c => stairGround0.get(c));
+  for (const c of cols) skyTop[c] = computeSkyTop(c % WX, Math.floor(c / WX), WY - 1);
+  stairCands = null; stairGround0.clear();
+}
 const saveExtraStairs = () => extraStairs.flatMap(o => [o.x, o.y, o.z, o.dir, o.n, o.mat]);
 function loadExtraStairs(a) {
   if (!Array.isArray(a)) return;
@@ -9066,12 +10036,17 @@ function gatherSave() {
     idxs: idxs.buffer, ids: ids.buffer, ...(wide ? { wide: true } : {}),
     pieces: gatherPieces(),
     stairs: saveExtraStairs(),
+    ...(Worlds.current.os === 1 ? { os: 1, osSkip: Worlds.current.osSkip } : {}),   // (an old world's staircases: see step 9 of the world's growth)
     player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health,
               gloom: player.gloom, darkTime: player.darkTime, lightTime: player.lightTime },
     time: timeOfDay,
     ...carried(), offSel, selected,   // (hotbar, counts, wear, data: with a stack held on the cursor counted as put back)
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health, ...(m.layer > 1 ? { layer: m.layer } : {}),
-      ...(MOB_TYPES[m.type].cow ? { baby: m.baby, fed: m.fed, happy: Math.round(m.happy), room: m.room, mateCool: Math.round(m.mateCool) } : {}) })),
+      ...(MOB_TYPES[m.type].cow ? { baby: m.baby, fed: m.fed, happy: Math.round(m.happy), room: m.room, mateCool: Math.round(m.mateCool) } : {}),
+      // (the other animals: the same, and an egg on its way, a goat's milk, a deer's sapling (its key), a bear's hunger)
+      ...(MOB_TYPES[m.type].animal ? { baby: m.baby, fed: m.fed, happy: Math.round(m.happy), mateCool: Math.round(m.mateCool),
+        ...(m.eggIn > 0 ? { eggIn: Math.round(m.eggIn) } : {}), ...(m.milky > 0 ? { milky: Math.round(m.milky) } : {}),
+        ...(m.sow ? { sow: blockKey(m.sow) } : {}), ...(m.hungerIn !== undefined ? { hungerIn: Math.round(Math.max(0, m.hungerIn)) } : {}) } : {}) })),
     drops: drops.map(d => ({ id: d.id, x: d.x, y: d.y, z: d.z, age: d.age, ...(d.wear ? { wear: d.wear } : {}), ...(d.data ? { data: d.data } : {}), ...(d.keep ? { keep: true } : {}) })),
     drying: [...drying],                                   // [[index, seconds left], ...]
     torchBurn: [...torchBurn].map(([i, t]) => [i, Math.round(t)]),   // [[index, seconds until it burns down a stage], ...]
@@ -9176,6 +10151,14 @@ function applyPlayerSave(s) {
         room: isFinite(m.room) ? m.room : -1, mateCool: Math.max(0, +m.mateCool || 0) });
       continue;
     }
+    if (MOB_TYPES[m.type].animal) {   // another animal, as it was kept
+      if (!ANIMALS[m.type] || !(window.MODELS || {})[m.type]) continue;
+      const A = ANIMALS[m.type], baby = Math.max(0, +m.baby || 0), mob = spawnAnimal(m.type, m.x, m.y, m.z, baby);
+      Object.assign(mob, { yaw: m.yaw || 0, health: m.health || mob.health, fed: Math.min(A.fedMax, Math.max(0, m.fed | 0)), happy: Math.max(0, +m.happy || 0),
+        mateCool: Math.max(0, +m.mateCool || 0), eggIn: Math.max(0, +m.eggIn || 0), milky: Math.max(0, +m.milky || 0), sow: keyOr(m.sow, 0) > 0 ? keyOr(m.sow) : 0 });
+      if (m.hungerIn !== undefined) mob.hungerIn = Math.max(0, +m.hungerIn || 0);
+      continue;
+    }
     const mob = spawnMob(m.type, m.x, m.y, m.z, 0, Math.max(1, Math.min(STRATA_LAYERS, m.layer | 0 || 1)));
     mob.yaw = m.yaw || 0; mob.health = m.health || mob.health;
   }
@@ -9189,6 +10172,7 @@ function applyPlayerSave(s) {
   if (Worlds.current.temp || MENU_ONLY) return;   // (no world in the main menu.) A friend's world: it loads once their game sends it (see Multiplayer)
   try {
     const s = await Worlds.load(Worlds.current.id);
+    settleOldStairs(s && s.seed === seed ? s : null);   // (an old world opened for the first time in this version)
     if (s && s.seed === seed) applySave(s);
     else {
       // a brand-new world: keep your block layout, but items you earned (like chocolate) belong to the old world
@@ -9285,14 +10269,17 @@ addEventListener('pagehide', () => autoSave());
     p.av.tag.material.map.dispose(); p.av.tag.material.dispose();
     p.av = null;
   }
-  function setOther(id, d) {      // d: { name, hue, x, y, z, yaw }
+  // hf: 1 when the held item is a Linen Bag holding something, so other games draw it full; left out otherwise
+  const myHf = () => bagFull(HOTBAR[selected] | 0, HOTBAR_DATA[selected]);
+  const withHf = (o, full) => { if (full) o.hf = 1; return o; };
+  function setOther(id, d) {      // d: { name, hue, x, y, z, yaw, h, hf, g }
     let p = others.get(id);
     if (!p) { p = { ...d, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw }; others.set(id, p); }
     const skin = skins.get(id) || null;
     if (p.av && (p.name !== d.name || p.hue !== d.hue || p.skin !== skin)) removeBody(p);
-    Object.assign(p, { name: d.name, hue: d.hue, skin, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw, held: d.h | 0, gear: Array.isArray(d.g) ? d.g.slice(0, 6).map(x => x | 0) : [] });
+    Object.assign(p, { name: d.name, hue: d.hue, skin, tx: d.x, ty: d.y, tz: d.z, tyaw: d.yaw, held: d.h | 0, heldFull: d.hf === 1 && isBag(d.h | 0), gear: Array.isArray(d.g) ? d.g.slice(0, 6).map(x => x | 0) : [] });
     if (!p.av) p.av = makeBody(p);
-    setHeld(p.av, p.held);   // what they're holding shows in their hand
+    setHeld(p.av, p.held, p.heldFull);   // what they're holding shows in their hand (hf: a Linen Bag holding something, shown full)
     setGear(p.av, p.gear);   // and what they wear on it
     return p;
   }
@@ -9374,7 +10361,8 @@ addEventListener('pagehide', () => autoSave());
     const f = friends.get(conn.peer);
     if (f) f.seen = performance.now();
     if (d.t === 'hello') {          // someone checking which world this is, before they load it
-      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, s: WX, b: BIOME_SCALE, land: LAND, mode: gameMode, host: myName });
+      conn.send({ t: 'info', ver: GAME_VERSION, seed, gen: GEN, h: WY, s: WX, b: BIOME_SCALE, land: LAND, mode: gameMode, host: myName,
+        ...(Worlds.current.os === 1 ? { os: 1, osSkip: Worlds.current.osSkip } : {}) });   // (an old world's staircases: see step 9 of the world's growth)
     } else if (d.t === 'join') {
       if (d.ver !== GAME_VERSION) { conn.send({ t: 'refuse', why: `You need the same version of the game. They have ${GAME_VERSION}, you have ${d.ver}.` }); return; }
       const used = new Set([HUES[0], ...[...friends.values()].map(x => x.hue)]);
@@ -9391,7 +10379,7 @@ addEventListener('pagehide', () => autoSave());
     } else if (!f) {
       return;
     } else if (d.t === 'me') {
-      setOther(conn.peer, { name: f.name, hue: f.hue, x: +d.x || 0, y: +d.y || 0, z: +d.z || 0, yaw: +d.yaw || 0, h: d.h | 0, g: d.g });
+      setOther(conn.peer, { name: f.name, hue: f.hue, x: +d.x || 0, y: +d.y || 0, z: +d.z || 0, yaw: +d.yaw || 0, h: d.h | 0, hf: d.hf, g: d.g });
     } else if (d.t === 'sets' && Array.isArray(d.l)) {
       applySets(d.l, d.p);
     } else if (d.t === 'skin') {     // a friend's skin: shown on them here, and passed on to everyone else
@@ -9405,27 +10393,37 @@ addEventListener('pagehide', () => autoSave());
     } else if (d.t === 'hit') {
       const m = mobs.find(m => m.k === d.k && !m.dead), p = others.get(conn.peer);
       if (m && p) hitMob(m, p);
-    } else if (d.t === 'feed') {    // a friend fed a cow Grain (they've used it up: if the cow doesn't want it, it goes back)
-      const m = mobs.find(m => m.k === d.k && !m.dead);
-      if (!m || !MOB_TYPES[m.type].cow || !feed(m)) conn.send({ t: 'give', id: GRAIN });
+    } else if (d.t === 'feed') {    // a friend fed a cow Grain, or another animal its food (they've used it up: if it isn't wanted, it goes back)
+      const m = mobs.find(m => m.k === d.k && !m.dead), id = d.id === undefined ? GRAIN : d.id | 0;
+      if (m && isAnimal(m) && m.type === 'goat' && id === CLAY_JUG) conn.send({ t: 'give', id: milkGoat(m) ? JUG_OF_MILK : CLAY_JUG });   // (a Clay Jug: back full, or empty)
+      else {
+        const ate = m && (MOB_TYPES[m.type].cow ? id === GRAIN && feed(m) : isAnimal(m) && ANIMAL_FOOD[m.type].has(id) && feedAnimal(m));
+        if (!ate) conn.send({ t: 'give', id });
+      }
     } else if (d.t === 'stime') {   // (a friend's staircase)
       timeOfDay = Math.min(1, Math.max(0, +d.time || 0));
     } else if (d.t === 'sdrop') {
       stairDrop(d.id | 0, d.n | 0, d.w | 0, null, [+d.x || 0, +d.y || 0, +d.z || 0]);
     } else if (d.t === 'pickup') {
       const dr = drops.find(x => x.k === d.k);
-      if (dr && dr.age > 0.5) { removeDrop(dr); conn.send({ t: 'give', id: dr.id }); }
+      if (dr && dr.age > 0.5) {   // (with its wear, and a Linen Bag with what's in it)
+        removeDrop(dr);
+        const g = { t: 'give', id: dr.id };
+        if (dr.wear > 0) g.w = dr.wear;
+        if (bagFull(dr.id, dr.data)) g.data = dr.data;
+        conn.send(g);
+      }
     }
   }
   function hostTick() {
-    // h: the item each player is holding (0 = nothing)
-    const players = [{ id: 'host', name: myName, hue: HUES[0], x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0, g: gearIds() }];
-    for (const [id, f] of friends) { const p = others.get(id); if (p) players.push({ id, name: f.name, hue: f.hue, x: r2(p.tx), y: r2(p.ty), z: r2(p.tz), yaw: r2(p.tyaw), h: p.held | 0, g: p.gear || [] }); }
+    // h: the item each player is holding (0 = nothing); hf: 1 when it's a Linen Bag holding something (left out otherwise)
+    const players = [withHf({ id: 'host', name: myName, hue: HUES[0], x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0, g: gearIds() }, myHf())];
+    for (const [id, f] of friends) { const p = others.get(id); if (p) players.push(withHf({ id, name: f.name, hue: f.hue, x: r2(p.tx), y: r2(p.ty), z: r2(p.tz), yaw: r2(p.tyaw), h: p.held | 0, g: p.gear || [] }, p.heldFull)); }
     // (a mob's last number is 1 while it's fading away, 2 while it's throwing)
     // (a cow also has its look: see cowLook)
     const ms = mobs.map(m => { const a = [m.k, m.type, r2(m.x), r2(m.y), r2(m.z), r2(m.yaw), m.dead ? 1 : 0, m.hurt > 0 ? 1 : 0, m.fade ? 1 : m.throwT ? 2 : 0];
-      if (MOB_TYPES[m.type].cow) a.push(cowLook(m)); return [m, a]; });
-    const ds = drops.map(d => [d.k, d.id, r2(d.x), r2(d.y), r2(d.z)]);
+      if (MOB_TYPES[m.type].cow) a.push(cowLook(m)); else if (isAnimal(m)) a.push(animalLook(m)); return [m, a]; });
+    const ds = drops.map(d => bagFull(d.id, d.data) ? [d.k, d.id, r2(d.x), r2(d.y), r2(d.z), 1] : [d.k, d.id, r2(d.x), r2(d.y), r2(d.z)]);   // (1: a Linen Bag holding something)
     const rs = rocks.map(r => [r.k, r2(r.x), r2(r.y), r2(r.z), r.id]);   // (id: Rock or Snowball)
     const fs = falling.map(f => [f.k, f.id, f.x, r2(f.y), f.z]);
     const now = performance.now(), r = renderBlocks();
@@ -9464,7 +10462,7 @@ addEventListener('pagehide', () => autoSave());
         if (d.ver !== GAME_VERSION) return fail(`${d.host} is playing version ${d.ver}, and you have ${GAME_VERSION}. You both need the same version.`);
         clearTimeout(joinTimeout); done = true;
         status('Joining...');
-        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, s: d.s, b: d.b, land: d.land, mode: d.mode, host: d.host })); } catch (e) {}
+        try { sessionStorage.setItem('cubeland-join', JSON.stringify({ code, seed: d.seed, gen: d.gen, h: d.h, s: d.s, b: d.b, land: d.land, mode: d.mode, host: d.host, os: d.os, osSkip: d.osSkip })); } catch (e) {}
         p.destroy();
         await saveBeforeLeaving();
         location.hash = 'join=' + code;
@@ -9527,9 +10525,10 @@ addEventListener('pagehide', () => autoSave());
         let m = byK.get(k);
         if (!m) {
           if (dead || Net.gone.has(k) || !MOB_TYPES[type] || !(window.MODELS || {})[type]) continue;
-          m = spawnMob(type, x, y, z, (look | 0) & 3); m.k = k; m.yaw = yaw;
+          m = spawnMob(type, x, y, z, (look | 0) & (MOB_TYPES[type].animal ? 1 : 3)); m.k = k; m.yaw = yaw;
         }
         if (look !== undefined && MOB_TYPES[type].cow) applyCowLook(m, look | 0);
+        else if (look !== undefined && MOB_TYPES[type].animal) applyAnimalLook(m, look | 0);
         Object.assign(m, { tx: x, ty: y, tz: z, tyaw: yaw });
         if (dead && !m.dead) { m.dead = 0.001; Net.gone.add(k); }
         if (hurt && !m.netHurt) m.hurt = 0.3;
@@ -9554,11 +10553,11 @@ addEventListener('pagehide', () => autoSave());
       for (const r of [...rocks]) if (!seenR.has(r.k)) removeRock(r);
       // dropped items
       const byD = new Map(drops.map(x => [x.k, x])), seenD = new Set();
-      for (const [k, id, x, y, z] of d.drops) {
+      for (const [k, id, x, y, z, full] of d.drops) {
         seenD.add(k);
         let dr = byD.get(k);
         if (!dr) { if (!BLOCKS[id]) continue; dr = dropItem(id, x, y, z); dr.k = k; dr.vx = dr.vy = dr.vz = 0; }
-        Object.assign(dr, { tx: x, ty: y, tz: z });
+        Object.assign(dr, { tx: x, ty: y, tz: z, netFull: full === 1 });   // (a Linen Bag holding something shows full)
       }
       for (const dr of [...drops]) if (!seenD.has(dr.k)) removeDrop(dr);
       // falling Sand, Gravel and Dirt (the host's game puts the block down where each one lands)
@@ -9572,8 +10571,9 @@ addEventListener('pagehide', () => autoSave());
       for (const f of [...falling]) if (!seenF.has(f.k)) removeFalling(f);
     } else if (d.t === 'sets' && Array.isArray(d.l)) {
       applySets(d.l, d.p);
-    } else if (d.t === 'give') {
-      giveItem(d.id);
+    } else if (d.t === 'give') {   // (a tool's wear and a Linen Bag's contents come too, if they make sense)
+      const id = d.id | 0, w = Number.isInteger(d.w) && d.w > 0 && d.w < maxWear(id) ? d.w : 0;
+      giveItem(id, w, isBag(id) ? cleanBag(d.data) : null);
     } else if (d.t === 'knock') {   // a Snowball hit you
       if (isFinite(d.vx) && isFinite(d.vz)) knockPlayer(Math.max(-8, Math.min(8, +d.vx)), Math.max(-8, Math.min(8, +d.vz)));
     } else if (d.t === 'splat') {
@@ -9597,7 +10597,7 @@ addEventListener('pagehide', () => autoSave());
     flush();
     if (Net.hosting && friends.size) hostTick();
     if (Net.client && worldLoaded && hostConn && hostConn.open)
-      hostConn.send({ t: 'me', x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0, g: gearIds() });
+      hostConn.send(withHf({ t: 'me', x: r2(player.x), y: r2(player.y), z: r2(player.z), yaw: r2(player.yaw), h: HOTBAR[selected] | 0, g: gearIds() }, myHf()));
     if (Net.client && worldLoaded && performance.now() - lastHeard > 30000) hostGone();
   }, 100);
 
@@ -9627,7 +10627,7 @@ addEventListener('pagehide', () => autoSave());
       }
       return false;
     },
-    feed(m) { if (hostConn && hostConn.open) hostConn.send({ t: 'feed', k: m.k }); },
+    feed(m, id = GRAIN) { if (hostConn && hostConn.open) hostConn.send({ t: 'feed', k: m.k, id }); },
     pickup(d) { if (hostConn && hostConn.open) hostConn.send({ t: 'pickup', k: d.k }); },
     toHost(msg) { if (hostConn && hostConn.open) hostConn.send(msg); },
     friendCount() { return friends.size; },
@@ -9916,6 +10916,10 @@ function frame(now) {
   player.onGround = false;
   player.hitWall = false;
   player.impact = 0;
+  doorsInside = new Set(); fencesInside = new Set();
+  const boxesIn = playerBoxes(player);
+  doorsInside = new Set(boxesIn.filter(b => b.door !== undefined).map(b => b.door));       // (a door that swung into you)
+  fencesInside = new Set(boxesIn.filter(b => b.fence !== undefined).map(b => b.fence));    // (a fence's rail that appeared round you)
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(player.vx), Math.abs(player.vy), Math.abs(player.vz)) * dt / 0.4));
   const sdt = dt / steps;
   for (let i = 0; i < steps; i++) {
@@ -9991,8 +10995,9 @@ function frame(now) {
       }
       outline.scale.set(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
       outline.position.set(hit.x + (lo[0] + hi[0]) / 2, hit.y + (lo[1] + hi[1]) / 2, hit.z + (lo[2] + hi[2]) / 2);
-    } else if (hitBox(hb)) {       // outline just the torch sticks (or the rock)
-      const bx = hitBox(hb);
+    } else if (hitBox(hb) || isFence(hb)) {       // outline just the torch sticks (or the rock, a door's panel, a fence's post and sides)
+      const bs = isFence(hb) ? fenceBoxes(hit.x, hit.y, hit.z, 1, false) : [hitBox(hb)];
+      const bx = [0, 1, 2].map(k => Math.min(...bs.map(b => b[k]))).concat([3, 4, 5].map(k => Math.max(...bs.map(b => b[k]))));
       outline.scale.set(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2]);
       outline.position.set(hit.x + (bx[0] + bx[3]) / 2, hit.y + (bx[1] + bx[4]) / 2, hit.z + (bx[2] + bx[5]) / 2);
     } else {
@@ -10040,7 +11045,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
     axeStages[m] = stagesPerSwing(4);
   }
   HOTBAR[act] = keep;
-  table('numbers', { STACK_MAX, SMELT_TIME, BURN_TIMES, FARM, SAPLING, DURABILITY, ARMOR_DURABILITY, ARMOR_SHARE, PICK_TIER, STRATA_PICKAXE, PICK_STAGES,
+  table('numbers', { STACK_MAX, SMELT_TIME, BURN_TIMES, FARM, CROPS: CROP, SAPLING, DURABILITY, ARMOR_DURABILITY, ARMOR_SHARE, PICK_TIER, STRATA_PICKAXE, PICK_STAGES,
     AXE_STAGES: axeStages, LOG_STAGES, STONE_STAGES, HEARTS });
   // smelting: the fuel and the smelts by key, in the Kiln's and Foundry's order (the deep layers' smelts, tall: true, are
   // in SMELTS only while tall worlds are on, so they're also checked on their own against the strata)
@@ -10106,11 +11111,30 @@ if (/[?&]datacheck\b/.test(location.search)) {
     diff(Object.keys(MOB_TYPES), inPlay.map(m => m.type), 'mobs.MOBS (spawning order)', md);
     for (const type of new Set([...Object.keys(MOB_TYPES), ...Object.keys(byType)])) diff(MOB_TYPES[type] && mobKeys(MOB_TYPES[type]), byType[type], `mobs.MOBS ${type}`, md);
     fieldsKnown(M.MOBS, ['type', 'name', 'health', 'speed', 'max', 'drops', 'growl', 'hostile', 'dark', 'night', 'deep', 'burns', 'shamble', 'damage', 'sight', 'reach',
-      'glow', 'curious', 'hearing', 'lightRange', 'thrower', 'near', 'far', 'snuffer', 'faint', 'scale', 'cow'], 'mobs.MOBS', md);
+      'glow', 'curious', 'hearing', 'lightRange', 'thrower', 'near', 'far', 'snuffer', 'faint', 'scale', 'cow', 'animal'], 'mobs.MOBS', md);
     M.MOBS.forEach((m, k) => (m.drops || []).forEach(([t], j) => { if (!blockKeyKnown(t)) md.push(`mobs.MOBS.${k}.drops.${j}: "${t}" isn't a block or item`); }));
+    M.MOBS.forEach((m, k) => { if (m.growl !== undefined && !Sound.hasVoice(m.growl)) md.push(`mobs.MOBS.${k} (${m.type}): the game has no voice ${JSON.stringify(m.growl)}`); });
     for (const t of ['zombie', 'grrangry']) if (!M.MOBS.some(m => m.type === t)) md.push(`mobs.MOBS: no ${t} (ZOMBIE_READY picks one of the two)`);
-    diff({ LAYER_BOOST: MOB_LAYER_BOOST, GLOOM_FADE: { range: GLOOM_FADE_RANGE, time: GLOOM_FADE_TIME }, COW },
-      { LAYER_BOOST: M.LAYER_BOOST, GLOOM_FADE: M.GLOOM_FADE, COW: M.COW }, 'mobs', md);
+    diff({ LAYER_BOOST: MOB_LAYER_BOOST, GLOOM_FADE: { range: GLOOM_FADE_RANGE, time: GLOOM_FADE_TIME }, COW, ANIMALS },
+      { LAYER_BOOST: M.LAYER_BOOST, GLOOM_FADE: M.GLOOM_FADE, COW: M.COW, ANIMALS: M.ANIMALS }, 'mobs', md);
+    // the animals: each animal row has its ANIMALS numbers and each ANIMALS entry is an animal row; what they eat, stand on and
+    // look for are blocks, their biomes biomes, a bear's prey animals; the fields are the ones the code reads
+    const animalTypes = M.MOBS.filter(m => m.animal).map(m => m.type), AN = M.ANIMALS || {};
+    for (const t of animalTypes) if (!AN[t]) md.push(`mobs.ANIMALS: no ${t} (its MOBS row says animal)`);
+    const ANIMAL_FIELDS = ['perChunk', 'crowdedAt', 'nearRange', 'happyMax', 'mateCooldown', 'mateCost', 'babyTime', 'babyFoodBoost', 'babyHealth', 'fedMax', 'foodHappy',
+      'food', 'forage', 'biomes', 'ground', 'group', 'nearMax', 'spawnWeight', 'logNear', 'logs', 'minHeight', 'layTime', 'scratchTime', 'fertChance', 'peckTime', 'peckChance',
+      'eggReach', 'duckRate', 'duckReach', 'followRange', 'waterRange', 'shyRange', 'sowEvery', 'sowChance', 'sowClear', 'nibbleEvery', 'nibbleChance', 'nibbleRange',
+      'milkTime', 'rootNear', 'truffleChance', 'angerTime', 'cubs', 'cubChance', 'prey', 'preyFlee', 'huntCool', 'huntRange', 'huntHeight', 'chaseTime', 'retry', 'mealHappy', 'cubRange', 'cubNear'];
+    for (const [t, a] of Object.entries(AN)) {
+      if (t.startsWith('_')) continue;
+      const at = `mobs.ANIMALS.${t}`;
+      if (!animalTypes.includes(t)) md.push(`${at}: isn't a MOBS row with animal`);
+      for (const f of Object.keys(a)) if (!f.startsWith('_') && !ANIMAL_FIELDS.includes(f)) md.push(`${at}: "${f}" isn't something the game reads`);
+      for (const f of ['food', 'ground', 'logs']) (a[f] || []).forEach(k => { if (!blockKeyKnown(k)) md.push(`${at}.${f}: "${k}" isn't a block or item`); });
+      (a.biomes || []).forEach(b => { if (!BIOME_NAMES.includes(b)) md.push(`${at}.biomes: "${b}" isn't a biome`); });
+      (a.prey || []).forEach(p => { if (!animalTypes.includes(p)) md.push(`${at}.prey: "${p}" isn't an animal`); });
+      for (const f of ['group', 'cubs', 'layTime', 'scratchTime', 'peckTime']) if (a[f] !== undefined && !(Array.isArray(a[f]) && a[f].length === 2 && a[f][0] <= a[f][1])) md.push(`${at}.${f}: should be [fewest, most]`);
+    }
   }
   out.mobs = md;
   // texture-names: the files' other spellings and the pictures' borrowings (both must be pictures the game uses; a borrowing
@@ -10141,17 +11165,18 @@ if (/[?&]datacheck\b/.test(location.search)) {
   const BL = D.blocks, bd = [];
   const BLOCK_FIELDS = ['id', 'name', 'pictures', 'icon', 'transparent', 'noCollide', 'liquid', 'shape', 'box', 'drop', 'places', 'handDrop', 'item', 'food',
     'tool', 'material', 'damage', 'pick', 'layer', 'level', 'front', 'facing', 'lit', 'wall', 'wi', 'count', 'burn', 'axis', 'layers', 'soil', 'wet', 'fert',
-    'stage', 'dye', 'armor', 'pack', 'belt', 'tools', 'piece', 'form', 'of', 'snowed', 'inner', 'needs', 'shovel', 'leaves', 'sound', 'inventory', 'look', 'log', 'fruit', 'hinge', 'open', 'half', 'grows', 'sand', 'sapling'];
+    'stage', 'dye', 'armor', 'pack', 'belt', 'tools', 'piece', 'form', 'of', 'snowed', 'inner', 'needs', 'shovel', 'leaves', 'sound', 'inventory', 'look', 'log', 'fruit', 'hinge', 'open', 'half', 'grows', 'sand', 'sapling',
+    'crop', 'top', 'plants', 'returns', 'bag', 'full'];
   const blockAsData = id => {
     const b = BLOCKS[id]; if (!b) return undefined;
-    return Object.fromEntries(Object.entries(b).map(([f, v]) => f === 't' ? ['pictures', v.map(t => TILE_NAMES[t])] : f === 'icon' ? [f, TILE_NAMES[v]]
-      : ['drop', 'places', 'piece', 'of', 'inner', 'dye', 'fruit', 'sapling'].includes(f) ? [f, key(v)] : f === 'handDrop' ? [f, [key(v[0]), v[1], v[2]]] : [f, v]));
+    return Object.fromEntries(Object.entries(b).map(([f, v]) => f === 't' ? ['pictures', v.map(t => TILE_NAMES[t])] : f === 'icon' || f === 'full' ? [f, TILE_NAMES[v]]
+      : ['drop', 'places', 'piece', 'of', 'inner', 'dye', 'fruit', 'sapling', 'plants', 'returns'].includes(f) ? [f, key(v)] : f === 'handDrop' ? [f, [key(v[0]), v[1], v[2]]] : [f, v]));
   };
   const rowAsData = ({ id, pictures, ...r }) => ({ ...r, pictures: typeof pictures === 'string' ? [pictures, pictures, pictures] : pictures });
   // (in the order the game loads them, which is the file's order: a row can only name blocks loaded before it or with it)
   // (FORMS' rows each make 7 items: they're checked as those items, see formRows)
   const BLOCK_TABLES = ['BASE', 'KILN', 'TORCHES', 'WATER', 'LYING_LOGS', 'SNOW', 'TOOLS', 'DEEP_STONE', 'SOILS', 'GRAIN', 'COLOURS', 'METALS', 'DEEP_ORES', 'FOUNDRY',
-    'GEAR', 'FLOWERS', 'WOODS', 'DOORS', 'SNOWY', 'FORMS'];
+    'GEAR', 'FLOWERS', 'WOODS', 'CROPS', 'FENCES', 'DOORS', 'SNOWY', 'FORMS'];
   if (!BL) bd.push('blocks: not in textures.js');
   else {
     const made = { DOORS: () => doorRows(BL.DOORS || []), SNOWY: () => snowyRows(BL.SNOWY || []), FORMS: () => formRows(BL.FORMS || []) };
@@ -10364,11 +11389,42 @@ if (/[?&]datacheck\b/.test(location.search)) {
       if (r.grove !== undefined && !(Array.isArray(r.grove) && r.grove.length === 2 && r.grove[0] > 0 && typeof r.grove[1] === 'number')) wd.push(`${at}: grove is [size, above]`);
       for (const f of ['spacing', 'edge', 'coast']) if (r[f] !== undefined && !(Number.isInteger(r[f]) && r[f] >= 1)) wd.push(`${at}: ${f} is a whole number of blocks, 1 or more`);
     });
+    // the wild crops (land 5 on, grown in the rows' order): each a crop of blocks.json CROPS (once), biomes or near (with within)
+    // biomes, ground blocks, a chance, tries [fewest, most] and a spread; the dead bushes: biomes, ground blocks and a chance
+    fieldsKnown(W.WILD_CROPS || [], ['crop', 'seed', 'biomes', 'near', 'within', 'ground', 'chance', 'tries', 'spread'], 'worldgen.WILD_CROPS', wd);
+    const crops = new Set((BL && BL.CROPS || []).map(r => r.crop)), wildSeen = new Set();
+    (W.WILD_CROPS || []).forEach((r, k) => {
+      if (!crops.has(r.crop)) wd.push(`worldgen.WILD_CROPS.${k}: "${r.crop}" isn't a crop (blocks.json CROPS)`);
+      if (wildSeen.has(r.crop)) wd.push(`worldgen.WILD_CROPS.${k}: ${r.crop} is in more than once`);
+      wildSeen.add(r.crop);
+    });
+    const biomesOk = (at, list) => { if (!Array.isArray(list) || !list.length) wd.push(`${at}: should be a list of biomes`); else list.forEach(b => { if (!BIOME_NAMES.includes(b)) wd.push(`${at}: "${b}" isn't a biome`); }); };
+    const groundOk = (at, list) => { if (!Array.isArray(list) || !list.length) wd.push(`${at}: should be a list of blocks`); else list.forEach(b => { if (!blockKeyKnown(b)) wd.push(`${at}: "${b}" isn't a block`); }); };
+    (W.WILD_CROPS || []).forEach((r, k) => {
+      const at = `worldgen.WILD_CROPS.${k} (${r.crop})`;
+      if (!Number.isInteger(r.seed)) wd.push(`${at}: seed is a whole number`);
+      if ((r.biomes === undefined) === (r.near === undefined)) wd.push(`${at}: has biomes or near (not both)`);
+      if (r.biomes !== undefined) biomesOk(`${at}.biomes`, r.biomes);
+      if (r.near !== undefined) { biomesOk(`${at}.near`, r.near); if (!(Number.isInteger(r.within) && r.within >= 1)) wd.push(`${at}: within is a whole number of blocks, 1 or more`); }
+      else if (r.within !== undefined) wd.push(`${at}: within goes with near`);
+      groundOk(`${at}.ground`, r.ground);
+      if (!(r.chance > 0 && r.chance <= 1)) wd.push(`${at}: chance is above 0, at most 1`);
+      if (!(Array.isArray(r.tries) && r.tries.length === 2 && r.tries.every(n => Number.isInteger(n) && n >= 1) && r.tries[0] <= r.tries[1])) wd.push(`${at}: tries is [fewest, most], whole numbers`);
+      if (!(Number.isInteger(r.spread) && r.spread >= 0)) wd.push(`${at}: spread is a whole number of blocks`);
+    });
+    const DB = W.DEAD_BUSHES;
+    if (DB !== undefined) {
+      fieldsKnown([DB], ['seed', 'biomes', 'ground', 'chance'], 'worldgen.DEAD_BUSHES', wd);
+      if (!Number.isInteger(DB.seed)) wd.push('worldgen.DEAD_BUSHES: seed is a whole number');
+      biomesOk('worldgen.DEAD_BUSHES.biomes', DB.biomes);
+      groundOk('worldgen.DEAD_BUSHES.ground', DB.ground);
+      if (!(DB.chance > 0 && DB.chance <= 1)) wd.push('worldgen.DEAD_BUSHES: chance is above 0, at most 1');
+    }
   }
   out.worldgen = wd;
   // every file's own fields (numbers: its diff already covers them), and no data file the game doesn't read
-  const TOP = { smelting: ['FUEL', 'SMELTS'], recipes: ['RECIPES', 'CUTTER'], creative: ['TABS'], mobs: ['MOBS', 'LAYER_BOOST', 'GLOOM_FADE', 'COW'],
-    'texture-names': ['TEXTURE_SPELLINGS', 'TEXTURE_BORROWS', 'FONT_NAMES'], blocks: [...BLOCK_TABLES, 'FORM_NAMES'], worldgen: ['ORE_VEINS', 'BADLANDS_BANDS', 'TREE_PATCH', 'TREE_MIX', 'TREE_EXTRA', 'TREE_SHAPES'] };
+  const TOP = { smelting: ['FUEL', 'SMELTS'], recipes: ['RECIPES', 'CUTTER'], creative: ['TABS'], mobs: ['MOBS', 'LAYER_BOOST', 'GLOOM_FADE', 'COW', 'ANIMALS'],
+    'texture-names': ['TEXTURE_SPELLINGS', 'TEXTURE_BORROWS', 'FONT_NAMES'], blocks: [...BLOCK_TABLES, 'FORM_NAMES'], worldgen: ['ORE_VEINS', 'BADLANDS_BANDS', 'TREE_PATCH', 'TREE_MIX', 'TREE_EXTRA', 'TREE_SHAPES', 'WILD_CROPS', 'DEAD_BUSHES'] };
   for (const [name, known] of Object.entries(TOP)) for (const f of Object.keys(D[name] || {})) if (!f.startsWith('_') && !known.includes(f)) out[name].push(`${name}.${f}: isn't something the game reads`);
   out.files = Object.keys(D).filter(name => !(name in out)).map(name => `data/${name}.json isn't a file the game reads`);
   window.DATACHECK = out;

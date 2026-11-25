@@ -167,6 +167,7 @@ public partial class Main
 		// leaves: only a Hoe gets the Leaves block itself; anything else (or your hand) just has a 1 in 5 chance of a Stick
 		if (Blocks.IsSnow(hb) || hb == Blocks.SnowBlock)   // snow breaks into Snowballs: 2-4 for each layer, 4 from a Snow Block
 			for (int n = hb == Blocks.SnowBlock ? 4 : Blocks.SnowballsFor(Blocks.B[hb].Layers, rnd); n > 0; n--) Collect(Blocks.Snowball, h.X, h.Y, h.Z);
+		else if (Harvest(hb, h.X, h.Y, h.Z)) { }   // (a ripe crop or a Cantaloupe: its harvest)
 		else if (!Blocks.IsLeaves(hb) || inv.Holding("hoe")) CollectBlock(hb, h.X, h.Y, h.Z);
 		if (Survival && staged && Blocks.OreIndex(hb) >= 0) for (int n = Blocks.B[hb].Layer; n > 1; n--) Collect(DropFor(hb), h.X, h.Y, h.Z);   // (an ore in layer n gives n Chunks)
 		Sound.I?.Break(hb);
@@ -179,17 +180,38 @@ public partial class Main
 		else if (b.Snowed > 0) world.SetBlock(h.X, h.Y, h.Z, Blocks.Snow);   // snow-logged: the torch, flower, rock or Cutter comes out, the snow stays
 		else { world.SetBlock(h.X, h.Y, h.Z, 0); world.DropTorchesAround(h.X, h.Y, h.Z, DropFor); }
 		if (b.Shape == "door") BreakDoorHalf(h.X, h.Y, h.Z, b);   // (a door: its other half goes too)
+		if (b.Crop == "corn") BreakCornHalf(h.X, h.Y, h.Z, b);    // (Corn: both halves go, with one harvest)
 		WearTool(cost);
 		if (Survival && TreeFellingOn && natural && Blocks.IsLogBlock(hb) && !NaturalLog(h.X, h.Y - 1, h.Z)) Fell(h.X, h.Y, h.Z);   // (a tree's bottom log: the whole tree comes down)
 	}
 
-	// right-click farming: a Hoe tills Grass or Dirt, Grain Seeds are planted in tilled soil, Bone Ash fertilizes it
+	// a ripe crop besides Grain (its harvest: data/numbers.json CROPS; Corn's top: as the bottom), or a Cantaloupe (its slices),
+	// broken: what it gives, in place of its drop (false: it isn't one)
+	bool Harvest(int b, int x, int y, int z)
+	{
+		var d = Blocks.Get(b);
+		string crop = b == Blocks.Cantaloupe ? "cantaloupe" : d is { Crop: { } c, Stage: 3 } && c != "cantaloupe" ? c : null;
+		if (crop == null || Nums.N.CROPS == null || !Nums.N.CROPS.TryGetValue(crop, out var cn) || cn.harvest is not { } list) return false;
+		foreach (var e in list)
+		{
+			int id = DataKeys.IdOf(e[0].GetString()), lo = e[1].GetInt32(), hi = e[2].GetInt32();
+			for (int n = lo + rnd.Next(hi - lo + 1); n > 0; n--) Collect(id, x, y, z);
+		}
+		return true;
+	}
+	// Corn broken: its other half goes too (no second harvest)
+	void BreakCornHalf(int x, int y, int z, BlockDef b)
+	{
+		int oy = b.Top ? y - 1 : y + 1;
+		if (World.Inside(x, oy, z) && Blocks.Get(world.GetBlock(x, oy, z)) is { Crop: "corn" } o && o.Top != b.Top) world.SetBlock(x, oy, z, 0);
+	}
+	// right-click farming: a Hoe tills Grass or Dirt, a seed (an item that plants) is planted in tilled soil, Bone Ash fertilizes it
 	// (clicking the crop works too). Returns true if it did something, or the click should stop there.
 	bool FarmUse(int x, int y, int z, int hb)
 	{
 		int held = inv.Held, above = world.GetBlock(x, y + 1, z);
-		bool onCrop = Blocks.IsCrop(hb);
-		int ty = onCrop ? y - 1 : y, target = onCrop ? world.GetBlock(x, ty, z) : hb;
+		bool onCrop = Blocks.IsAnyCrop(hb);
+		int ty = onCrop ? (Blocks.B[hb].Top ? y - 2 : y - 1) : y, target = onCrop ? world.GetBlock(x, ty, z) : hb;
 		if (inv.Holding("hoe"))
 		{
 			if ((!Blocks.IsGrassy(hb) && hb != Blocks.Dirt) || (above != 0 && !Blocks.IsWater(above) && !Blocks.IsFlower(above))) return false;
@@ -199,10 +221,10 @@ public partial class Main
 			if (Blocks.IsGrassy(hb) && rnd.NextDouble() < SeedChance) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
 			return true;
 		}
-		if (held == Blocks.GrainSeeds)
+		if (Blocks.Get(held)?.Plants is int crop and > 0)
 		{
 			if (!Blocks.IsSoil(hb) || above != 0) return true;
-			world.SetBlock(x, y + 1, z, Blocks.GrainStages[0]);
+			world.SetBlock(x, y + 1, z, crop);
 			Sound.I?.Place(Blocks.Grass); MobNoise(x, y + 1, z); inv.UseOne();
 			return true;
 		}
@@ -227,7 +249,7 @@ public partial class Main
 	void Place()
 	{
 		// holding food: eat it (survival); holding Fire Essence: it lifts the gloom
-		if (FeedCow() || UseFireEssence() || Eat() || ThrowSnowball()) return;
+		if (FeedCow() || FeedAnimalClick() || UseFireEssence() || Eat() || ThrowSnowball()) return;
 		if (player.Raycast() is not { } h) return;
 		// a single layer of snow is in the way of anything but more snow: aiming at it is aiming at the top of what it lies on
 		if (Blocks.Get(h.Id)?.Layers == 1 && inv.Held != Blocks.Snow && h.Y > 0)
@@ -321,9 +343,10 @@ public partial class Main
 				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
 			}
 			if (Blocks.B[pid].Shape == "plant")
-			{   // a flower: planted on top of grass or dirt
+			{   // a flower: planted on top of grass or dirt (a Dead Bush on Sand or any Terracotta too)
 				int under = world.GetBlock(bx, by - 1, bz);
-				if (by != h.Y + 1 || (!Blocks.IsGrassy(under) && under != Blocks.Dirt) || (there != 0 && there != Blocks.Snow)) return;
+				bool dry = pid == Blocks.DeadBush && (under == Blocks.Sand || Blocks.IsTerracotta(under));
+				if (by != h.Y + 1 || (!Blocks.IsGrassy(under) && under != Blocks.Dirt && !dry) || (there != 0 && there != Blocks.Snow)) return;
 				world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid); return;   // (into a layer of snow: it stays round the flower)
 			}
 			if (pid == Blocks.Furnace || pid == Blocks.Foundry)
@@ -336,7 +359,7 @@ public partial class Main
 					if (MathF.Abs(dx) > MathF.Abs(dz) ? f[0] == MathF.Sign(dx) : f[1] == (dz == 0 ? 1 : MathF.Sign(dz))) { pid = first + k; break; }
 				}
 			}
-			if (player.Touches(bx, by, bz)) return;
+			if (player.Touches(bx, by, bz) || (Blocks.IsFence(pid) && (player.TouchesFence(bx, by, bz) || there == Blocks.Snow))) return;   // (a fence: not into you, nor into snow)
 			world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid);   // (the Cutter put down in a layer of snow stands in it)
 		}
 	}

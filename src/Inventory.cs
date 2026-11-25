@@ -12,8 +12,9 @@ namespace Cubeland;
 public class Inventory
 {
 	public const int Slots = 10, Pocket0 = 10, Pack0 = 20, Tool0 = 60, Off0 = 72, Armor0 = 82, BackSlot = 86, BeltSlot = 87, NS = 88;
-	// what a backpack that's been taken off carries (its slots, in order)
-	public class PackData { public int[] Id, N, W; }
+	// what a backpack that's been taken off carries (its slots, in order; D: the slots' own contents, such as a bag's, by
+	// slot), or what's in a bag (its things in the order they went in)
+	public class PackData { public int[] Id, N, W; public Dictionary<int, PackData> D; }
 	public static readonly int[] Default = { 1, 2, 3, 8, 7, 4, 10, 12, 22, 6 };
 	public readonly int[] Id = new int[NS], Count = new int[NS];
 	public readonly PackData[] Data = new PackData[NS];
@@ -78,6 +79,46 @@ public class Inventory
 		SetSlot(e, id, 1, wear, data);
 		return true;
 	}
+	// ---- the Linen Bag (the user's, 2026-11-25; the same rules as the web version) ----
+	// One slot holding a mix of things, up to one full stack (STACK_MAX) in all: each thing takes STACK_MAX / its own stack
+	// size, so 1 for anything that stacks and the whole bag for a tool, armor, a pack, a belt (one to a slot). Not another bag,
+	// nor anything holding things (a backpack with things in it). Its things are its slot's Data, in the order they went in
+	// (an unworn thing that stacks joins its own entry); an empty bag has no Data.
+	public const string BagFullNote = "The bag is full", BagNoNote = "That can't go in a bag";
+	public static int BagRoom => Blocks.StackMax;
+	public static int BagSize(int id) => Blocks.StackMax / Blocks.StackMaxOf(id);
+	public static int BagUsed(PackData d) { int u = 0; if (d?.Id != null) for (int k = 0; k < d.Id.Length; k++) u += d.N[k] * BagSize(d.Id[k]); return u; }
+	public static bool BagTakes(int id, PackData data) => id != 0 && Blocks.Get(id) != null && !Blocks.IsBag(id) && data == null;
+	// put up to n of (id, wear) in a bag's things: how many went in (bag: its Data, made or changed)
+	public static int BagPut(ref PackData bag, int id, int n, int wear)
+	{
+		int fit = Math.Min(n, (BagRoom - BagUsed(bag)) / BagSize(id));
+		if (fit <= 0) return 0;
+		var ids = bag?.Id?.ToList() ?? new(); var ns = bag?.N?.ToList() ?? new(); var ws = bag?.W?.ToList() ?? new();
+		int at = wear == 0 && Blocks.StackMaxOf(id) > 1 ? Enumerable.Range(0, ids.Count).FirstOrDefault(k => ids[k] == id && ws[k] == 0, -1) : -1;
+		if (at >= 0) ns[at] += fit; else { ids.Add(id); ns.Add(fit); ws.Add(wear); }
+		bag = new PackData { Id = ids.ToArray(), N = ns.ToArray(), W = ws.ToArray() };
+		return fit;
+	}
+	// the last thing put in, all of it, out of a bag's things (null if there's nothing)
+	public static (int id, int n, int w)? BagTakeLast(ref PackData bag)
+	{
+		if (bag?.Id == null || bag.Id.Length == 0) { bag = null; return null; }
+		int k = bag.Id.Length - 1; var got = (bag.Id[k], bag.N[k], bag.W?.ElementAtOrDefault(k) ?? 0);
+		bag = k == 0 ? null : new PackData { Id = bag.Id[..k], N = bag.N[..k], W = (bag.W ?? new int[k + 1])[..k] };
+		return got;
+	}
+	// a bag's things as checked from outside (a friend's game): whole numbers, real things, at least 1 of each, no bag nor
+	// anything holding things, wear only on what wears (and less than wears it out), 1-64 entries and the room it has;
+	// anything else: null (an empty bag)
+	public static bool WearOk(int id, int w) => w == 0 || (w > 0 && w < MaxWear(id));
+	public static PackData BagChecked(int[] ids, int[] ns, int[] ws)
+	{
+		if (ids == null || ns == null || ids.Length == 0 || ids.Length > BagRoom || ns.Length != ids.Length || (ws != null && ws.Length != ids.Length)) return null;
+		for (int k = 0; k < ids.Length; k++) if (Blocks.Get(ids[k]) == null || Blocks.IsBag(ids[k]) || ns[k] < 1 || ns[k] > BagRoom || (ws != null && !WearOk(ids[k], ws[k]))) return null;
+		var d = new PackData { Id = ids, N = ns, W = ws ?? new int[ids.Length] };
+		return BagUsed(d) <= BagRoom ? d : null;
+	}
 	// ---- gear ----
 	public int PackSize => Survival && Id[BackSlot] != 0 ? Blocks.B[Id[BackSlot]].Pack : 0;
 	public int OffCount => 1 + (Survival && Id[BeltSlot] != 0 ? Blocks.B[Id[BeltSlot]].Belt : 0);
@@ -109,7 +150,12 @@ public class Inventory
 	{
 		if (Id[BackSlot] == 0) return;
 		var d = new PackData { Id = new int[Tool0 - Pack0], N = new int[Tool0 - Pack0], W = new int[Tool0 - Pack0] };
-		for (int k = Pack0; k < Tool0; k++) { d.Id[k - Pack0] = Id[k]; d.N[k - Pack0] = Count[k]; d.W[k - Pack0] = Wear[k]; Id[k] = Count[k] = Wear[k] = 0; Data[k] = null; }
+		for (int k = Pack0; k < Tool0; k++)
+		{
+			d.Id[k - Pack0] = Id[k]; d.N[k - Pack0] = Count[k]; d.W[k - Pack0] = Wear[k];
+			if (Data[k] != null) (d.D ??= new())[k - Pack0] = Data[k];   // (a bag in it keeps what it holds)
+			Id[k] = Count[k] = Wear[k] = 0; Data[k] = null;
+		}
 		Data[BackSlot] = d.Id.Any(x => x != 0) ? d : null;
 	}
 	// ...and a backpack put on spreads what it carries back into them
@@ -117,7 +163,7 @@ public class Inventory
 	{
 		var d = Data[BackSlot]; Data[BackSlot] = null;
 		if (d?.Id == null) return;
-		for (int k = 0; k < d.Id.Length && k < Tool0 - Pack0; k++) { Id[Pack0 + k] = d.Id[k]; Count[Pack0 + k] = d.N?.ElementAtOrDefault(k) ?? 0; Wear[Pack0 + k] = d.W?.ElementAtOrDefault(k) ?? 0; }
+		for (int k = 0; k < d.Id.Length && k < Tool0 - Pack0; k++) { Id[Pack0 + k] = d.Id[k]; Count[Pack0 + k] = d.N?.ElementAtOrDefault(k) ?? 0; Wear[Pack0 + k] = d.W?.ElementAtOrDefault(k) ?? 0; Data[Pack0 + k] = d.D?.GetValueOrDefault(k); }
 	}
 	// a smaller belt (or none): what was in the offhand and tool slots it gave comes out
 	public void FitBelt()

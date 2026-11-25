@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://1040dls16dn7"
-path="res://.godot/imported/fireclay_terracotta.png-f031927b8c78417dde4675f55b2e762f.ctex"
+uid="uid://dfr6pj5db5pd0"
+path="res://.godot/imported/potato_stage_1.png-f5cf98fb903b3b73f37c9bf24ef4c76b.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://textures/blocks/fireclay_terracotta.png"
-dest_files=["res://.godot/imported/fireclay_terracotta.png-f031927b8c78417dde4675f55b2e762f.ctex"]
+source_file="res://textures/blocks/potato_stage_1.png"
+dest_files=["res://.godot/imported/potato_stage_1.png-f5cf98fb903b3b73f37c9bf24ef4c76b.ctex"]
 
 [params]
 

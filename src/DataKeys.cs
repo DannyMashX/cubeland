@@ -14,7 +14,8 @@ public static class DataKeys
 	//  0 is "air"; snow-logged: "snowy:" + its inner block's key; a shape item: form + ":" + its block's key ("slab:grass");
 	//  a piece item: "piece:" + its block's key; anything else: its name in lower case with _ between words, then any
 	//  states that aren't the usual one after a #, in this order: layer (deep sets, 2-8), wall and count (torches), facing
-	//  and lit (anything with a front), facing, half, hinge and open (a door as it stands, always all four), level (water), stage (Grain, always), layers (snow, 2-7), axis (lying logs),
+	//  and lit (anything with a front), facing, half, hinge and open (a door as it stands, always all four), level (water), stage (Grain and the
+	//  other crops, always; then top for Corn's upper block), layers (snow, 2-7), axis (lying logs),
 	//  look (Red Bricks' other looks), placed (a flat block whose drop is an item of the same name).
 	public static string KeyOf(int id)
 	{
@@ -37,6 +38,7 @@ public static class DataKeys
 		if (d.Shape == "door") states.Add($"facing={d.Facing},half={d.Half},hinge={d.Hinge},open={d.Open}");   // (a door as it stands: always all four)
 		if (d.Liquid && d.Level > 0) states.Add($"level={d.Level}");
 		if (Blocks.IsCrop(id)) states.Add($"stage={Array.IndexOf(Blocks.GrainStages, id)}");
+		else if (d.Crop != null) { states.Add($"stage={d.Stage}"); if (d.Top) states.Add("top"); }   // (the other crops: their stage, always; Corn's upper block: top)
 		if (d.Shape == "snow" && d.Layers >= 2) states.Add($"layers={d.Layers}");
 		if (d.Axis > 0) states.Add($"axis={d.Axis}");
 		if (d.Look > 0) states.Add($"look={d.Look}");
@@ -56,6 +58,8 @@ public static class DataKeys
 		}
 		return key != null && ids.TryGetValue(key, out int v) ? v : throw new InvalidOperationException($"a data file names \"{key}\", which no block or item has (see DataKeys.cs)");
 	}
+	// the same, for a key from a save (an unknown one is just not found)
+	public static bool TryIdOf(string key, out int id) { try { id = IdOf(key); return true; } catch (InvalidOperationException) { id = 0; return false; } }
 	// lower case; each run of anything that isn't a-z or 0-9 becomes one _; no _ at either end
 	public static string Snake(string name)
 	{

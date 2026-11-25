@@ -86,6 +86,8 @@ public partial class Main : Node3D
 		DisplayServer.WindowSetTitle($"{Title} {Version}");
 		if (current == null) return;   // (the main menu, with no world: see PickWorld)
 		world = new World(current.Seed, current.Gen, current.H, current.S, current.B, current.Land);
+		if (current.Os && current.Gen == 3 && current.Land < 5 && WorldGen.EerieOn) world.Gen.OldStairs(current.OsSkip);   // (see Worlds.OldStairs)
+		world.DuckNear = DuckNear;   // (ducks help the field: see Main.Animals.cs)
 		genTask = Task.Run(() => { world.Generate(p => genProgress = p); LoadSaveBlocks(); });
 	}
 
@@ -111,6 +113,7 @@ public partial class Main : Node3D
 	void StartPlaying()
 	{
 		ready = true;
+		RollVisit();
 		stages.Clear(); foreach (var (m, _) in cracks.Values) if (GodotObject.IsInstanceValid(m)) m.QueueFree(); cracks.Clear();   // (a new world: no blocks half broken)
 		ClearDoorSwings();
 		loading.Visible = false;
@@ -147,6 +150,12 @@ public partial class Main : Node3D
 			var v = atArg[5..].Split(',').Select(t => float.Parse(t, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
 			player.Pos = new Vector3(v[0], v[1], v[2]); player.Flying = true;
 			if (v.Length > 4) { player.Yaw = v[3]; player.Pitch = v[4]; }
+		}
+		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--look=")) is { } lookArg)   // (test: then turn to face x,y,z)
+		{
+			var v = lookArg[7..].Split(',').Select(t => float.Parse(t, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+			var to = new Vector3(v[0], v[1], v[2]) - (player.Pos + new Vector3(0, 1.62f, 0));
+			player.Yaw = MathF.Atan2(-to.X, -to.Z); player.Pitch = MathF.Atan2(to.Y, new Vector2(to.X, to.Z).Length());
 		}
 		if (netClient) ConnectToHost();
 		// tests go straight in; otherwise the main menu (or the Ready screen) is showing
@@ -382,13 +391,19 @@ public partial class Main : Node3D
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone; float bagNetT; List<(Mob m, Vector3 at, float yaw, bool graze)> picHold;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
 		string arg = args.FirstOrDefault(a => a.StartsWith("--shot="));
 		if (arg == null) return;
 		if (args.Contains("--scene") && !sceneBuilt) BuildTestScene();
+		if (args.Contains("--piecescene") && !pieceSceneBuilt && !menuOpen) BuildPieceScene();
+		if (args.Contains("--holescene") && !holeSceneBuilt && !menuOpen) BuildHoleScene();
+		if (args.Contains("--casingscene") && !casingSceneBuilt && !menuOpen) BuildCasingScene();
+		if (args.Contains("--aoscene") && !aoSceneBuilt && !menuOpen) BuildAoScene();
+		if (args.Contains("--icescene") && !iceSceneBuilt && !menuOpen) BuildIceScene();
+		if (args.Contains("--doorscene") && !doorSceneBuilt && !menuOpen) BuildDoorScene();
 		if (args.Contains("--selftest") && !sceneBuilt) { sceneBuilt = true; SelfTest(); }
 		if (args.Contains("--die") && !diedTest && inv.Survival) { diedTest = true; gloomDeath = true; HurtPlayer(99); if (!dead) { gloomDeath = true; Die(); } }
 		// multiplayer tests: --host (host this world), --join=CODE (join a game)
@@ -695,6 +710,517 @@ public partial class Main : Node3D
 			Check("a harvest uses up one of the fertilizer's 2", world.FertLeft.GetValueOrDefault(World.Idx(fx, y, fz)) == 1);
 			Check("Flour by hand, Bread in the kiln, Bread is food", Inventory.Recipes.Any(r => r.Out == Blocks.Flour) && Kilns.Smelts.Any(s => s.Out == Blocks.Bread && s.From == Blocks.Flour) && Blocks.Get(Blocks.Bread)?.Food > 0);
 			inv.SetSlot(0, Blocks.Bread); player.Pitch = -0.45f;
+		}
+		if (args.Contains("--bagtest") && !bagTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (test: the Linen Bag, the user's (2026-11-25), with the rules agreed with the web version)
+			bagTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int K(string key) => DataKeys.IdOf(key);
+			int Bag = K("linen_bag"), Dirt = Blocks.Dirt, Sand = Blocks.Sand, Pick = K("stone_pickaxe"), Pack = K("leather_backpack");
+			int P = Inventory.Pocket0;
+			string In(Inventory.PackData d) => d?.Id == null ? "empty" : string.Join(", ", Enumerable.Range(0, d.Id.Length).Select(k => $"{d.N[k]} {Blocks.B[d.Id[k]].Name}{(d.W?[k] > 0 ? $" (worn {d.W[k]})" : "")}"));
+			void Hold(int id, int n, int w = 0, Inventory.PackData d = null) { (heldId, heldN, heldWear, heldData) = (id, n, w, d); ShowHeld(); }
+			void Click(int i, MouseButton b) { lastPick = -1; SurvivalSlotPress(i, b); UpdateHeld(); }
+			for (int i = 0; i < Inventory.Armor0; i++) inv.SetSlot(i, 0);
+			ClearHeld();
+			// the data
+			Check("the Linen Bag is 724 (key linen_bag), one to a slot; 725 is gone, and no key is linen_backpack or linen_utility_belt",
+				Bag == 724 && Blocks.IsBag(Bag) && Blocks.StackMaxOf(Bag) == 1 && Blocks.Get(725) == null && Blocks.B[Bag].Name == "Linen Bag"
+				&& !Enumerable.Range(1, Blocks.MaxId - 1).Any(i => DataKeys.KeyOf(i) is "linen_backpack" or "linen_utility_belt"));
+			var made = Inventory.Recipes.Where(r => r.Out == Bag).ToList();
+			Check("it's made at the Bench from 3 Linen and 1 String", made.Count == 1 && made[0].At == "bench" && made[0].N == 1
+				&& made[0].Needs.OrderBy(n => n.id).SequenceEqual(new[] { (K("linen"), 3), (K("string"), 1) }.OrderBy(n => n.Item1)));
+			Check("Linen no longer makes any pack or belt (they're leather-based, as before)", Inventory.Recipes.Where(r => Blocks.B[r.Out].Pack > 0 || Blocks.B[r.Out].Belt > 0).All(r => r.Needs.All(n => n.id != K("linen"))) && Inventory.Recipes.Count(r => Blocks.B[r.Out].Pack > 0 || Blocks.B[r.Out].Belt > 0) == 12);
+			Check("it's last in the creative Tools & Armor tab", CreativeTabs.First(t => t.name == "Tools & Armor").ids.Last() == Bag);
+			// putting things in: left-click puts in as much as fits, right-click one
+			inv.SetSlot(P, Bag);
+			Hold(Dirt, 40); Click(P, MouseButton.Left);
+			Check($"40 Dirt held, the bag clicked: all 40 go in ({In(inv.Data[P])}; held {heldN})", In(inv.Data[P]) == "40 Dirt" && heldId == 0);
+			Hold(Sand, 30); Click(P, MouseButton.Left);
+			Check($"then 30 Sand: 24 go in (room for 64 in all), 6 stay held ({In(inv.Data[P])}; held {heldN})", In(inv.Data[P]) == "40 Dirt, 24 Sand" && heldId == Sand && heldN == 6);
+			Click(P, MouseButton.Left);
+			Check($"then nothing more goes in: \"The bag is full\" ({invName.Text}), and nothing swaps", invName.Text == "The bag is full" && heldN == 6 && inv.Id[P] == Bag);
+			// taking out: the last thing put in, all of it
+			ClearHeld(); Click(P, MouseButton.Right);
+			Check($"right-click it with nothing held: the last thing put in comes out, all of it (held {heldN} {Blocks.B[heldId].Name}; left {In(inv.Data[P])})", heldId == Sand && heldN == 24 && In(inv.Data[P]) == "40 Dirt");
+			Click(P, MouseButton.Right);
+			Check($"right-click it holding Sand: one goes in ({In(inv.Data[P])}; held {heldN})", In(inv.Data[P]) == "40 Dirt, 1 Sand" && heldN == 23);
+			ClearHeld(); Click(P, MouseButton.Right); ClearHeld(); Click(P, MouseButton.Right);
+			Check($"and out again, newest first, till it's empty (held {heldN} {Blocks.B[heldId].Name}; bag {In(inv.Data[P])})", heldId == Dirt && heldN == 40 && inv.Data[P] == null && inv.Id[P] == Bag);
+			ClearHeld(); Click(P, MouseButton.Right);
+			Check("right-click an empty bag with nothing held: it's picked up", heldId == Bag && inv.Id[P] == 0);
+			Click(P, MouseButton.Left);
+			Check("and put back down", inv.Id[P] == Bag && heldId == 0);
+			// the same thing joins its own entry; the tooltip
+			Hold(Dirt, 10); Click(P, MouseButton.Left); Hold(Sand, 5); Click(P, MouseButton.Left); Hold(Dirt, 10); Click(P, MouseButton.Left);
+			Check($"10 Dirt, 5 Sand, then 10 Dirt more: the Dirt joins its own entry ({In(inv.Data[P])})", In(inv.Data[P]) == "20 Dirt, 5 Sand");
+			string tip = TipFor(Bag, -1, inv.Data[P]);
+			Check($"its tooltip: what it holds, newest first, and its room ({tip.Replace("\n", " / ")})", tip == "Linen Bag\n5 Sand\n20 Dirt\nRoom for 39 more");
+			Check("an empty bag's tooltip says Empty", TipFor(Bag, -1, null) == "Linen Bag\nEmpty");
+			var many = new Inventory.PackData { Id = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 12, 13 }, N = Enumerable.Repeat(1, 10).ToArray(), W = new int[10] };
+			string tip10 = TipFor(Bag, -1, many);
+			Check($"with 10 things in it: 8 lines, then \"and 2 more\" ({tip10.Replace("\n", " / ")})", tip10.Split('\n').Length == 11 && tip10.Split('\n')[9] == "and 2 more" && tip10.EndsWith("Room for 54 more"));
+			Hold(Dirt, 50); Click(P, MouseButton.Left);
+			Check($"filled up: \"Full\" ({TipFor(Bag, -1, inv.Data[P]).Replace("\n", " / ")}; held {heldN})", TipFor(Bag, -1, inv.Data[P]).EndsWith("\nFull") && heldN == 11 && Inventory.BagUsed(inv.Data[P]) == 64);
+			ClearHeld();
+			// a tool fills a bag on its own, and keeps its wear
+			inv.SetSlot(P + 1, Bag);
+			Hold(Pick, 1, 5); Click(P + 1, MouseButton.Left);
+			Check($"a worn Stone Pickaxe goes in an empty bag and fills it ({In(inv.Data[P + 1])}; {TipFor(Bag, -1, inv.Data[P + 1]).Replace("\n", " / ")})", In(inv.Data[P + 1]) == "1 Stone Pickaxe (worn 5)" && TipFor(Bag, -1, inv.Data[P + 1]) == "Linen Bag\nStone Pickaxe\nFull");
+			Hold(Dirt, 1); Click(P + 1, MouseButton.Left);
+			Check("nothing else fits with it", invName.Text == "The bag is full" && heldN == 1);
+			ClearHeld(); Click(P + 1, MouseButton.Right);
+			Check("it comes back out with its wear", heldId == Pick && heldN == 1 && heldWear == 5 && inv.Data[P + 1] == null);
+			ClearHeld();
+			Hold(Pick, 1); Click(P + 1, MouseButton.Left); ClearHeld();
+			// what doesn't go in
+			var packFull = new Inventory.PackData { Id = new[] { Dirt }, N = new[] { 3 }, W = new int[1] };
+			inv.SetSlot(P + 2, Bag);
+			Hold(Pack, 1, 0, packFull); Click(P + 2, MouseButton.Left);
+			Check($"a backpack with things in it doesn't go in: \"That can't go in a bag\" ({invName.Text})", invName.Text == "That can't go in a bag" && heldId == Pack && inv.Data[P + 2] == null);
+			Hold(Pack, 1); Click(P + 2, MouseButton.Left);
+			Check($"an empty backpack does, and fills it ({In(inv.Data[P + 2])})", In(inv.Data[P + 2]) == "1 Leather Backpack" && heldId == 0);
+			// a bag on a bag: they swap, each keeping what it holds
+			var dirtBag = inv.Data[P]; var pickBag = inv.Data[P + 1];
+			PickUp(P + 1, 1); Click(P, MouseButton.Left);
+			Check($"a held bag clicked on a bag: they swap, each keeping what it holds (slot: {In(inv.Data[P])}; held: {In(heldData)})", inv.Data[P] == pickBag && heldId == Bag && heldData == dirtBag);
+			Click(P + 1, MouseButton.Left);
+			// the pictures: empty, holding anything; the fill bar
+			bool Same(Image a, string png)
+			{
+				var b = Image.LoadFromFile(ProjectSettings.GlobalizePath(png)); if (a == null || b == null || a.GetSize() != b.GetSize()) return false;
+				for (int y = 0; y < a.GetHeight(); y++) for (int x = 0; x < a.GetWidth(); x++) { Color c = a.GetPixel(x, y), e = b.GetPixel(x, y); if ((c.A > 0 || e.A > 0) && !c.IsEqualApprox(e)) return false; }
+				return true;
+			}
+			Check("its two pictures show as drawn: linen_bag (empty) and linen_bag_full (holding anything)", Same(Atlas.IconTexture(Bag).GetImage(), "res://textures/items/linen_bag.png") && Same(Atlas.BagIcon(Bag, true).GetImage(), "res://textures/items/linen_bag_full.png") && Atlas.BagIcon(Bag, false) == Atlas.IconTexture(Bag));
+			inv.SetSlot(P + 3, Bag); DrawHotbar();
+			var s0 = gearSlots[P]; var s3 = gearSlots[P + 3];
+			Check($"in its slot: the full picture and a fill bar of how full it is (full: {s0.BarShown:0.00}, in bright blue 3FA9FF), the empty picture and no bar when empty ({s3.BarShown})",
+				s0.Pic.Texture == Atlas.BagIcon(Bag, true) && Math.Abs(s0.BarShown - 1) < 0.01f && s0.BarColor.IsEqualApprox(Color.FromHtml("3FA9FF")) && s3.Pic.Texture == Atlas.IconTexture(Bag) && s3.BarShown < 0);
+			var half = new Inventory.PackData { Id = new[] { Dirt }, N = new[] { 16 }, W = new int[1] }; inv.Data[P + 3] = half; DrawHotbar();
+			Check($"a quarter full: a quarter of the bar ({s3.BarShown:0.00})", Math.Abs(s3.BarShown - 0.25f) < 0.05f);
+			Hold(Bag, 1, 0, half);
+			Check("held on the mouse: the full picture while it holds anything", heldPic.Texture == Atlas.BagIcon(Bag, true));
+			Hold(Bag, 1);
+			Check("and its own picture when it's empty", heldPic.Texture == Atlas.IconTexture(Bag));
+			ClearHeld();
+			inv.SetSlot(0, Bag, 1, 0, half); SelectSlot(0); UpdateHand(0.016f); UpdateHand(0.016f);
+			bool handFullPic = handBody?.HeldMesh?.MaterialOverride is ShaderMaterial hm && (Texture2D)hm.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true);
+			inv.Data[0] = null; UpdateHand(0.016f);
+			bool handEmptyPic = handBody?.HeldMesh?.MaterialOverride is ShaderMaterial hm2 && (Texture2D)hm2.GetShaderParameter("tex") == Atlas.IconTexture(Bag);
+			Check("in your hand: the full picture while it holds anything, its own when empty", handFullPic && handEmptyPic);
+			var other = new Mob { Type = "player", T = new MobType { Scale = 0.9f } }; BuildMob(other);
+			Texture2D OtherPic() => other.HeldMesh?.MaterialOverride is ShaderMaterial om ? (Texture2D)om.GetShaderParameter("tex") : null;
+			SetHeld(other, Bag, true); var p1 = OtherPic(); SetHeld(other, Bag, false); var p2 = OtherPic(); SetHeld(other, Bag, true); var p3 = OtherPic();
+			Check("in another player's hand: full, then emptied, then filled again, the picture follows", p1 == Atlas.BagIcon(Bag, true) && p2 == Atlas.IconTexture(Bag) && p3 == Atlas.BagIcon(Bag, true));
+			other.Root.QueueFree();
+			// saves: what it holds, and a bag in a backpack taken off
+			inv.SetSlot(Inventory.BackSlot, Pack); inv.SetSlot(Inventory.Pack0, Bag, 1, 0, new Inventory.PackData { Id = new[] { Sand, Pick }, N = new[] { 3, 1 }, W = new[] { 0, 9 } });
+			inv.PackBack();
+			var packD = inv.Data[Inventory.BackSlot];
+			Check($"a backpack taken off keeps a bag in it with what the bag holds ({In(packD?.D?.GetValueOrDefault(0))})", inv.Id[Inventory.Pack0] == 0 && In(packD?.D?.GetValueOrDefault(0)) == "3 Sand, 1 Stone Pickaxe (worn 9)");
+			var so = new System.Text.Json.JsonSerializerOptions { IncludeFields = true };
+			var back = System.Text.Json.JsonSerializer.Deserialize<Worlds.Save>(System.Text.Json.JsonSerializer.Serialize(new Worlds.Save { Data = new() { [P] = inv.Data[P], [Inventory.BackSlot] = packD } }, so), so);
+			Check($"saved and loaded: a bag's things, and the bag in the backpack's ({In(back.Data[P])}; {In(back.Data[Inventory.BackSlot].D?.GetValueOrDefault(0))})", In(back.Data[P]) == In(inv.Data[P]) && In(back.Data[Inventory.BackSlot].D?.GetValueOrDefault(0)) == "3 Sand, 1 Stone Pickaxe (worn 9)");
+			inv.Data[Inventory.BackSlot] = back.Data[Inventory.BackSlot]; inv.UnpackBack();
+			Check("put back on, the bag is in its slot with what it holds", inv.Id[Inventory.Pack0] == Bag && In(inv.Data[Inventory.Pack0]) == "3 Sand, 1 Stone Pickaxe (worn 9)");
+			// a dropped bag: its picture, and spilling what it holds when its 5 minutes are up
+			var spot = player.Pos + new Vector3(30, 0, 30); spot.Y = world.Heights[(int)spot.Z * World.WX + (int)spot.X] + 1.5f;
+			foreach (var dd in drops.All.ToArray()) drops.Remove(dd);
+			var dr = drops.Add(Bag, spot.X, spot.Y, spot.Z); dr.V = Vector3.Zero;
+			dr.Data = new Inventory.PackData { Id = new[] { Dirt, Pick }, N = new[] { 3, 1 }, W = new[] { 0, 7 } };
+			Check("a dropped bag holding things shows its full picture", (Texture2D)dr.Mat.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true));
+			dr.Age = 300.5f; drops.Update(0.016f);
+			var left = drops.All.ToList();
+			Check($"when its 5 minutes are up it spills what it holds there, each thing a drop of its own ({string.Join(", ", left.Select(d => Blocks.B[d.Id].Name + (d.Wear > 0 ? $" (worn {d.Wear})" : "")))})",
+				!left.Contains(dr) && left.Count(d => d.Id == Dirt) == 3 && left.Count(d => d.Id == Pick && d.Wear == 7) == 1 && left.Count == 4 && left.All(d => d.P.DistanceTo(spot) < 1 && d.Age < 1));
+			foreach (var dd in drops.All.ToArray()) drops.Remove(dd);
+			// multiplayer: a friend picking up a drop gets its wear and what a bag holds, checked
+			var data = new Inventory.PackData { Id = new[] { Sand, Dirt }, N = new[] { 5, 3 }, W = new int[2] };
+			Dictionary<string, object> Wire(Dictionary<string, object> m) => Cubeland.Net.BinaryPack.Unpack(Cubeland.Net.BinaryPack.Pack(m)) as Dictionary<string, object>;
+			int Got(Dictionary<string, object> m) { for (int i = 0; i < Inventory.Armor0; i++) inv.SetSlot(i, 0); GotGive(Wire(m)); return Enumerable.Range(0, Inventory.Armor0).FirstOrDefault(i => inv.Id[i] != 0, -1); }
+			var gm = GiveMsg(Bag, 0, data);
+			int g = Got(gm);
+			Check($"\"give\" sends a bag's things as data {{id, n, w}}, and the friend gets them ({In(g >= 0 ? inv.Data[g] : null)})", gm.ContainsKey("data") && !gm.ContainsKey("w") && g >= 0 && inv.Id[g] == Bag && In(inv.Data[g]) == "5 Sand, 3 Dirt");
+			g = Got(GiveMsg(Bag, 0, new Inventory.PackData { Id = new[] { Pick }, N = new[] { 1 }, W = new[] { 3 } }));
+			Check($"a bag holding a worn tool: the tool keeps its wear ({In(g >= 0 ? inv.Data[g] : null)})", g >= 0 && In(inv.Data[g]) == "1 Stone Pickaxe (worn 3)");
+			g = Got(GiveMsg(Pick, 12, null));
+			Check("and a tool's wear (w)", g >= 0 && inv.Id[g] == Pick && inv.Wear[g] == 12);
+			g = Got(GiveMsg(Pick, Inventory.MaxWear(Pick) + 5, null)); bool over = g >= 0 && inv.Id[g] == Pick && inv.Wear[g] == 0;
+			int g2 = Got(GiveMsg(Dirt, 4, null));
+			Check("a wear past wearing it out, or on what doesn't wear, comes as none", over && g2 >= 0 && inv.Id[g2] == Dirt && inv.Wear[g2] == 0);
+			g = Got(GiveMsg(Bag, 0, null));
+			Check("an empty bag sends no data", !GiveMsg(Bag, 0, null).ContainsKey("data") && g >= 0 && inv.Id[g] == Bag && inv.Data[g] == null);
+			Dictionary<string, object> Bad(List<object> ids, List<object> ns, List<object> ws) => new() { ["t"] = "give", ["id"] = Bag, ["data"] = new Dictionary<string, object> { ["id"] = ids, ["n"] = ns, ["w"] = ws } };
+			List<object> L(params object[] v) => v.ToList();
+			var bads = new (string what, Dictionary<string, object> m)[]
+			{
+				("more than one stack's worth", Bad(L(Dirt, Sand), L(40, 30), L(0, 0))),
+				("a bag inside", Bad(L(Bag), L(1), L(0))),
+				("a thing that isn't one", Bad(L(4000), L(1), L(0))),
+				("lists that don't match", Bad(L(Dirt, Sand), L(4), L(0, 0))),
+				("none of a thing", Bad(L(Dirt), L(0), L(0))),
+				("a number that isn't whole", Bad(L(Dirt), L(2.5), L(0))),
+				("wear on what doesn't wear", Bad(L(Dirt), L(2), L(3))),
+				("a tool worn out", Bad(L(Pick), L(1), L(Inventory.MaxWear(Pick)))),
+				("more than 64 entries", Bad(Enumerable.Repeat((object)Dirt, 65).ToList(), Enumerable.Repeat((object)1, 65).ToList(), Enumerable.Repeat((object)0, 65).ToList())),
+			};
+			var wrong = new List<string>();
+			foreach (var (what, m) in bads) { g = Got(m); if (g < 0 || inv.Id[g] != Bag || inv.Data[g] != null) wrong.Add(what); }
+			Check($"the friend's game checks the data first: anything wrong gives an empty bag ({string.Join(", ", bads.Select(b => b.what))}){(wrong.Count > 0 ? "; got through: " + string.Join(", ", wrong) : "")}", wrong.Count == 0);
+			// dying: the bag falls with what it holds
+			for (int i = 0; i < Inventory.NS; i++) inv.SetSlot(i, 0);
+			inv.SetSlot(P, Bag, 1, 0, new Inventory.PackData { Id = new[] { Dirt }, N = new[] { 7 }, W = new int[1] });
+			Die();
+			var fell = drops.All.FirstOrDefault(d => d.Id == Bag);
+			Check($"dying: the bag falls with what it holds ({In(fell?.Data)})", fell != null && In(fell.Data) == "7 Dirt" && (Texture2D)fell.Mat.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true));
+			Respawn();
+		}
+		if (args.Contains("--croptest") && !cropTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (test, survival: the crops besides Grain: a row of wet tilled soil by water, each seed planted the way you would, grown,
+			//  harvested; Corn's halves; a Cantaloupe Vine's melons; a Potato planted, not eaten, at bare soil; a Jug of Milk's jug back)
+			cropTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int x0 = (int)player.Pos.X + 3, z0 = (int)player.Pos.Z, y = world.Heights[z0 * World.WX + x0];
+			for (int dx = -2; dx < 12; dx++) for (int dz = -2; dz <= 4; dz++)
+			{
+				for (int u = -3; u <= 0; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, u == 0 ? Blocks.Stone : Blocks.Dirt);
+				for (int u = 1; u < 6; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0);
+			}
+			int K(string key) => DataKeys.IdOf(key);
+			string[] seeds = { "grain_seeds", "potato", "turnip", "flax_seeds", "corn", "cantaloupe_seeds" };
+			string[] crops = { "grain", "potato", "turnip", "flax", "corn", "cantaloupe_vine" };
+			world.SetBlock(x0, y, z0, Blocks.Water); world.SetBlock(x0 + 7, y, z0, Blocks.Dirt);   // (water at one end; bare dirt beyond the last, for its melon)
+			world.SetBlock(x0, y, z0 + 2, Blocks.Water); world.SetBlock(x0 + 1, y + 2, z0 + 2, Blocks.Stone);   // (a Corn with a stone over it)
+			int hoe = Blocks.Tools.First(t => Blocks.Get(t)?.Tool == "hoe");
+			void Plant(int x, int z, string seed) { world.SetBlock(x, y, z, Blocks.Grass); inv.SetSlot(0, hoe); SelectSlot(0); FarmUse(x, y, z, Blocks.Grass); inv.SetSlot(0, K(seed)); FarmUse(x, y, z, world.GetBlock(x, y, z)); }
+			for (int k = 0; k < 6; k++) Plant(x0 + 1 + k, z0, seeds[k]);
+			Plant(x0 + 1, z0 + 2, "corn");
+			Check("each seed plants its crop's first stage (Grain Seeds too)", Enumerable.Range(0, 6).All(k => world.GetBlock(x0 + 1 + k, y + 1, z0) == K(crops[k] + "#stage=0")));
+			Check("the crops' keys: potato#stage=3, corn#stage=3,top", DataKeys.KeyOf(Blocks.CropBlock("potato", 3)) == "potato#stage=3" && DataKeys.KeyOf(Blocks.CropBlock("corn", 3, true)) == "corn#stage=3,top");
+			Check("a Turnip grows as fast on dry soil as on wet; a Potato half as fast", World.GrowRate(Blocks.Tilled, K("turnip#stage=0")) == 1 && World.GrowRate(Blocks.Tilled, K("potato#stage=0")) == World.DryRate);
+			// a Potato aimed at bare tilled soil is planted, not eaten; aimed anywhere else (hurt), it's eaten
+			void Aim(int x, int yy, int z) { player.Pos = new Vector3(x + 0.5f, yy + 1.2f, z + 0.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0; }
+			world.SetBlock(x0 + 9, y, z0, Blocks.Tilled); health = 4; inv.SetSlot(0, K("potato"), 2); SelectSlot(0);
+			Aim(x0 + 9, y, z0); bool ate = Eat(); if (!ate && player.Raycast() is { } ph) FarmUse(ph.X, ph.Y, ph.Z, ph.Id);
+			Check("a Potato aimed at bare tilled soil is planted, not eaten", !ate && health == 4 && world.GetBlock(x0 + 9, y + 1, z0) == K("potato#stage=0"));
+			Aim(x0 + 9, y, z0 + 4); Check("aimed at anything else, a hurt player eats it (1 quarter heart)", Eat() && health == 5);
+			world.SetBlock(x0 + 9, y + 1, z0, 0); world.SetBlock(x0 + 9, y, z0, Blocks.Stone);
+			inv.SetSlot(0, K("jug_of_milk")); health = 4; Check("a Jug of Milk heals 6 and leaves its Clay Jug in your hand", Eat() && health == 10 && inv.Held == K("clay_jug"));
+			health = MaxHealth;
+			// fertilize the potato's soil, then let it all grow
+			inv.SetSlot(0, Blocks.BoneAsh); FarmUse(x0 + 2, y + 1, z0, world.GetBlock(x0 + 2, y + 1, z0));
+			for (int s = 0; s < 1500; s++) world.TickTimers(1);
+			string Row() => string.Join(" ", Enumerable.Range(1, 7).Select(k => DataKeys.KeyOf(world.GetBlock(x0 + k, y + 1, z0)) + (k == 5 ? "/" + DataKeys.KeyOf(world.GetBlock(x0 + k, y + 2, z0)) : "")));
+			GD.Print("crops after 1500s: " + Row());
+			Check("after 25 minutes on wet soil, every crop is ripe (Grain stage 7, the others 3)", world.GetBlock(x0 + 1, y + 1, z0) == Blocks.GrainRipe && Enumerable.Range(1, 5).All(k => Blocks.B[world.GetBlock(x0 + 1 + k, y + 1, z0)] is { Stage: 3 }));
+			Check("ripe Corn is two blocks: its top above", world.GetBlock(x0 + 5, y + 2, z0) == Blocks.CropBlock("corn", 3, true));
+			Check("a Corn with no room above stays one block (stage 1)", world.GetBlock(x0 + 1, y + 1, z0 + 2) == Blocks.CropBlock("corn", 1) && world.GetBlock(x0 + 1, y + 2, z0 + 2) == Blocks.Stone);
+			Check("the grown Cantaloupe Vine has grown a melon on its free side", world.GetBlock(x0 + 7, y + 1, z0) == Blocks.Cantaloupe);
+			// harvests (survival): what breaking each gives
+			int Dropped(int id) => drops.All.Count(d => d.Id == id);
+			void Clear() { foreach (var dr in drops.All.ToArray()) drops.Remove(dr); }
+			int BreakAt(int x, int yy, int z, string item) { Clear(); inv.SetSlot(0, 0); Aim(x, yy, z); Break(); return Dropped(K(item)); }
+			int fertBefore = world.FertLeft.GetValueOrDefault(World.Idx(x0 + 2, y, z0));
+			int potatoes = BreakAt(x0 + 2, y + 1, z0, "potato");
+			Check($"a ripe Potato gives 2-4 Potatoes ({potatoes}), and uses one of its soil's fertilizer harvests", potatoes is >= 2 and <= 4 && world.FertLeft.GetValueOrDefault(World.Idx(x0 + 2, y, z0)) == fertBefore - 1);
+			int turnips = BreakAt(x0 + 3, y + 1, z0, "turnip"); Check($"a ripe Turnip gives 1-3 Turnips ({turnips})", turnips is >= 1 and <= 3);
+			Clear(); inv.SetSlot(0, 0); Aim(x0 + 4, y + 1, z0); Break(); int fl = Dropped(K("flax")), fs = Dropped(K("flax_seeds"));
+			Check($"ripe Flax gives 1-2 Flax ({fl}) and 1-2 Flax Seeds ({fs})", fl is >= 1 and <= 2 && fs is >= 1 and <= 2);
+			int corn = BreakAt(x0 + 5, y + 2, z0, "corn");
+			Check($"breaking ripe Corn's top takes both halves and gives 2-3 Corn once ({corn})", corn is >= 2 and <= 3 && world.GetBlock(x0 + 5, y + 1, z0) == 0 && world.GetBlock(x0 + 5, y + 2, z0) == 0);
+			int slices = BreakAt(x0 + 7, y + 1, z0, "cantaloupe_slice");
+			Check($"a Cantaloupe gives 3-5 slices ({slices}); its vine stays", slices is >= 3 and <= 5 && world.GetBlock(x0 + 6, y + 1, z0) == Blocks.CropBlock("cantaloupe", 3));
+			for (int s = 0; s < 1500; s++) world.TickTimers(1);
+			// (the melon grows on a free side, picked at random: the bare dirt, or now the harvested Corn's soil too)
+			Check("and grows another melon, on a free side", (world.GetBlock(x0 + 7, y + 1, z0) == Blocks.Cantaloupe) != (world.GetBlock(x0 + 5, y + 1, z0) == Blocks.Cantaloupe));
+			world.SetBlock(x0 + 1, y + 2, z0 + 2, 0); int unripe = BreakAt(x0 + 1, y + 1, z0 + 2, "corn"); Check($"unripe Corn gives its seed back: 1 Corn ({unripe})", unripe == 1);
+			int vineSeeds = BreakAt(x0 + 6, y + 1, z0, "cantaloupe_seeds"); Check($"a vine broken gives 1 Cantaloupe Seeds ({vineSeeds})", vineSeeds == 1);
+			Check("Baked Potato, Roasted Corn, Cooked Egg and the Clay Jug (3 Clay Balls) in the Kiln", Kilns.Smelts.Any(s => s.Out == K("baked_potato") && s.From == K("potato")) && Kilns.Smelts.Any(s => s.Out == K("roasted_corn"))
+				&& Kilns.Smelts.Any(s => s.Out == K("cooked_egg")) && Kilns.Smelts.Any(s => s.Out == K("clay_jug") && s.Needs.Length == 1 && s.Needs[0] == (Blocks.ClayBall, 3)));
+			Check("Linen from Flax, cloth from Linen, Cantaloupe Seeds from a slice, String from Flax", new[] { "linen", "linen_cloth", "cantaloupe_seeds", "string", "red_linen_cloth", "linen_bag", "oak_fence" }.All(o => Inventory.Recipes.Any(r => r.Out == K(o))));
+			// the 13 cloths cut into the 7 shapes at the Cutter (3800 + 7 x the cloth's place + the form), in the Shapes tab too
+			var cloths = Enumerable.Range(0, 13).Select(k => K(k == 0 ? "linen_cloth" : new[] { "red", "orange", "yellow", "green", "aqua", "blue", "indigo", "purple", "magenta", "pink", "white", "black" }[k - 1] + "_linen_cloth")).ToArray();
+			var shapes = cloths.SelectMany((c, k) => Blocks.Forms.Select((f, n) => (got: Blocks.FormItem(f, c), want: 3800 + 7 * k + n))).ToArray();
+			var shapesTab = CreativeTabs.FirstOrDefault(t => t.name == "Shapes").ids ?? Array.Empty<int>();
+			Check($"the 13 cloths cut into piece, slab, vslab, stairs, quarter, vstairs, vquarter: 3800-3890 ({shapes.Count(s => s.got == s.want)} of 91), each in the Shapes tab",
+				shapes.All(s => s.got == s.want) && cloths.All(c => Blocks.Splittable.Contains(c)) && shapes.All(s => shapesTab.Contains(s.got))
+				&& Blocks.B[3806].Name == "Linen Cloth Vertical Quarter" && Blocks.B[3887].Name == "Black Linen Cloth Stairs" && Blocks.B[3887].T[0] == Blocks.B[cloths[12]].T[0]);
+			// the farming pictures put in so far (items 707-725, blocks 3700-3752): each one whose file is there shows as drawn
+			var files = new Dictionary<string, string>();
+			foreach (var folder in new[] { "res://textures/items", "res://textures/blocks" }) foreach (var (n, p) in Atlas.Pictures(folder)) files.TryAdd(n, p);
+			var farmPics = Enumerable.Range(707, 19).Concat(Enumerable.Range(3700, 53)).Where(i => Blocks.Get(i) != null)
+				.SelectMany(i => Blocks.B[i].T.Distinct()).Distinct().Where(t => files.ContainsKey(Atlas.Names[t])).ToArray();
+			bool Same(Image img, int t)
+			{
+				if (img == null) return false;   // (a picture that can't be loaded, e.g. with no .import file yet)
+				img.Convert(Image.Format.Rgba8);
+				if (img.GetWidth() != Atlas.TILE) img.Resize(Atlas.TILE, Atlas.TILE, Image.Interpolation.Nearest);
+				for (int py = 0; py < Atlas.TILE; py++) for (int px = 0; px < Atlas.TILE; px++)
+				{
+					Color a = img.GetPixel(px, py), b = Atlas.Image.GetPixel(t * Atlas.TILE + px, py);
+					if (a != b && !(a.A8 == 0 && b.A8 == 0)) return false;   // (Godot's import recolours see-through pixels: those don't count)
+				}
+				return true;
+			}
+			// (the PNG file itself, not Godot's imported copy, so a picture changed since its last import shows up)
+			Image Raw(string path) => FileAccess.FileExists(path) ? Image.LoadFromFile(ProjectSettings.GlobalizePath(path)) : null;
+			bool AsDrawn(int t) => Same(Raw(files[Atlas.Names[t]]), t);
+			var notDrawn = farmPics.Where(t => !AsDrawn(t)).Select(t => Atlas.Names[t]).ToArray();   // (a picture changed since its last import shows here)
+			Check($"the farming pictures in so far show as drawn ({farmPics.Length}: {string.Join(", ", farmPics.Select(t => Atlas.Names[t]))}){(notDrawn.Length > 0 ? "; not as drawn: " + string.Join(", ", notDrawn) : "")}", notDrawn.Length == 0);
+			// the cut-shape sheets (textures/blocks/sheets, 3 x 3 cells laid out like the face): each cell is its picture in the
+			// game, and the pictures pieced together from them (no_top_left..., the diagonals, slab_side) are there too
+			var sheets = new Dictionary<string, string>();
+			foreach (var (n, p) in Atlas.Pictures("res://textures/blocks/sheets")) sheets.TryAdd(n, p);
+			int TileNamed(string n) { for (int i = 0; i < Atlas.NT; i++) if (Atlas.Names[i] == n) return i; return -1; }
+			string[,] cellName = { { "_top_left", "_left_half", "_bottom_left" }, { "_top_half", "", "_bottom_half" }, { "_top_right", "_right_half", "_bottom_right" } };
+			string[] pieced = { "_no_top_left", "_no_top_right", "_no_bottom_left", "_no_bottom_right", "_diagonal_a", "_diagonal_b", "_slab_side" };
+			var farmSheets = Enumerable.Range(3700, 53).Where(i => Blocks.Get(i) != null).SelectMany(i => Blocks.B[i].T.Distinct()).Distinct()
+				.Select(t => Atlas.Names[t]).Where(sheets.ContainsKey).ToArray();
+			var sheetBad = new List<string>();
+			foreach (var n in farmSheets)
+			{
+				var sheet = Raw(sheets[n]);
+				if (sheet == null) { sheetBad.Add(n + " (can't be loaded)"); continue; }
+				int cs = sheet.GetWidth() / 3;
+				for (int col = 0; col < 3; col++) for (int row = 0; row < 3; row++)
+				{
+					int t = TileNamed(n + cellName[col, row]);
+					if (t < 0 || !Same(sheet.GetRegion(new Rect2I(col * cs, row * cs, cs, cs)), t)) sheetBad.Add(n + cellName[col, row]);
+				}
+				foreach (var suffix in pieced) if (TileNamed(n + suffix) < 0) sheetBad.Add(n + suffix);
+			}
+			Check($"the farming sheets in so far show as drawn, all 9 cells and the 7 pieced-together pictures ({farmSheets.Length} sheets{(sheetBad.Count > 0 ? "; wrong or missing: " + string.Join(", ", sheetBad.Take(8)) : "")})", sheetBad.Count == 0);
+			player.Pos = new Vector3(x0 + 3.5f, y + 3.5f, z0 + 5.5f); player.Pitch = -0.6f; player.Yaw = 0;
+		}
+		if (args.Contains("--animaltest") && !animalTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (test, survival: the six animals of Farming & animals, as agreed with the web version)
+			animalTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int K(string key) => DataKeys.IdOf(key);
+			int x0 = (int)player.Pos.X + 4, z0 = (int)player.Pos.Z, y = world.Heights[z0 * World.WX + x0];
+			for (int dx = -6; dx < 40; dx++) for (int dz = -8; dz <= 8; dz++)
+			{
+				world.SetBlock(x0 + dx, y, z0 + dz, Blocks.Grass); world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Dirt);
+				for (int u = 1; u < 10; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0);
+			}
+			int Y = y + 1;
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			void Clear() { foreach (var dr in drops.All.ToArray()) drops.Remove(dr); }
+			int Dropped(int id) => drops.All.Count(d => d.Id == id);
+			string[] six = { "chicken", "duck", "deer", "goat", "boar", "bear" };
+			Check("six animals, each with its numbers, wearing <type> and <type>baby", six.All(t => MobTypes.TryGetValue(t, out var mt) && mt.Animal && mt.A != null)
+				&& ModelOf(new Mob { Type = "deer", T = MobTypes["deer"], Variant = 1 }) == "deerbaby" && ModelOf(new Mob { Type = "deer", T = MobTypes["deer"] }) == "deer");
+			// ---- chickens: fed, an egg later; fed full and happy, it won't eat; scratching fertilizes; pecking sets crops back ----
+			var hen = SpawnAnimal("chicken", x0 + 0.5f, Y, z0 + 0.5f); hen.Vx = hen.Vz = 0;
+			Check("a chicken eats Corn: happy, and an Egg on its way (60-120 s)", FeedAnimal(hen) && hen.Happy > 0 && hen.EggIn >= 60 && hen.EggIn <= 120 && hen.Fed == 1);
+			Clear(); hen.EggIn = 0.05f; AnimalThink(hen, 0.1f);
+			Check("then it lays an Egg where it stands", Dropped(Egg) == 1);
+			hen.Fed = hen.T.A.fedMax; hen.Happy = hen.T.A.happyMax;
+			Check("fed fedMax times and more than half happy, it doesn't want more", !FeedAnimal(hen));
+			world.SetBlock(x0, y, z0, Blocks.Tilled);
+			bool fert = false; for (int k = 0; k < 60 && !fert; k++) { hen.ScratchIn = 0; ChickenWork(hen, 0.01f, x0, Y, z0); fert = world.GetBlock(x0, y, z0) == Blocks.Fertilized; }
+			Check("scratching empty tilled soil fertilizes it now and then", fert && world.FertLeft.ContainsKey(World.Idx(x0, y, z0)));
+			int pot2 = Blocks.CropBlock("potato", 2), pot3 = Blocks.CropBlock("potato", 3);
+			world.SetBlock(x0, y, z0 + 1, Blocks.WetTilled); world.SetBlock(x0, Y, z0 + 1, pot2);
+			bool Pecked(int x, int z, int was) { for (int k = 0; k < 60; k++) { hen.PeckIn = 0; ChickenWork(hen, 0.01f, x0, Y, z0); if (world.GetBlock(x, Y, z) != was) return true; } return false; }
+			Check("pecking puts a young crop beside it back a stage", Pecked(x0, z0 + 1, pot2) && world.GetBlock(x0, Y, z0 + 1) == Blocks.CropBlock("potato", 1));
+			world.SetBlock(x0, Y, z0 + 1, Blocks.CropBlock("potato", 0));
+			Check("a first stage is eaten", Pecked(x0, z0 + 1, Blocks.CropBlock("potato", 0)) && world.GetBlock(x0, Y, z0 + 1) == 0);
+			world.SetBlock(x0, Y, z0 + 1, pot3);
+			Check("a ripe crop is safe", !Pecked(x0, z0 + 1, pot3));
+			world.SetBlock(x0 + 1, y, z0, Blocks.WetTilled); world.SetBlock(x0 + 1, Y, z0, Blocks.CropBlock("corn", 2)); world.SetBlock(x0 + 1, Y + 1, z0, Blocks.CropBlock("corn", 2, true));
+			world.SetBlock(x0, Y, z0 + 1, 0);
+			Check("Corn pecked from stage 2 loses its top", Pecked(x0 + 1, z0, Blocks.CropBlock("corn", 2)) && world.GetBlock(x0 + 1, Y, z0) == Blocks.CropBlock("corn", 1) && world.GetBlock(x0 + 1, Y + 1, z0) == 0);
+			var chick = SpawnAnimal("chicken", x0 + 2.5f, Y, z0 + 0.5f, 0.5f);
+			Check("a chick has babyHealth and grows up after babyTime", chick.Health == chick.T.A.babyHealth && chick.Variant == 1);
+			AnimalThink(chick, 1); Check("(grown: full health, the grown model)", chick.Baby == 0 && chick.Health == chick.T.Health && chick.Variant == 0);
+			var chick2 = SpawnAnimal("chicken", x0 + 3.5f, Y, z0 + 0.5f, 100); Clear(); MobDies(chick2);
+			Check("a chick dies leaving nothing", drops.All.Count == 0);
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			// ---- breeding: two happy chickens with room have a chick; a crowded pair doesn't ----
+			var ha = SpawnAnimal("chicken", x0 + 6.5f, Y, z0 + 0.5f); var hb = SpawnAnimal("chicken", x0 + 7.3f, Y, z0 + 0.5f);
+			foreach (var h in new[] { ha, hb }) { h.Happy = 100; h.MateCool = 0; h.MateCheck = 0; h.Vx = h.Vz = 0; }
+			for (int f = 0; f < 400 && !mobList.Any(o => o.Type == "chicken" && o.Baby > 0); f++) { ha.MateCheck = Math.Min(ha.MateCheck, 0.05f); AnimalThink(ha, 0.1f); AnimalThink(hb, 0.1f); }
+			Check($"two happy chickens with room have a chick ({mobList.Count(o => o.Type == "chicken" && o.Baby > 0)})", mobList.Count(o => o.Type == "chicken" && o.Baby > 0) == 1 && ha.MateCool > 0);
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			// ---- ducks: a grown duck in water near wet soil speeds its crops; ashore, it heads for water ----
+			for (int dx = 10; dx <= 12; dx++) for (int dz = -1; dz <= 1; dz++) world.SetBlock(x0 + dx, y, z0 + dz, Blocks.Water);
+			world.SetBlock(x0 + 14, y, z0, Blocks.WetTilled); world.SetBlock(x0 + 20, y, z0, Blocks.WetTilled);
+			var duck = SpawnAnimal("duck", x0 + 11.5f, y + 0.2f, z0 + 0.5f);   // (floating: half a block under the surface) duck.Vx = duck.Vz = 0;
+			Check("a grown duck in the water helps wet soil within 4 (x1.25), not 9 away", DuckNear(World.Idx(x0 + 14, y, z0)) && !DuckNear(World.Idx(x0 + 20, y, z0)) && World.DuckRate == 1.25f);
+			duck.Baby = 10; Check("a duckling doesn't", !DuckNear(World.Idx(x0 + 14, y, z0))); duck.Baby = 0;
+			duck.X = x0 + 16.5f; duck.Y = Y; duck.WaterCheck = 0; duck.WaterGoal = null; inv.SetSlot(0, Blocks.Stone); SelectSlot(0);
+			player.Pos = new Vector3(x0 - 20, Y, z0);
+			Check("ashore, a duck heads for the nearest water", DuckWater(duck, 0.1f) && duck.WaterGoal is { } wg && wg.X < x0 + 13);
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			// ---- deer: shy unless you hold its food; sows the sapling of the leaves it passed; nibbles saplings ----
+			var deer = SpawnAnimal("deer", x0 + 25.5f, Y, z0 + 0.5f); deer.Vx = deer.Vz = 0;
+			player.Pos = new Vector3(x0 + 20.5f, Y, z0 + 0.5f);
+			inv.SetSlot(0, Blocks.Stone); deer.Flee = 0; deer.AlertIn = 0; AnimalAlert(deer, 0.1f); bool ran = deer.Flee > 0;
+			inv.SetSlot(0, K("cherries")); deer.Flee = 0; deer.AlertIn = 0; AnimalAlert(deer, 0.1f);
+			Check("a deer runs from you within 8, unless you hold its food", ran && deer.Flee <= 0);
+			world.SetBlock(x0 + 25, Y + 4, z0 + 3, K("birch_leaves")); world.Grown.Add(World.Idx(x0 + 25, Y + 4, z0 + 3));
+			deer.LookIn = 0; DeerWork(deer, 0.01f, x0 + 25, Y, z0);
+			Check("it remembers the sapling of the leaves it passed", deer.Sow == K("birch_sapling"));
+			world.SetBlock(x0 + 25, Y + 4, z0 + 3, 0);
+			bool sown = false; for (int k = 0; k < 600 && !sown; k++) { deer.SowIn = 0; deer.NibbleIn = 99; DeerWork(deer, 0.01f, x0 + 25, Y, z0); sown = world.GetBlock(x0 + 25, Y, z0) == K("birch_sapling"); }
+			Check("and now and then plants it where it stands (natural)", sown && world.Grown.Contains(World.Idx(x0 + 25, Y, z0)));
+			bool nibbled = false; for (int k = 0; k < 200 && !nibbled; k++) { deer.NibbleIn = 0; deer.SowIn = 99; DeerWork(deer, 0.01f, x0 + 25, Y, z0); nibbled = world.GetBlock(x0 + 25, Y, z0) == 0; }
+			Check("it nibbles a sapling close by", nibbled);
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			// ---- goats: a Dead Bush or a natural low leaf block, never a hedge; milky after eating; a Clay Jug gives milk ----
+			var goat = SpawnAnimal("goat", x0 + 30.5f, Y, z0 + 0.5f); goat.Vx = goat.Vz = 0;
+			world.SetBlock(x0 + 32, Y, z0, K("oak_leaves"));   // (a hedge: put there)
+			Check("a goat leaves a hedge alone", GoatTarget(x0 + 30, Y, z0) == null);
+			world.Grown.Add(World.Idx(x0 + 32, Y, z0));
+			Check("but eats a low natural leaf block", GoatTarget(x0 + 30, Y, z0) is { } gt && gt.x == x0 + 32);
+			world.SetBlock(x0 + 32, Y, z0, 0); world.SetBlock(x0 + 29, Y, z0 + 1, Blocks.DeadBush);
+			float before = goat.Happy; ForageDone(goat, x0 + 30, Y, z0);
+			Check("and a Dead Bush (foraging: happier)", world.GetBlock(x0 + 29, Y, z0 + 1) == 0 && goat.Happy > before);
+			Check("fed, it's milky for milkTime", FeedAnimal(goat) && goat.Milky == goat.T.A.milkTime);
+			Check("a Clay Jug used on it: a Jug of Milk, once", MilkGoat(goat) && !MilkGoat(goat));
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			// ---- boar: roots up Grass to Dirt near an Oak or Maple; hit, it turns on you (survival) ----
+			var boar = SpawnAnimal("boar", x0 + 35.5f, Y, z0 + 0.5f); boar.Vx = boar.Vz = 0;
+			Check("a boar roots only near an Oak or Maple log", !CanForage(boar, x0 + 35, Y, z0));
+			world.SetBlock(x0 + 37, Y, z0 + 2, Blocks.Log);
+			Check("near one, it does", CanForage(boar, x0 + 35, Y, z0));
+			ForageDone(boar, x0 + 35, Y, z0);
+			Check("the Grass turns to Dirt", world.GetBlock(x0 + 35, y, z0) == Blocks.Dirt);
+			player.Pos = new Vector3(x0 + 33.5f, Y, z0 + 0.5f); inv.SetSlot(0, 0); HitMob(boar);
+			Check("hit (survival), it's angry at you for angerTime", boar.Angry == boar.T.A.angerTime && boar.Flee <= 0);
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			// ---- bears: prey run from a grown bear; a hungry bear catches one, which leaves only Feathers; its cubs ----
+			var bear = SpawnAnimal("bear", x0 + 5.5f, Y, z0 + 5.5f); var prey = SpawnAnimal("chicken", x0 + 6.5f, Y, z0 + 5.5f);
+			bear.Vx = bear.Vz = prey.Vx = prey.Vz = 0;
+			prey.AlertIn = 0; AnimalAlert(prey, 0.1f);
+			Check("a chicken runs from a grown bear", prey.Flee > 0 && prey.FleeFrom == bear);
+			Check("a bear isn't hungry at first (huntCool)", bear.HungerIn == bear.T.A.huntCool && !BearHunt(bear, 0.1f));
+			bear.HungerIn = 0; bear.HuntRetry = 0; bear.PreyCheck = 0; Clear();
+			bool chased = BearHunt(bear, 0.1f);
+			Check($"hungry, it catches the nearest prey, which leaves only Feathers ({Dropped(K("raw_meat"))} meat)", chased && prey.Dead > 0 && prey.Eaten && Dropped(K("raw_meat")) == 0);
+			BearHunt(bear, 0.1f);
+			Check("a meal: not hungry again for huntCool, and happier", bear.HungerIn == bear.T.A.huntCool && bear.Happy >= bear.T.A.mealHappy);
+			var cub = SpawnAnimal("bear", x0 + 8.5f, Y, z0 + 5.5f, 100);
+			player.Pos = new Vector3(x0 + 15.5f, Y, z0 + 5.5f); bear.AlertIn = 0; AnimalAlert(bear, 0.1f); bool calm = bear.Angry <= 0;
+			player.Pos = new Vector3(x0 + 11.5f, Y, z0 + 5.5f); bear.AlertIn = 0; AnimalAlert(bear, 0.1f);
+			Check("a bear leaves you alone, unless you go near its cub (survival)", calm && bear.Angry == bear.T.A.angerTime);
+			// ---- what other games see ----
+			var look = AnimalLook(cub) | 16; var copy = SpawnAnimal("bear", x0 + 9.5f, Y, z0 + 9.5f); ApplyAnimalLook(copy, look);
+			Check("other games see an animal young, happy, eating or angry", copy.Variant == 1 && copy.Angry > 0 && (look & 1) == 1);
+			foreach (var m in mobList.ToArray()) RemoveMob(m);
+			// ---- where a group can start ----
+			world.SetBlock(x0 + 2, y, z0 - 5, Blocks.Grass);
+			Check("chickens can start on Grass; ducks on water with land near", AnimalSpot("chicken", x0 + 2, z0 - 5) is { } cs && cs.Y == Y && AnimalSpot("duck", x0 + 11, z0) is { } ds && ds.Y > y && AnimalSpot("duck", x0 + 2, z0 - 5) == null);
+			Check("deer need a log within 6", AnimalSpot("deer", x0 + 2, z0 - 5) == null && AnimalSpot("deer", x0 + 36, z0 + 2) != null);
+			player.Pos = new Vector3(x0 + 0.5f, Y + 3, z0 - 6.5f); player.Flying = true;
+		}
+		if (args.Contains("--fencetest") && !fenceTested && !menuOpen && shotTimer > 0.3f)
+		{   // (test: fences, as agreed with the web version)
+			fenceTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int K(string key) => DataKeys.IdOf(key);
+			int x0 = (int)player.Pos.X + 3, z0 = (int)player.Pos.Z, y = world.Heights[z0 * World.WX + x0];
+			for (int dx = -4; dx < 16; dx++) for (int dz = -6; dz <= 6; dz++)
+			{
+				world.SetBlock(x0 + dx, y, z0 + dz, Blocks.Stone);
+				for (int u = 1; u < 7; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0);
+			}
+			int Y = y + 1, oak = K("oak_fence"), cherry = K("cherry_fence");
+			var fences = Enumerable.Range(1, Blocks.B.Length - 1).Where(Blocks.IsFence).ToArray();
+			Check($"16 fences, each showing its own wood's planks, and a 3D icon (a post with rails each way): {fences.Length}", fences.Length == 16 && fences.All(f => Blocks.B[f].Of > 0 && Blocks.B[f].T[0] == Blocks.B[Blocks.B[f].Of].T[0])
+				&& Atlas.Is3DIcon(oak) && Atlas.IconBoxes(oak).Length == 5 && Blocks.StackMaxOf(oak) > 1);
+			// a line: glass, oak, oak (a door beside it), cherry, oak, stone
+			int door = Enumerable.Range(1, Blocks.B.Length - 1).First(i => Blocks.B[i]?.Shape == "door");
+			world.SetBlock(x0 - 1, Y, z0, Blocks.Glass);
+			world.SetBlock(x0, Y, z0, oak); world.SetBlock(x0 + 1, Y, z0, oak); world.SetBlock(x0 + 2, Y, z0, cherry); world.SetBlock(x0 + 3, Y, z0, oak);
+			world.SetBlock(x0 + 4, Y, z0, Blocks.Stone); world.SetBlock(x0 + 1, Y, z0 + 1, door);
+			int M(int x) => Blocks.FenceMask(world.GetBlock, x, Y, z0);
+			Check($"they join each other (any wood), a door and a whole block, not glass: {M(x0)} {M(x0 + 1)} {M(x0 + 2)} {M(x0 + 3)}", M(x0) == 1 && M(x0 + 1) == 7 && M(x0 + 2) == 3 && M(x0 + 3) == 3);
+			void Run(float secs, bool fwd, bool jump) { for (int s = 0; s < secs * 60; s++) player.Update(1 / 60f, new Player.Keys { F = fwd, Jump = jump }); }
+			void Stand(float x, float yy, float z, float yaw) { player.Pos = new Vector3(x, yy, z); player.Vel = Vector3.Zero; player.Flying = false; player.Yaw = yaw; player.Pitch = 0; Run(0.5f, false, false); }
+			Stand(x0 + 2.5f, Y, z0 - 2.5f, MathF.PI); Run(2, true, false);
+			Check($"you can't walk through a fence line (stopped at z {player.Pos.Z - z0:0.00})", player.Pos.Z < z0 + 6 / 16f - Player.Half + 0.01f && player.Pos.Z > z0 - 1);
+			Stand(x0 + 2.5f, Y, z0 - 2.5f, MathF.PI); Run(3, true, true);
+			Check($"nor jump over it (z {player.Pos.Z - z0:0.00})", player.Pos.Z < z0 + 0.5f);
+			Stand(x0 + 2.5f, Y + 3, z0 + 0.5f, 0); Run(1, false, false);
+			Check($"you can stand on top of it, 1.5 up ({player.Pos.Y - Y:0.00})", MathF.Abs(player.Pos.Y - (Y + Blocks.FenceTall)) < 0.01f && player.OnGround);
+			// a post on its own: beside it you get past; into it you don't
+			world.SetBlock(x0 + 7, Y, z0, oak);
+			Stand(x0 + 6.65f, Y, z0 - 2.5f, MathF.PI); Run(2, true, false);
+			Check($"a post on its own: you walk past it, close beside ({player.Pos.Z - z0:0.00})", player.Pos.Z > z0 + 2);
+			Stand(x0 + 7.5f, Y, z0 - 2.5f, MathF.PI); Run(2, true, false);
+			Check($"but not through it ({player.Pos.Z - z0:0.00})", player.Pos.Z < z0 + 6 / 16f - Player.Half + 0.01f);
+			// aiming (from the -z side, level): the post, the rails, not the gap between them
+			Player.Hit? AimAt(float x, float eyeY) { player.Pos = new Vector3(x, eyeY - Player.Eye, z0 - 2.5f); player.Flying = true; player.Yaw = MathF.PI; player.Pitch = 0; return player.Raycast(); }
+			bool HitsAt(Player.Hit? h, int x) => h is { } hh && hh.X == x && hh.Y == Y && hh.Z == z0;
+			Check("aiming: the post", HitsAt(AimAt(x0 + 2.5f, Y + 0.9f), x0 + 2));
+			Check("a rail (low and high)", HitsAt(AimAt(x0 + 2.85f, Y + 7.5f / 16), x0 + 2) && HitsAt(AimAt(x0 + 2.85f, Y + 13.5f / 16), x0 + 2));
+			Check("not the gap between the rails, nor above them", !HitsAt(AimAt(x0 + 2.85f, Y + 10.5f / 16), x0 + 2) && !HitsAt(AimAt(x0 + 2.85f, Y + 15.5f / 16), x0 + 2));
+			// putting one down: not into you (it's 1.5 tall), nor into a layer of snow; no snow on top of one
+			void Down(int x, float feet, int id) { player.Pos = new Vector3(x + 0.5f, feet, z0 + 4.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0; inv.SetSlot(0, id); SelectSlot(0); Place(); }
+			Down(x0, Y + 1.2f, oak);
+			Check("a fence isn't put down where its top half would be in you", world.GetBlock(x0, Y, z0 + 4) == 0);
+			Down(x0, Y + 1.6f, oak);
+			Check("a little higher, it is", world.GetBlock(x0, Y, z0 + 4) == oak);
+			Down(x0, Y + 2.6f, Blocks.Snow);
+			Check("no snow goes on top of a fence", world.GetBlock(x0, Y + 1, z0 + 4) == 0);
+			world.SetBlock(x0 + 2, Y, z0 + 4, Blocks.Snow); Down(x0 + 2, Y + 2.6f, oak);
+			Check("nor a fence into a layer of snow", world.GetBlock(x0 + 2, Y, z0 + 4) == Blocks.Snow);
+			// a cow in a pen (3 x 3 inside) stays in it, never hopping out
+			int px = x0 + 9, pz = z0 - 2;
+			for (int a = 0; a < 5; a++) for (int c = 0; c < 5; c++) if (a == 0 || a == 4 || c == 0 || c == 4) world.SetBlock(px + a, Y, pz + c, oak);
+			var cow = SpawnMob("cow", px + 2.5f, Y, pz + 2.5f);
+			for (int s = 0; s < 1200; s++) { cow.Timer = Math.Min(cow.Timer, 0.5f); UpdateMobs(0.05f); }
+			Check($"a cow in a pen walks about in it for a minute and stays in ({cow.X - px:0.0}, {cow.Y - Y:0.0}, {cow.Z - pz:0.0})", cow.X > px + 1 && cow.X < px + 4 && cow.Z > pz + 1 && cow.Z < pz + 4 && cow.Y < Y + 0.5f);
+			RemoveMob(cow);
+			player.Pos = new Vector3(x0 + 2.5f, Y + 2.5f, z0 - 4.5f); player.Flying = true; player.Yaw = MathF.PI; player.Pitch = -0.5f;
+		}
+		if (args.Contains("--wildtest") && !wildTested && !menuOpen && shotTimer > 0.3f)
+		{   // (test, a Biomes world at land 5: what grew wild is where it should be; a Dead Bush put down; the linen gear)
+			wildTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			var wild = world.Gen.Late.FindAll(l => l.stand == WorldGen.WildStand || l.stand == WorldGen.MelonStand);
+			(int x, int y, int z) At(int i) => (i % World.WX, i / (World.WX * World.WZ), i / World.WX % World.WZ);
+			var kept = wild.FindAll(l => { var (x, y, z) = At(l.i); return world.GetBlock(x, y, z) == l.id; });
+			Check($"in land {current.Land}, crops, melons and Dead Bushes grew wild ({wild.Count}; {kept.Count} still there after the structures)", World.WildCrops(current.Land) ? wild.Count > 100 && kept.Count >= wild.Count * 0.95 : wild.Count == 0);
+			int Under(int x, int y, int z) => world.GetBlock(x, y - 1, z);
+			var rows = Nums.Worldgen.WILD_CROPS.ToDictionary(r => r.crop, r => r.ground.Select(DataKeys.IdOf).ToHashSet());
+			var bushGround = Nums.Worldgen.DEAD_BUSHES.ground.Select(DataKeys.IdOf).ToHashSet();
+			int bad = 0, pairs = 0, melons = 0, snowed = 0; var seen = new HashSet<string>(); var firsts = new List<string>();
+			foreach (var l in kept)
+			{
+				var (x, y, z) = At(l.i); var d = Blocks.B[l.id];
+				string kind = l.id == Blocks.Cantaloupe ? "melon" : l.id == Blocks.DeadBush ? "dead_bush" : d.Crop;
+				if (seen.Add(kind)) firsts.Add($"{kind} {x},{y},{z}");
+				if (l.id == Blocks.DeadBush) { if (!bushGround.Contains(Under(x, y, z))) bad++; }
+				else if (l.id == Blocks.Cantaloupe) { melons++; if (!rows["cantaloupe"].Contains(Under(x, y, z)) || !new[] { (1, 0), (-1, 0), (0, 1), (0, -1) }.Any(s => world.GetBlock(x + s.Item1, y, z + s.Item2) == Blocks.CropBlock("cantaloupe", 3))) bad++; }
+				else if (d.Top) { pairs++; if (world.GetBlock(x, y - 1, z) != Blocks.CropBlock("corn", 3)) bad++; }
+				else
+				{
+					if (d.Stage != 3 || !rows[d.Crop].Contains(Under(x, y, z))) bad++;
+					if (d.Crop == "corn" && world.GetBlock(x, y + 1, z) != Blocks.CropBlock("corn", 3, true)) bad++;
+				}
+				int above = world.GetBlock(x, y + 1, z);
+				if (l.id != Blocks.Cantaloupe && (above == Blocks.Snow || Blocks.Plain(l.id) != l.id)) snowed++;
+			}
+			Check($"each stands ripe on its ground (Corn as both halves, {pairs}; each melon beside a grown vine, {melons}): {bad} wrong", bad == 0 && (!World.WildCrops(current.Land) || pairs > 0 && melons > 0));
+			Check($"no snow on or in any of them ({snowed})", snowed == 0);
+			GD.Print("wild, the first of each: " + string.Join("; ", firsts));
+			// a Dead Bush put down: on Sand, Grass, Dirt and any Terracotta; not on Stone or Chiseled Terracotta
+			int x0 = (int)player.Pos.X + 3, z0 = (int)player.Pos.Z, y0 = world.Heights[z0 * World.WX + x0];
+			int[] grounds = { Blocks.Sand, Blocks.Grass, Blocks.Dirt, Blocks.Terracotta, Blocks.ColourTerracotta[3], Blocks.FireclayTerracotta, Blocks.Stone, 67 };
+			for (int k = 0; k < grounds.Length; k++) { world.SetBlock(x0 + k, y0, z0, grounds[k]); for (int u = 1; u < 4; u++) world.SetBlock(x0 + k, y0 + u, z0, 0); }
+			for (int k = 0; k < grounds.Length; k++)
+			{
+				player.Pos = new Vector3(x0 + k + 0.5f, y0 + 2.2f, z0 + 0.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Pitch = -MathF.PI / 2 + 0.001f; player.Yaw = 0;
+				inv.SetSlot(0, Blocks.DeadBush); SelectSlot(0); Place();
+			}
+			var put = Enumerable.Range(0, grounds.Length).Select(k => world.GetBlock(x0 + k, y0 + 1, z0) == Blocks.DeadBush).ToArray();
+			Check($"a Dead Bush goes down on Sand, Grass, Dirt and any Terracotta, not on Stone or Chiseled Terracotta ({string.Join("", put.Select(p => p ? 'y' : 'n'))})", put.SequenceEqual(new[] { true, true, true, true, true, true, false, false }));
+			int bag = DataKeys.IdOf("linen_bag");
+			Check("the Linen Bag is one to a slot, and not gear (see --bagtest)", Blocks.IsBag(bag) && Blocks.StackMaxOf(bag) == 1 && !Blocks.GearItems.Contains(bag));
 		}
 		if (args.Contains("--snowlog") && !snowTested && !menuOpen)
 		{   // (test: snow round torches and flowers, put down and taken away the way you would, looking straight down at each spot)
@@ -1072,6 +1598,38 @@ public partial class Main : Node3D
 			Check("it swings for a moment (the chunk leaves it out meanwhile)", ChunkMesher.Swinging.ContainsKey(World.Idx(x0, y, z0)) && swings.Count > 0);
 			UpdateDoorSwings(0.2f);
 			Check("then stands in its new place", !ChunkMesher.Swinging.ContainsKey(World.Idx(x0, y, z0)) && swings.Count == 0);
+			// open, it's turned a quarter about its hinge and reaches 10/16 out of its block's back (the boxes agreed with the web version)
+			float[][][] openBoxes =
+			{
+				new[] { new[] { 0, 0, -0.625f, 0.25f, 1, 0.375f }, new[] { 0.75f, 0, -0.625f, 1, 1, 0.375f } },
+				new[] { new[] { -0.625f, 0, 0.75f, 0.375f, 1, 1 }, new[] { -0.625f, 0, 0, 0.375f, 1, 0.25f } },
+				new[] { new[] { 0.75f, 0, 0.625f, 1, 1, 1.625f }, new[] { 0, 0, 0.625f, 0.25f, 1, 1.625f } },
+				new[] { new[] { 0.625f, 0, 0, 1.625f, 1, 0.25f }, new[] { 0.625f, 0, 0.75f, 1.625f, 1, 1 } },
+			};
+			bool boxesOk = true;
+			for (int f = 0; f < 4; f++) for (int g = 0; g < 2; g++) for (int half = 0; half < 2; half++)
+			{
+				var bx = Blocks.B[D(f, g, true, half)].Box; var sb = Blocks.B[D(f, g, false, half)].Box;
+				for (int k = 0; k < 6; k++) boxesOk &= MathF.Abs(bx[k] - openBoxes[f][g][k]) < 1e-6f;
+				boxesOk &= f % 2 == 0 ? sb[2] == 0.375f && sb[5] == 0.625f && sb[0] == 0 && sb[3] == 1 : sb[0] == 0.375f && sb[3] == 0.625f && sb[2] == 0 && sb[5] == 1;
+			}
+			Check("open, a door reaches 10/16 out of its block's back, against its hinge side (all 8 ways); shut, across the middle", boxesOk);
+			// (the door at x0 is open: facing 0, hinge 0, so its panel is x0 to x0 + 0.25 across, z0 - 0.625 to z0 + 0.375)
+			Stand(x0 + 4.5f, z0 - 4.5f);
+			Check("you can't walk into the part sticking out of its block", !player.Fits(new Vector3(x0 + 0.25f + Player.Half - 0.05f, y, z0 - 0.5f)) && player.Fits(new Vector3(x0 + 0.25f + Player.Half + 0.05f, y, z0 - 0.5f)));
+			Stand(x0 + 0.2f, z0 - 0.5f);
+			Check("but a door swung open into you doesn't hold you: you can walk out of it", player.Fits(player.Pos + new Vector3(0.3f, 0, 0)) && player.Fits(player.Pos + new Vector3(0, 0, -0.6f)));
+			Stand(x0 + 0.125f, z0 - 3.5f); player.Yaw = MathF.PI; player.Pitch = 0;
+			var aimed = player.Raycast();
+			Check("aimed at from behind, the part sticking out is the door", aimed is { } ah && ah.X == x0 && ah.Z == z0 && ah.Y == y + 1 && MathF.Abs(ah.Pt.Z - (z0 - 0.625f)) < 1e-3f);
+			Stand(x0 + 0.725f, z0 - 3.5f); player.Yaw = MathF.PI; player.Pitch = 0;
+			Check("and a little to the side, it isn't", player.Raycast() is not { X: var ax, Z: var az } || ax != x0 || az != z0);
+			ToggleDoor(x0, y, z0); world.SetBlock(x0, y, z0 - 1, Blocks.Stone); world.SetBlock(x0, y + 1, z0 - 1, Blocks.Stone);
+			Stand(x0 + 0.5f, z0 + 3.5f); ToggleDoor(x0, y, z0); UpdateDoorSwings(0.2f);
+			Check("it opens into a block behind it all the same (the block stays)", Is(x0, 0, 0, true) && world.GetBlock(x0, y, z0 - 1) == Blocks.Stone);
+			Stand(x0 + 0.125f, z0 - 3.5f); player.Yaw = MathF.PI; player.Pitch = 0;
+			Check("aimed at, the block in front of the hidden part is the block", player.Raycast() is { } bh && bh.Id == Blocks.Stone && bh.Z == z0 - 1);
+			world.SetBlock(x0, y, z0 - 1, 0); world.SetBlock(x0, y + 1, z0 - 1, 0);
 			ToggleDoor(x0, y, z0);
 			Check("right-clicked again: shut", Is(x0, 0, 0, false));
 			Stand(x0 + 0.5f, z0 - 2.5f); ToggleDoor(x0, y, z0);
@@ -1178,7 +1736,8 @@ public partial class Main : Node3D
 				Check("FELLING ALONE: a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
 			}
 			Check("OFF: nothing half broken, no cracks", stages.Count == 0);
-			Check($"new worlds are land {(World.OreSpreadOn ? 4 : 3)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 4 : 3) && current.Land == World.NewLand);
+			Check($"new worlds are land {World.NewLand} (this one: {current.Land}); staircases only in lands 5 and 6 ({world.Gen.StairSpots.Count} spots)", World.NewLand == (World.OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0) && current.Land == World.NewLand
+				&& (world.Gen.StairSpots.Count > 0) == (world.Gen.HasStairs && current.Gen == 3));
 		}
 		if (args.Contains("--stagetest") && !stageTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
 		{   // (test, survival: stage breaking of Stone, ores and logs, natural or put down, and tree felling)
@@ -1245,12 +1804,401 @@ public partial class Main : Node3D
 			Swings(x0 + 1, y, z0 + 5, side: true);
 			Check("a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
 			}   // (felling on)
-			Check($"new worlds are land {(World.OreSpreadOn ? 4 : 3)} (this one: {current.Land})", World.NewLand == (World.OreSpreadOn ? 4 : 3) && current.Land == World.NewLand);
+			Check($"new worlds are land {World.NewLand} (this one: {current.Land}); staircases only in lands 5 and 6 ({world.Gen.StairSpots.Count} spots)", World.NewLand == (World.OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0) && current.Land == World.NewLand
+				&& (world.Gen.StairSpots.Count > 0) == (world.Gen.HasStairs && current.Gen == 3));
 			// half broken, to look at
 			Grow(x0 + 3, y, z0 + 4, Blocks.Stone); Hold(Tool("pickaxe", "stone")); Aim(x0 + 3, y, z0 + 4); Break(); Break();
 			Grow(x0 + 4, y, z0 + 4, Blocks.Log); Hold(0); Aim(x0 + 4, y, z0 + 4); for (int k = 0; k < 7; k++) Break();
 			Check("half-broken blocks stay, with their progress", stages.Count == 2);
 			player.Pos = new Vector3(x0 + 3.5f, y + 1, z0 + 1.2f); player.Pitch = -0.45f; player.Yaw = MathF.PI;
+		}
+		if (args.Contains("--necktest") && !neckTested && !menuOpen && shotTimer > 0.3f)
+		{   // (test: a head turns from its "head" group's pivot point, or from the middle of its bottom if the group has none, as agreed with the web version)
+			neckTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			var keep = models["cow"]; var P = player.Pos;
+			// textures' longer-legged cow and calf (their body, neck, head and snout), with the neck in the head group (in a group inside
+			// it), and the head group's pivot at the neck's top back edge
+			string Model(string neckName, bool calf, bool origin = true) => (calf ? """
+				{ "elements": [ { "name": "body", "from": [5, 5, 3], "to": [11, 10, 13] }, { "name": "NECK", "from": [6, 8, 0], "to": [10, 12, 4] },
+				{ "name": "head", "from": [5, 9, -4], "to": [11, 14, 0] }, { "name": "snout", "from": [6, 9, -5], "to": [10, 11, -4] },
+				{ "name": "leg_a", "from": [5, 0, 4], "to": [7, 5, 6] }, { "name": "leg_b", "from": [9, 0, 4], "to": [11, 5, 6] },
+				{ "name": "leg_c", "from": [5, 0, 10], "to": [7, 5, 12] }, { "name": "leg_d", "from": [9, 0, 10], "to": [11, 5, 12] } ],
+				"groups": [ { "name": "body", "origin": [8, 5, 8], "children": [0] },
+				{ "name": "Head", "origin": [8, 12, 4], "children": [ { "name": "throat", "origin": [8, 12, 4], "children": [1] }, 2, 3 ] },
+				{ "name": "legs", "origin": [8, 5, 8], "children": [4, 5, 6, 7] } ] }
+				""" : """
+				{ "elements": [ { "name": "body", "from": [3, 6, 1], "to": [13, 14, 14] }, { "name": "NECK", "from": [6, 9, -3], "to": [10, 14, 2] },
+				{ "name": "head", "from": [5, 9, -8], "to": [11, 15, -3] }, { "name": "snout", "from": [6, 9, -10], "to": [10, 12, -8] },
+				{ "name": "leg_a", "from": [3, 0, 2], "to": [6, 6, 5] }, { "name": "leg_b", "from": [10, 0, 2], "to": [13, 6, 5] },
+				{ "name": "leg_c", "from": [3, 0, 10], "to": [6, 6, 13] }, { "name": "leg_d", "from": [10, 0, 10], "to": [13, 6, 13] } ],
+				"groups": [ { "name": "body", "origin": [8, 6, 8], "children": [0] },
+				{ "name": "Head", "origin": [8, 14, 2], "children": [ { "name": "throat", "origin": [8, 14, 2], "children": [1] }, 2, 3 ] },
+				{ "name": "legs", "origin": [8, 6, 8], "children": [4, 5, 6, 7] } ] }
+				""").Replace("NECK", neckName).Replace(origin ? "\u0000" : "\"name\": \"Head\", \"origin\": [8, 14, 2],", "\"name\": \"Head\",").Replace(origin ? "\u0000" : "\"name\": \"Head\", \"origin\": [8, 12, 4],", "\"name\": \"Head\",");
+			Mob Build(string json) { models["cow"] = (System.Text.Json.JsonDocument.Parse(json).RootElement.Clone(), "Cow"); return SpawnMob("cow", P.X, P.Y, P.Z + 6); }
+			// each head-group part with the head turned by `a` (grazing is -0.85, wobbling to -0.90): its middle, lowest and highest point (model px)
+			(Vector3 mid, float low, float high)[] Parts(Mob m, float a)
+			{
+				m.Head.Rotation = new Vector3(a, 0, 0);
+				var outp = m.Head.GetChildren().OfType<MeshInstance3D>().Select(mi =>
+				{
+					var bb = mi.Mesh.GetAabb(); float low = 1e9f, high = -1e9f;
+					for (int k = 0; k < 8; k++) { float yy = (m.Head.Transform * (mi.Position + bb.GetEndpoint(k))).Y * 16; low = Math.Min(low, yy); high = Math.Max(high, yy); }
+					return (m.Head.Transform * mi.Position * 16, low, high);
+				}).ToArray();
+				m.Head.Rotation = Vector3.Zero;
+				return outp;
+			}
+			foreach (var (calf, o, nose85, nose90, neckTop) in new[] { (false, new Vector3(8, 14, 2), 1.68f, 1.49f, 14f), (true, new Vector3(8, 12, 4), 3.26f, 3.09f, 12f) })
+			{
+				string who = calf ? "calf" : "cow";
+				var m = Build(Model("Neck", calf));
+				Check($"{who}: with a neck in its head group, the head turns from the group's pivot ({m.Head.Position * 16 + new Vector3(m.Cx, 0, m.Cz)})", (m.Head.Position * 16 + new Vector3(m.Cx, 0, m.Cz) - o).Length() < 1e-3f);
+				var rest = Parts(m, 0); var g85 = Parts(m, -0.85f); var g90 = Parts(m, -0.90f);
+				var restMids = rest.Select(r => r.mid + new Vector3(m.Cx, 0, m.Cz)).ToArray();
+				var want = calf ? new[] { new Vector3(8, 11.5f, -2), new Vector3(8, 10, 2), new Vector3(8, 10, -4.5f) } : new[] { new Vector3(8, 12, -5.5f), new Vector3(8, 11.5f, -0.5f), new Vector3(8, 10.5f, -9) };
+				Check($"{who}: at rest, the head, neck and snout are where the model puts them", rest.Length == 3 && want.All(w => restMids.Any(r => (r - w).Length() < 1e-3f)));
+				int ni = Array.FindIndex(restMids, r => (r - want[1]).Length() < 1e-3f), si = Array.FindIndex(restMids, r => (r - want[2]).Length() < 1e-3f);
+				Check($"{who}: grazing, the nose comes down to {g85[si].low:0.00} px up ({g90[si].low:0.00} at the wobble's -0.90; web {nose85:0.00} / {nose90:0.00}), and the neck's top stays at {g85[ni].high:0.00} (was {rest[ni].high:0.00})",
+					Math.Abs(g85[si].low - nose85) < 0.01f && Math.Abs(g90[si].low - nose90) < 0.01f && g85[ni].high <= neckTop + 0.01f && Math.Abs(rest[ni].high - neckTop) < 0.01f);
+				RemoveMob(m);
+				var plain = Build(Model("dewlap", calf));   // (the same, with that part not called neck: still the group's pivot point)
+				Check($"{who}: with no neck, the head turns from its group's pivot point too", (plain.Head.Position * 16 + new Vector3(plain.Cx, 0, plain.Cz) - o).Length() < 1e-3f);
+				RemoveMob(plain);
+				var old = Build(Model("Neck", calf, false));   // (the head group with no pivot point: the middle of the head's bottom, as before)
+				var hf = calf ? new Vector3(8, 9, -2) : new Vector3(8, 9, -5.5f);
+				Check($"{who}: a head group with no pivot point: the head turns from the middle of its bottom", (old.Head.Position * 16 + new Vector3(old.Cx, 0, old.Cz) - hf).Length() < 1e-3f);
+				var o85 = Parts(old, -0.85f);
+				GD.Print($"  ({who} without the rule: the nose stops {o85.Min(q => q.low):0.00} px up and the neck's top swings up to {o85.Max(q => q.high):0.00})");
+				RemoveMob(old);
+			}
+			// every installed model: its head turns from its head group's origin (or, with none, the middle of its bottom). Which ones
+			// that moves from the middle of the head's bottom (the old rule), and the gap behind a grazing head (its back top corner
+			// going forward at -0.85, model px; web's numbers)
+			var same = new List<string>(); var moved = new List<string>(); var necks = new List<string>(); var gaps = new List<string>(); var leaned = new List<string>();
+			float[] NeckOrigin(System.Text.Json.JsonElement json)
+			{
+				float[] Find(System.Text.Json.JsonElement list)
+				{
+					if (list.ValueKind != System.Text.Json.JsonValueKind.Array) return null;
+					foreach (var g in list.EnumerateArray().Where(c => c.ValueKind == System.Text.Json.JsonValueKind.Object))
+					{
+						if (g.TryGetProperty("name", out var n) && string.Equals(n.GetString(), "head", StringComparison.OrdinalIgnoreCase) && g.TryGetProperty("origin", out var o)) return Vec(o);
+						if (g.TryGetProperty("children", out var ch) && Find(ch) is { } f) return f;
+					}
+					return null;
+				}
+				return json.TryGetProperty("groups", out var gr) ? Find(gr) : null;
+			}
+			foreach (var (name, md) in models.Where(kv => kv.Key != "cow").Append(new KeyValuePair<string, (System.Text.Json.JsonElement json, string folder)>("cow", keep)).ToArray())
+			{
+				var hd = md.json.GetProperty("elements").EnumerateArray().FirstOrDefault(e => e.TryGetProperty("name", out var n) && n.GetString() == "head");
+				if (hd.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+				models["cow"] = md; var mob = SpawnMob("cow", P.X, P.Y, P.Z + 6);
+				if (mob.Head != null)
+				{
+					var f = Vec(hd.GetProperty("from")); var t = Vec(hd.GetProperty("to"));
+					var no = NeckOrigin(md.json);
+					var bottom = new Vector3(((f[0] + t[0]) / 2 - mob.Cx) / 16, f[1] / 16, ((f[2] + t[2]) / 2 - mob.Cz) / 16);
+					var w = no != null ? new Vector3((no[0] - mob.Cx) / 16, no[1] / 16, (no[2] - mob.Cz) / 16) : bottom;
+					((mob.Head.Position - w).Length() < 1e-4f ? same : moved).Add(name);
+					if ((w - bottom).Length() > 1e-4f) necks.Add(name);
+					// the gap: the head's back top corner (in the body's frame, model px) before and after turning down by 0.85
+					var corner = new Vector3((f[0] + t[0]) / 2 - mob.Cx, t[1], t[2] - mob.Cz) / 16 - mob.Head.Position;
+					float gap = (corner.Z - (Basis.FromEuler(new Vector3(-0.85f, 0, 0)) * corner).Z) * 16;
+					if (MobTypes.ContainsKey(name) || name.EndsWith("baby")) gaps.Add($"{name} {gap:0.00}");
+					// grazing in full: only the head goes down, the body stays as it stands (no lean: the user's call, 2026-11-25)
+					mob.Happy = 0; mob.Grazing = 1000; mob.GrazeAnim = 1; CowShow(mob, 0);
+					if (mob.Figure.Position.Length() > 1e-6f || mob.Figure.Rotation.Length() > 1e-6f || mob.Head.Rotation.X > -0.8f) leaned.Add(name);
+				}
+				RemoveMob(mob);
+			}
+			models["cow"] = keep;
+			Check($"every installed model's head turns from its group's pivot point, or its bottom middle ({same.Count}: {string.Join(", ", same)}){(moved.Count > 0 ? "; wrong: " + string.Join(", ", moved) : "")}", moved.Count == 0 && same.Contains("cow") && same.Contains("zombie"));
+			Check($"people and monsters turn their heads as before: their pivot points are the heads' bottom middles (moved from there: {string.Join(", ", necks)})", !necks.Intersect(new[] { "player", "skeleton", "zombie", "gloomling" }).Any());
+			GD.Print($"  (the gap behind a grazing head, model px: {string.Join(", ", gaps)})");
+			Check($"grazing, only the head goes down: no body leans, as in the web version{(leaned.Count > 0 ? " (wrong: " + string.Join(", ", leaned) + ")" : "")}", leaned.Count == 0);
+		}
+		if (args.Contains("--animalcheck") && !animalChecked && !menuOpen && shotTimer > 0.3f)
+		{   // (test: the six animals' models in game: their parts, size and the neck rule; each walks; spawning across a Biomes world)
+			animalChecked = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			string[] kinds = { "chicken", "duck", "deer", "goat", "boar", "bear" };
+			var P = player.Pos;
+			int x0 = (int)P.X - 12, z0 = (int)P.Z + 6, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -2; dx < 30; dx++) for (int dz = -2; dz < 30; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 8; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			var looks = new List<string>(); bool allBuilt = true;
+			foreach (var kind in kinds) foreach (bool young in new[] { false, true })
+			{
+				var m = SpawnAnimal(kind, x0 + 4, y, z0 + 4, young ? 100 : 0);
+				int legs = m.Legs.Count; bool ok = m.Head != null && legs == (kind is "chicken" or "duck" ? 2 : 4) && m.Height > 0.2f && m.Half > 0.05f;
+				if (!ok) allBuilt = false;
+				looks.Add($"{(young ? kind + " young" : kind)} {legs} legs {m.Height:0.00} tall{(m.Head == null ? " NO HEAD" : "")}");
+				RemoveMob(m);
+			}
+			Check($"each animal and its young is built from its model: a head, legs that swing (2 for birds, 4 for the rest) ({string.Join("; ", looks)})", allBuilt);
+			// walking: each grown one let loose on open ground for 30 seconds goes somewhere, its legs swinging, never into a block
+			var walked = new List<string>(); bool allWalk = true;
+			foreach (var kind in kinds)
+			{
+				var m = SpawnAnimal(kind, x0 + 14.5f, y, z0 + 14.5f);
+				float start = m.X, startZ = m.Z, swing = 0, far = 0; bool inBlock = false;
+				player.Pos = new Vector3(x0 + 14.5f, y + 40, z0 + 14.5f); player.Flying = true;   // (well away: a deer would run off)
+				for (int s = 0; s < 600; s++)
+				{
+					m.Timer = Math.Min(m.Timer, 0.5f); UpdateMobs(0.05f);
+					foreach (var l in m.Legs) swing = Math.Max(swing, Math.Abs(l.Pivot.Rotation.X));
+					far = Math.Max(far, MathF.Sqrt((m.X - start) * (m.X - start) + (m.Z - startZ) * (m.Z - startZ)));
+					if (MobBlocked(m, m.X, m.Y + 0.01f, m.Z)) inBlock = true;
+				}
+				bool ok = far > 1.5f && swing > 0.15f && !inBlock;
+				if (!ok) allWalk = false;
+				walked.Add($"{kind} {far:0.0} blocks, legs {swing:0.00}{(inBlock ? " IN A BLOCK" : "")}");
+				RemoveMob(m);
+			}
+			Check($"each grown animal walks about, legs swinging, never into a block ({string.Join("; ", walked)})", allWalk);
+			// the Deer and the Duck turn their heads from where the neck meets the body (the neck rule); the others from the head's bottom
+			var necked = kinds.Concat(kinds.Select(k => k + "baby")).Where(k => models.TryGetValue(k, out var md) && md.json.GetRawText().Contains("\"neck\"")).ToArray();
+			Check($"the grown Deer and Duck have necks in their heads' groups ({string.Join(", ", necked)})", necked.OrderBy(k => k).SequenceEqual(new[] { "deer", "duck" }));
+			// spawning: from spots all over this Biomes world, each kind starts somewhere, only in its own biomes
+			if (current?.Gen == 3)
+			{
+				foreach (var m in mobList.ToArray()) RemoveMob(m);
+				var seen = kinds.ToDictionary(k => k, k => 0); var wrong = new List<string>(); int overBorder = 0;
+				var r = new Random(7);
+				for (int n = 0; n < 1500; n++)
+				{
+					int before = mobList.Count;
+					player.Pos = new Vector3(40 + r.Next(World.WX - 80), 80, 40 + r.Next(World.WZ - 80));
+					animalSpawnIn = 0; SpawnAnimals();
+					foreach (var m in mobList.Skip(before))
+					{
+						seen[m.Type]++;
+						// (a group starts on one spot in the kind's biome and spreads up to 2.5 blocks each way, so it may stand just over a border)
+						int mx = (int)MathF.Floor(m.X), mz = (int)MathF.Floor(m.Z), bi = world.Gen.BiomeOf(mx, mz);
+						bool near = false;
+						for (int dz = -4; dz <= 4 && !near; dz++) for (int dx = -4; dx <= 4 && !near; dx++) near = AnimalBiomes[m.Type].Contains(world.Gen.BiomeOf(mx + dx, mz + dz));
+						if (!AnimalBiomes[m.Type].Contains(bi)) { if (near) overBorder++; else wrong.Add($"{m.Type} in {WorldGen.BiomeNames[bi]}"); }
+					}
+					if (mobList.Count > 300) foreach (var m in mobList.ToArray()) RemoveMob(m);
+				}
+				Check($"spawning all over a Biomes world: every kind starts somewhere ({string.Join(", ", seen.Select(kv => $"{kv.Key} {kv.Value}"))})", seen.Values.All(v => v > 0));
+				Check($"each only in its own biomes ({overBorder} of {seen.Values.Sum()} just over a border, within 4){(wrong.Count > 0 ? "; elsewhere: " + string.Join(", ", wrong.Distinct().Take(6)) : "")}", wrong.Count == 0);
+				foreach (var m in mobList.ToArray()) RemoveMob(m);
+			}
+			else
+			{
+				animalSpawnIn = 0; SpawnAnimals();
+				Check("not a Biomes world: no animals start", !mobList.Any(m => m.T.Animal));
+			}
+			player.Pos = P;
+		}
+		// (pictures: animals held still where --animalpic put them, standing or with heads down)
+		if (picHold != null) foreach (var (m, at, yaw, graze) in picHold)
+		{
+			m.X = at.X; m.Y = at.Y; m.Z = at.Z; m.Yaw = yaw; m.Vx = m.Vz = 0; m.Walking = false; m.Flee = 0; m.Angry = 0; m.Chase = false; m.Timer = 1000;
+			m.Grazing = graze ? 1000 : 0; m.Mate = null;
+		}
+		if (args.Contains("--animalpic") && picHold == null && !menuOpen && shotTimer > 0.3f)
+		{   // (to look at: the six animals side on in a line, each grown one with its young in front; --graze: heads down)
+			string[] kinds = { "chicken", "duck", "deer", "goat", "boar", "bear" };
+			bool graze = args.Contains("--graze");
+			int x0 = (int)player.Pos.X - 12, z0 = (int)player.Pos.Z - 8, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -3; dx < 28; dx++) for (int dz = -3; dz < 16; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Grass); for (int u = 0; u < 8; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			picHold = new();
+			for (int k = 0; k < 6; k++)
+			{
+				var at = new Vector3(x0 + 3.0f + k * 3.5f, y, z0 + 2.5f); var atYoung = new Vector3(x0 + 2.6f + k * 3.5f, y, z0 + 4.8f);
+				picHold.Add((SpawnAnimal(kinds[k], at.X, at.Y, at.Z), at, MathF.PI / 2, graze));
+				picHold.Add((SpawnAnimal(kinds[k], atYoung.X, atYoung.Y, atYoung.Z, 1000), atYoung, MathF.PI / 2, graze));
+			}
+			player.Pos = new Vector3(x0 + 11.6f, y + 1.9f, z0 + 13.8f); player.Flying = true; player.Yaw = 0; player.Pitch = -0.19f;
+			inv.SetSlot(9, 0); SelectSlot(9); panoCapturing = true;   // (no hand in the way)
+		}
+		if (args.Contains("--cowpic") && !cowShown && !menuOpen && shotTimer > 0.3f && models.ContainsKey("cow"))
+		{   // (to look at: a cow, a fat cow and a calf side on, in a line, each standing then grazing)
+			cowShown = true;
+			int x0 = (int)player.Pos.X - 10, z0 = (int)player.Pos.Z - 8, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -3; dx < 24; dx++) for (int dz = -3; dz < 14; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 6; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			int[] variants = { 0, 0, 2, 2, 1, 1 };
+			for (int k = 0; k < 6; k++)
+			{
+				var c = SpawnMob("cow", x0 + 2f + k * 3.5f, y, z0 + 2.5f, variants[k]);
+				c.Yaw = MathF.PI / 2; c.Walking = false; c.Timer = 1000; c.Happy = 0; if (variants[k] == 1) c.Baby = 1000;
+				if (k % 2 == 1) c.Grazing = 1000;
+			}
+			player.Pos = new Vector3(x0 + 10.75f, y + 2.6f, z0 + 11.5f); player.Flying = true; player.Yaw = 0; player.Pitch = -0.2f;
+			inv.SetSlot(9, 0); SelectSlot(9); panoCapturing = true;   // (no hand in the way)
+		}
+		// (test, an older world given the staircases, in two runs of the pumpkin 1280 land-3 world in a test folder (--worlds=):
+		// --oldstairtest=1 opens it for the first time in this version, its save holding a little hut near the spot at 1175, 299, then
+		// builds beside the staircase at 647, 840 and saves; --oldstairtest=2 opens it again: nothing was decided again)
+		if (args.FirstOrDefault(a => a.StartsWith("--oldstairtest=")) is { } ot && !osTested && ready && !menuOpen && shotTimer > 0.3f)
+		{
+			osTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			string run = ot[15..], dir = args.FirstOrDefault(a => a.StartsWith("--worlds="))?[9..] ?? "user://worlds";
+			int n = World.WX / World.CS;
+			var hut = new HashSet<int> { 18 * n + 73, 19 * n + 73 };   // (the hut: x 1179 to 1183, z 303 to 307)
+			string Placed() => string.Join(" ", world.Gen.StairSpots.Where(o => o.Placed).Select(o => $"{o.X},{o.Y},{o.Z},{o.Dir},{o.N},{o.Mat}"));
+			GD.Print($"OLDSTAIRS run {run}: land {current.Land}, os {current.Os}, skip [{string.Join(",", current.OsSkip ?? Array.Empty<int>())}], placed {Placed()}");
+			Check($"an older world (land {current.Land}) grows the staircases now", current.Land == 3 && current.Os && world.Gen.Os && world.Gen.HasStairs);
+			Check("the chunks that held changes when it was first opened are noted: just the hut's two", current.OsSkip != null && current.OsSkip.SequenceEqual(hut.OrderBy(c => c)));
+			Check("no staircase near the hut: the spot at 1175, 299 was skipped", !world.Gen.StairSpots.Any(o => WorldGen.NearChunks(hut, o.X, o.Z)) && !world.Gen.StairSpots.Any(o => o.X == 1175 && o.Z == 299));
+			var keep = world.Gen.StairSpots.FirstOrDefault(o => o.Placed && o.X == 647 && o.Z == 840);
+			Check($"the other staircases stand, as in the world grown with nothing skipped ({Placed()})", keep != null && StairStanding(keep) && Placed() == "647,80,840,3,7,8 438,71,345,0,8,253 940,70,914,1,5,7" && world.Gen.StairSpots.Where(o => o.Placed).All(StairStanding));
+			Check("the hut is still there", world.GetBlock(1179, 88, 303) == Blocks.Cobblestone && world.GetBlock(1181, 89, 305) == DataKeys.IdOf("oak_planks"));
+			string list = FileAccess.GetFileAsString(dir + "/worlds.json");
+			Check("the world's list keeps it", list.Contains("\"Os\":true") && list.Contains("\"OsSkip\":[" + string.Join(",", hut.OrderBy(c => c)) + "]"));
+			if (run == "1")
+			{   // build right beside the staircase at 647, 840, and save
+				for (int y = keep.Y; y < keep.Y + 4; y++) world.SetBlock(650, y, 838, Blocks.Cobblestone);
+				Check("built beside a staircase, then saved, the save keeping it too", SaveWorld(true) && FileAccess.GetFileAsString($"{dir}/{current.Id}.json") is { } sv && sv.Contains("\"Os\":true") && sv.Contains("\"OsSkip\":[" + string.Join(",", hut.OrderBy(c => c)) + "]"));
+			}
+			else
+				Check("opened again after building beside it: the staircase at 647, 840 still stands, the new wall beside it, nothing decided again", world.GetBlock(650, keep.Y + 1, 838) == Blocks.Cobblestone && StairStanding(keep));
+		}
+		// (test, two games or two editions: --osnet prints which staircases this game grew and whether they stand, as the host and as
+		// the friend (once welcomed, with the host's changed blocks in), so the two can be compared; the friend checks it was told)
+		if (args.Contains("--osnet") && !osNetDone && ready && !menuOpen && (hosting || netClient && welcomed) && (bagNetT += dt) > 3)
+		{
+			osNetDone = true;
+			string Placed() => string.Join(" ", world.Gen.StairSpots.Where(o => o.Placed).Select(o => $"{o.X},{o.Y},{o.Z},{o.Dir},{o.N},{o.Mat}{(StairStanding(o) ? "" : " (gone)")}"));
+			GD.Print($"OSNET {(hosting ? "host" : "friend")}: land {current.Land}, os {current.Os}, skip [{string.Join(",", current.OsSkip ?? Array.Empty<int>())}], {world.Gen.StairSpots.Count} spots, placed {Placed()}");
+			if (netClient) GD.Print((current.Os && world.Gen.Os && world.Gen.StairSpots.Any(o => o.Placed && StairStanding(o)) ? "PASS " : "FAIL ") + "friend: the host's older world grows its staircases here too, told in \"info\" before the world grew");
+		}
+		// (test, two games: --bagnet --host holds a full Linen Bag and drops an empty and a full one; --bagnet --join=CODE holds a
+		// full one too, checks the host's drops and hand show the right pictures, and is the picture; the host checks the friend's hand)
+		if (args.Contains("--bagnet"))
+		{
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int Bag = DataKeys.IdOf("linen_bag"); int sx = (int)spawnPoint.X, sz = (int)spawnPoint.Z;
+			float Gy(int x, int z) => world.Heights[z * World.WX + x] + 1;
+			var some = new Inventory.PackData { Id = new[] { Blocks.Dirt }, N = new[] { 10 }, W = new int[1] };
+			foreach (var d in drops.All) d.Spin = 0;   // (held facing the friend, for the picture)
+			if (hosting && !bagNetSet)
+			{
+				bagNetSet = true;
+				player.Pos = new Vector3(sx + 0.5f, Gy(sx, sz - 4), sz - 3.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = MathF.PI; player.Pitch = 0;
+				inv.SetSlot(0, Bag, 1, 0, some); SelectSlot(0);
+				var d1 = drops.Add(Bag, sx - 1.2f, Gy(sx - 2, sz - 2), sz - 1.5f); d1.V = Vector3.Zero; d1.Keep = true;
+				var d2 = drops.Add(Bag, sx + 0.1f, Gy(sx, sz - 2), sz - 1.5f); d2.V = Vector3.Zero; d2.Keep = true; d2.Data = some;
+				GD.Print("bagnet: host ready");
+			}
+			if (hosting && bagNetSet && !bagNetDone && others.Values.FirstOrDefault(o => o.Av != null && o.Held == Bag) is { } fr && (bagNetT += (float)dt) > 3)
+			{
+				bagNetDone = true;
+				Check("host: the friend's hand shows a bag holding something with its full picture (from their \"hf\")", fr.HeldFull && fr.Av.HeldMesh?.MaterialOverride is ShaderMaterial m && (Texture2D)m.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true));
+			}
+			if (netClient && welcomed && !bagNetSet)
+			{
+				bagNetSet = true;
+				player.Pos = new Vector3(sx + 0.5f, Gy(sx, sz + 1), sz + 1.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = 0; player.Pitch = -0.28f;
+				inv.SetSlot(0, Bag, 1, 0, some); SelectSlot(0);
+			}
+			if (netClient && bagNetSet && !bagNetDone && others.TryGetValue("host", out var host) && host.Av != null && drops.All.Count(d => d.Id == Bag) >= 2 && (bagNetT += (float)dt) > 3)
+			{
+				bagNetDone = true;
+				var bags = drops.All.Where(d => d.Id == Bag).OrderBy(d => d.P.X).ToList();
+				Check($"friend: the host's two dropped bags, the empty one with its own picture and the one holding something with its full picture ({string.Join(", ", bags.Select(d => d.Full ? "full" : "empty"))})",
+					bags.Count == 2 && !bags[0].Full && bags[1].Full && (Texture2D)bags[1].Mat.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true) && (Texture2D)bags[0].Mat.GetShaderParameter("tex") == Atlas.IconTexture(Bag));
+				Check("friend: the host's hand shows their bag holding something with its full picture", host.HeldFull && host.Av.HeldMesh?.MaterialOverride is ShaderMaterial m && (Texture2D)m.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true));
+				Check("friend: their own bag in the hotbar and in their hand shows full too", hotSlots[0].Pic.Texture == Atlas.BagIcon(Bag, true) && handBody?.HeldMesh?.MaterialOverride is ShaderMaterial hm && (Texture2D)hm.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true));
+				// (pictures, --mixdir: this view (the dropped bags, and the host's hand) now; then the --shot is a close-up of the host's hand,
+				// the camera narrowed and turned to it, your own hand out of the way; you still hold your bag, for the host's check)
+				string dir = args.FirstOrDefault(a => a.StartsWith("--mixdir="))?[9..];
+				if (dir != null && GetViewport().GetTexture()?.GetImage() is { } im) im.SavePng(dir + "/case_drops.png");
+				if (dir != null && host.Av.HeldMesh is { } hand)
+				{
+					var to = hand.GlobalPosition - cam.GlobalPosition;
+					player.Yaw = MathF.Atan2(-to.X, -to.Z); player.Pitch = MathF.Atan2(to.Y, new Vector2(to.X, to.Z).Length());
+					cam.Fov = 18; panoCapturing = true;
+				}
+			}
+		}
+		// (test, mixed editions: --bagmix --join=CODE joins another edition's host that holds a full Linen Bag and has dropped an empty
+		// and a full one; it stands 5 in front of the host looking back, checks those pictures, then holds its own bag full, empty,
+		// then nothing, printing the time of each change so the host's log can be checked against it; pictures go to --mixdir)
+		if (args.Contains("--bagmix") && netClient && welcomed && others.TryGetValue("host", out var mh) && mh.Av != null)
+		{
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			string Now() => System.DateTime.UtcNow.ToString("HH:mm:ss") + " UTC";
+			int Bag = DataKeys.IdOf("linen_bag"); string dir = args.FirstOrDefault(a => a.StartsWith("--mixdir="))?[9..];
+			var some = new Inventory.PackData { Id = new[] { Blocks.Dirt }, N = new[] { 10 }, W = new int[1] };
+			float fyaw = mh.Yaw + MathF.PI;
+			foreach (var d in drops.All) d.Spin = fyaw;   // (held facing you, for the picture)
+			if (!bagNetSet)
+			{
+				bagNetSet = true;
+				float fx = mh.X - 5 * MathF.Sin(mh.Yaw), fz = mh.Z - 5 * MathF.Cos(mh.Yaw);
+				float gy = world.Heights[(int)fz * World.WX + (int)fx] + 1;
+				player.Pos = new Vector3(fx, MathF.Max(mh.Y, gy), fz); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = fyaw; player.Pitch = -0.2f;
+				inv.SetSlot(0, Bag, 1, 0, some); inv.SetSlot(1, 0); SelectSlot(0);
+				GD.Print($"bagmix: host at {mh.X:0.0} {mh.Y:0.0} {mh.Z:0.0} yaw {mh.Yaw:0.00}; me at {fx:0.0} {player.Pos.Y:0.0} {fz:0.0}; holding a FULL bag from {Now()}");
+			}
+			float was = bagNetT; bagNetT += dt;
+			bool At(float t) => was < t && bagNetT >= t;
+			if (At(8))
+			{
+				var bags = drops.All.Where(d => d.Id == Bag).ToList();
+				GD.Print("bagmix: dropped bags " + string.Join(", ", bags.Select(d => $"{(d.Full ? "full" : "empty")} at {d.P.X:0.0} {d.P.Y:0.0} {d.P.Z:0.0}")));
+				Check("mixed friend: the host's two dropped bags, one empty with its own picture and one holding something with its full picture",
+					bags.Count == 2 && bags.Count(d => d.Full) == 1 && bags.All(d => (Texture2D)d.Mat.GetShaderParameter("tex") == (d.Full ? Atlas.BagIcon(Bag, true) : Atlas.IconTexture(Bag))));
+				Check("mixed friend: the host's hand shows their bag holding something with its full picture", mh.Held == Bag && mh.HeldFull && mh.Av.HeldMesh?.MaterialOverride is ShaderMaterial m && (Texture2D)m.GetShaderParameter("tex") == Atlas.BagIcon(Bag, true));
+				if (dir != null && GetViewport().GetTexture()?.GetImage() is { } im) im.SavePng(dir + "/mix_full.png");
+			}
+			if (At(75)) { inv.SetSlot(0, Bag); SelectSlot(0); GD.Print($"bagmix: holding an EMPTY bag from {Now()}"); }
+			if (At(85))
+			{
+				Check("mixed friend: my own emptied bag shows its empty picture in the hotbar and in my hand", hotSlots[0].Pic.Texture == Atlas.IconTexture(Bag) && handBody?.HeldMesh?.MaterialOverride is ShaderMaterial hm && (Texture2D)hm.GetShaderParameter("tex") == Atlas.IconTexture(Bag));
+				if (dir != null && GetViewport().GetTexture()?.GetImage() is { } im) im.SavePng(dir + "/mix_empty.png");
+			}
+			if (At(140)) { SelectSlot(1); GD.Print($"bagmix: holding NOTHING from {Now()}"); }
+		}
+		if (bagShown && args.Contains("--hand")) foreach (var d in drops.All) d.Spin = 0.25f;   // (pictures: the dropped bags held facing you)
+		if (args.Contains("--bagpic") && !bagShown && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (to look at: Linen Bags empty, part full and full in the inventory, one's tooltip showing; --hand: one in your hand, two dropped)
+			bagShown = true;
+			int Bag = DataKeys.IdOf("linen_bag"), Dirt = Blocks.Dirt, Sand = Blocks.Sand;
+			for (int i = 0; i < Inventory.Armor0; i++) inv.SetSlot(i, 0);
+			var part = new Inventory.PackData { Id = new[] { Dirt, Sand, Blocks.Cobblestone }, N = new[] { 12, 6, 8 }, W = new int[3] };
+			var full = new Inventory.PackData { Id = new[] { DataKeys.IdOf("stone_pickaxe") }, N = new[] { 1 }, W = new[] { 20 } };
+			inv.SetSlot(0, Bag); inv.SetSlot(1, Bag, 1, 0, part); inv.SetSlot(2, Bag, 1, 0, full);
+			inv.SetSlot(3, Dirt, 30); inv.SetSlot(4, Sand, 12); inv.SetSlot(5, DataKeys.IdOf("linen"), 9); inv.SetSlot(6, DataKeys.IdOf("string"), 4);
+			inv.SetSlot(Inventory.Pocket0, Bag, 1, 0, new Inventory.PackData { Id = new[] { Blocks.Cobblestone }, N = new[] { 48 }, W = new int[1] });
+			if (args.Contains("--hand"))
+			{
+				SelectSlot(2);
+				int x0 = (int)player.Pos.X, z0 = (int)player.Pos.Z, y = world.Heights[z0 * World.WX + x0] + 1;
+				for (int dx = -4; dx <= 4; dx++) for (int dz = -8; dz <= 2; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Grass); for (int u = 0; u < 6; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+				player.Pos = new Vector3(x0 + 0.5f, y, z0 + 0.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = 0; player.Pitch = -0.55f;
+				var d1 = drops.Add(Bag, x0 - 0.9f, y, z0 - 1.4f); d1.V = Vector3.Zero; d1.Keep = true;
+				var d2 = drops.Add(Bag, x0 + 0.2f, y, z0 - 1.4f); d2.V = Vector3.Zero; d2.Keep = true; d2.Data = part;
+			}
+			else { SelectSlot(1); OpenPanel(invPanel); tipPin = hotSlots[1]; Slot.TipShow?.Invoke(hotSlots[1]); }
+		}
+		if (args.Contains("--clothpic") && !clothShown && !menuOpen && shotTimer > 0.3f)
+		{   // (to look at: the 13 Linen Cloths in rows, front to back: a vertical slab, a slab, stairs and a whole block of each)
+			clothShown = true;
+			int x0 = (int)player.Pos.X - 6, z0 = (int)player.Pos.Z - 8, y = world.Heights[z0 * World.WX + x0] + 1;
+			for (int dx = -2; dx < 15; dx++) for (int dz = -2; dz < 12; dz++) { world.SetBlock(x0 + dx, y - 1, z0 + dz, Blocks.Stone); for (int u = 0; u < 6; u++) world.SetBlock(x0 + dx, y + u, z0 + dz, 0); }
+			string[] dyes = { "", "red_", "orange_", "yellow_", "green_", "aqua_", "blue_", "indigo_", "purple_", "magenta_", "pink_", "white_", "black_" };
+			for (int k = 0; k < 13; k++)
+			{
+				int c = DataKeys.IdOf(dyes[k] + "linen_cloth");
+				world.SetBlock(x0 + k, y, z0, c);
+				world.SetSpots(x0 + k, y, z0 + 2, 0x33 | 0x88, c);
+				world.SetSpots(x0 + k, y, z0 + 4, 0x33, c);
+				world.SetSpots(x0 + k, y, z0 + 6, 0x55, c);
+			}
+			// the hotbar: cloth shapes' icons, and an empty hand
+			int Cl(int k) => DataKeys.IdOf(dyes[k] + "linen_cloth");
+			int[] bar = { Cl(0), Blocks.FormItem("slab", Cl(0)), Blocks.FormItem("stairs", Cl(1)), Blocks.FormItem("vslab", Cl(2)), Blocks.FormItem("quarter", Cl(4)),
+				Blocks.FormItem("piece", Cl(6)), Blocks.FormItem("vstairs", Cl(8)), Blocks.FormItem("vquarter", Cl(10)), Blocks.FormItem("stairs", Cl(12)), 0 };
+			for (int k = 0; k < bar.Length; k++) inv.SetSlot(k, bar[k]);
+			SelectSlot(9);
+			player.Pos = new Vector3(x0 + 6.5f, y + 2.2f, z0 + 10.5f); player.Flying = true; player.Yaw = 0; player.Pitch = -0.38f;
 		}
 		if (args.Contains("--cutshapes") && !cutTested && !menuOpen)
 		{   // (test: slabs, stairs, quarters and pieces of stone, grass and terracotta to look at, and their icons in the hotbar)
@@ -1398,6 +2346,14 @@ public partial class Main : Node3D
 			if (ob == Blocks.GoldOre) { var (ox, oy, oz) = World.FromIdx(q); if (world.Heights[oz * World.WX + ox] - oy < 20) goldShallow++; }
 		}
 		GD.Print("ores 142-146: " + string.Join(", ", oreCount));
+		// loading a save: a block built above the land is a roof for the sky light (as the web version)
+		{
+			int rx = (int)player.Pos.X + 40, rz = (int)player.Pos.Z, ry = world.Heights[rz * World.WX + rx] + 6, rc = rz * World.WX + rx;
+			world.ApplyEdits(new[] { World.Idx(rx, ry, rz) }, new[] { Blocks.Stone });
+			bool roofed = world.SkyTop[rc] == ry && world.SkyExposure(rx, ry - 3, rz, null) < 1;
+			world.SetBlock(rx, ry, rz, 0);
+			Check($"a roof built above the land shades what's under it after loading (sky top {ry})", roofed && world.SkyTop[rc] < ry);
+		}
 		if (World.OreSpread(current.Land)) Check("ores and fireclay are in the ground, gold at every depth (lands 2 and 4)", oreCount.All(n => n > 0) && goldShallow > 0);
 		else Check("ores and fireclay are in the ground, gold only deep", oreCount.All(n => n > 0) && goldShallow == 0);
 		Check("ores need the right pickaxe", Blocks.B[Blocks.CopperOre].Pick == Blocks.PickTier["stone"] && Blocks.B[Blocks.IronOre].Pick == Blocks.PickTier["copper"]
@@ -1540,6 +2496,213 @@ public partial class Main : Node3D
 	}
 
 	bool sceneBuilt, mobsShown, diedTest, savetestDone, netTried;
+	// (test: --piecescene: whole blocks beside a piece, slab, stairs and quarter of the same block, against a stone wall and out
+	//  on grass, to compare how they're lit; --torch adds torches, for a picture at night)
+	bool pieceSceneBuilt;
+	void BuildPieceScene()
+	{
+		pieceSceneBuilt = true;
+		int cx = (int)player.Pos.X, cz = (int)player.Pos.Z - 10, y = world.Heights[cz * World.WX + cx] + 1;
+		for (int x = -9; x <= 9; x++) for (int z = -4; z <= 12; z++)
+		{
+			for (int u = -3; u < 0; u++) world.SetBlock(cx + x, y + u, cz + z, u == -1 ? Blocks.Grass : Blocks.Dirt);
+			for (int u = 0; u < 10; u++) if (world.GetBlock(cx + x, y + u, cz + z) != 0) world.SetBlock(cx + x, y + u, cz + z, 0);
+		}
+		for (int x = -8; x <= 8; x++) for (int u = 0; u < 3; u++) world.SetBlock(cx + x, y + u, cz - 2, Blocks.Stone);   // the wall
+		// against the wall: Stone whole, a slab, stairs, one piece (in the corner by the wall), a quarter, Stone whole
+		world.SetBlock(cx - 6, y, cz - 1, Blocks.Stone);
+		world.SetSpots(cx - 4, y, cz - 1, 0x33, Blocks.Stone);
+		world.SetSpots(cx - 2, y, cz - 1, Blocks.ShapeMasks["stairs"][2], Blocks.Stone);
+		world.SetPiece(cx, y, cz - 1, 0, Blocks.Stone);
+		world.SetSpots(cx + 2, y, cz - 1, 0x03, Blocks.Stone);
+		world.SetBlock(cx + 4, y, cz - 1, Blocks.Stone);
+		world.SetPiece(cx + 6, y, cz - 1, 0, Blocks.Stone); world.SetPiece(cx + 6, y, cz - 1, 1, Blocks.Stone);
+		// out on the grass: Cobblestone whole, a piece, a slab; Grass whole (a step up) and a Grass slab; Oak Leaves whole and a slab
+		world.SetBlock(cx - 6, y, cz + 2, Blocks.Cobblestone);
+		world.SetPiece(cx - 4, y, cz + 2, 0, Blocks.Cobblestone);
+		world.SetSpots(cx - 2, y, cz + 2, 0x33, Blocks.Cobblestone);
+		world.SetBlock(cx, y, cz + 2, Blocks.Grass);
+		world.SetSpots(cx + 2, y, cz + 2, 0x33, Blocks.Grass);
+		world.SetBlock(cx + 4, y, cz + 2, Blocks.Leaves);
+		world.SetSpots(cx + 6, y, cz + 2, 0x33, Blocks.Leaves);
+		// a few loose pieces scattered on the grass
+		world.SetPiece(cx - 5, y, cz + 5, 0, Blocks.Cobblestone); world.SetPiece(cx - 1, y, cz + 5, 5, Blocks.Stone); world.SetPiece(cx + 3, y, cz + 5, 4, Blocks.Planks);
+		if (HasArg("--torch")) { world.SetBlock(cx - 3, y, cz + 4, Blocks.TorchVariant(0, 1, 0)); world.SetBlock(cx + 5, y, cz + 4, Blocks.TorchVariant(0, 1, 0)); world.SetBlock(cx + 1, y, cz, Blocks.TorchVariant(0, 1, 0)); }
+		player.Pos = new Vector3(cx + 0.5f, y + 3.2f, cz + 9.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = 0; player.Pitch = -0.42f;
+		if (HasArg("--near")) { player.Pos = new Vector3(cx - 0.5f, y + 1.6f, cz + 5.2f); player.Pitch = -0.5f; }   // (closer: both rows, left half)
+	}
+	// (test: --holescene: holes 1 x 1, 2 x 2 and 3 x 3, 3 deep, in flat grass: the back row empty, the front row with pieces, slabs,
+	//  stairs and quarters inside (on the floor, on the walls partway down, by the top edge), to compare how their floors are lit)
+	bool holeSceneBuilt;
+	void BuildHoleScene()
+	{
+		holeSceneBuilt = true;
+		int cx = (int)player.Pos.X, cz = (int)player.Pos.Z - 10, y = world.Heights[cz * World.WX + cx] + 1;
+		for (int x = -9; x <= 9; x++) for (int z = -6; z <= 12; z++)
+		{
+			for (int u = -9; u < 0; u++) world.SetBlock(cx + x, y + u, cz + z, u == -1 ? Blocks.Grass : Blocks.Dirt);
+			for (int u = 0; u < 10; u++) if (world.GetBlock(cx + x, y + u, cz + z) != 0) world.SetBlock(cx + x, y + u, cz + z, 0);
+		}
+		void Hole(int hx, int hz, int n) { for (int dx = 0; dx < n; dx++) for (int dz = 0; dz < n; dz++) for (int u = 1; u <= 3; u++) world.SetBlock(hx + dx, y - u, hz + dz, 0); }
+		int[] xs = { cx - 7, cx - 3, cx + 2 }; int[] ns = { 1, 2, 3 };
+		for (int k = 0; k < 3; k++) { Hole(xs[k], cz - 3, ns[k]); Hole(xs[k], cz + 3, ns[k]); }
+		int fz = cz + 3, fl = y - 3;   // (the front row, and its holes' bottom layer of air)
+		bool probe = HasArg("--holeprobe");
+		// (--holeprobe: each floor's light from the meshes: shading and sky at every corner of the floor's faces)
+		string FloorLight(int hx, int hz, int n)
+		{
+			var mesher = new ChunkMesher(world); var seen = new HashSet<(int, int, int)>();
+			float shade = 0, skyv = 0, lo = 9; int cnt = 0;
+			for (int dx = 0; dx < n; dx++) for (int dz = 0; dz < n; dz++)
+			{
+				int bx = hx + dx, bz = hz + dz;
+				if (!seen.Add((bx / World.CS, fl / World.CS, bz / World.CS))) continue;
+				var (solid, _) = mesher.Build(bx / World.CS, fl / World.CS, bz / World.CS);
+				for (int v = 0; v + 3 < solid.Pos.Count; v += 4)
+				{
+					bool flat = true; for (int k = 0; k < 4; k++) flat &= solid.Pos[v + k].Y == fl;
+					if (!flat) continue;
+					for (int k = 0; k < 4; k++)
+					{
+						var p = solid.Pos[v + k];
+						if (p.X < hx || p.X > hx + n || p.Z < hz || p.Z > hz + n) continue;
+						float b = solid.Col[v + k].A * solid.Uv2[v + k].Y;
+						shade += solid.Col[v + k].A; skyv += solid.Uv2[v + k].Y; lo = Math.Min(lo, b); cnt++;
+					}
+				}
+			}
+			return cnt == 0 ? "none" : $"corners {cnt} shade {shade / cnt:0.000} sky {skyv / cnt:0.000} darkest {lo:0.000}";
+		}
+		void Probe(string when) { for (int k = 0; k < 3; k++) GD.Print($"HOLEPROBE {when} {ns[k]}x{ns[k]} empty: {FloorLight(xs[k], cz - 3, ns[k])} | pieces row: {FloorLight(xs[k], fz, ns[k])}"); }
+		if (probe) Probe("before");
+		// 1 x 1: a piece on the floor, and a top-half piece stuck to the back wall partway down
+		world.SetPiece(xs[0], fl, fz, 0, Blocks.Stone); world.SetPiece(xs[0], fl + 1, fz, 3, Blocks.Stone);
+		// 2 x 2: stairs on the floor, a quarter on the wall by the top edge, a slab partway down
+		world.SetSpots(xs[1] + 1, fl, fz + 1, Blocks.ShapeMasks["stairs"][2], Blocks.Cobblestone);
+		world.SetSpots(xs[1], fl + 2, fz, 0x0C, Blocks.Planks);
+		world.SetSpots(xs[1] + 1, fl + 1, fz, 0xCC, Blocks.Stone);
+		// 3 x 3: a slab on the floor in the middle, pieces on the walls at each height, a quarter by the top edge
+		world.SetSpots(xs[2] + 1, fl, fz + 1, 0x33, Blocks.Cobblestone);
+		world.SetPiece(xs[2], fl + 1, fz + 1, 2, Blocks.Stone); world.SetPiece(xs[2] + 2, fl, fz + 2, 1, Blocks.Stone);
+		world.SetSpots(xs[2] + 1, fl + 2, fz, 0x0C, Blocks.Planks);
+		if (probe) { Probe("after"); GetTree().Quit(); }
+		player.Pos = new Vector3(cx - 1.5f, y + 11.5f, cz + 1.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = MathF.PI; player.Pitch = -1.5f;   // (looking down: the front row at the top)
+		// (--holeview=front or back: straight down over one row, closer)
+		if (HasArg("--holeview=front")) player.Pos = new Vector3(cx - 1f, y + 7f, fz + 1.5f);
+		if (HasArg("--holeview=back")) player.Pos = new Vector3(cx - 1f, y + 7f, cz - 1.5f);
+		// (--holeview=one: close up, straight down into the 1 x 1 hole with the piece on its floor)
+		if (HasArg("--holeview=one")) player.Pos = new Vector3(xs[0] + 0.5f, y + 0.1f, fz + 0.25f);
+	}
+	// (test: --casingscene: Fireclay Bricks, Fireclay Casing and Fireclay Terracotta in a row in the air, close up, from above;
+	//  --casingview=below looks up at them from underneath. The hotbar holds the three, the casing in your hand)
+	bool casingSceneBuilt;
+	void BuildCasingScene()
+	{
+		casingSceneBuilt = true;
+		int cx = (int)player.Pos.X, cz = (int)player.Pos.Z - 8, y = world.Heights[cz * World.WX + cx] + 8;
+		for (int x = -12; x <= 12; x++) for (int z = -8; z <= 12; z++) for (int u = -8; u < 12; u++) if (world.GetBlock(cx + x, y + u, cz + z) != 0) world.SetBlock(cx + x, y + u, cz + z, 0);
+		world.SetBlock(cx - 2, y, cz, Blocks.FireclayBricks);
+		world.SetBlock(cx, y, cz, Blocks.FireclayCasing);
+		world.SetBlock(cx + 2, y, cz, Blocks.FireclayTerracotta);
+		int[] hot = { Blocks.FireclayCasing, Blocks.FireclayBricks, Blocks.FireclayTerracotta };
+		for (int k = 0; k < 9; k++) inv.SetSlot(k, k < hot.Length ? hot[k] : 0);
+		SelectSlot(0);
+		bool below = HasArg("--casingview=below");
+		player.Pos = new Vector3(cx + 0.5f, below ? y - 3.4f : y + 2.6f, cz + 2.6f); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = 0;
+		player.Pitch = below ? 1.0f : -0.9f;
+	}
+	// (test: --aoscene: corner shadows to compare (with --aodarkest=N): holes 1 x 1, 2 x 2 and 3 x 3, 3 deep, in flat grass, seen from
+	//  above; --aoview=corner: the inside corner of two stone walls and a 1-wide tunnel through a block of stone, from the side)
+	bool aoSceneBuilt;
+	void BuildAoScene()
+	{
+		aoSceneBuilt = true;
+		int cx = (int)player.Pos.X, cz = (int)player.Pos.Z - 6, y = world.Heights[cz * World.WX + cx] + 1;
+		for (int x = -12; x <= 12; x++) for (int z = -20; z <= 10; z++)
+		{
+			for (int u = -9; u < 0; u++) world.SetBlock(cx + x, y + u, cz + z, u == -1 ? Blocks.Grass : Blocks.Dirt);
+			for (int u = 0; u < 14; u++) if (world.GetBlock(cx + x, y + u, cz + z) != 0) world.SetBlock(cx + x, y + u, cz + z, 0);
+		}
+		void Hole(int hx, int hz, int n) { for (int dx = 0; dx < n; dx++) for (int dz = 0; dz < n; dz++) for (int u = 1; u <= 3; u++) world.SetBlock(hx + dx, y - u, hz + dz, 0); }
+		Hole(cx - 5, cz + 1, 1); Hole(cx - 2, cz, 2); Hole(cx + 2, cz, 3);
+		// the inside corner: two stone walls 3 tall meeting at a right angle, open towards you
+		int wz = cz - 14;
+		for (int k = 0; k < 5; k++) for (int u = 0; u < 3; u++) { world.SetBlock(cx - 7 + k, y + u, wz, Blocks.Stone); world.SetBlock(cx - 7, y + u, wz + k, Blocks.Stone); }
+		// the tunnel: a block of stone 5 wide, 4 tall, 7 deep, with a tunnel 1 wide and 2 tall through it, towards you
+		for (int x = 1; x <= 5; x++) for (int z = -6; z <= 0; z++) for (int u = 0; u < 4; u++) world.SetBlock(cx + x, y + u, wz + z + 4, x == 3 && u < 2 ? 0 : Blocks.Stone);
+		bool corner = HasArg("--aoview=corner");
+		player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = 0;
+		if (corner) { player.Pos = new Vector3(cx + 3.5f, y + 1.6f, wz + 10.5f); player.Pitch = -0.12f; }
+		else { player.Pos = new Vector3(cx + 0.5f, y + 5.5f, cz + 5f); player.Pitch = -1.05f; }
+	}
+	// (test: --icescene: Ice whole, as a slab, a top slab, stairs, a quarter, a vertical slab and a piece on a stone floor in the air,
+	//  the shape items in the hotbar; prints each shape item's id and name)
+	bool iceSceneBuilt;
+	void BuildIceScene()
+	{
+		iceSceneBuilt = true;
+		int cx = (int)player.Pos.X, cz = (int)player.Pos.Z - 8, y = world.Heights[cz * World.WX + cx] + 8, I = Blocks.Ice;
+		for (int x = -12; x <= 12; x++) for (int z = -8; z <= 12; z++) for (int u = -8; u < 12; u++) if (world.GetBlock(cx + x, y + u, cz + z) != 0) world.SetBlock(cx + x, y + u, cz + z, 0);
+		for (int x = -8; x <= 8; x++) for (int z = -2; z <= 2; z++) world.SetBlock(cx + x, y - 1, cz + z, Blocks.Stone);
+		var st = Blocks.ShapeMasks["stairs"];
+		world.SetBlock(cx - 6, y, cz, I);
+		world.SetSpots(cx - 4, y, cz, 0x33, I);          // a slab
+		world.SetSpots(cx - 2, y, cz, 0xCC, I);          // a top slab
+		world.SetSpots(cx, y, cz, st[2], I);             // stairs
+		world.SetSpots(cx + 2, y, cz, 0x03, I);          // a quarter
+		world.SetSpots(cx + 4, y, cz, 0x0F, I);          // a vertical slab
+		world.SetPiece(cx + 6, y, cz, 0, I);             // a piece
+		var hot = new List<int> { I };
+		foreach (var f in Blocks.Forms) hot.Add(Blocks.FormItem(f, I));
+		for (int k = 0; k < 9; k++) inv.SetSlot(k, k < hot.Count ? hot[k] : 0);
+		SelectSlot(0);
+		foreach (int h in hot) GD.Print($"ICESHAPE {h} {Blocks.Get(h)?.Name}");
+		player.Pos = new Vector3(cx + 0.5f, y + 2.6f, cz + 5.5f); player.Vel = Vector3.Zero; player.Flying = true; player.Yaw = 0; player.Pitch = -0.45f;
+		// (--icemix: on grass instead, the shapes touching each other and whole Ice in two rows, a slab on top of whole Ice, an
+		//  upside-down stairs over a gap; --iceview=low: seen from just above the ground)
+		if (HasArg("--icemix"))
+		{
+			int g = world.Heights[(cz + 6) * World.WX + cx] + 1;
+			for (int x = -6; x <= 6; x++) for (int z = -4; z <= 8; z++)
+			{
+				world.SetBlock(cx + x, g - 1, cz + 6 + z, Blocks.Grass);
+				for (int u = 0; u < 8; u++) if (world.GetBlock(cx + x, g + u, cz + 6 + z) != 0) world.SetBlock(cx + x, g + u, cz + 6 + z, 0);
+			}
+			int z0 = cz + 6, z1 = cz + 5;
+			world.SetBlock(cx - 3, g, z0, I); world.SetSpots(cx - 2, g, z0, 0x33, I); world.SetSpots(cx - 1, g, z0, st[2], I);
+			world.SetBlock(cx, g, z0, I); world.SetSpots(cx + 1, g, z0, 0x55, I); world.SetSpots(cx + 2, g, z0, 0x03, I); world.SetBlock(cx + 3, g, z0, I);
+			world.SetSpots(cx - 3, g, z1, 0x33, I); world.SetBlock(cx - 2, g, z1, I); world.SetSpots(cx - 1, g, z1, 0xCC, I);
+			world.SetSpots(cx, g, z1, st[3], I); world.SetBlock(cx + 1, g, z1, I); world.SetPiece(cx + 2, g, z1, 1, I); world.SetSpots(cx + 3, g, z1, 0x33, I);
+			world.SetSpots(cx, g + 1, z0, 0x33, I);                 // a slab on top of whole Ice
+			world.SetSpots(cx + 2, g + 1, z0, st[6], I);            // upside-down stairs over the quarter
+			bool low = HasArg("--iceview=low");
+			player.Pos = new Vector3(cx + 2.5f, low ? g + 1.2f : g + 3.2f, z0 + (low ? 4.5f : 4f)); player.Pitch = low ? -0.15f : -0.6f;
+		}
+	}
+	// (test: --doorscene: a wall of Stone Bricks on flat stone with doors in it, their fronts to +z: an Oak door shut, an Oak door
+	//  open, an Oak door open with a Stone block behind it, and a Cherry double door open; seen from behind the wall, the side
+	//  they open to; --doorsceneview=front: from in front)
+	bool doorSceneBuilt;
+	void BuildDoorScene()
+	{
+		doorSceneBuilt = true;
+		int cx = (int)player.Pos.X, cz = (int)player.Pos.Z - 4, y = world.Heights[cz * World.WX + cx] + 1;
+		for (int x = -12; x <= 12; x++) for (int z = -12; z <= 12; z++)
+		{
+			for (int u = -4; u < 0; u++) world.SetBlock(cx + x, y + u, cz + z, Blocks.Stone);
+			for (int u = 0; u < 14; u++) if (world.GetBlock(cx + x, y + u, cz + z) != 0) world.SetBlock(cx + x, y + u, cz + z, 0);
+		}
+		int bricks = DataKeys.IdOf("stone_bricks"), oak = DataKeys.IdOf("oak_door"), cherry = DataKeys.IdOf("cherry_door");
+		int[] gaps = { -6, -3, 0, 4, 5 };
+		for (int x = -9; x <= 9; x++) for (int u = 0; u < 3; u++) if (u == 2 || Array.IndexOf(gaps, x) < 0) world.SetBlock(cx + x, y + u, cz, bricks);
+		void Door(int x, int item, int hinge, bool open) { world.SetBlock(cx + x, y, cz, Blocks.DoorState(item, 0, hinge, open, 0)); world.SetBlock(cx + x, y + 1, cz, Blocks.DoorState(item, 0, hinge, open, 1)); }
+		Door(-6, oak, 0, false); Door(-3, oak, 0, true); Door(0, oak, 0, true); Door(4, cherry, 0, true); Door(5, cherry, 1, true);
+		world.SetBlock(cx, y, cz - 1, Blocks.Stone);   // (where the open door at 0 swings to)
+		inv.SetSlot(inv.Selected, oak);
+		player.Vel = Vector3.Zero; player.Flying = true;
+		if (HasArg("--doorsceneview=front")) { player.Pos = new Vector3(cx + 0.5f, y + 2.6f, cz + 7.5f); player.Yaw = 0; player.Pitch = -0.32f; }
+		else { player.Pos = new Vector3(cx - 0.5f, y + 4.2f, cz - 8.5f); player.Yaw = MathF.PI; player.Pitch = -0.5f; }
+	}
 	void BuildTestScene()
 	{
 		sceneBuilt = true;

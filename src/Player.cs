@@ -37,30 +37,50 @@ public class Player
 		}
 		if (Blocks.B[id].Shape == "half") { into.Add(new Aabb(new Vector3(x, y, z), new Vector3(1, 0.5f, 1))); return; }   // a half-tall block: just its bottom half
 		if (Blocks.B[id].Shape == "door") { var bx = Blocks.B[id].Box; into.Add(new Aabb(new Vector3(x + bx[0], y + bx[1], z + bx[2]), new Vector3(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2]))); return; }   // a door: just its panel
+		if (Blocks.B[id].Shape == "fence")
+		{   // a fence: its post and joined sides, 1.5 tall (so you can't jump it)
+			foreach (var bx in Blocks.FenceBoxes(Blocks.FenceMask(W.GetBlock, x, y, z), true))
+				into.Add(new Aabb(new Vector3(x + bx[0], y + bx[1], z + bx[2]), new Vector3(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2])));
+			return;
+		}
 		if (Blocks.B[id].Shape == "snow") { if (Blocks.B[id].Layers > 1) into.Add(new Aabb(new Vector3(x, y, z), new Vector3(1, (Blocks.B[id].Layers - 1) / 8f, 1))); return; }   // snow: you sink in one layer
 		if (Blocks.B[id].NoCollide) return;
 		into.Add(new Aabb(new Vector3(x, y, z), Vector3.One));
 	}
-	readonly List<Aabb> scratch = new();
+	readonly List<Aabb> scratch = new(), doorScratch = new();
 	List<Aabb> Overlapping(Vector3 p)
 	{
-		scratch.Clear();
+		scratch.Clear(); doorScratch.Clear();
 		var min = new Vector3(p.X - Half, p.Y, p.Z - Half); var max = new Vector3(p.X + Half, p.Y + Height, p.Z + Half);
 		var found = new List<Aabb>();
-		for (int y = (int)MathF.Floor(min.Y); y <= (int)MathF.Floor(max.Y - 1e-5f); y++)
-			for (int z = (int)MathF.Floor(min.Z); z <= (int)MathF.Floor(max.Z - 1e-5f); z++)
-				for (int x = (int)MathF.Floor(min.X); x <= (int)MathF.Floor(max.X - 1e-5f); x++)
-					SolidBoxes(x, y, z, scratch);
-		foreach (var b in scratch)
+		int x0 = (int)MathF.Floor(min.X), x1 = (int)MathF.Floor(max.X - 1e-5f), z0 = (int)MathF.Floor(min.Z), z1 = (int)MathF.Floor(max.Z - 1e-5f);
+		// (a door's panel is looked for in the cells beside you too: open, it reaches out of its block. A panel you're already
+		// in, like a door swung open into you, doesn't hold you: you can walk out of it. A fence reaches half a block up out of
+		// its block, so the layer under you is looked at for fences; one you're already in doesn't hold you either)
+		for (int y = (int)MathF.Floor(min.Y) - 1; y <= (int)MathF.Floor(max.Y - 1e-5f); y++)
+			for (int z = z0 - 1; z <= z1 + 1; z++)
+				for (int x = x0 - 1; x <= x1 + 1; x++)
+				{
+					bool inside = x >= x0 && x <= x1 && z >= z0 && z <= z1, under = y < (int)MathF.Floor(min.Y);
+					int id = World.Inside(x, y, z) ? W.Blocks.Get(x, y, z) : 0;
+					if (Blocks.IsFence(id)) { if (inside) SolidBoxes(x, y, z, doorScratch); }
+					else if (under) continue;
+					else if (Blocks.IsDoor(id)) { if (inside || Blocks.B[id].Open == 1) SolidBoxes(x, y, z, doorScratch); }
+					else if (inside) SolidBoxes(x, y, z, scratch);
+				}
+		static bool Over(Aabb b, Vector3 min, Vector3 max) { var e = b.End; return b.Position.X < max.X && e.X > min.X && b.Position.Y < max.Y && e.Y > min.Y && b.Position.Z < max.Z && e.Z > min.Z; }
+		foreach (var b in scratch) if (Over(b, min, max)) found.Add(b);
+		if (doorScratch.Count > 0)
 		{
-			var e = b.End;
-			if (b.Position.X < max.X && e.X > min.X && b.Position.Y < max.Y && e.Y > min.Y && b.Position.Z < max.Z && e.Z > min.Z) found.Add(b);
+			var nowMin = new Vector3(Pos.X - Half, Pos.Y, Pos.Z - Half); var nowMax = new Vector3(Pos.X + Half, Pos.Y + Height, Pos.Z + Half);
+			foreach (var b in doorScratch) if (Over(b, min, max) && !Over(b, nowMin, nowMax)) found.Add(b);
 		}
 		return found;
 	}
 	public bool Fits(Vector3 p) => Overlapping(p).Count == 0;
 	// would you be standing inside the block space (x, y, z)?
 	public bool Touches(int x, int y, int z) => TouchesBox(x, y, z, 1);
+	public bool TouchesFence(int x, int y, int z) => x + 1 > Pos.X - Half && x < Pos.X + Half && y + Blocks.FenceTall > Pos.Y && y < Pos.Y + Height && z + 1 > Pos.Z - Half && z < Pos.Z + Half;
 	public bool TouchesBox(float x, float y, float z, float s) =>
 		x + s > Pos.X - Half && x < Pos.X + Half && y + s > Pos.Y && y < Pos.Y + Height && z + s > Pos.Z - Half && z < Pos.Z + Half;
 	// false if the spots in `mask` of space (x, y, z) would be inside you
@@ -187,6 +207,14 @@ public class Player
 		for (int step = 0; step < 64; step++)
 		{
 			var h = HitInCell(x, y, z, o, d, maxDist);
+			// an open door beside this cell can reach into it (out of its block's back): its panel there can be aimed at too
+			foreach (var (ax, az) in Beside)
+			{
+				int nx = x + ax, nz = z + az;
+				if (!World.Inside(nx, y, nz) || Blocks.Get(W.Blocks.Get(nx, y, nz)) is not { Shape: "door", Open: 1 }) continue;
+				if (DoorPartIn(nx, y, nz, x, z, o, d, maxDist) is not { } hd) continue;
+				if (h is not { } hh || (hd.Pt - o).LengthSquared() < (hh.Pt - o).LengthSquared()) h = hd;
+			}
 			if (h != null) return h;
 			if (tmx < tmy && tmx < tmz) { if (tmx > maxDist) break; x += sx; tmx += tdx; }
 			else if (tmy < tmz) { if (tmy > maxDist) break; y += sy; tmy += tdy; }
@@ -194,12 +222,24 @@ public class Player
 		}
 		return null;
 	}
+	static readonly (int, int)[] Beside = { (1, 0), (-1, 0), (0, 1), (0, -1) };
+	// the part of the door at (dx, y, dz)'s panel inside the cell (cx, y, cz), aimed at (the hit is the door)
+	Hit? DoorPartIn(int dx, int y, int dz, int cx, int cz, Vector3 o, Vector3 d, float maxDist)
+	{
+		int id = W.Blocks.Get(dx, y, dz); var bx = Blocks.B[id].Box;
+		float x0 = MathF.Max(dx + bx[0], cx), x1 = MathF.Min(dx + bx[3], cx + 1), z0 = MathF.Max(dz + bx[2], cz), z1 = MathF.Min(dz + bx[5], cz + 1);
+		if (x0 >= x1 || z0 >= z1 || !RayBox(o, d, new Vector3(x0, y + bx[1], z0), new Vector3(x1, y + bx[4], z1), out float t, out int axis) || t > maxDist) return null;
+		int nx = 0, ny = 0, nz = 0;
+		if (axis == 0) nx = d.X > 0 ? -1 : 1; else if (axis == 1) ny = d.Y > 0 ? -1 : 1; else nz = d.Z > 0 ? -1 : 1;
+		return new Hit { X = dx, Y = y, Z = dz, Nx = nx, Ny = ny, Nz = nz, Sub = -1, Id = id, Pt = o + d * t };
+	}
 	Hit? HitInCell(int x, int y, int z, Vector3 o, Vector3 d, float maxDist)
 	{
 		if (!World.Inside(x, y, z)) return null;
 		int id = W.Blocks.Get(x, y, z);
 		if (id == 0 || Blocks.B[id].Liquid) return null;
 		var b = Blocks.B[id];
+		if (b.Shape == "door") return DoorPartIn(x, y, z, x, z, o, d, maxDist);   // (just its part in its own block: the rest is aimed at from the cells it reaches into)
 		Hit? best = null; float bestT = maxDist;
 		void Try(float x0, float y0, float z0, float x1, float y1, float z1, int sub)
 		{
@@ -218,6 +258,7 @@ public class Player
 					if (a[s] != 0) { float px = (s & 1) * 0.5f, py = ((s >> 1) & 1) * 0.5f, pz = (s >> 2) * 0.5f; Try(px, py, pz, px + 0.5f, py + 0.5f, pz + 0.5f, s); }
 		}
 		else if (b.Shape == "torch") { var bx = ChunkMesher.TorchGeo(id).Box; Try(bx[0], bx[1], bx[2], bx[3], bx[4], bx[5], -1); }
+		else if (b.Shape == "fence") { foreach (var bx in Blocks.FenceBoxes(Blocks.FenceMask(W.GetBlock, x, y, z), false)) Try(bx[0], bx[1], bx[2], bx[3], bx[4], bx[5], -1); }   // (its post and rails)
 		else if (b.Box != null) Try(b.Box[0], b.Box[1], b.Box[2], b.Box[3], b.Box[4], b.Box[5], -1);
 		else Try(0, 0, 0, 1, 1, 1, -1);
 		if (b.Snowed > 0 && b.Shape is "torch" or "plant" or "flat") Try(0, 0, 0, 1, 1 / 8f, 1, -1);   // (snow-logged: its snow can be aimed at too)

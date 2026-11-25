@@ -570,6 +570,7 @@ public partial class Main
 		object v = fi.GetValue(d);
 		if (fi.Name == "T") return v is int[] t ? string.Join(" ", t.Select(x => x >= 0 && x < Atlas.NT ? Atlas.Names[x] : "?")) : "";
 		if (fi.Name == "Icon") return d.Icon >= 0 ? (d.Icon < Atlas.NT ? Atlas.Names[d.Icon] : "?") : "-1";
+		if (fi.Name == "Full") return d.Full >= 0 ? (d.Full < Atlas.NT ? Atlas.Names[d.Full] : "?") : "-1";
 		return v switch
 		{
 			null => "",
@@ -700,12 +701,16 @@ public partial class Main
 			if (fp != gp) found.Add($"{t} {r.id} ({r.name}) pictures: file {fp}; game {gp}");
 			string ficon = r.icon ?? "-1", gi = BlockVal(typeof(BlockDef).GetField("Icon"), game);
 			if (ficon != gi) found.Add($"{t} {r.id} ({r.name}) icon: file {ficon}; game {gi}");
-			foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon")))
+			if ((r.full ?? "-1") is var ffull && BlockVal(typeof(BlockDef).GetField("Full"), game) is var gfull && ffull != gfull) found.Add($"{t} {r.id} ({r.name}) full: file {ffull}; game {gfull}");
+			foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon" or "Full")))
 				if (BlockVal(fi, want) is var f && BlockVal(fi, game) is var g && f != g) found.Add($"{t} {r.id} ({r.name}).{fi.Name}: file {f}, game {g}");
 			if (Blocks.RowKey(r, want, itemSlugs) is var rk && DataKeys.KeyOf(r.id) is var gk && rk != gk) found.Add($"{t} {r.id} ({r.name}): its key is \"{rk}\", but the game's block {r.id} is \"{gk}\"");
 			// (fields only the families have, which desktop finds by number: only on the blocks that are those)
 			if (t != "SOILS" && (r.soil || r.wet || r.fert)) found.Add($"{t} {r.id} ({r.name}): soil, wet and fert are only for SOILS");
-			if (t != "GRAIN" && r.stage != 0) found.Add($"{t} {r.id} ({r.name}): stage is only for GRAIN");
+			if (t != "GRAIN" && t != "CROPS" && r.stage != 0) found.Add($"{t} {r.id} ({r.name}): stage is only for GRAIN and CROPS");
+			if (t != "CROPS" && (r.crop != null || r.top)) found.Add($"{t} {r.id} ({r.name}): crop and top are only for CROPS");
+			if (t == "CROPS" && (r.crop == null || r.stage is < 0 or > 3 || (r.top && (r.crop != "corn" || r.stage < 2)))) found.Add($"CROPS {r.id} ({r.name}): a crop needs its crop and a stage 0-3 (top: Corn's, stages 2 and 3)");
+			if ((t == "FENCES") != (r.shape == "fence") || (t == "FENCES" && r.of == null)) found.Add($"{t} {r.id} ({r.name}): fences (shape fence, with of) are FENCES' rows, and only theirs");
 		}
 		// the families: just the blocks the code finds by number
 		static int[] Span(int a, int n) => Enumerable.Range(a, n).ToArray();
@@ -845,7 +850,7 @@ public partial class Main
 						string form = item.Piece > 0 ? "piece" : item.Form, at = $"FORMS {k} ({f.of}).{form} {id}";
 						fileDef.TryAdd(id, item);
 						int sum = of >= 2200 && of < 3400 && of % 100 < 4 ? of - of % 100 + 10 * (of % 100 + 1) + Array.IndexOf(Blocks.Forms, form) : Blocks.FormSum(form, of);
-						if (id != sum) found.Add($"{at}: should be {sum} (the older blocks': 100 + b, 1000 + b..., or from 1800 or 2000; the newer woods': B + 10 to B + 46)");
+						if (id != sum) found.Add($"{at}: should be {sum} (the older blocks': 100 + b, 1000 + b..., or from 1800 or 2000; the cloths': from 3800; the newer woods': B + 10 to B + 46)");
 						if (rowOf.ContainsKey(id) || !itemIds.Add(id)) found.Add($"{at}: id {id} is another block's or item's too");
 						if (Blocks.Get(id) is not { } game) { found.Add($"{at}: the game has no block {id}"); continue; }
 						if (BlockVal(typeof(BlockDef).GetField("T"), game) is var gp && gp != pics) found.Add($"{at} pictures: file {pics}; game {gp}");
@@ -886,7 +891,7 @@ public partial class Main
 				if (fp != gp) found.Add($"{at} pictures: file {fp}; game {gp}");
 				string ficon = innerRow.icon ?? "-1", gi = BlockVal(typeof(BlockDef).GetField("Icon"), game);
 				if (ficon != gi) found.Add($"{at} icon: file {ficon}; game {gi}");
-				foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon")))
+				foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon" or "Full")))
 					if (BlockVal(fi, want) is var fv && BlockVal(fi, game) is var gv && fv != gv) found.Add($"{at}.{fi.Name}: file {fv}, game {gv}");
 				if ($"snowy:{s.inner}" is var sk && DataKeys.KeyOf(s.id) is var gk && sk != gk) found.Add($"{at}: its key is \"{sk}\", but the game's block {s.id} is \"{gk}\"");
 				// (breaking it gives what it holds, not itself: only a torch or pieces drop nothing here, the code gives theirs)

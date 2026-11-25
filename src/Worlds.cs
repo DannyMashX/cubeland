@@ -15,10 +15,14 @@ public static class Worlds
 	public class Info
 	{
 		public string Id, Name, Mode = "creative", Ver; public int Seed, Gen = 2, H = 192, S = 640, Land; public double B = 1; public long Created, Played;   // (H: the world's height; worlds from before Alpha 0.1 are 192 tall. S: its width and depth; worlds made before 1280 are 640. B: how big its biomes are, 1 = the usual size. Land: see World.LandVersion)
+		// Os: a Biomes world from before the staircases (land 0 to 4) that grows them too; OsSkip: the chunks near which none grow
+		// (see OldStairs). Decided once, the first time it's opened in a version with staircases. The same as the web version.
+		public bool Os; public int[] OsSkip;
 		[JsonIgnore] public bool Survival => Mode == "survival";
 	}
 	public class PlayerSave { public float X, Y, Z, Yaw, Pitch, DarkTime, LightTime; public bool Fly; public int Health, Gloom; }
-	public class MobSave { public string Type; public float X, Y, Z, Yaw; public int Health, Layer; public float Baby, Happy, Room, MateCool; public int Fed; }   // (the last five: cows)
+	public class MobSave { public string Type; public float X, Y, Z, Yaw; public int Health, Layer; public float Baby, Happy, Room, MateCool; public int Fed;   // (the last five: cows and the other animals)
+		public float EggIn, Milky; public float? HungerIn; public string Sow; }   // (the other animals: an egg on its way, a goat's milk, a bear's hunger, a deer's sapling)
 	public class DropSave { public int Id, Wear; public float X, Y, Z, Age; public Inventory.PackData Data; public bool Keep; }
 	public class Save
 	{
@@ -28,6 +32,7 @@ public static class Worlds
 		public int[] Hotbar, Counts, Wear; public int Selected, OffSel; public Dictionary<int, Inventory.PackData> Data;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();
 		public int[] Stairs = Array.Empty<int>();   // staircases that moved somewhere the world had no spot for (x, y, z, way, steps, block, ...)
+		public bool Os; public int[] OsSkip;        // (kept here too, as in the world's list: see Info and OldStairs)
 		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: lucky ticks so far in each stage)
 		public Dictionary<int, int> Fert = new();   // fertilized soil -> harvests left
 		public Dictionary<int, float> Grazed = new();   // grass a cow ate -> seconds until it grows back
@@ -104,6 +109,29 @@ public static class Worlds
 		if (ok) MarkOpened(w);
 		return ok;
 	}
+	// An older Biomes world (land 0 to 4) grows the staircases too, as new worlds do, but none within 2 chunks of a chunk that held
+	// any change (block) when it was first opened in a version with them. That's decided once, here, and kept in the list and the
+	// save, so building near a staircase later never takes it away. (If the list lost it but the save has it, the save's is used.)
+	// Chunks are 16 x 16 columns, all heights: z / 16 * (width / 16) + x / 16. The same as the web version.
+	public static void OldStairs(Info w)
+	{
+		if (w == null || w.Gen != 3 || w.Land >= 5) return;
+		if (w.Os) { w.OsSkip = TidyChunks(w.OsSkip); return; }
+		Save s = null;
+		try { s = LoadSave(w.Id); } catch { return; }   // (a save that can't be read: decide another time, never without its changes)
+		if (s != null && s.Seed != w.Seed) s = null;
+		if (s != null && s.Os) w.OsSkip = TidyChunks(s.OsSkip);
+		else
+		{
+			int size = World.ValidSize(w.S, w.H == 640 ? 640 : 192), n = size / World.CS;
+			var skip = new SortedSet<int>();
+			foreach (int i in s?.Idxs ?? Array.Empty<int>()) if (i >= 0) skip.Add(i / size % size / World.CS * n + i % size / World.CS);
+			w.OsSkip = skip.ToArray();
+		}
+		w.Os = true;
+		Load(); SaveList();
+	}
+	public static int[] TidyChunks(IEnumerable<int> a) => (a ?? Array.Empty<int>()).Where(c => c >= 0).Distinct().OrderBy(c => c).ToArray();
 	public static void Remove(string id)
 	{
 		Load(); list.RemoveAll(w => w.Id == id); SaveList();

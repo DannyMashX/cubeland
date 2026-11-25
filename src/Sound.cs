@@ -336,6 +336,98 @@ public partial class Sound : Node
 		Filter(outp, "hp", 60, 0.7);
 		return Finish(outp, 0.85);
 	}
+	// ---- the Farming & animals voices, made the same way as the moo: a throat (a train of little pulses at the voice's pitch,
+	// which follows pitch(p) over the call, p = 0-1; sharp: how buzzy) shaped by the mouth (band-pass filters). The same as the
+	// web version's, number for number ----
+	static float[] Throat(Func<double> r, double len, Func<double, double> pitch, double sharp = 0.3, double jitter = 0.03)
+	{
+		int n = (int)(SR * len); var src = new float[n];
+		for (double t = 0.003; t < len;)
+		{
+			double f = pitch(t / len) * (1 - jitter / 2 + r() * jitter); int o = (int)(t * SR), plen = (int)(SR / f);
+			for (int i = 0; i < plen && o + i < n; i++) src[o + i] += (float)Math.Exp(-i / (plen * sharp));
+			t += 1 / f;
+		}
+		return src;
+	}
+	static float[] NoiseOf(Func<double> r, int n) { var b = new float[n]; for (int i = 0; i < n; i++) b[i] = (float)(r() * 2 - 1); return b; }
+	static float[] Fl(float[] a, string type, double f, double q) => Filter((float[])a.Clone(), type, f, q);
+	// the Chicken's "buk-buk": two or three quick, clipped clucks
+	static float[] Cluck(Func<double> r)
+	{
+		int k = 2 + (int)(r() * 2); double each = 0.07, gap = 0.06 + r() * 0.03, len = k * (each + gap) + 0.05; int n = (int)(SR * len);
+		double f0 = 420 + r() * 120; var src = Throat(r, len, p => f0 * (1.05 - 0.1 * p), 0.25);
+		var a = Fl(src, "bp", 1100 + r() * 200, 2.5); var b = Fl(src, "bp", 2600, 3); var outp = new float[n];
+		for (int i = 0; i < n; i++)
+		{
+			double t = (double)i / SR; int c = (int)Math.Floor(t / (each + gap)); double tt = t - c * (each + gap);
+			double env = c < k && tt < each ? Math.Min(1, tt / 0.008) * Math.Pow(1 - tt / each, 1.5) * (c == k - 1 ? 1.15 : 1) : 0;
+			outp[i] = (float)(env * (a[i] * 2 + b[i] * 0.8));
+		}
+		Filter(outp, "hp", 300, 0.7);
+		return Finish(outp, 0.7);
+	}
+	// the Duck's "waak": a nasal, buzzy call that falls away
+	static float[] Quack(Func<double> r)
+	{
+		double len = 0.22 + r() * 0.1; int n = (int)(SR * len); double f0 = 230 + r() * 60;
+		var src = Throat(r, len, p => f0 * (1.1 - 0.25 * p), 0.08, 0.05);
+		var a = Fl(src, "bp", 1050 + r() * 150, 3.5); var b = Fl(src, "bp", 2300, 4); var nasal = Fl(src, "bp", 600, 2); var outp = new float[n];
+		for (int i = 0; i < n; i++)
+		{
+			double t = (double)i / SR, env = Math.Min(1, t / 0.015) * (t > len * 0.5 ? Math.Pow(1 - (t - len * 0.5) / (len * 0.5), 1.3) : 1);
+			outp[i] = (float)(env * (a[i] * 2.2 + b[i] * 1 + nasal[i] * 0.8));
+		}
+		Filter(outp, "hp", 250, 0.7);
+		return Finish(outp, 0.75);
+	}
+	// the Goat's "meh-eh-eh": a wavering bleat
+	static float[] Bleat(Func<double> r)
+	{
+		double len = 0.6 + r() * 0.25; int n = (int)(SR * len); double f0 = 300 + r() * 80, rate = 7 + r() * 2;
+		var src = Throat(r, len, p => f0 * (1 + 0.06 * Math.Sin(2 * Math.PI * rate * p * len) - 0.08 * p), 0.2);
+		var a = Fl(src, "bp", 620 + r() * 60, 2.5); var b = Fl(src, "bp", 1750 + r() * 150, 3); var outp = new float[n];
+		var breath = Filter(NoiseOf(r, n), "bp", 2500, 0.8);
+		for (int i = 0; i < n; i++)
+		{
+			double t = (double)i / SR, wob = 0.65 + 0.35 * Math.Abs(Math.Sin(Math.PI * rate * t));
+			double env = Math.Min(1, t / 0.04) * (t > len * 0.7 ? Math.Pow(1 - (t - len * 0.7) / (len * 0.3), 1.5) : 1);
+			outp[i] = (float)(env * wob * (a[i] * 2 + b[i] * 1.1 + breath[i] * 0.06));
+		}
+		Filter(outp, "hp", 200, 0.7);
+		return Finish(outp, 0.75);
+	}
+	// the Boar's grunt: a low, breathy "hrnk" or two
+	static float[] Grunt(Func<double> r)
+	{
+		int k = 1 + (int)(r() * 2); double each = 0.18 + r() * 0.08, len = k * (each + 0.07); int n = (int)(SR * len); double f0 = 95 + r() * 25;
+		var src = Throat(r, len, p => f0 * (1.1 - 0.2 * p), 0.15, 0.12);
+		var a = Fl(src, "lp", 450, 0.8); var b = Fl(src, "bp", 900, 2); var breath = Filter(NoiseOf(r, n), "lp", 700, 0.7); var outp = new float[n];
+		for (int i = 0; i < n; i++)
+		{
+			double t = (double)i / SR; int c = (int)Math.Floor(t / (each + 0.07)); double tt = t - c * (each + 0.07);
+			double env = c < k && tt < each ? Math.Min(1, tt / 0.02) * Math.Pow(1 - tt / each, 1.2) : 0;
+			outp[i] = (float)(env * (a[i] * 1.8 + b[i] * 0.9 + breath[i] * 0.35));
+		}
+		Filter(outp, "hp", 50, 0.7);
+		return Finish(outp, 0.8);
+	}
+	// the Bear's roar: a long, rough, deep voice that swells and falls
+	static float[] Roar(Func<double> r)
+	{
+		double len = 1.0 + r() * 0.4; int n = (int)(SR * len); double f0 = 75 + r() * 20;
+		var src = Throat(r, len, p => f0 * (0.9 + 0.35 * Math.Sin(Math.PI * Math.Min(1, p * 1.3)) - 0.15 * p), 0.12, 0.2);
+		var a = Fl(src, "bp", 420 + r() * 60, 1.8); var b = Fl(src, "bp", 950 + r() * 100, 2.2);
+		var rasp = Filter(NoiseOf(r, n), "bp", 700, 0.9); var outp = new float[n];
+		for (int i = 0; i < n; i++)
+		{
+			double t = (double)i / SR, env = Math.Min(1, t / 0.15) * (t > len * 0.6 ? Math.Pow(1 - (t - len * 0.6) / (len * 0.4), 1.4) : 1);
+			double rough = 0.75 + 0.25 * Math.Sin(2 * Math.PI * 31 * t);
+			outp[i] = (float)(env * rough * (a[i] * 2 + b[i] * 1 + rasp[i] * 0.45));
+		}
+		Filter(outp, "hp", 45, 0.7);
+		return Finish(outp, 0.9);
+	}
 	// Dan The Chocolate Man's "hrr": a high, cat-like trilled chirp ("mrrp")
 	static float[] Hrr(Func<double> r)
 	{
@@ -443,6 +535,8 @@ public partial class Sound : Node
 		for (int ki = 0; ki < wk.Length; ki++) { int k = ki; Add("water:" + wk[k], v => Water(wk[k], Rng(41000 + k * 211 + v * 37))); }
 		Add("growl:say", v => Growl(Rng(31000 + v * 29)));
 		Add("moo:say", v => Moo(Rng(52000 + v * 31)));
+		foreach (var (name, make, seed) in new (string, Func<Func<double>, float[]>, int)[] { ("cluck", Cluck, 57000), ("quack", Quack, 58000), ("bleat", Bleat, 59000), ("grunt", Grunt, 60000), ("roar", Roar, 66000) })
+			Add(name + ":say", v => make(Rng(seed + v * 41)));   // (the animals' voices)
 		for (int mi = 0; mi < Recipes.Length; mi++)
 		{
 			int m = mi;

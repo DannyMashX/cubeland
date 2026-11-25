@@ -29,7 +29,7 @@ public partial class Main
 
 	// which model a cow wears: 0 = cow, 1 = calf (cowbaby), 2 = fat cow (cowfat)
 	static int CowVariant(Mob m) => m.Baby > 0 ? 1 : m.Fed >= FatAt ? 2 : 0;
-	static string ModelOf(Mob m) => !m.T.Cow ? m.Type : m.Variant == 1 ? "cowbaby" : m.Variant == 2 ? "cowfat" : "cow";
+	static string ModelOf(Mob m) => m.T.Animal ? (m.Variant == 1 ? m.Type + "baby" : m.Type) : !m.T.Cow ? m.Type : m.Variant == 1 ? "cowbaby" : m.Variant == 2 ? "cowfat" : "cow";
 	// a cow grew up or got fat: it's built again in its new shape
 	void RebuildMob(Mob m)
 	{

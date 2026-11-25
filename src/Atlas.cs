@@ -252,6 +252,20 @@ public static class Atlas
 	// what inventory slots, the hotbar and recipe lists show: an ordinary whole block as a little cube, anything else
 	// its flat picture (dropped and held things keep using the flat IconTexture)
 	static readonly Dictionary<int, ImageTexture> slotCache = new();
+	// (a bag holding anything: its "full" picture, the same in slots, on the mouse, dropped and in the hand)
+	public static ImageTexture SlotIcon(int id, bool full) => full ? BagIcon(id, true) : SlotIcon(id);
+	public static ImageTexture BagIcon(int id, bool full)
+	{
+		if (!full || Blocks.Get(id) is not { Full: >= 0 } b) return IconTexture(id);
+		if (!fullCache.TryGetValue(id, out var t))
+		{
+			var img = Image.CreateEmpty(TILE, TILE, false, Image.Format.Rgba8);
+			img.BlitRect(Image, new Rect2I(b.Full * TILE, 0, TILE, TILE), Vector2I.Zero);
+			fullCache[id] = t = ImageTexture.CreateFromImage(img);
+		}
+		return t;
+	}
+	static readonly Dictionary<int, ImageTexture> fullCache = new();
 	public static ImageTexture SlotIcon(int id)
 	{
 		if (!Is3DIcon(id)) return IconTexture(id);
@@ -281,6 +295,8 @@ public static class Atlas
 		}
 		if (b.Shape == "half") return new[] { new[] { 0, 16, 0, 16, 0, 8 } };   // the Cutter: half a block tall
 		if (b.Shape == "snow") return new[] { new[] { 0, 16, 0, 16, 0, 2 * b.Layers } };   // snow: as deep as its layers
+		if (b.Shape == "fence")   // a fence: its post, with its two rails each way along x
+			return new[] { new[] { 6, 10, 6, 10, 0, 16 }, new[] { 0, 6, 7, 9, 6, 9 }, new[] { 0, 6, 7, 9, 12, 15 }, new[] { 10, 16, 7, 9, 6, 9 }, new[] { 10, 16, 7, 9, 12, 15 } };
 		if (!IsCubeIcon(id)) return null;
 		return b.Shape == "torch" ? new[] { new[] { 6, 10, 6, 10, 0, 16 } } : new[] { new[] { 0, 16, 0, 16, 0, 16 } };
 	}

@@ -45,6 +45,7 @@ public partial class Main
 		{
 			if (inv.Id[i] == 0) return;
 			if (shift && b == MouseButton.Left) { QuickMove(i); return; }
+			if (b == MouseButton.Right && Blocks.IsBag(inv.Id[i]) && inv.Data[i] != null) { BagOut(i); return; }   // (a bag: the last thing put in comes out)
 			PickUp(i, b == MouseButton.Right ? (inv.Count[i] + 1) / 2 : inv.Count[i]);
 			if (b == MouseButton.Left) { lastPick = i; lastPickMs = now; }
 			return;
@@ -73,7 +74,7 @@ public partial class Main
 	void ShowHeld()
 	{
 		if (heldView == null) return;
-		heldPic.Texture = heldId != 0 ? Atlas.SlotIcon(heldId) : null;
+		heldPic.Texture = heldId != 0 ? Atlas.SlotIcon(heldId, heldData != null) : null;
 		heldPic.TextureFilter = Atlas.Is3DIcon(heldId) ? CanvasItem.TextureFilterEnum.Linear : CanvasItem.TextureFilterEnum.Nearest;
 		heldCount.Text = heldN > 1 ? heldN.ToString() : "";
 	}
@@ -97,6 +98,29 @@ public partial class Main
 		heldN -= n; if (heldN <= 0) ClearHeld();
 		AfterChange(i);
 	}
+	// the Linen Bag: some of the held stack into the bag in slot i (n: as much as fits, or 1). A held bag isn't put in a bag:
+	// it swaps as anything else does (see PutDown).
+	void BagIn(int i, int n)
+	{
+		if (!Inventory.BagTakes(heldId, heldData)) { BagNote(Inventory.BagNoNote); return; }
+		var bag = inv.Data[i];
+		int put = Inventory.BagPut(ref bag, heldId, Math.Min(n, heldN), heldWear);
+		if (put == 0) { BagNote(Inventory.BagFullNote); return; }
+		inv.Data[i] = bag;
+		heldN -= put; if (heldN <= 0) ClearHeld();
+		Changed();
+	}
+	// right-click a bag with nothing held: the last thing put in, all of it, onto the mouse
+	void BagOut(int i)
+	{
+		var bag = inv.Data[i];
+		if (Inventory.BagTakeLast(ref bag) is not { } got) return;
+		inv.Data[i] = bag;
+		(heldId, heldN, heldWear, heldData) = (got.id, got.n, got.w, null);
+		Changed();
+	}
+	void BagNote(string what) { if (invName != null) invName.Text = what; ShowNote(what, 1.5f); }
+	bool IsBagFor(int i) => Blocks.IsBag(inv.Id[i]) && heldId != 0 && !Blocks.IsBag(heldId);   // (clicking a bag with something held puts it in)
 	void PickUp(int i, int n)
 	{
 		if (i == Inventory.BackSlot) inv.PackBack();   // (a backpack takes what's in it along)
@@ -110,8 +134,9 @@ public partial class Main
 	void PutDown(int i)
 	{
 		if (!inv.SlotOpen(i)) return;
+		if (IsBagFor(i)) { BagIn(i, heldN); return; }
 		if (inv.Id[i] == 0 || (inv.Id[i] == heldId && CanTake(i))) { Put(i, heldN); Changed(); return; }
-		if (inv.Id[i] == heldId) return;   // (a full stack of it)
+		if (inv.Id[i] == heldId && !Blocks.IsBag(heldId)) return;   // (a full stack of it; two bags swap, each keeping what it holds)
 		if (!inv.Fits(i, heldId)) { NoGo(); return; }
 		if (i == Inventory.BackSlot) inv.PackBack();   // (the backpack coming off takes what's in it along)
 		var (id, n, w, d) = (heldId, heldN, heldWear, heldData);
@@ -119,7 +144,7 @@ public partial class Main
 		inv.Id[i] = id; inv.Count[i] = inv.Counted(id) ? n : 0; inv.Wear[i] = w; inv.Data[i] = d;
 		AfterChange(i); Changed();
 	}
-	void PutOne(int i) { if (CanTake(i)) { Put(i, 1); Changed(); } else if (inv.Id[i] != heldId && inv.Fits(i, heldId)) PutDown(i); }
+	void PutOne(int i) { if (IsBagFor(i)) BagIn(i, 1); else if (CanTake(i)) { Put(i, 1); Changed(); } else if (inv.Id[i] != heldId && inv.Fits(i, heldId)) PutDown(i); }
 	// after a slot changed: a backpack put on unpacks, a belt taken off lets go of the slots it gave
 	void AfterChange(int i)
 	{

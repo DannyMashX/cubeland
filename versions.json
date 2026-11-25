@@ -1,5 +1,38 @@
 [
     {
+        "version":  "Beta 0.1.5.0",
+        "title":  "Fields and Flocks",
+        "folder":  "beta-0.1.5.0",
+        "date":  "2026-11-25",
+        "notes":  "New: Potatoes, Turnips, Flax, Corn and Cantaloupes to grow on tilled soil. Plant a Potato, a Turnip or Corn itself, and Flax and Cantaloupe from their seeds. Corn grows two blocks tall, a grown Cantaloupe vine grows melons beside it one at a time, and Turnips grow just as fast on dry soil",
+        "changes":  [
+                        "New: Potatoes, Turnips, Flax, Corn and Cantaloupes to grow on tilled soil. Plant a Potato, a Turnip or Corn itself, and Flax and Cantaloupe from their seeds. Corn grows two blocks tall, a grown Cantaloupe vine grows melons beside it one at a time, and Turnips grow just as fast on dry soil",
+                        "New: crops growing wild in new Biomes worlds: Potatoes and Flax in meadows, Turnips in snowy lands and the taiga, Corn on the plains, and Cantaloupes near deserts and badlands",
+                        "New: Dead Bushes in the deserts and badlands of new Biomes worlds. Break one by hand for a Stick or two, or dig it up whole with a shovel",
+                        "New: Baked Potatoes, Roasted Corn and Cooked Eggs from the Kiln, plus Turnips, Cantaloupe Slices and Truffles to eat",
+                        "New: Clay Jugs, fired in the Kiln from 3 Clay Balls. Use one on a Goat you\u0027ve fed for a Jug of Milk, and drinking it gives the jug back",
+                        "New: Flax gives Linen and String. Linen makes Linen Cloth in 13 colours, which can be cut at the Cutter into slabs, stairs, quarters and pieces",
+                        "New: the Linen Bag (Crafting Bench: 3 Linen, 1 String) holds a mix of things in one slot, up to a stack in all. Drop things onto it in your inventory, and right-click it to take the last one back out. It looks fuller once it holds anything, and a blue bar shows how full it is",
+                        "New: a fence for every wood (4 from 4 planks and 2 Sticks at the Crafting Bench). Fences join up with each other, walls and doors, so a door in a fence line makes a gate, and they\u0027re too tall for you or animals to jump",
+                        "New: six animals in Biomes worlds, old and new: Chickens, Ducks, Deer, Goats, Boar and Bears. Feed one its food to make it happy, and happy animals have young",
+                        "New: fed Chickens and Ducks lay Eggs. Chickens scratch tilled soil, sometimes fertilizing it, but peck at young crops. A Duck swimming by a field makes its crops grow a little faster",
+                        "New: Deer run from you unless you hold fruit or Grain. They plant saplings as they roam, and nibble young ones",
+                        "New: Goats eat Dead Bushes and wild shrubs, and give milk into a Clay Jug once fed",
+                        "New: Boar root up grass near Oaks and Maples, sometimes turning up a Truffle, and fight back when hit",
+                        "New: Bears hunt Chickens, Ducks, Deer and Boar, and leave you alone unless you hit one or go near its cubs",
+                        "New: Ice can be cut into slabs, stairs, quarters and pieces at the Cutter",
+                        "Changed: Cows have a sturdier new look, with a tufted tail, and lower their heads all the way to the grass when they graze",
+                        "Changed: doors swing open on their hinges like real doors, sticking out of the doorway (even into a block beside it)",
+                        "Changed: Fireclay Casing has Fireclay Bricks on top and Fireclay Terracotta underneath",
+                        "Changed: Fireclay Terracotta has the new terracotta look",
+                        "Changed: corner shadows are a little lighter, so narrow holes, tight corners and tunnels aren\u0027t so dark",
+                        "Fixed: pieces, slabs, stairs and quarters looked too bright beside whole blocks. They\u0027re now shaded the same way, and grass and leaf ones take the biome\u0027s colour",
+                        "Fixed: after loading a world on the desktop version, the space under a roof built higher than the land around it could be lit as brightly as open sky",
+                        "Fixed: a grazing calf\u0027s head no longer comes away from its shoulders",
+                        "Fixed: a friend picking up a dropped tool in your world now gets it as worn as it was"
+                    ]
+    },
+    {
         "version":  "Beta 0.1.4.0",
         "title":  "Trees and Leaves",
         "folder":  "beta-0.1.4.0",

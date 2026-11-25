@@ -51,9 +51,13 @@ public partial class Main
 	{
 		int food = Blocks.Get(inv.Held)?.Food ?? 0;
 		if (!inv.Survival || food == 0 || dead || health >= MaxHealth) return false;
+		// a seed you can eat (a Potato, a Turnip) aimed at bare tilled soil: it's planted, not eaten
+		if (Blocks.B[inv.Held].Plants > 0 && player.Raycast() is { } h && Blocks.IsSoil(h.Id) && world.GetBlock(h.X, h.Y + 1, h.Z) == 0) return false;
+		int back = Blocks.B[inv.Held].Returns;   // (what's left in your hand: a Jug of Milk's Clay Jug)
 		ShowChange(health, "green");
 		health = Math.Min(MaxHealth, health + food);
 		inv.UseOne(); DrawHearts();
+		if (back > 0 && !inv.Give(back)) drops.Add(back, player.Pos.X, player.Pos.Y + 0.5f, player.Pos.Z);
 		return true;
 	}
 	// Fire Essence (a rare Grr drop): using one clears all your gloom at once
