@@ -466,7 +466,25 @@ public static partial class Blocks
 	public static int DoorWith(int door, int facing, int hinge, bool open, int half) => DoorState(B[door].Drop, facing, hinge, open, half);
 
 	public static bool IsTorch(int id) => Get(id)?.Shape == "torch";
-	public static bool IsWater(int id) => id >= Water && id <= Water + 7;
+	// (and Earthlike's running river water, since Beta 0.1.5.4: RIVER_WATER's 25 rows, 3891 + 8 x pace + flow, 3915 falling. It
+	// counts as still water everywhere water does: a source that never changes on its own, level 0; only its current, Flow and
+	// Pace, tells it apart. The same in the web version)
+	public const int RiverWater = 3891, RiverWaterLast = 3915;
+	public static bool IsRiverWater(int id) => id >= RiverWater && id <= RiverWaterLast;
+	public static bool IsWater(int id) => id >= Water && id <= Water + 7 || IsRiverWater(id);
+	public static bool IsStillWater(int id) => id == Water || IsRiverWater(id);   // (a source: never changes on its own)
+	public static int WaterLevel(int id) => IsRiverWater(id) ? 0 : id - Water;   // (0 still; 1-7 flowing, the higher the thinner)
+	// ...its current: running (3891-3914, flow 0-7) carries you its way at its pace's speed; falling (3915) takes you down
+	public const int FallingWater = 3915;
+	public static bool IsRunningRiver(int id) => id >= RiverWater && id < FallingWater;
+	static readonly float[] CurrentSpeed = { 0.75f, 1.75f, 3f };   // blocks a second: gentle, quick, rapids
+	static readonly float[] FlowX = { 1, 0.70710678f, 0, -0.70710678f, -1, -0.70710678f, 0, 0.70710678f }, FlowZ = { 0, 0.70710678f, 1, 0.70710678f, 0, -0.70710678f, -1, -0.70710678f };
+	public static bool RiverCurrent(int id, out float cx, out float cz)
+	{
+		cx = cz = 0; if (!IsRunningRiver(id)) return false;
+		int f = (id - RiverWater) % 8; float sp = CurrentSpeed[(id - RiverWater) / 8];
+		cx = FlowX[f] * sp; cz = FlowZ[f] * sp; return true;
+	}
 	public static bool IsFurnace(int id) => (id >= Furnace && id < Furnace + 8) || IsFoundry(id);   // a Kiln or the Foundry's Furnace (they work the same way)
 	public static int FurnaceBase(int id) => IsFoundry(id) ? Foundry : Furnace;   // its first (unlit, facing 0) id
 	public static bool IsItem(int id) => Get(id)?.Item == true;
@@ -480,7 +498,7 @@ public static partial class Blocks
 	public static int StackMaxOf(int id) => IsTool(id) || IsGear(id) || IsBag(id) ? 1 : StackMax;
 	public static bool IsBag(int id) => Get(id)?.Bag == true;
 	// how high the water's surface sits in its block (water with more water on top fills the whole block)
-	public static float WaterHeight(int id, int above) => IsWater(above) ? 1 : id == Water ? 0.875f : Math.Max(0.15f, 0.875f * (8 - (id - Water)) / 8f);
+	public static float WaterHeight(int id, int above) => IsWater(above) ? 1 : IsStillWater(id) ? 0.875f : Math.Max(0.15f, 0.875f * (8 - WaterLevel(id)) / 8f);
 	public static string ShapeOfMask(int m) => ShapeMasks.FirstOrDefault(kv => kv.Value.Contains(m)).Key;
 	// a block's looks: what putting it down picks from at random (Red Bricks: 12-15, from 12 or any of its looks; anything else:
 	// just itself)

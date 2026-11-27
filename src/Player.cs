@@ -142,13 +142,24 @@ public class Player
 		if (wish.LengthSquared() > 0) wish = wish.Normalized();
 		float speed = Flying ? Fly : (k.Sprint ? Sprint : Walk) * (InWater ? 0.55f : 1);
 		float a = MathF.Min(1, dt * (OnGround || Flying ? 14 : InWater ? 6 : 4));
-		Vel.X += (wish.X * speed - Vel.X) * a;
-		Vel.Z += (wish.Z * speed - Vel.Z) * a;
+		// (0.1.5.4) a river's current: the water at your waist (else at your legs, for half) carries you its way; falling water
+		// takes you down (below)
+		float cx = 0, cz = 0; bool falling = false;
+		if (!Flying)
+		{
+			float share = 1; int wb = 0;
+			if (WaterAt(Pos.X, Pos.Y + 0.9f, Pos.Z)) wb = W.GetBlock((int)MathF.Floor(Pos.X), (int)MathF.Floor(Pos.Y + 0.9f), (int)MathF.Floor(Pos.Z));
+			else if (WaterAt(Pos.X, Pos.Y + 0.2f, Pos.Z)) { wb = W.GetBlock((int)MathF.Floor(Pos.X), (int)MathF.Floor(Pos.Y + 0.2f), (int)MathF.Floor(Pos.Z)); share = 0.5f; }
+			if (wb == Blocks.FallingWater) falling = true;
+			else if (Blocks.RiverCurrent(wb, out cx, out cz)) { cx *= share; cz *= share; }
+		}
+		Vel.X += (wish.X * speed + cx - Vel.X) * a;
+		Vel.Z += (wish.Z * speed + cz - Vel.Z) * a;
 		if (Flying) Vel.Y += (((k.Jump ? 1 : 0) - (k.Down ? 1 : 0)) * 8 - Vel.Y) * MathF.Min(1, dt * 10);
 		else if (InWater)
 		{
 			// water slows your fall and lets you sink gently; hold Space to swim up, Shift to dive
-			Vel.Y += ((k.Jump ? 3.4f : k.Down ? -3.4f : -1.6f) - Vel.Y) * MathF.Min(1, dt * 4);
+			Vel.Y += ((k.Jump ? 3.4f : k.Down ? -3.4f : -1.6f) - (falling ? 4 : 0) - Vel.Y) * MathF.Min(1, dt * 4);   // (falling water: 4 lower)
 			if (k.Jump && OnGround) Vel.Y = 5;
 			// swimming up against the edge of a pool climbs you out of it
 			if (k.Jump && hitWall && !WaterAt(Pos.X, Pos.Y + 1.3f, Pos.Z)) Vel.Y = MathF.Max(Vel.Y, 6.5f);

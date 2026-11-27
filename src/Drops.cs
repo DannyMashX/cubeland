@@ -73,8 +73,12 @@ public partial class Drops : Node3D
 			}
 			else {
 			if (d.Age > 300 && !d.Keep) { Spill(d); Remove(d); continue; }   // gone after 5 minutes (unless it must stay)
-			// fall and slide to a stop, resting on top of blocks
-			d.V.Y = Math.Max(-30, d.V.Y - 22 * dt);
+			// fall and slide to a stop, resting on top of blocks; in a river (0.1.5.4), float: carried by the current, rising to the top
+			// and riding it, no falling; down falling water
+			int wb = W.GetBlock(F(d.P.X), F(d.P.Y + 0.25f), F(d.P.Z));
+			if (wb == Blocks.FallingWater) d.V.Y = -3;
+			else if (Blocks.RiverCurrent(wb, out float rcx, out float rcz)) { d.V.X = rcx; d.V.Z = rcz; d.V.Y = Blocks.IsWater(W.GetBlock(F(d.P.X), F(d.P.Y + 0.25f) + 1, F(d.P.Z))) || d.P.Y + 0.25f - F(d.P.Y + 0.25f) < 0.6f ? 1.5f : 0; }   // (rising till its middle is 0.6 up the top water block: riding near the top)
+			else d.V.Y = Math.Max(-30, d.V.Y - 22 * dt);
 			float nx = d.P.X + d.V.X * dt, nz = d.P.Z + d.V.Z * dt, ny = d.P.Y + d.V.Y * dt;
 			if (!W.Solid(F(nx), F(d.P.Y), F(d.P.Z))) d.P.X = nx; else d.V.X = 0;
 			if (!W.Solid(F(d.P.X), F(d.P.Y), F(nz))) d.P.Z = nz; else d.V.Z = 0;

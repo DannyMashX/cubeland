@@ -561,8 +561,13 @@ public partial class World
 	int WaterWants(int x, int y, int z, int cur)
 	{
 		int W0 = Cubeland.Blocks.Water;
-		if (cur == W0) return cur;                                                                   // still water never moves
+		if (Cubeland.Blocks.IsStillWater(cur)) return cur;                                           // still water never moves (river water neither)
 		if (cur != 0 && !Cubeland.Blocks.IsWater(cur) && !Cubeland.Blocks.IsTorch(cur)) return cur;  // solid blocks hold water back
+		{   // (0.1.5.4) a river heals: touching running river water on 2 or more of the 4 sides, it becomes that river water (the first such side's, in Sides order)
+			int rv = 0, rn = 0;
+			foreach (var s in Sides) { int n = GetBlock(x + s[0], y, z + s[1]); if (Cubeland.Blocks.IsRunningRiver(n)) { rn++; if (rv == 0) rv = n; } }
+			if (rn >= 2) return rv;
+		}
 		if (Cubeland.Blocks.IsWater(GetBlock(x, y + 1, z))) return W0 + 1;                           // pouring down from above
 		int best = 8;
 		foreach (var s in Sides)
@@ -571,7 +576,7 @@ public partial class World
 			if (!Cubeland.Blocks.IsWater(n)) continue;
 			// water only spreads sideways from water that rests on something (ground, or still water)
 			int under = GetBlock(x + s[0], y - 1, z + s[1]);
-			if (under == W0 || (under != 0 && !Cubeland.Blocks.IsWater(under) && !Cubeland.Blocks.IsTorch(under))) best = Math.Min(best, n - W0 + 1);
+			if (Cubeland.Blocks.IsStillWater(under) || (under != 0 && !Cubeland.Blocks.IsWater(under) && !Cubeland.Blocks.IsTorch(under))) best = Math.Min(best, Cubeland.Blocks.WaterLevel(n) + 1);
 		}
 		if (best <= 7) return W0 + best;
 		return Cubeland.Blocks.IsWater(cur) ? 0 : cur;                                               // nothing feeding it: dries up

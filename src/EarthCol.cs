@@ -36,6 +36,7 @@ public sealed class EarthCol
 				var s = spots[z * 16 + x] = Probe(cx * 16 + x, cz * 16 + z, rivers);
 				DrawBlockColumn(col, x, z, cx * 16 + x, cz * 16 + z, s);
 			}
+		Falls(col, cx, cz, spots);
 		if (Gen != null) Trees(col, cx, cz);
 		for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) Snow(col, x, z, spots[z * 16 + x]);
 		return col;
@@ -106,13 +107,40 @@ public sealed class EarthCol
 		// 3. the surface by sub-biome (the land's tops; under water only the sea's own rows)
 		if (SurfaceHere(s)) Surface(col, x, z, bx, bz, yg, c, s.cs, s.row);
 		// 4. water, and Ice where it stays frozen
-		for (int y = yg + 1; y <= Math.Min(s.top, H - 1); y++) col[At(x, y, z)] = EarthIds.Water;
-		if (s.wet && s.top < H)
-		{
-			int ic = s.ys >= 0 ? s.channel : c.i;
-			bool ice = P.Sea[c.i] && s.ys < 0 ? s.sub == EarthPlan.SeaIce : P.Temp[ic] + P.Swing[ic] < FreezeSummer;
-			if (ice) col[At(x, s.top, z)] = EarthIds.Ice;
-		}
+		int wb = s.channel >= 0 ? s.rv.water : EarthIds.Water;   // (0.1.5.4: in a river's channel, its running water)
+		for (int y = yg + 1; y <= Math.Min(s.top, H - 1); y++) col[At(x, y, z)] = wb;
+		if (s.wet && s.top < H && Iced(s)) col[At(x, s.top, z)] = EarthIds.Ice;
+	}
+	// a wet column whose water's top is frozen (the sea where it's sea ice; a river or lake where summer stays below freezing)
+	bool Iced(in Spot s)
+	{
+		int ic = s.ys >= 0 ? s.channel : s.c.i;
+		return P.Sea[s.c.i] && s.ys < 0 ? s.sub == EarthPlan.SeaIce : P.Temp[ic] + P.Swing[ic] < FreezeSummer;
+	}
+	// (0.1.5.4) falling water: a river channel column whose surface is 2 or more under a channel column beside it (the 4 sides,
+	// each one's own Probe, not chained; neither iced over) gets falling water (3915) in its air, from its surface + 1 up to 1
+	// under the highest such neighbour's surface. Probes over the chunk's edge are made for it (off the map: none)
+	public const int FallingWater = 3915;
+	static readonly int[] FallDX = { 1, -1, 0, 0 }, FallDZ = { 0, 0, 1, -1 };
+	void Falls(int[] col, int cx, int cz, Spot[] spots)
+	{
+		for (int z = 0; z < 16; z++)
+			for (int x = 0; x < 16; x++)
+			{
+				var s = spots[z * 16 + x];
+				if (s.channel < 0 || s.ys < 0 || Iced(s)) continue;
+				int hi = s.ys;
+				for (int k = 0; k < 4; k++)
+				{
+					int nx = x + FallDX[k], nz = z + FallDZ[k], bx = cx * 16 + nx, bz = cz * 16 + nz;
+					if (bx < 0 || bz < 0 || bx >= P.Size || bz >= P.Size) continue;
+					var n = nx >= 0 && nx < 16 && nz >= 0 && nz < 16 ? spots[nz * 16 + nx] : Probe(bx, bz, RiversFor(bx >> 4, bz >> 4));
+					if (n.channel < 0 || n.ys < 0 || Iced(n)) continue;
+					if (n.ys > hi) hi = n.ys;
+				}
+				if (hi - s.ys < 2) continue;
+				for (int y = s.ys + 1; y <= Math.Min(hi - 1, H - 1); y++) if (col[At(x, y, z)] == 0) col[At(x, y, z)] = FallingWater;
+			}
 	}
 	int BedBlock(in Spot s) => s.rv.w < 12 * P.Belt ? GravelOf(P.GravelRock[s.channel], null) : EarthIds.Silt;
 	// the top block once the surface is drawn (the trees read it for their ground)
@@ -285,9 +313,10 @@ public sealed class EarthCol
 	{
 		public int i; public double[] px = new double[Pieces + 1], pz = new double[Pieces + 1];
 		public double wS, wE, dS, dE, lS, lE;
+		public int pace;   // (0.1.5.4: how fast its water runs, 0 gentle, 1 quick, 2 rapids: RiverPace)
 		public bool end;   // (the river ends here: into the sea, a lake, or nothing. Past its last point there's no channel and no banks)
 	}
-	public struct RiverHere { public int channel; public double r, level, depth, w; public int cap, levee; }
+	public struct RiverHere { public int channel; public double r, level, depth, w; public int cap, levee, water; }   // (water: its river water's id, 0.1.5.4)
 	// the river cells whose curve (with its banks) reaches this chunk column, lowest cell first
 	List<RiverBit> RiversNear(int cx, int cz)
 	{
@@ -315,6 +344,11 @@ public sealed class EarthCol
 				b.lS = u >= 0 ? (P.Level[u] + lv) / 2 : lv;
 				b.lE = d < 0 ? lv : dr && P.RiverUp[d] == i ? (lv + P.Level[d]) / 2 : P.Level[d];
 				b.end = !dr;
+				if (d >= 0)
+				{   // (0.1.5.4) its pace: the cell's fall to its Down, as MakeBraids works it out
+					double dd = (i % N != d % N && i / N != d / N) ? C * 1.4142135623730951 : C;
+					b.pace = RiverPace(P.Pace(Math.Max(0, P.Level[i] - P.Level[d]) / dd));
+				}
 				list.Add(b);
 			}
 		return list;
@@ -322,21 +356,53 @@ public sealed class EarthCol
 	// (v2) the rivers wind: a spot is looked up wobbled by up to Meander x Belt blocks (two smooth noises, salts 7830 and 7831, about
 	// 64 blocks across), so a river drawn from straight stretches meanders; the same for every spot, so it stays whole
 	public static double Meander = 10;
+	// (0.1.5.4, running rivers) a river's pace from how steep it runs (EarthPlan.Pace): 0 gentle (under 0.02), 1 quick (under 0.2),
+	// 2 rapids; and the river water at a spot: 3891 + 8 x pace + the way it runs there (Dir8 of the river's piece turned back from
+	// the wobbled space: WobbleBack). The same in the web version (web's river draft 1)
+	public const int RiverWater = 3891;
+	public static double QuickPace = 0.02, RapidsPace = 0.2;
+	public static int RiverPace(double pace) => pace < QuickPace ? 0 : pace < RapidsPace ? 1 : 2;
+	// the 8 ways (0 E, 1 SE, 2 S, 3 SW, 4 W, 5 NW, 6 N, 7 NE; E = +x, S = +z) a direction is nearest, by plain comparisons
+	const double Tan22 = 0.41421356237309503;
+	public static int Dir8(double wx, double wz)
+	{
+		if (wx == 0 && wz == 0) return 0;
+		double ax = Math.Abs(wx), az = Math.Abs(wz);
+		if (az <= ax * Tan22) return wx > 0 ? 0 : 4;
+		if (ax <= az * Tan22) return wz > 0 ? 2 : 6;
+		return wx > 0 ? (wz > 0 ? 1 : 7) : (wz > 0 ? 3 : 5);
+	}
+	double WobX(double X, double Z) => P.Fbm(X / 64.0, Z / 64.0, 2, 7830) / 0.375 - 1;
+	double WobZ(double X, double Z) => P.Fbm(X / 64.0, Z / 64.0, 2, 7831) / 0.375 - 1;
+	// a direction v in the wobbled space, turned back to the world's at X, Z: the wobble moves a spot by A x (WobX, WobZ), so its
+	// Jacobian J = I + A x the wobble's slopes (differences over +-0.5), and w = J^-1 v (its sign only: the adjugate, flipped if
+	// det < 0)
+	int RiverWaterAt(int pace, double vx, double vz, double X, double Z)
+	{
+		double A = Meander * P.Belt;
+		double mxX = WobX(X + 0.5, Z) - WobX(X - 0.5, Z), mxZ = WobX(X, Z + 0.5) - WobX(X, Z - 0.5);
+		double mzX = WobZ(X + 0.5, Z) - WobZ(X - 0.5, Z), mzZ = WobZ(X, Z + 0.5) - WobZ(X, Z - 0.5);
+		double j00 = 1 + A * mxX, j01 = A * mxZ, j10 = A * mzX, j11 = 1 + A * mzZ, det = j00 * j11 - j01 * j10;
+		double wx = j11 * vx - j01 * vz, wz = -j10 * vx + j00 * vz;
+		if (det < 0) { wx = -wx; wz = -wz; }
+		return RiverWater + 8 * pace + Dir8(wx, wz);
+	}
 	RiverHere RiverAt(List<RiverBit> rivers, double X, double Z)
 	{
+		double X0 = X, Z0 = Z, hvx = 0, hvz = 0; int hpace = 0;
 		double mx = P.Fbm(X / 64.0, Z / 64.0, 2, 7830) / 0.375 - 1, mz = P.Fbm(X / 64.0, Z / 64.0, 2, 7831) / 0.375 - 1;
 		X += mx * Meander * P.Belt; Z += mz * Meander * P.Belt;
 		var h = new RiverHere { channel = -1, cap = int.MaxValue, levee = int.MinValue }; double best = 1;
 		foreach (var b in rivers)
 		{
 			// the nearest point on the curve's pieces, and how far along (t, 0-1)
-			double bd = double.MaxValue, bt = 0; bool past = false;
+			double bd = double.MaxValue, bt = 0, bvx = 0, bvz = 0; bool past = false;
 			for (int k = 0; k < Pieces; k++)
 			{
 				double ax = b.px[k], az = b.pz[k], vx = b.px[k + 1] - ax, vz = b.pz[k + 1] - az, l2 = vx * vx + vz * vz;
 				double u0 = l2 > 0 ? ((X - ax) * vx + (Z - az) * vz) / l2 : 0, u = Math.Clamp(u0, 0, 1);
 				double dx = X - (ax + u * vx), dz = Z - (az + u * vz), d2 = dx * dx + dz * dz;
-				if (d2 < bd) { bd = d2; bt = (k + u) / Pieces; past = b.end && k == Pieces - 1 && u0 > 1; }
+				if (d2 < bd) { bd = d2; bt = (k + u) / Pieces; past = b.end && k == Pieces - 1 && u0 > 1; bvx = vx; bvz = vz; }
 			}
 			if (past) continue;   // (beyond where the river ends: no round end of channel or banks out into the sea or lake)
 			double dist = Math.Sqrt(bd), half = (b.wS + (b.wE - b.wS) * bt) / 2, level = b.lS + (b.lE - b.lS) * bt;
@@ -344,7 +410,7 @@ public sealed class EarthCol
 			if (dist < half)
 			{
 				double r = dist / half;
-				if (r < best) { best = r; h.channel = b.i; h.r = r; h.level = level; h.depth = b.dS + (b.dE - b.dS) * bt; h.w = half * 2; }
+				if (r < best) { best = r; h.channel = b.i; h.r = r; h.level = level; h.depth = b.dS + (b.dE - b.dS) * bt; h.w = half * 2; hvx = bvx; hvz = bvz; hpace = b.pace; }
 			}
 			else if (dist < half + Bank)
 			{
@@ -353,6 +419,7 @@ public sealed class EarthCol
 				if (dist < half + 2 && ys > h.levee) h.levee = ys;
 			}
 		}
+		if (h.channel >= 0) h.water = RiverWaterAt(hpace, hvx, hvz, X0, Z0);
 		return h;
 	}
 

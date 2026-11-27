@@ -79,6 +79,12 @@ public partial class Main : Node3D
 				int cx = (2 * kx + 1) * ncx / 10, cz = (2 * kz + 1) * ncx / 10;
 				foreach (int v in cols.Draw(cx, cz)) unchecked { h = (h ^ (uint)v) * 16777619; }
 			}
+			{   // (0.1.5.4) RIVERCOUNT: how many of each river water id (3891-3915) the COLHASH columns hold, id:count for those there
+				var rc = new System.Collections.Generic.SortedDictionary<int, int>();
+				for (int kz = 0; kz < 5; kz++) for (int kx = 0; kx < 5; kx++)
+					foreach (int v in cols.Draw((2 * kx + 1) * ncx / 10, (2 * kz + 1) * ncx / 10)) if (Cubeland.Blocks.IsRiverWater(v)) rc[v] = rc.GetValueOrDefault(v) + 1;
+				GD.Print("RIVERCOUNT " + (rc.Count == 0 ? "none" : string.Join(" ", rc.Select(kv => $"{kv.Key}:{kv.Value}"))));
+			}
 			GD.Print($"COLHASH {h:x8} (seed {st}, {plan.Size} wide, {cols.H} tall; plan {planMs} ms, {sw.ElapsedMilliseconds / 25.0:0} ms a column; PLANHASH {plan.PlanHash:x8} KEEPHASH {plan.KeepHash:x8})");
 			// (and SPAWNHASH: the same over the 3 x 3 columns round where a new world's players start, Main.EarthSpawn, its column
 			// in the middle, rows of z then x)
@@ -89,6 +95,21 @@ public partial class Main : Node3D
 				foreach (int v in cols.Draw(cx, cz)) unchecked { hs = (hs ^ (uint)v) * 16777619; }
 			}
 			GD.Print($"SPAWNHASH {hs:x8} (the start at block {spx},{spz}, column {spx >> 4},{spz >> 4})");
+			if (OS.GetCmdlineUserArgs().Contains("--pacesurvey"))
+			{   // (test, 0.1.5.4 rivers: how the river cells' paces spread, by count and by river length, with their widths)
+				var paces = new System.Collections.Generic.List<(double pace, double len, double w)>(); int Nn = plan.N;
+				for (int i = 0; i < Nn * Nn; i++)
+				{
+					if (!plan.River(i)) continue; int r = plan.Down[i]; if (r < 0) continue;
+					double d = (i % Nn != r % Nn && i / Nn != r / Nn) ? plan.Cell * 1.4142135623730951 : plan.Cell;
+					paces.Add((plan.Pace(Math.Max(0, plan.Level[i] - plan.Level[r]) / d), d, plan.RiverWidth(i)));
+				}
+				paces.Sort((p1, p2) => p1.pace.CompareTo(p2.pace)); double tot = paces.Sum(q => q.len);
+				string At(double f) { double acc = 0; foreach (var q in paces) { acc += q.len; if (acc >= f * tot) return q.pace.ToString("0.00000"); } return "-"; }
+				GD.Print($"PACESURVEY {paces.Count} river cells, {tot:0} blocks of river; pace by length: 10% {At(0.1)}, 25% {At(0.25)}, 50% {At(0.5)}, 75% {At(0.75)}, 90% {At(0.9)}, 95% {At(0.95)}, 99% {At(0.99)}, max {paces.Last().pace:0.00000}");
+				foreach (var pcut in new[] { 0.001, 0.002, 0.004, 0.006, 0.01, 0.015, 0.02, 0.03, 0.05 })
+					GD.Print($"PACESURVEY share of river length over {pcut}: {paces.Where(q => q.pace > pcut).Sum(q => q.len) / tot:P1} (of wide rivers, 12+ blocks: {paces.Where(q => q.pace > pcut && q.w >= 12).Sum(q => q.len) / Math.Max(1, paces.Where(q => q.w >= 12).Sum(q => q.len)):P1})");
+			}
 			if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--probe=")) is { } pr)   // (test: what the plan has at blocks x,z;x,z...)
 				foreach (var one in pr[8..].Split(';'))
 				{
@@ -122,16 +143,19 @@ public partial class Main : Node3D
 				[3926] = 0xa0a888, [3927] = 0xf4f0e8, [3928] = 0xc0906a, [3929] = 0xa08a6a, [3934] = 0x6a8a4a, [3937] = 0xd0a090, [3938] = 0x5a7a5a,
 				[3939] = 0xb07a4a, [58] = 0x4f7a3a, [218] = 0xb5652e, [65] = 0x9a5a3a, [63] = 0x9aa0b0 };
 			for (int s = 380; s < 387; s++) own[s] = 0xf8fbff;
-			uint ColorOf(int id) => own.TryGetValue(id, out uint u) ? u : Cubeland.Blocks.IsLeaves(id) ? 0x2f7a2au : Cubeland.Blocks.B[id] is { } bd && bd.Name.EndsWith("Log") ? 0x6a4a2au : id >= 5030 && id <= 5051 || id == EarthIds.Gravel ? 0x8c8680u
+			uint RiverCol(int id) { int pc = (id - 3891) / 8; return pc == 0 ? 0x3a74c8u : pc == 1 ? 0x5a9ae0u : 0xa8d8ffu; }   // (0.1.5.4: running river water, lighter the faster)
+			uint ColorOf(int id) => Cubeland.Blocks.IsRiverWater(id) ? RiverCol(id) : own.TryGetValue(id, out uint u) ? u : Cubeland.Blocks.IsLeaves(id) ? 0x2f7a2au : Cubeland.Blocks.B[id] is { } bd && bd.Name.EndsWith("Log") ? 0x6a4a2au : id >= 5030 && id <= 5051 || id == EarthIds.Gravel ? 0x8c8680u
 				: rockOf.TryGetValue(id, out int rk) ? EarthPlan.RockColors[rk] : 0xff00ffu;
 			Color Shade(uint rgb, float f) => new Color(Math.Min(1, ((rgb >> 16) & 255) / 255f * f), Math.Min(1, ((rgb >> 8) & 255) / 255f * f), Math.Min(1, (rgb & 255) / 255f * f));
 			var seen = new System.Collections.Generic.Dictionary<int, int>(); sw.Restart();
+			int[] topY = new int[n * n], topId = new int[n * n];   // (0.1.5.4: the top block of each column, for the flow check)
 			for (int q = 0; q < 16 * 16; q++)
 			{
 				int cx = c0x + q % 16, cz = c0z + q / 16; var col = cols.Draw(cx, cz);
 				for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++)
 				{
 					int y = cols.H - 1; while (y > 0 && col[EarthCol.At(x, y, z)] == 0) y--;
+					topY[(q / 16 * 16 + z) * n + q % 16 * 16 + x] = y; topId[(q / 16 * 16 + z) * n + q % 16 * 16 + x] = col[EarthCol.At(x, y, z)];
 					int id = col[EarthCol.At(x, y, z)]; seen[id] = seen.GetValueOrDefault(id) + 1;
 					img.SetPixel((cx - c0x) * 16 + x, (cz - c0z) * 16 + z, Shade(ColorOf(id), (float)Math.Clamp(0.6 + (y - plan.Room) / 120.0, 0.35, 1.2)));
 				}
@@ -143,6 +167,18 @@ public partial class Main : Node3D
 			}
 			System.IO.Directory.CreateDirectory(cm[9..]); int zm = ArgInt("--zoom=", 3); img.Resize(n * zm, n * zm, Godot.Image.Interpolation.Nearest); cut.Resize(n * zm, (y1 - y0) * zm, Godot.Image.Interpolation.Nearest); img.SavePng($"{cm[9..]}/columns_top.png"); cut.SavePng($"{cm[9..]}/columns_cut.png");
 			GD.Print($"COLMAP columns {c0x}-{c0x + 15} x {c0z}-{c0z + 15} (blocks {c0x * 16},{c0z * 16} to {c0x * 16 + 255},{c0z * 16 + 255}; cut along block row z {mz * 16 + 8}, y {y0}-{y1 - 1}); {sw.ElapsedMilliseconds / 256.0:0} ms a column");
+			{   // (0.1.5.4 --colmap: does river water run downhill? From each river-water top, 8 blocks on its way: river water there
+				// should be no higher; also how often it's lower, and the paces)
+				int[] dxs = { 1, 1, 0, -1, -1, -1, 0, 1 }, dzs = { 0, 1, 1, 1, 0, -1, -1, -1 }; int river = 0, ahead = 0, up = 0, down = 0; var pc = new int[3];
+				for (int i = 0; i < n * n; i++)
+				{
+					if (!Cubeland.Blocks.IsRiverWater(topId[i])) continue; river++; int f = (topId[i] - 3891) % 8, p = (topId[i] - 3891) / 8; pc[Math.Min(2, p)]++;
+					if (f > 7) continue; int ax = i % n + 8 * dxs[f], az = i / n + 8 * dzs[f]; if (ax < 0 || az < 0 || ax >= n || az >= n) continue;
+					int j = az * n + ax; if (!Cubeland.Blocks.IsRiverWater(topId[j])) continue; ahead++;
+					if (topY[j] > topY[i]) up++; else if (topY[j] < topY[i]) down++;
+				}
+				GD.Print($"FLOWCHECK {river} river-water tops (gentle {pc[0]}, quick {pc[1]}, rapids {pc[2]}); 8 ahead still river {ahead}: higher {up}, lower {down}, level {ahead - up - down}");
+			}
 			GD.Print("COLMAP tops: " + string.Join(", ", seen.OrderByDescending(kv => kv.Value).Take(24).Select(kv => $"{kv.Key} {kv.Value}")));
 			SetProcess(false); GetTree().Quit(); return;
 		}
@@ -816,6 +852,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 		// night music comes on once it's properly dark, and goes back to day music once it's light again
 		nightMusic = nightMusic ? sky.SkyDay < 0.5f : sky.SkyDay < 0.12f;
 		Sound.I?.Music(nightMusic ? "night" : "day");
+		if ((riverScan -= dt) <= 0) { riverScan = 0.5f; var (calm, rapid) = RiverHeard(); Sound.I?.River(calm, rapid); }   // (Beta 0.1.5.4: the river's sound)
 		if (Sound.I != null) Sound.I.Hushed = NearStair();
 	}
 	float target = 1;
@@ -824,6 +861,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
 	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone, netTested; float bagNetT, mixT; int mixStep;
+	(int x, int y, int z, int id) mixRefill;   // (Beta 0.1.5.4: the river spot an Earthlike host refills in --mixtest)
 	// (test, --mixtest: the world as it stands, every block's full id in index order, as an FNV-1a fingerprint; and the changed blocks)
 	// (gen 4: over the 7 x 7 chunk columns round the plan's start, EarthSpawn's column, clamped to the map: y, then z, then x over
 	// the box's blocks; grown first, so both editions read the same land. A column not grown would read Bedrock.)
@@ -1112,6 +1150,122 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 							GD.Print($"cavetest: at {x},{y},{z}: stone layers here " + string.Join(" ", Enumerable.Range(-12, 25).Select(d => Blocks.StoneLayer(world.GetBlock(x, y + d, z + 4)))));
 						}
 				}
+		}
+		if (args.Contains("--riverplay") && !riverPlayed && !menuOpen && shotTimer > 0.3f)
+		{   // (test, Beta 0.1.5.4: a real Earthlike river near the start carries you its way)
+			int px = (int)player.Pos.X, pz = (int)player.Pos.Z; bool ready = true;
+			for (int cz = (pz - 56) >> 4; cz <= (pz + 56) >> 4 && ready; cz++) for (int cx = (px - 56) >> 4; cx <= (px + 56) >> 4; cx++)
+				if (cx >= 0 && cz >= 0 && cx < World.WX / 16 && cz < World.WZ / 16 && !world.ColumnGrown(cx, cz)) { ready = false; break; }
+			if (ready)
+			{
+				riverPlayed = true;
+				void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+				int bx = -1, by = -1, bz = -1, bid = 0, bd = int.MaxValue, found = 0, falls = 0;
+				for (int z = Math.Max(1, pz - 56); z <= Math.Min(World.WZ - 2, pz + 56); z++)
+					for (int x = Math.Max(1, px - 56); x <= Math.Min(World.WX - 2, px + 56); x++)
+						for (int y = World.WY - 2; y > 1; y--)
+						{
+							int b = world.GetBlock(x, y, z);
+							if (b == Blocks.FallingWater) falls++;
+							if (!Blocks.IsRunningRiver(b)) continue;
+							found++;
+							if (Blocks.IsRunningRiver(world.GetBlock(x, y - 1, z)) && world.GetBlock(x, y + 1, z) == 0)
+							{
+								int d = (x - px) * (x - px) + (z - pz) * (z - pz);
+								if (d < bd) { bd = d; bx = x; by = y - 1; bz = z; bid = b; }
+							}
+							break;
+						}
+				GD.Print($"RIVERPLAY {found} columns of running river water and {falls} falling-water blocks within 56 of the start; nearest 2-deep at {bx},{by},{bz} ({(bid > 0 ? DataKeys.KeyOf(bid) : "none")})");
+				Check("there's running river water near the start, 2 deep somewhere", bx >= 0);
+				if (bx >= 0)
+				{
+					Blocks.RiverCurrent(bid, out float ccx, out float ccz);
+					player.Flying = false; player.Pos = new Vector3(bx + 0.5f, by + 0.05f, bz + 0.5f); player.Vel = Vector3.Zero;
+					var keys = new Player.Keys(); var p0 = player.Pos;
+					for (int k = 0; k < 180; k++) player.Update(1 / 60f, keys);
+					var mv = player.Pos - p0; float along = (mv.X * ccx + mv.Z * ccz) / MathF.Sqrt(ccx * ccx + ccz * ccz);
+					GD.Print($"RIVERPLAY 3 s in it: moved {mv.X:0.00}, {mv.Y:0.00}, {mv.Z:0.00}; along its current {along:0.00} (its speed {MathF.Sqrt(ccx * ccx + ccz * ccz):0.00} a second)");
+					Check($"it carries you its way ({along:0.00} blocks along its current in 3 s)", along > 0.5f);
+					player.Pos = new Vector3(bx + 0.5f, by + 2.05f, bz + 0.5f); var (hc, hr) = RiverHeard();
+					GD.Print($"RIVERPLAY heard beside it: calm {hc:0.00}, rapid {hr:0.00}");
+					Check($"you hear it there (calm {hc:0.00} + rapid {hr:0.00} > 1), and nothing in an ordinary world", hc + hr > 1);
+				}
+			}
+		}
+		if (args.Contains("--rivertest") && !riverTested && !menuOpen && shotTimer > 0.3f)
+		{   // (test, Beta 0.1.5.4: running river water, its current, drops in it and the refill rule; a trough in front of you)
+			riverTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int R = Blocks.RiverWater;
+			Check("river water counts as still water: water, a source, full height, level 0 (and plain water as before)", Enumerable.Range(R, 25).All(i => Blocks.IsWater(i) && Blocks.IsStillWater(i) && Blocks.WaterLevel(i) == 0 && Blocks.WaterHeight(i, 0) == 0.875f && Blocks.IsRiverWater(i))
+				&& Blocks.IsWater(Blocks.Water) && Blocks.IsStillWater(Blocks.Water) && !Blocks.IsStillWater(Blocks.Water + 3) && Blocks.WaterLevel(Blocks.Water + 3) == 3 && !Blocks.IsWater(R - 1) && !Blocks.IsWater(R + 25)
+				&& Blocks.IsRunningRiver(R) && Blocks.IsRunningRiver(R + 23) && !Blocks.IsRunningRiver(Blocks.FallingWater) && Blocks.FallingWater == R + 24);
+			{   // the river's sound: two 6 s loops that join up without a seam, not too loud
+				foreach (bool rp in new[] { false, true })
+				{
+					var lp = Sound.RiverLoop(rp); float big = 0; for (int i = 1; i < lp.Length; i++) big = Math.Max(big, MathF.Abs(lp[i] - lp[i - 1]));
+					float seam = MathF.Abs(lp[0] - lp[^1]), peak = lp.Max(MathF.Abs);
+					Check($"the {(rp ? "rapids" : "river")} loop: 6 s, peak {peak:0.00}, seam step {seam:0.0000} no bigger than its biggest step ({big:0.0000})", lp.Length == 44100 * 6 && MathF.Abs(peak - (rp ? 0.7f : 0.6f)) < 0.001f && seam <= big);
+				}
+				Check("an ordinary world hears no river", RiverHeard() == (0, 0));
+			}
+			Check("the currents: E gentle 0.75, SE quick 1.75 x sqrt(1/2) each way, N rapids 3; falling water and plain water none",
+				Blocks.RiverCurrent(R, out float c1x, out float c1z) && c1x == 0.75f && c1z == 0 && Blocks.RiverCurrent(R + 9, out float c2x, out float c2z) && MathF.Abs(c2x - 1.2374369f) < 1e-5f && MathF.Abs(c2z - 1.2374369f) < 1e-5f
+				&& Blocks.RiverCurrent(R + 22, out float c3x, out float c3z) && c3x == 0 && c3z == -3 && !Blocks.RiverCurrent(Blocks.FallingWater, out _, out _) && !Blocks.RiverCurrent(Blocks.Water, out _, out _));
+			// the trough: 60 long (+x), 5 wide, 3 deep, stone round it, air above, 6 blocks in front of you
+			int x0 = (int)player.Pos.X - 30, z0 = (int)player.Pos.Z - 8, y0 = Math.Min(World.WY - 12, world.Heights[z0 * World.WX + x0] + 4);
+			void Trough(int water, int deep)
+			{
+				for (int x = x0 - 1; x <= x0 + 60; x++) for (int z = z0 - 3; z <= z0 + 3; z++)
+				{
+					world.SetBlock(x, y0, z, Blocks.Stone);
+					for (int y = y0 + 1; y <= y0 + 8; y++) world.SetBlock(x, y, z, x < x0 || x >= x0 + 60 || Math.Abs(z - z0) == 3 ? (y <= y0 + 3 ? Blocks.Stone : 0) : y <= y0 + deep ? water : 0);
+				}
+				world.WaterQueue.Clear();
+			}
+			var keys = new Player.Keys();
+			(float dx, float dz) Drift(int water, int deep, float secs)
+			{
+				Trough(water, deep);
+				player.Flying = false; player.Pos = new Vector3(x0 + 15.5f, y0 + 1, z0 + 0.5f); player.Vel = Vector3.Zero;
+				for (int k = 0; k < secs * 60; k++) player.Update(1 / 60f, keys);
+				return (player.Pos.X - (x0 + 15.5f), player.Pos.Z - (z0 + 0.5f));
+			}
+			var g = Drift(R, 2, 5); var q = Drift(R + 8, 2, 5); var r = Drift(R + 16, 2, 4);
+			Check($"5 s in gentle water (E): carried about 0.75 a second, not sideways (moved {g.dx:0.00}, {g.dz:0.00})", g.dx > 3.2f && g.dx < 3.8f && MathF.Abs(g.dz) < 0.05f);
+			Check($"5 s in quick water (E): about 1.75 a second (moved {q.dx:0.00})", q.dx > 7.6f && q.dx < 8.8f && MathF.Abs(q.dz) < 0.05f);
+			Check($"4 s in rapids (E): about 3 a second (moved {r.dx:0.00})", r.dx > 10.8f && r.dx < 12.1f && MathF.Abs(r.dz) < 0.05f);
+			var w = Drift(R + 8, 1, 5);
+			Check($"wading in quick water (1 deep, legs only): half the current (moved {w.dx:0.00})", w.dx > 3.6f && w.dx < 4.5f);
+			var wst = Drift(R + 8 + 4, 2, 3);
+			Check($"quick water running W carries you W (moved {wst.dx:0.00})", wst.dx < -4.4f && wst.dx > -5.3f);
+			var dg = Drift(R + 1, 2, 4);
+			Check($"gentle water running SE carries you both ways at 0.75 x sqrt(1/2) (moved {dg.dx:0.00}, {dg.dz:0.00}; the trough's side stops you)", dg.dx > 1.6f && dg.dx < 2.2f && dg.dz > 0.9f);
+			var still = Drift(Blocks.Water, 2, 3);
+			Check($"plain still water carries you nowhere (moved {still.dx:0.00}, {still.dz:0.00})", MathF.Abs(still.dx) < 0.01f && MathF.Abs(still.dz) < 0.01f);
+			// falling water: a shaft of it, 8 deep
+			Trough(Blocks.FallingWater, 8);
+			player.Pos = new Vector3(x0 + 15.5f, y0 + 6, z0 + 0.5f); player.Vel = Vector3.Zero;
+			float topVy = 0; for (int k = 0; k < 40; k++) { player.Update(1 / 60f, keys); topVy = player.Vel.Y; }
+			Check($"falling water: you sink towards 5.6 a second, not pushed sideways (after 0.67 s: {topVy:0.00} down, moved {player.Pos.X - (x0 + 15.5f):0.00} sideways)", topVy < -4.5f && topVy > -5.7f && MathF.Abs(player.Pos.X - (x0 + 15.5f)) < 0.01f);
+			// a drop in quick water: it floats up to the top and drifts E
+			Trough(R + 8, 3);
+			player.Pos = new Vector3(x0 + 55.5f, y0 + 9, z0 - 10.5f);   // (out of reach of it)
+			var dr = drops.Add(Blocks.Dirt, x0 + 10.5f, y0 + 1.2f, z0 + 0.5f); float sx = dr.P.X;
+			for (int k = 0; k < 180; k++) drops.Update(1 / 60f);
+			Check($"a drop in quick water floats up to the top and drifts the river's way (3 s: moved {dr.P.X - sx:0.00}, height {dr.P.Y - y0:0.00} over the floor)", dr.P.X - sx > 4.5f && dr.P.X - sx < 5.6f && dr.P.Y > y0 + 2.4f && dr.P.Y < y0 + 3.6f && MathF.Abs(dr.P.Z - (z0 + 0.5f)) < 0.01f);
+			drops.Remove(dr);
+			// the refill rule: a block put in the river and taken out fills back with its water; a notch in the bank (one side) with flowing water
+			Trough(R + 2, 2);
+			world.SetBlock(x0 + 20, y0 + 2, z0, Blocks.Stone); for (int k = 0; k < 8; k++) world.UpdateWater(0.3f);
+			world.SetBlock(x0 + 20, y0 + 2, z0, 0); for (int k = 0; k < 8; k++) world.UpdateWater(0.3f);
+			Check($"a block put in a river and taken out again fills back with that river water ({world.GetBlock(x0 + 20, y0 + 2, z0)})", world.GetBlock(x0 + 20, y0 + 2, z0) == R + 2);
+			world.SetBlock(x0 + 20, y0 + 2, z0 + 3, 0); world.SetBlock(x0 + 20, y0 + 1, z0 + 3, Blocks.Stone); for (int k = 0; k < 8; k++) world.UpdateWater(0.3f);
+			int notch = world.GetBlock(x0 + 20, y0 + 2, z0 + 3);
+			Check($"a notch in the bank touching it on one side fills with flowing water, not river water ({notch})", notch == Blocks.Water + 1);
+			Check("the river itself never changes on its own (the trough is still all its water)", Enumerable.Range(1, 58).All(k => world.GetBlock(x0 + k, y0 + 1, z0) == R + 2 && world.GetBlock(x0 + k, y0 + 2, z0 - 2) == R + 2));
+			player.Pos = new Vector3(x0 + 30.5f, y0 + 9, z0 - 10.5f); player.Vel = Vector3.Zero;
 		}
 		if (args.Contains("--farm") && !farmTested && !menuOpen)
 		{   // (test: a row of soil in front of you with water at one end, tilled and planted the way you would, then 200 seconds of growing)
@@ -2565,6 +2719,31 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 				GD.Print($"MIXTEST {(hosting ? "host" : "friend")}: changes made");
 			}
 			else if (mixStep == 1 && mixT > 25) { mixStep = 2; MixLive(2); }
+			// (Beta 0.1.5.4, in a river: an Earthlike host's refill, then the third and fourth readings on both sides)
+			else if (mixStep == 2 && hosting && world.Lazy && mixT > 26)
+			{
+				mixStep = 3; var (sx, sz) = EarthSpawn(); long best = long.MaxValue;
+				for (int z = Math.Max(1, sz - 56); z <= Math.Min(World.WZ - 2, sz + 56); z++)
+					for (int x = Math.Max(1, sx - 56); x <= Math.Min(World.WX - 2, sx + 56); x++)
+						for (int y = World.WY - 2; y > 1; y--)
+						{
+							int b = world.GetBlock(x, y, z);
+							if (!Blocks.IsRunningRiver(b)) continue;
+							if (world.GetBlock(x + 1, y, z) != b || world.GetBlock(x - 1, y, z) != b || world.GetBlock(x, y, z + 1) != b || world.GetBlock(x, y, z - 1) != b || world.GetBlock(x, y - 1, z) != b) continue;
+							long d = (long)(x - sx) * (x - sx) + (long)(z - sz) * (z - sz);
+							if (d < best) { best = d; mixRefill = (x, y, z, b); }
+							break;
+						}
+				if (mixRefill.id > 0) { world.SetBlock(mixRefill.x, mixRefill.y, mixRefill.z, Blocks.Stone); GD.Print($"MIXTEST host: Andesite put in the river at {mixRefill.x},{mixRefill.y},{mixRefill.z} (its water {mixRefill.id})"); }
+				else GD.Print("MIXTEST host: no river spot for the refill");
+			}
+			else if (mixStep == 3 && mixT > 27)
+			{
+				mixStep = 4; if (mixRefill.id > 0) world.SetBlock(mixRefill.x, mixRefill.y, mixRefill.z, 0);
+				GD.Print("MIXTEST host: the Andesite taken out");
+			}
+			else if (mixStep is 2 or 4 && (!hosting || !world.Lazy || mixStep == 4) && mixT > 40) { mixStep = 5; MixLive(3); if (mixRefill.id > 0) GD.Print($"MIXTEST host: the refilled spot holds {world.GetBlock(mixRefill.x, mixRefill.y, mixRefill.z)}"); }
+			else if (mixStep == 5 && mixT > 55) { mixStep = 6; MixLive(4); }
 		}
 		// (test, two games: --bagnet --host holds a full Linen Bag and drops an empty and a full one; --bagnet --join=CODE holds a
 		// full one too, checks the host's drops and hand show the right pictures, and is the picture; the host checks the friend's hand)
@@ -2993,7 +3172,28 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 		GetTree().Quit();
 	}
 
-	bool sceneBuilt, mobsShown, diedTest, savetestDone, netTried;
+	bool sceneBuilt, mobsShown, diedTest, savetestDone, netTried, riverTested, riverPlayed;
+	float riverScan;
+	// (Beta 0.1.5.4) how much river you hear: the open river water near you (every 2nd column within 8, heights within 8 of your
+	// eyes; each river water block with air above it adds 1 / (1 + d^2 / 25), d to the middle of its top), calm for gentle and
+	// quick water, rapid for rapids and falling water. Only in Earthlike worlds. The same in the web version
+	(float calm, float rapid) RiverHeard()
+	{
+		float calm = 0, rapid = 0;
+		if (world?.Plan == null || player == null) return (0, 0);
+		float hx = player.Pos.X, hy = player.Pos.Y + Player.Eye, hz = player.Pos.Z;
+		int x0 = (int)MathF.Floor(hx), y0 = (int)MathF.Floor(hy), z0 = (int)MathF.Floor(hz);
+		for (int dz = -8; dz <= 8; dz += 2) for (int dx = -8; dx <= 8; dx += 2) for (int dy = -8; dy <= 8; dy++)
+		{
+			int x = x0 + dx, y = y0 + dy, z = z0 + dz;
+			if (!World.Inside(x, y, z) || !World.Inside(x, y + 1, z)) continue;
+			int b = world.GetBlock(x, y, z);
+			if (!Blocks.IsRiverWater(b) || world.GetBlock(x, y + 1, z) != 0) continue;
+			float ex = x + 0.5f - hx, ey = y + 1 - hy, ez = z + 0.5f - hz, w = 1 / (1 + (ex * ex + ey * ey + ez * ez) / 25);
+			if (b >= Blocks.RiverWater + 16) rapid += w; else calm += w;
+		}
+		return (calm, rapid);
+	}
 	// (test: --piecescene: whole blocks beside a piece, slab, stairs and quarter of the same block, against a stone wall and out
 	//  on grass, to compare how they're lit; --torch adds torches, for a picture at night)
 	bool pieceSceneBuilt;

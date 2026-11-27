@@ -605,7 +605,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.5.3"></script>
+<script src="textures.js?v=beta-0.1.5.4"></script>
 <!-- Earthlike worlds: the plan and the land drawing (the desktop version's C#, translated), run in a Worker (see Earthlike worlds) -->
 <script type="text/plain" id="earth-src">
 // (made by cs2js.py from the desktop plan code: do not edit by hand; fixes go in the translator or the overrides)
@@ -668,7 +668,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 		  end = false;
 }
 
-	class RiverHere { constructor() { this.channel = 0; this.r = 0; this.level = 0; this.depth = 0; this.w = 0; this.cap = 0; this.levee = 0; } }
+	class RiverHere { constructor() { this.channel = 0; this.r = 0; this.level = 0; this.depth = 0; this.w = 0; this.cap = 0; this.levee = 0; this.vx = 0; this.vz = 0; } }
 
 
 // the surface table (pass 3), by biome (0-20) and sub-biome (32-111) number. (Draft: to become worldgen.json's EARTH_SURFACE once
@@ -4365,7 +4365,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 			for (let x = 0; x < 16; x++)
 			{
 				let s = spots[z * 16 + x] = Probe(cx * 16 + x, cz * 16 + z, rivers);
-				DrawBlockColumn(col, x, z, cx * 16 + x, cz * 16 + z, s);
+				DrawBlockColumn(col, x, z, cx * 16 + x, cz * 16 + z, s, rivers);
 			}
 		if (trees) Trees(col, cx, cz);
 		for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) Snow(col, x, z, spots[z * 16 + x]);
@@ -4411,7 +4411,43 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 	function SurfaceHere(  s) { return ( s.yg >= 1 && (!s.wet && s.ys < 0 || s.wet && s.row.Sea && Sea[s.c.i])); }
 
 
-	function DrawBlockColumn( col,  x,  z,  bx,  bz,   s)
+	// (Beta 0.1.5.4) running rivers: the water in a river's channel is RIVER_WATER, 3891 + 8 x pace + flow (data/blocks.json),
+	// and where the river beside it stands 2 or more higher, falling water (3915) fills the drop
+	const  RiverWater = 3891, RiverFalling = 3915;
+
+	// how fast it runs: its plan cell's Pace (the fall worked out as MakeBraids does): under 0.02 gentle (0), under 0.2 quick (1),
+	// steeper rapids (2)
+	function  RiverPaceOf( i)
+	{
+		let r = Down[i]; if (r < 0) return 0;
+		let d = (i % N != r % N && (i / N | 0) != (r / N | 0)) ? Cell * SQ2 : Cell, p = Pace(Math.max(0, Level[i] - Level[r]) / d);
+		return p < 0.02 ? 0 : p < 0.2 ? 1 : 2;
+	}
+
+	// the meander's wobble at a spot (as RiverAt: salt 7830 across, 7831 along)
+	function  Wob( X,  Z,  s) { return ( Fbm(X / 64.0, Z / 64.0, 2, s) / 0.375 - 1); }
+
+	// which way it runs (0-7: E, SE, S, SW, W, NW, N, NE; E = +x, S = +z): the river's nearest piece (v, downstream, in the
+	// wobbled space RiverAt looks in) turned back through the wobble (J, by differences half a block either side of the column's
+	// middle), then its eighth of the circle by comparing with tan 22.5 degrees (no atan2, so both editions agree to the bit)
+	function  RiverFlowAt( bx,  bz,  vx,  vz)
+	{
+		let X = bx + 0.5, Z = bz + 0.5, A = Meander * Belt;
+		let mxX = Wob(X + 0.5, Z, 7830) - Wob(X - 0.5, Z, 7830), mxZ = Wob(X, Z + 0.5, 7830) - Wob(X, Z - 0.5, 7830);
+		let mzX = Wob(X + 0.5, Z, 7831) - Wob(X - 0.5, Z, 7831), mzZ = Wob(X, Z + 0.5, 7831) - Wob(X, Z - 0.5, 7831);
+		let j00 = 1 + A * mxX, j01 = A * mxZ, j10 = A * mzX, j11 = 1 + A * mzZ, sg = j00 * j11 - j01 * j10 < 0 ? -1 : 1;
+		let wx = sg * (j11 * vx - j01 * vz), wz = sg * (-j10 * vx + j00 * vz);
+		let ax = Math.abs(wx), az = Math.abs(wz), T = 0.41421356237309503;
+		if (ax == 0 && az == 0) return 0;
+		if (az <= ax * T) return wx > 0 ? 0 : 4;
+		if (ax <= az * T) return wz > 0 ? 2 : 6;
+		return wx > 0 ? (wz > 0 ? 1 : 7) : (wz > 0 ? 3 : 5);
+	}
+
+	// a river (its plan cell) that stays frozen over (the same test as the Ice in DrawBlockColumn)
+	function  RiverFrozen( ch) { return ( Temp[ch] + Swing[ch] < FreezeSummer); }
+
+	function DrawBlockColumn( col,  x,  z,  bx,  bz,   s,  rivers)
 	{
 		let c = s.c; let yg = s.g0;
 		// 1. the ground: the plan's rock at each height (bedrock at the bottom, the soil and what erosion laid down on top)
@@ -4434,7 +4470,22 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 		// 3. the surface by sub-biome (the land's tops; under water only the sea's own rows)
 		if (SurfaceHere(s)) Surface(col, x, z, bx, bz, yg, c, s.cs, s.row);
 		// 4. water, and Ice where it stays frozen
-		for (let y = yg + 1; y <= Math.min(s.top, ColH() - 1); y++) col[CAt(x, y, z)] = 50;
+		let wid = s.ys >= 0 ? RiverWater + 8 * RiverPaceOf(s.channel) + RiverFlowAt(bx, bz, s.rv.vx, s.rv.vz) : 50;   // (Beta 0.1.5.4: a river's water runs)
+		for (let y = yg + 1; y <= Math.min(s.top, ColH() - 1); y++) col[CAt(x, y, z)] = wid;
+		// (Beta 0.1.5.4) falling water: where a river beside it (the 4 sides, each one's own Probe, not chained) stands 2 or more
+		// higher, the air over this one's surface up to 1 under the highest such; not where either is frozen over
+		if (s.ys >= 0 && !RiverFrozen(s.channel))
+		{
+			let hi = s.ys;
+			for (let k = 0; k < 4; k++)
+			{
+				let nx = bx + (k == 0 ? 1 : k == 1 ? -1 : 0), nz = bz + (k == 2 ? 1 : k == 3 ? -1 : 0);
+				if (nx < 0 || nz < 0 || nx >= Size || nz >= Size) continue;
+				let n = Probe(nx, nz, rivers);
+				if (n.ys >= s.ys + 2 && n.ys > hi && !RiverFrozen(n.channel)) hi = n.ys;
+			}
+			for (let y = s.ys + 1; y <= Math.min(hi - 1, ColH() - 1); y++) if (col[CAt(x, y, z)] == 0) col[CAt(x, y, z)] = RiverFalling;
+		}
 		if (s.wet && s.top < ColH())
 		{
 			let ic = s.ys >= 0 ? s.channel : c.i;
@@ -4648,13 +4699,13 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 		for (let __a59 = rivers, __k59 = 0; __k59 < __a59.length; __k59++)
 		{ const b = __a59[__k59];
 			// the nearest point on the curve's pieces, and how far along (t, 0-1)
-			let bd = Number.MAX_VALUE, bt = 0; let past = false;
+			let bd = Number.MAX_VALUE, bt = 0; let past = false; let bk = 0;
 			for (let k = 0; k < Pieces; k++)
 			{
 				let ax = b.px[k], az = b.pz[k], vx = b.px[k + 1] - ax, vz = b.pz[k + 1] - az, l2 = vx * vx + vz * vz;
 				let u0 = l2 > 0 ? ((X - ax) * vx + (Z - az) * vz) / l2 : 0, u = clamp(u0, 0, 1);
 				let dx = X - (ax + u * vx), dz = Z - (az + u * vz), d2 = dx * dx + dz * dz;
-				if (d2 < bd) { bd = d2; bt = (k + u) / Pieces; past = b.end && k == Pieces - 1 && u0 > 1; }
+				if (d2 < bd) { bd = d2; bt = (k + u) / Pieces; past = b.end && k == Pieces - 1 && u0 > 1; bk = k; }
 			}
 			if (past) continue;   // (beyond where the river ends: no round end of channel or banks out into the sea or lake)
 			let dist = Math.sqrt(bd), half = (b.wS + (b.wE - b.wS) * bt) / 2, level = b.lS + (b.lE - b.lS) * bt;
@@ -4662,7 +4713,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 			if (dist < half)
 			{
 				let r = dist / half;
-				if (r < best) { best = r; h.channel = b.i; h.r = r; h.level = level; h.depth = b.dS + (b.dE - b.dS) * bt; h.w = half * 2; }
+				if (r < best) { best = r; h.channel = b.i; h.r = r; h.level = level; h.depth = b.dS + (b.dE - b.dS) * bt; h.w = half * 2; h.vx = b.px[bk + 1] - b.px[bk]; h.vz = b.pz[bk + 1] - b.pz[bk]; }
 			}
 			else if (dist < half + Bank)
 			{
@@ -5605,7 +5656,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.5.3';
+const GAME_VERSION = 'Beta 0.1.5.4';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -6095,9 +6146,12 @@ addBlockRows(BLOCK_DATA.LYING_LOGS);
 // SNOW + layers - 1 (data/blocks.json SNOW)
 const SNOW = 380, SNOW_BLOCK = 387, isSnow = b => b >= SNOW && b < SNOW_BLOCK;
 addBlockRows(BLOCK_DATA.SNOW);
-const isWater = id => id >= WATER && id <= WATER + 7;
+const isWater = id => id >= WATER && id <= WATER + 7 || id >= 3891 && id <= 3915;   // (and the Earthlike rivers' water, RIVER_WATER 3891-3915)
+// still water: Water, and (Beta 0.1.5.4) the rivers' running and falling water, sources that never change on their own
+const isStill = id => id === WATER || id >= 3891 && id <= 3915;
+const waterLevel = id => id >= 3891 && id <= 3915 ? 0 : id - WATER;   // (0 still; 1-7 flowing, a step weaker for each block it has run)
 // how high the water's surface sits in its block (water with more water on top fills the whole block)
-const waterHeight = (id, above) => isWater(above) ? 1 : id === WATER ? 0.875 : Math.max(0.15, 0.875 * (8 - (id - WATER)) / 8);
+const waterHeight = (id, above) => isWater(above) ? 1 : isStill(id) ? 0.875 : Math.max(0.15, 0.875 * (8 - waterLevel(id)) / 8);
 const torchVariant = (wi, n, burn = 0) => TORCH_IDS[burn + ':' + wi + ':' + n];
 const torchMax = wi => wi ? 2 : 4;   // a wall holds up to 2 torches, a standing spot up to 4
 const wallIndex = (dx, dz) => TORCH_WALLS.findIndex(w => w && w[0] === dx && w[1] === dz);
@@ -6411,6 +6465,18 @@ addBlockRows(formRows(BLOCK_DATA.FORMS));   // (every piece, slab, stairs... ite
 // earthlike = hidden (not in your inventory, the creative inventory, search, recipes or the Shapes tab) until Earthlike worlds
 // come; only Earthlike's land puts them down. A door's states and a form's items are earthlike when their row is.
 const RIVER_WATER = 3891;   // (+ 8 x pace + flow: data/blocks.json RIVER_WATER)
+const RIVER_FALLING = 3915;   // (falling water: flow 8, pace 2)
+const isRiver = id => id >= RIVER_WATER && id <= RIVER_FALLING;   // a river's running water, or falling water (Earthlike)
+// (Beta 0.1.5.4) a river's current: how fast it runs (blocks a second, by pace: gentle, quick, rapids) and which way (flow 0-7:
+// E, SE, S, SW, W, NW, N, NE; E = +x, S = +z). The same as the desktop version's
+const RIVER_SPEED = [0.75, 1.75, 3.0], RIVER_WAYS = [[1, 0], [Math.SQRT1_2, Math.SQRT1_2], [0, 1], [-Math.SQRT1_2, Math.SQRT1_2],
+  [-1, 0], [-Math.SQRT1_2, -Math.SQRT1_2], [0, -1], [Math.SQRT1_2, -Math.SQRT1_2]];
+// the current in a block, [vx, vz] (running river water; falling water and everything else: null)
+function riverCurrent(b) {
+  if (b < RIVER_WATER || b >= RIVER_FALLING) return null;
+  const k = b - RIVER_WATER, s = RIVER_SPEED[k >> 3], w = RIVER_WAYS[k & 7];
+  return [w[0] * s, w[1] * s];
+}
 const EARTH_TABLES = ['EARTH_GROUND', 'EARTH_PLANTS', 'EARTH_ROCKS', 'EARTH_SOILS', 'EARTH_GRAVELS', 'EARTH_WOODS', 'EARTH_FENCES', 'RIVER_WATER'];
 for (const t of EARTH_TABLES) addBlockRows(BLOCK_DATA[t] || []);
 addBlockRows(doorRows(BLOCK_DATA.EARTH_DOORS || []));
@@ -9169,8 +9235,13 @@ function wakeWater(x, y, z) {
   }
 }
 function waterWants(x, y, z, cur) {
-  if (cur === WATER) return cur;                                  // still water never moves
+  if (isStill(cur)) return cur;                                   // still water never moves (nor does a river's water)
   if (cur && !isWater(cur) && !isTorch(cur)) return cur;          // solid blocks hold water back
+  // (Beta 0.1.5.4) a river heals: a spot touching a river's running water on 2 or more sides becomes that water (the first
+  // such side, in SIDES order: +x, -x, +z, -z), so a block taken out of a river fills back with running water
+  let rw = 0, rn = 0;
+  for (const [dx, dz] of SIDES) { const n = getBlock(x + dx, y, z + dz); if (n >= RIVER_WATER && n < RIVER_FALLING) { if (!rn) rw = n; rn++; } }
+  if (rn >= 2) return rw;
   if (isWater(getBlock(x, y + 1, z))) return WATER + 1;            // pouring down from above
   let best = 8;
   for (const [dx, dz] of SIDES) {
@@ -9178,7 +9249,7 @@ function waterWants(x, y, z, cur) {
     if (!isWater(n)) continue;
     // water only spreads sideways from water that rests on something (ground, or still water)
     const under = getBlock(x + dx, y - 1, z + dz);
-    if (under === WATER || (under && !isWater(under) && !isTorch(under))) best = Math.min(best, n - WATER + 1);
+    if (isStill(under) || (under && !isWater(under) && !isTorch(under))) best = Math.min(best, waterLevel(n) + 1);
   }
   if (best <= 7) return WATER + best;
   return isWater(cur) ? 0 : cur;                                  // nothing feeding it: dries up
@@ -9436,6 +9507,26 @@ function moveAxis(axis, d) {
   player.hitWall = true;
 }
 // water at a point in the world (counting how high the surface is in that block)
+// (Beta 0.1.5.4) every half a second: how much open running river water is near your head (every 2nd column within 8 blocks,
+// heights within 8). Each river block with air above it counts 1 / (1 + d^2 / 25), d from your head to the middle of its top;
+// gentle and quick water is the calm loop's, rapids and falling water the rapids loop's
+let riverSoundTimer = 0, riverHeard = [0, 0];
+function riverSound(dt) {
+  if ((riverSoundTimer -= dt) > 0) return;
+  riverSoundTimer = 0.5;
+  let calm = 0, rapid = 0;
+  if (EARTH) {
+    const hx = player.x, hy = player.y + EYE, hz = player.z, x0 = Math.floor(hx), y0 = Math.floor(hy), z0 = Math.floor(hz);
+    for (let dz = -8; dz <= 8; dz += 2) for (let dx = -8; dx <= 8; dx += 2) for (let dy = -8; dy <= 8; dy++) {
+      const x = x0 + dx, y = y0 + dy, z = z0 + dz, b = getBlock(x, y, z);
+      if (!isRiver(b) || getBlock(x, y + 1, z) !== 0) continue;
+      const ex = x + 0.5 - hx, ey = y + 1 - hy, ez = z + 0.5 - hz, w = 1 / (1 + (ex * ex + ey * ey + ez * ez) / 25);
+      if (b >= RIVER_WATER + 16) rapid += w; else calm += w;
+    }
+  }
+  riverHeard = [calm, rapid];
+  Sound.river(calm, rapid);
+}
 function waterAt(x, y, z) {
   const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z), b = getBlock(fx, fy, fz);
   return isWater(b) && y - fy < waterHeight(b, getBlock(fx, fy + 1, fz));
@@ -9899,6 +9990,27 @@ const Sound = (() => {
     filter(out, 'hp', 45, 0.7, sr);
     return finish(out, sr, 0.9);
   }
+  // ---- the river (Beta 0.1.5.4, Earthlike): a seamless 6-second loop of running water. Calm ('river'): a soft low rush with
+  // two slow swells and a few low gurgles (about 3 a second); 'rapids': brighter and busier (about 8 a second). Made half a second
+  // longer, and that extra end is faded into the start, so it loops without a seam
+  function riverLoop(r, sr, rapids) {
+    const n = Math.floor(sr * 6), x = Math.floor(sr * 0.5), raw = new Float32Array(n + x);
+    for (let i = 0; i < raw.length; i++) raw[i] = r() * 2 - 1;
+    if (rapids) { filter(raw, 'bp', 900, 0.5, sr); filter(raw, 'lp', 2200, 0.7, sr); } else filter(raw, 'lp', 450, 0.7, sr);
+    let e = 0; for (let i = 0; i < raw.length; i++) e += raw[i] * raw[i];
+    const k = e ? 0.25 / Math.sqrt(e / raw.length) : 0, ph = r() * 2 * Math.PI;   // (the rush at an even loudness, then the swells)
+    for (let i = 0; i < raw.length; i++) raw[i] *= k * (0.75 + 0.25 * Math.sin(2 * Math.PI * 2 * i / n + ph));
+    const count = rapids ? 48 : 18;
+    for (let j = 0; j < count; j++) bubble(raw, sr, { start: r() * 6, freq: rapids ? 300 + r() * 500 : 150 + r() * 250, len: 0.04 + r() * 0.06, amp: (rapids ? 0.12 : 0.15) * (0.5 + r()) });
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) out[i] = raw[i];
+    for (let i = 0; i < x; i++) { const t = i / x; out[i] = raw[i] * Math.sqrt(t) + raw[n + i] * Math.sqrt(1 - t); }
+    let m = 0; for (let i = 0; i < n; i++) m = Math.max(m, Math.abs(out[i]));
+    const s = m ? (rapids ? 0.7 : 0.6) / m : 0;
+    for (let i = 0; i < n; i++) out[i] *= s;
+    return out;
+  }
+  let riverGains = null;   // (the two loops' volumes, once a river has been heard)
   const ANIMAL_VOICES = { cluck: [cluck, 57000], quack: [quack, 58000], bleat: [bleat, 59000], grunt: [grunt, 60000], roar: [roar, 66000] };
   function buildBank() {
     bank = {};
@@ -9936,6 +10048,12 @@ const Sound = (() => {
         bank.water[kind].push(b);
       }
     });
+    bank.river = {};
+    for (const [kind, rapids, seed] of [['river', false, 51000], ['rapids', true, 51097]]) {
+      const data = riverLoop(rng(seed), sr, rapids), b = ctx.createBuffer(1, data.length, sr);
+      b.copyToChannel(data, 0);
+      bank.river[kind] = b;
+    }
     bank.growl = { say: [] };
     for (let v = 0; v < VARIANTS; v++) {
       const data = growl(rng(31000 + v * 29), sr);
@@ -10154,6 +10272,23 @@ const Sound = (() => {
     splash(speed) { play('water', 'splash', Math.min(1, 0.3 + speed / 14), speed > 12 ? 0.85 : 1, 0, 'player'); },   // harder falls = bigger, deeper splash
     swim() { play('water', 'swim', 0.55, 1, 0, 'player'); },   // (low sounds seem quieter, so this is turned up a little)
     pour() { play('water', 'place', 0.8, 1); },
+    // (Beta 0.1.5.4) the river near you: calm and rapid are how much open running water is about (riverSound); the loops start
+    // the first time there's any, and their volumes glide to the new levels over about a second (the Block slider)
+    river(calm, rapid) {
+      if (!ctx || !bank || !bank.river) return;
+      const k = muted ? 0 : levels.master * levels.block, want = [0.35 * Math.min(1, calm / 8) * k, 0.45 * Math.min(1, rapid / 6) * k];
+      if (!riverGains) {
+        if (want[0] <= 0 && want[1] <= 0) return;
+        riverGains = ['river', 'rapids'].map(kind => {
+          const src = ctx.createBufferSource(), g = ctx.createGain();
+          src.buffer = bank.river[kind]; src.loop = true; g.gain.value = 0;
+          src.connect(g).connect(master); src.start();
+          return g;
+        });
+      }
+      riverGains.forEach((g, i) => g.gain.setTargetAtTime(want[i], ctx.currentTime, 0.35));
+    },
+    get riverLevels() { return riverGains ? riverGains.map(g => g.gain.value) : null; },   // (testing)
     throw() { play('throw', 'say', 0.7, 1); },   // you threw something (others hear it with Sound.at)
     // a sound from a spot in the world ('throw', 'splat'): quieter the further away, panned left/right
     at(voice, vol, pan, ch = 'mob') { if (vol > 0.01) play(voice, 'say', vol, 1, pan, ch); },
@@ -12817,8 +12952,14 @@ function updateDrops(dt) {
       }
     } else {
     if (d.age > 300 && !d.keep) { spillBag(d); removeDrop(d); continue; }   // gone after 5 minutes (unless it must stay; a Linen Bag spills what's in it)
-    // fall and slide to a stop, resting on top of blocks
-    d.vy = Math.max(-30, d.vy - 22 * dt);
+    // fall and slide to a stop, resting on top of blocks. (Beta 0.1.5.4) In a river's running water a drop floats and the
+    // current carries it: it rises (1.5 a second) until it's in the top water block, 0.6 of the way up it; in falling water it falls
+    const rb = getBlock(Math.floor(d.x), Math.floor(d.y + 0.25), Math.floor(d.z)), rc = riverCurrent(rb);
+    if (rc) {
+      d.vx = rc[0]; d.vz = rc[1];
+      d.vy = isWater(getBlock(Math.floor(d.x), Math.floor(d.y + 0.25) + 1, Math.floor(d.z))) || d.y + 0.25 - Math.floor(d.y + 0.25) < 0.6 ? 1.5 : 0;
+    } else if (rb === RIVER_FALLING) d.vy = -3;
+    else d.vy = Math.max(-30, d.vy - 22 * dt);
     const nx = d.x + d.vx * dt, nz = d.z + d.vz * dt, ny = d.y + d.vy * dt;
     if (!solid(Math.floor(nx), Math.floor(d.y), Math.floor(d.z))) d.x = nx; else d.vx = 0;
     if (!solid(Math.floor(d.x), Math.floor(d.y), Math.floor(nz))) d.z = nz; else d.vz = 0;
@@ -16266,7 +16407,7 @@ function earthSeedFrom(text) {
 function earthColTest(seedText, size, trees = true, land = 9) {
   return new Promise((resolve, reject) => {
     const w = earthWorker(), ncx = size / 16 | 0, todo = [];
-    let h = 2166136261, hs = 2166136261, plan = null, start = null, ms = 0, n = 0;
+    let h = 2166136261, hs = 2166136261, plan = null, start = null, ms = 0, n = 0; const rc = new Array(25).fill(0);
     const next = () => { const t = todo.shift(); w.postMessage({ kind: 'draw', id: t[2], cx: t[0], cz: t[1], trees }); };
     w.onmessage = e => {
       const m = e.data;
@@ -16281,12 +16422,12 @@ function earthColTest(seedText, size, trees = true, land = 9) {
       }
       ms += m.ms; n++;
       const col = m.col;
-      if (m.id === 'c') for (let k = 0; k < col.length; k++) h = Math.imul(h ^ col[k], 16777619) >>> 0;
+      if (m.id === 'c') for (let k = 0; k < col.length; k++) { h = Math.imul(h ^ col[k], 16777619) >>> 0; if (col[k] >= 3891 && col[k] <= 3915) rc[col[k] - 3891]++; }
       else for (let k = 0; k < col.length; k++) hs = Math.imul(hs ^ col[k], 16777619) >>> 0;
       if (todo.length) { next(); return; }
       w.terminate();
       const hx = v => (v >>> 0).toString(16).padStart(8, '0');
-      resolve(`${seedText} ${size} ${trees ? 'trees' : 'notrees'} land ${land}: COLHASH ${hx(h)} SPAWNHASH ${hx(hs)} start ${start} PLANHASH ${hx(plan.planHash)} (plan ${plan.ms} ms, ${(ms / n).toFixed(1)} ms a column)`);
+      resolve(`${seedText} ${size} ${trees ? 'trees' : 'notrees'} land ${land}: COLHASH ${hx(h)} SPAWNHASH ${hx(hs)} start ${start} PLANHASH ${hx(plan.planHash)} (plan ${plan.ms} ms, ${(ms / n).toFixed(1)} ms a column) RIVERCOUNT ${rc.map((c, k) => c ? (3891 + k) + ':' + c : '').filter(Boolean).join(' ') || 'none'}`);
     };
     w.postMessage({ kind: 'plan', seed: earthSeedFrom(seedText), size, land });
   });
@@ -16583,8 +16724,19 @@ function frame(now) {
   // swimming: in water when your legs or waist are under the surface
   const swimming = !player.fly && (waterAt(player.x, player.y + 0.2, player.z) || waterAt(player.x, player.y + 0.9, player.z));
   const speed = player.fly ? 11 : (keys.ShiftLeft || keys.ShiftRight ? 6.2 : 4.3) * (swimming ? 0.55 : 1);
-  const tx = (fx * cos - fz * sin) * speed;
-  const tz = (-fx * sin - fz * cos) * speed;
+  let tx = (fx * cos - fz * sin) * speed;
+  let tz = (-fx * sin - fz * cos) * speed;
+  // (Beta 0.1.5.4) a river carries you: its current is added to where you're heading. It's the water at your waist, or if your
+  // waist is out of the water, at your legs (wading: half the current). Falling water pulls you down instead (below)
+  let inFalling = false;
+  if (!player.fly) {
+    const waist = waterAt(player.x, player.y + 0.9, player.z), legs = !waist && waterAt(player.x, player.y + 0.2, player.z);
+    if (waist || legs) {
+      const wb = getBlock(Math.floor(player.x), Math.floor(player.y + (waist ? 0.9 : 0.2)), Math.floor(player.z)), c = riverCurrent(wb);
+      if (c) { tx += waist ? c[0] : c[0] / 2; tz += waist ? c[1] : c[1] / 2; }
+      inFalling = wb === RIVER_FALLING;
+    }
+  }
   const accel = Math.min(1, dt * (player.onGround || player.fly ? 14 : swimming ? 6 : 4));
   player.vx += (tx - player.vx) * accel;
   player.vz += (tz - player.vz) * accel;
@@ -16595,7 +16747,7 @@ function frame(now) {
   } else if (swimming) {
     // water slows your fall and lets you sink gently; hold Space to swim up, Shift to dive
     const up = locked && keys.Space, down = locked && (keys.ShiftLeft || keys.ShiftRight);
-    const ty = up ? 3.4 : down ? -3.4 : -1.6;
+    const ty = (up ? 3.4 : down ? -3.4 : -1.6) - (inFalling ? 4 : 0);   // (falling water: you go down it, and can't swim up it)
     player.vy += (ty - player.vy) * Math.min(1, dt * 4);
     if (up && player.onGround) player.vy = 5;
     // swimming up against the edge of a pool climbs you out of it
@@ -16649,6 +16801,7 @@ function frame(now) {
   updateDrops(dt);
   updateFalls(dt);
   updateWater(dt);
+  if (worldLoaded) riverSound(dt);
   updateHealth(dt);
   if (locked && worldLoaded) { updateStairs(); updateEerie(dt); }
   if (hurtFlash > 0 || hurtEl.style.opacity !== '0') { hurtFlash = Math.max(0, hurtFlash - dt); hurtEl.style.opacity = String(Math.min(1, hurtFlash / 0.2)); }

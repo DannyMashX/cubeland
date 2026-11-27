@@ -497,6 +497,48 @@ public partial class Sound : Node
 		return Finish(o, 0.8);
 	}
 
+	// ---- (Beta 0.1.5.4) Earthlike's rivers: two seamless 6 s loops, the same recipe as the web version's: the rush (noise,
+	// low-passed, or band- and low-passed for the rapids) at an even loudness with slow swells, gurgles scattered over it, and
+	// its last half second crossfaded into its start so it loops without a seam
+	public static float[] RiverLoop(bool rapids) => RiverLoop(Rng(rapids ? 51097 : 51000), rapids);
+	static float[] RiverLoop(Func<double> r, bool rapids)
+	{
+		int n = SR * 6, x = SR / 2; var raw = new float[n + x];
+		for (int i = 0; i < raw.Length; i++) raw[i] = (float)(r() * 2 - 1);
+		if (rapids) { Filter(raw, "bp", 900, 0.5); Filter(raw, "lp", 2200, 0.7); } else Filter(raw, "lp", 450, 0.7);
+		double e = 0; for (int i = 0; i < raw.Length; i++) e += (double)raw[i] * raw[i];
+		double k = e > 0 ? 0.25 / Math.Sqrt(e / raw.Length) : 0, ph = r() * 2 * Math.PI;   // (the rush at an even loudness, then the swells)
+		for (int i = 0; i < raw.Length; i++) raw[i] = (float)(raw[i] * k * (0.75 + 0.25 * Math.Sin(2 * Math.PI * 2 * i / n + ph)));
+		int count = rapids ? 48 : 18;
+		for (int j = 0; j < count; j++)
+		{
+			double start = r() * 6, freq = rapids ? 300 + r() * 500 : 150 + r() * 250, len = 0.04 + r() * 0.06, amp = (rapids ? 0.12 : 0.15) * (0.5 + r());
+			Bubble(raw, start, freq, len, amp);
+		}
+		var o = new float[n];
+		for (int i = 0; i < n; i++) o[i] = raw[i];
+		for (int i = 0; i < x; i++) { double t = (double)i / x; o[i] = (float)(raw[i] * Math.Sqrt(t) + raw[n + i] * Math.Sqrt(1 - t)); }
+		double m = 0; for (int i = 0; i < n; i++) m = Math.Max(m, Math.Abs(o[i]));
+		double s = m > 0 ? (rapids ? 0.7 : 0.6) / m : 0;
+		for (int i = 0; i < n; i++) o[i] = (float)(o[i] * s);
+		return o;
+	}
+	static AudioStreamWav LoopWav(float[] d) { var w = Wav(d); w.LoopMode = AudioStreamWav.LoopModeEnum.Forward; w.LoopBegin = 0; w.LoopEnd = d.Length; return w; }
+	// both loops always play in an Earthlike world (from the first time either is wanted), each as loud as the river near you
+	// (Main.RiverHeard, every 0.5 s): River(calm, rapid)
+	AudioStreamWav[] riverWav; AudioStreamPlayer[] riverPlay; readonly float[] riverWant = new float[2], riverVol = new float[2];
+	public void River(float calm, float rapid)
+	{
+		float k = Muted ? 0 : Levels["master"] * Levels["block"];
+		riverWant[0] = 0.35f * Math.Min(1, calm / 8) * k; riverWant[1] = 0.45f * Math.Min(1, rapid / 6) * k;
+		if (riverPlay == null && riverWav != null && (riverWant[0] > 0 || riverWant[1] > 0))
+		{
+			riverPlay = new AudioStreamPlayer[2];
+			for (int i = 0; i < 2; i++) { riverPlay[i] = new AudioStreamPlayer { Stream = riverWav[i], Bus = "Sfx", VolumeDb = -80 }; AddChild(riverPlay[i]); riverPlay[i].Play(); }
+		}
+	}
+	public float RiverLevel(int i) => riverVol[i];   // (tests)
+
 	static AudioStreamWav Wav(float[] d, float gain = 1)
 	{
 		var bytes = new byte[d.Length * 2];
@@ -547,6 +589,7 @@ public partial class Sound : Node
 		Add("throw:say", v => Whoosh(Rng(61000 + v * 23)));
 		Add("splat:say", v => Splat(Rng(62000 + v * 23)));
 		lock (bank) foreach (var (k, l) in raw) bank[k] = l.Select(d => Wav(d)).ToArray();
+		riverWav = new[] { LoopWav(RiverLoop(false)), LoopWav(RiverLoop(true)) };   // (Beta 0.1.5.4: the river's two loops)
 		ready = true;
 		BuildMusic();
 	}
@@ -720,6 +763,8 @@ public partial class Sound : Node
 		float dt = (float)delta;
 		// the underwater muffle closes and opens smoothly
 		muffle.CutoffHz += (muffleTarget - muffle.CutoffHz) * Math.Min(1, dt * 20);
+		if (riverPlay != null)   // (the river's loops ease towards how loud they're wanted, over about a second)
+			for (int i = 0; i < 2; i++) { riverVol[i] += (riverWant[i] - riverVol[i]) * (1 - MathF.Exp(-dt / 0.35f)); riverPlay[i].VolumeDb = Mathf.LinearToDb(Math.Max(1e-5f, riverVol[i])); }
 		hush = Hushed ? Math.Max(0, hush - dt / 2.5f) : Math.Min(1, hush + dt / 4);
 		AudioServer.SetBusVolumeDb(musicBus, Mathf.LinearToDb(Math.Max(1e-4f, MusicLevel * hush)));
 		if (wanted == null) return;
