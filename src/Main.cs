@@ -70,9 +70,24 @@ public partial class Main : Node3D
 			// as 4-byte numbers (FNV-1a); the time per column; a top-down picture of 16 x 16 columns (--at=cx,cz their middle, in
 			// columns; --river: round the first river 8-20 blocks wide from the map's middle out) and a cut through its middle row)
 			string st = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--seed="))?[7..] ?? "pumpkin";
+			if (OS.GetCmdlineUserArgs().Contains("--noplants")) EarthCol.PlantsOn = false;   // (0.1.5.5 test: the trees and W only)
 			var sw = System.Diagnostics.Stopwatch.StartNew();
 			var plan = new EarthPlan(Worlds.SeedFrom(st), ArgInt("--size=", 2048), ArgInt("--room=", 0));
 			long planMs = sw.ElapsedMilliseconds; var tw = OS.GetCmdlineUserArgs().Contains("--notrees") ? null : new World(Worlds.SeedFrom(st), 4, 640, plan.Size, 1, 9); var cols = new EarthCol(plan, tw?.Gen); int ncx = plan.Size / 16;   // (the trees: land 9, Earthlike's, trunks up into the leaves)
+			if (tw != null && !OS.GetCmdlineUserArgs().Contains("--nostairs"))
+			{   // (0.1.5.5) STAIRS: the staircases found with nothing skipped, each region's "x,y,z,dir,n,mat" or "none", rows of z then x
+				var ssw = System.Diagnostics.Stopwatch.StartNew(); cols.Stairs = cols.FindStairs(new System.Collections.Generic.HashSet<int>());
+				GD.Print($"STAIRS {string.Join(" ", cols.Stairs.Select(st => st == null ? "none" : string.Join(",", st)))} (found in {ssw.ElapsedMilliseconds} ms)");
+			}
+			if (tw != null && OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--stairsurvey=")) is { } ssa)
+			{   // (test: a moved staircase's new spot, StairElsewhere, for seeds 1-10: found or not, how many tested, how long)
+				var q = ssa[14..].Split(','); int tries = int.Parse(q[0]), test = int.Parse(q[1]);
+				for (int sd = 1; sd <= 10; sd++)
+				{
+					var ssw = System.Diagnostics.Stopwatch.StartNew(); var f = cols.StairElsewhere(plan.Size / 4, plan.Size / 4, new System.Collections.Generic.HashSet<int>(), sd, tries, test);
+					GD.Print($"STAIRSURVEY seed {sd}: {(f == null ? "none" : string.Join(",", f))}, tested {cols.LastTested}, {ssw.ElapsedMilliseconds} ms");
+				}
+			}
 			uint h = 2166136261; sw.Restart();
 			for (int kz = 0; kz < 5; kz++) for (int kx = 0; kx < 5; kx++)
 			{
@@ -84,6 +99,19 @@ public partial class Main : Node3D
 				for (int kz = 0; kz < 5; kz++) for (int kx = 0; kx < 5; kx++)
 					foreach (int v in cols.Draw((2 * kx + 1) * ncx / 10, (2 * kz + 1) * ncx / 10)) if (Cubeland.Blocks.IsRiverWater(v)) rc[v] = rc.GetValueOrDefault(v) + 1;
 				GD.Print("RIVERCOUNT " + (rc.Count == 0 ? "none" : string.Join(" ", rc.Select(kv => $"{kv.Key}:{kv.Value}"))));
+			}
+			{   // (0.1.5.5) LIFECOUNT: the same for the life blocks: logs (upright or lying, in the log group), Burnt Logs, Earthlike's
+				// plants, the Flowers, crops, Cantaloupe and Dead Bush
+				// (web's form: over the 25 COLHASH columns and the 9 SPAWNHASH ones; crops 3700-3721)
+				static bool Life(int v) => Cubeland.Blocks.Get(Cubeland.Blocks.LogOf(v))?.Log == true || v >= 3994 && v <= 3996 || v >= 3940 && v <= 3961
+					|| v >= 194 && v <= 198 || v >= 3700 && v <= 3723;
+				var lc = new System.Collections.Generic.SortedDictionary<int, int>();
+				var (lsx, lsz) = EarthSpawn(plan);
+				var lifeCols = new System.Collections.Generic.List<(int, int)>();
+				for (int kz = 0; kz < 5; kz++) for (int kx = 0; kx < 5; kx++) lifeCols.Add(((2 * kx + 1) * ncx / 10, (2 * kz + 1) * ncx / 10));
+				for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) lifeCols.Add((Math.Clamp((lsx >> 4) + dx, 0, ncx - 1), Math.Clamp((lsz >> 4) + dz, 0, ncx - 1)));
+				foreach (var (acx, acz) in lifeCols) foreach (int v in cols.Draw(acx, acz)) if (v > 0 && Life(v)) lc[v] = lc.GetValueOrDefault(v) + 1;
+				GD.Print("LIFECOUNT " + (lc.Count == 0 ? "none" : string.Join(" ", lc.Select(kv => $"{kv.Key}:{kv.Value}"))));
 			}
 			GD.Print($"COLHASH {h:x8} (seed {st}, {plan.Size} wide, {cols.H} tall; plan {planMs} ms, {sw.ElapsedMilliseconds / 25.0:0} ms a column; PLANHASH {plan.PlanHash:x8} KEEPHASH {plan.KeepHash:x8})");
 			// (and SPAWNHASH: the same over the 3 x 3 columns round where a new world's players start, Main.EarthSpawn, its column
@@ -545,7 +573,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 		world = new World(current.Seed, current.Gen, current.H, current.S, current.B, current.Land);
 		if (current.Os && current.Gen == 3 && current.Land < 5 && WorldGen.EerieOn) world.Gen.OldStairs(current.OsSkip);   // (see Worlds.OldStairs)
 		world.DuckNear = DuckNear;   // (ducks help the field: see Main.Animals.cs)
-		genTask = Task.Run(() => { world.Generate(p => genProgress = p); LoadSaveBlocks(); });
+		genTask = Task.Run(() => { world.Generate(p => genProgress = p); FindEarthStairs(); LoadSaveBlocks(); });   // (0.1.5.5: an Earthlike world's staircases)
 	}
 
 	// ---- the screen: info in the corner, the crosshair, the hotbar ----
@@ -860,7 +888,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone, netTested; float bagNetT, mixT; int mixStep;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone, netTested, earthLifeTested; float bagNetT, mixT; int mixStep;
 	(int x, int y, int z, int id) mixRefill;   // (Beta 0.1.5.4: the river spot an Earthlike host refills in --mixtest)
 	// (test, --mixtest: the world as it stands, every block's full id in index order, as an FNV-1a fingerprint; and the changed blocks)
 	// (gen 4: over the 7 x 7 chunk columns round the plan's start, EarthSpawn's column, clamped to the map: y, then z, then x over
@@ -1256,6 +1284,22 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			for (int k = 0; k < 180; k++) drops.Update(1 / 60f);
 			Check($"a drop in quick water floats up to the top and drifts the river's way (3 s: moved {dr.P.X - sx:0.00}, height {dr.P.Y - y0:0.00} over the floor)", dr.P.X - sx > 4.5f && dr.P.X - sx < 5.6f && dr.P.Y > y0 + 2.4f && dr.P.Y < y0 + 3.6f && MathF.Abs(dr.P.Z - (z0 + 0.5f)) < 0.01f);
 			drops.Remove(dr);
+			{   // (Beta 0.1.5.5) a river carries mobs, but not ducks: a cow swimming (3 deep) and one wading (1 deep) in quick water
+				// running E drift E (it stands still of itself); a duck paddles where it likes; in falling water a cow sinks
+				(float dx, float y) MobDrift(string type, int water, int deep, float secs)
+				{
+					Trough(water, deep);
+					var m = type == "cow" ? SpawnCow(x0 + 10.5f, y0 + 1, z0 + 0.5f) : SpawnAnimal(type, x0 + 10.5f, y0 + 1, z0 + 0.5f);
+					float sx0 = m.X;
+					for (int k = 0; k < secs * 20; k++) { m.Walking = false; m.Timer = 99; m.Vx = m.Vz = 0; m.X = Math.Clamp(m.X, x0 + 1f, x0 + 58f); UpdateMobs(0.05f); }
+					var res = (m.X - sx0, m.Y - y0); RemoveMob(m); return res;
+				}
+				var cs = MobDrift("cow", R + 8, 3, 3); var cw = MobDrift("cow", R + 8, 1, 3); var du = MobDrift("duck", R + 8, 3, 3); var cf = MobDrift("cow", Blocks.FallingWater, 6, 1);
+				GD.Print($"RIVERMOBS cow swimming {cs.dx:0.00} (at {cs.y:0.00}), wading {cw.dx:0.00} (at {cw.y:0.00}); duck {du.dx:0.00}; cow in falling water ends at {cf.y:0.00}");
+				Check($"a river carries a cow swimming its way ({cs.dx:0.00} in 3 s, 1.75 a second) and one wading ({cw.dx:0.00})", cs.dx > 4.5f && cs.dx < 5.6f && cw.dx > 4.5f && cw.dx < 5.6f);
+				Check($"but not a duck ({du.dx:0.00})", MathF.Abs(du.dx) < 0.5f);
+				Check($"a cow in falling water sinks ({cf.y:0.00} over the floor after 1 s)", cf.y < 2.5f);
+			}
 			// the refill rule: a block put in the river and taken out fills back with its water; a notch in the bank (one side) with flowing water
 			Trough(R + 2, 2);
 			world.SetBlock(x0 + 20, y0 + 2, z0, Blocks.Stone); for (int k = 0; k < 8; k++) world.UpdateWater(0.3f);
@@ -1266,6 +1310,37 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			Check($"a notch in the bank touching it on one side fills with flowing water, not river water ({notch})", notch == Blocks.Water + 1);
 			Check("the river itself never changes on its own (the trough is still all its water)", Enumerable.Range(1, 58).All(k => world.GetBlock(x0 + k, y0 + 1, z0) == R + 2 && world.GetBlock(x0 + k, y0 + 2, z0 - 2) == R + 2));
 			player.Pos = new Vector3(x0 + 30.5f, y0 + 9, z0 - 10.5f); player.Vel = Vector3.Zero;
+		}
+		if (args.Contains("--earthlife") && !earthLifeTested && !menuOpen && shotTimer > 0.3f)
+		{   // (test, Beta 0.1.5.5: animals in an Earthlike world)
+			earthLifeTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int Bi(string n) => Array.IndexOf(EarthPlan.BiomeNames, n);
+			Check("an Earthlike world, its biome at your feet from the plan", Earthlike && EarthBiomeAt((int)player.Pos.X, (int)player.Pos.Z) is >= 0 and < 21);
+			Check("the Earthlike lists: cows in 5 biomes; goats on the crags, on the rocks and their gravels; boar under Mahogany and Teak too",
+				CowEarthBiomes.Length == 5 && CowEarthBiomes.Contains(Bi("savanna")) && AnimalEarthBiomes["goat"].Contains(Bi("crags")) && AnimalEarthBiomes["chicken"].Contains(Bi("dry_forest"))
+				&& AnimalEarthGround["goat"].Contains(4403) && AnimalEarthGround["goat"].Contains(5033) && AnimalEarthGround["goat"].Contains(Blocks.Grass) && LogsOf("boar").Contains(4000) && LogsOf("boar").Contains(4300) && !LogsOf("boar").Contains(4100));
+			Check("grass is any grassy top here (not the bare soils); what grazing or rooting leaves", GrassFor(Blocks.Grass) && GrassFor(4812) && GrassFor(Blocks.SnowyGrass) && !GrassFor(4802) && !GrassFor(Blocks.Dirt)
+				&& BareOf(4812) == 4802 && BareOf(Blocks.Grass) == Blocks.Dirt && World.Regrows(4802) && !World.Regrows(4804) && World.Regrows(Blocks.Dirt));
+			int x = (int)player.Pos.X + 3, z = (int)player.Pos.Z + 3, y = World.WY - 2;
+			while (y > 1 && world.GetBlock(x, y, z) == 0) y--;
+			world.SetBlock(x, y, z, 4812); world.SetBlock(x, y + 1, z, 0); world.SetBlock(x, y + 2, z, 0);
+			Check("a chicken can start on a grassy soil", AnimalSpot("chicken", x, z) is { } cs && (int)cs.Y == y + 1);
+			Graze(x, y, z);
+			Check("a cow grazing Grassy Red Earth leaves Red Earth, which it counts down", world.GetBlock(x, y, z) == 4802 && world.Grazed.ContainsKey(World.Idx(x, y, z)));
+			int secs = 0; while (world.GetBlock(x, y, z) == 4802 && secs < 400) { world.TickTimers(1); secs++; }
+			Check($"and it grows back to Grassy Red Earth ({secs} s)", world.GetBlock(x, y, z) == 4812 && !world.Grazed.ContainsKey(World.Idx(x, y, z)));
+			{   // (A5) a night mob's spot: on a field of Grassy Red Earth round you (open sky, nothing above), any spot counts
+				int px = (int)MathF.Floor(player.Pos.X), pz = (int)MathF.Floor(player.Pos.Z), y0 = (int)MathF.Floor(player.Pos.Y) - 1;
+				for (int dz = -14; dz <= 14; dz++) for (int dx = -14; dx <= 14; dx++)
+				{
+					world.SetBlock(px + dx, y0, pz + dz, 4812);
+					for (int u = 1; u <= 40; u++) if (world.GetBlock(px + dx, y0 + u, pz + dz) != 0) world.SetBlock(px + dx, y0 + u, pz + dz, 0);
+				}
+				int got = 0;
+				for (int k = 0; k < 40; k++) if (FindMobSpot(10, 12) is { } ms && world.GetBlock((int)MathF.Floor(ms.X), (int)MathF.Floor(ms.Y) - 1, (int)MathF.Floor(ms.Z)) == 4812) got++;
+				Check($"(A5) a mob's spot counts a grassy soil as grass here ({got} of 40 on Grassy Red Earth)", EarthMobGrass && got == 40);
+			}
 		}
 		if (args.Contains("--farm") && !farmTested && !menuOpen)
 		{   // (test: a row of soil in front of you with water at one end, tilled and planted the way you would, then 200 seconds of growing)
@@ -2099,7 +2174,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			int oak = Id("oak_sapling"), palm = Id("palm_sapling"), cedar = Id("cedar_sapling"), redwood = Id("redwood_sapling");
 			var saplings = Enumerable.Range(1, Blocks.MaxId - 1).Where(i => Blocks.Get(i)?.Grows != null).ToArray();
 			var dropping = Enumerable.Range(1, Blocks.MaxId - 1).Where(i => Blocks.Get(i)?.Sapling > 0).ToArray();
-			Check($"16 saplings ({saplings.Length}); the 16 trees' leaves drop their own ({dropping.Length}; Dead has none)", saplings.Length == 16 && dropping.Length == 16
+			Check($"20 saplings ({saplings.Length}); the 20 trees' leaves drop their own ({dropping.Length}; Dead has none)", saplings.Length == 20 && dropping.Length == 20
 				&& dropping.All(i => Blocks.IsLeaves(i) && Blocks.B[Blocks.B[i].Sapling].Grows != null) && Blocks.B[Blocks.Leaves].Sapling == oak
 				&& Blocks.B[Blocks.PalmLeaves].Sapling == palm && Blocks.B[Id("cedar_leaves")].Sapling == cedar && Blocks.B[Id("redwood_leaves")].Sapling == redwood);
 			Check("only Palm, Orange and Palo Verde grow on Sand too", string.Join(",", saplings.Where(i => Blocks.B[i].Sand).Select(DataKeys.KeyOf)) == "orange_sapling,palo_verde_sapling,palm_sapling");
@@ -2146,6 +2221,18 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			Check("its leaves never break anything (the Glass in their way is still there)", world.GetBlock(leaf.x, leaf.y, leaf.z) == Blocks.Glass);
 			world.SetBlock(x0, y + 1, z0, 0);
 			Check("a grown block changed is yours (not natural any more)", !world.Grown.Contains(World.Idx(x0, y + 1, z0)) && !Natural(x0, y + 1, z0));
+			{   // (Beta 0.1.5.5) the four new woods' saplings grow into their own trees
+				string[] news = { "mahogany", "acacia", "stiltroot", "teak" }; bool allGrew = true; var sizes = new List<string>();
+				for (int k = 0; k < news.Length; k++)
+				{
+					int sx = x0 + 10 * k, sz = z0 + 8, sid = Id(news[k] + "_sapling"); long si = World.Idx(sx, y, sz);
+					world.SetBlock(sx, y, sz, sid);
+					var tp = world.Gen.PlanTree(news[k], sx, y - 1, sz, (a, b, c) => World.Idx(a, b, c) == si ? 0 : world.GetBlock(a, b, c), (a, c) => y - 1);
+					bool grew = tp != null && world.GrowSapling(sx, y, sz) == World.Growth.Grew && tp.All(q => world.GetBlock(q.x, q.y, q.z) == q.id) && world.GetBlock(sx, y + 2, sz) == Id(news[k] + "_log");
+					sizes.Add($"{news[k]} {tp?.Count}"); allGrew &= grew;
+				}
+				Check($"the 4 new woods' saplings grow into their own trees ({string.Join(", ", sizes)} blocks)", allGrew);
+			}
 			// a Redwood: only from four saplings in a square
 			int rx = x0 + 20, rlog = Id("redwood_log");
 			world.SetBlock(rx, y, z0, redwood);

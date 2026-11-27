@@ -131,6 +131,7 @@ public sealed class AnimalNumbers
 	public int perChunk, crowdedAt, fedMax, babyHealth, nearMax;
 	public float nearRange, happyMax, mateCooldown, mateCost, babyTime, babyFoodBoost, foodHappy, spawnWeight;
 	public string[] food, biomes, ground, logs, prey;
+	public string[] earthBiomes, earthGround, earthLogs;   // (Beta 0.1.5.5: Earthlike worlds)
 	public ForageNumbers forage;
 	public int[] group, cubs;
 	public float cubChance;
@@ -145,6 +146,7 @@ public sealed class CowNumbers
 {
 	public int perChunk, crowdedAt, fatAt, fedMax, calfHealth;
 	public float happyMax, grazeHappy, grainHappy, grazeBelow, grazeTime, mateCooldown, mateCost, calfTime, calfGrainBoost, nearRange, regrowMin, regrowMax;
+	public string[] earthBiomes;   // (Beta 0.1.5.5: Earthlike worlds)
 }
 // data/texture-names.json: other spellings of pictures' files, pictures that borrow another's file until they have their own,
 // and the names of font letters a file name can't hold (file name -> the character)
@@ -249,6 +251,7 @@ public sealed class WildCropRow
 	public string crop;
 	public int seed, within, spread;
 	public string[] biomes, near, ground;
+	public string[] earthBiomes, earthNear;   // (Beta 0.1.5.5: Earthlike's land 9, by the plan's biome names)
 	public double chance;
 	public int[] tries;
 }
@@ -256,6 +259,7 @@ public sealed class DeadBushNumbers
 {
 	public int seed;
 	public string[] biomes, ground;
+	public string[] earthBiomes, earthGround;   // (Beta 0.1.5.5: Earthlike's land 9)
 	public double chance;
 }
 // a TREE_EXTRA row: tree grows in biome on a chance per column of its ground; grove [size, above]: only where a slow noise

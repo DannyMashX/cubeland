@@ -62,7 +62,8 @@ public partial class Main
 		var P = player.Pos;
 		if (mobList.Count(m => m.T.Cow && (m.X - P.X) * (m.X - P.X) + (m.Z - P.Z) * (m.Z - P.Z) < 80 * 80) >= 6) return;
 		bool none = !mobList.Any(m => m.T.Cow);
-		if (FindMobSpot(none ? 12 : 30, none ? 32 : 60) is not { } s) return;
+		if (FindMobSpot(none ? 12 : 30, none ? 32 : 60, grassy: true) is not { } s) return;
+		if (Earthlike && !CowEarthBiomes.Contains(EarthBiomeAt((int)MathF.Floor(s.X), (int)MathF.Floor(s.Z)))) return;   // (0.1.5.5: Earthlike, by biome)
 		int n = 2 + rnd.Next(3);
 		for (int k = 0; k < n; k++)
 		{
@@ -102,7 +103,7 @@ public partial class Main
 			if ((m.Grazing -= dt) <= 0)
 			{
 				int x = (int)MathF.Floor(m.X), y = (int)MathF.Floor(m.Y) - 1, z = (int)MathF.Floor(m.Z);
-				if (world.GetBlock(x, y, z) == Blocks.Grass) { Graze(x, y, z); m.Happy = Math.Min(CowHappyMax, m.Happy + GrazeHappy); }
+				if (GrassFor(world.GetBlock(x, y, z))) { Graze(x, y, z); m.Happy = Math.Min(CowHappyMax, m.Happy + GrazeHappy); }
 				m.Timer = 1 + (float)rnd.NextDouble() * 2;
 			}
 			return true;
@@ -137,7 +138,7 @@ public partial class Main
 		if (!m.Walking && m.Happy < GrazeBelow && (m.GrazeIn -= dt) <= 0)
 		{
 			m.GrazeIn = 5 + (float)rnd.NextDouble() * 10;
-			if (world.GetBlock((int)MathF.Floor(m.X), (int)MathF.Floor(m.Y) - 1, (int)MathF.Floor(m.Z)) == Blocks.Grass) { m.Grazing = GrazeTime; return true; }
+			if (GrassFor(world.GetBlock((int)MathF.Floor(m.X), (int)MathF.Floor(m.Y) - 1, (int)MathF.Floor(m.Z)))) { m.Grazing = GrazeTime; return true; }
 		}
 		return false;
 	}
@@ -163,10 +164,10 @@ public partial class Main
 		for (int k = 0; k < 4; k++) AddHeart(new Vector3(x, y + 1, z), k * 0.15f);
 	}
 
-	// eaten grass: Dirt for now, back to Grass in a few minutes (World.Grazed counts it down)
+	// eaten grass: Dirt for now (a grassy soil: its bare soil), back to Grass (the grassy soil) in a few minutes (World.Grazed counts it down)
 	void Graze(int x, int y, int z)
 	{
-		world.SetBlock(x, y, z, Blocks.Dirt);
+		world.SetBlock(x, y, z, BareOf(world.GetBlock(x, y, z)));
 		world.Grazed[World.Idx(x, y, z)] = World.RegrowMin + (float)rnd.NextDouble() * (World.RegrowMax - World.RegrowMin);
 		Sound.I?.Place(Blocks.Grass);
 	}

@@ -23,6 +23,8 @@ public partial class World
 	public static readonly float DuckRate = Nums.Mobs.ANIMALS?.GetValueOrDefault("duck")?.duckRate ?? 1;
 	// grass a cow ate: Dirt spot -> seconds until it's Grass again (if nothing has been put on it)
 	public readonly Dictionary<long, float> Grazed = new();
+	// (Beta 0.1.5.5) what grazed grass can be while it grows back: Dirt, or a bare soil whose grassy soil there is (not Desert Soil)
+	public static bool Regrows(int b) => b == B.Dirt || b is >= 4800 and <= 4809 and not 4804;
 	public static readonly float RegrowMin = Nums.Mobs.COW.regrowMin, RegrowMax = Nums.Mobs.COW.regrowMax;   // (data/mobs.json's COW)
 	float farmTimer, wetTimer;
 
@@ -127,11 +129,12 @@ public partial class World
 		}
 		foreach (long i in new List<long>(Grazed.Keys))
 		{
-			if (Blocks[i] != B.Dirt) { Grazed.Remove(i); continue; }   // (dug up, tilled or built over)
+			int was = Blocks[i];
+			if (!Regrows(was)) { Grazed.Remove(i); continue; }   // (dug up, tilled or built over)
 			if ((Grazed[i] -= step) > 0) continue;
 			Grazed.Remove(i);
 			var (x, y, z) = FromIdx(i);
-			if (!Solid(x, y + 1, z) && !B.IsWater(GetBlock(x, y + 1, z))) SetBlock(x, y, z, B.Grass);
+			if (!Solid(x, y + 1, z) && !B.IsWater(GetBlock(x, y + 1, z))) SetBlock(x, y, z, was == B.Dirt ? B.Grass : was + 10);   // (0.1.5.5: a bare soil grows back grassy)
 		}
 		foreach (long i in new List<long>(Soils))
 		{

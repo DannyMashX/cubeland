@@ -30,10 +30,26 @@ public partial class Main
 	static readonly int Feather = KeyOr("feather"), Egg = KeyOr("egg"), Truffle = KeyOr("truffle"), ClayJug = KeyOr("clay_jug"), JugOfMilk = KeyOr("jug_of_milk");
 	static readonly Dictionary<string, HashSet<int>> AnimalFood = new(), AnimalGround = new(), AnimalLogs = new();
 	static readonly Dictionary<string, int[]> AnimalBiomes = new();
+	// (Beta 0.1.5.5) Earthlike: each animal's biomes (the plan's), and its ground and logs there (if it has its own)
+	static readonly Dictionary<string, int[]> AnimalEarthBiomes = new();
+	static readonly Dictionary<string, HashSet<int>> AnimalEarthGround = new(), AnimalEarthLogs = new();
+	static readonly int[] CowEarthBiomes = (Nums.Mobs.COW?.earthBiomes ?? Array.Empty<string>()).Select(b => Array.IndexOf(EarthPlan.BiomeNames, b)).ToArray();
+	// (A5) the other mobs' spots count the grassy soils as grass in Earthlike too, so nights there are like any other world's
+	public static bool EarthMobGrass = true;
+	bool Earthlike => world?.Plan != null;
+	// the plan's own Biome at block column (x, z): its plan cell's
+	int EarthBiomeAt(int x, int z) { var p = world.Plan; return p.Biome[Math.Clamp(z / p.Cell, 0, p.N - 1) * p.N + Math.Clamp(x / p.Cell, 0, p.N - 1)]; }
+	// grass, for an animal's ground list, the cows and foraging: in Earthlike any grassy top (the grassy soils too)
+	bool GrassFor(int b) => b == Blocks.Grass || Earthlike && Blocks.PlantsLikeGrass(b);
+	// what grass eaten or rooted up leaves: a grassy soil its bare soil, else Dirt
+	static int BareOf(int b) => b is >= 4810 and <= 4819 ? b - 10 : Blocks.Dirt;
 	static Main()
 	{
 		foreach (var (type, a) in Nums.Mobs.ANIMALS ?? new Dictionary<string, AnimalNumbers>())
 		{
+			AnimalEarthBiomes[type] = (a.earthBiomes ?? Array.Empty<string>()).Select(b => Array.IndexOf(EarthPlan.BiomeNames, b)).ToArray();
+			if (a.earthGround != null) AnimalEarthGround[type] = a.earthGround.Where(k => k != "water").Select(DataKeys.IdOf).ToHashSet();
+			if (a.earthLogs != null) AnimalEarthLogs[type] = a.earthLogs.Select(DataKeys.IdOf).ToHashSet();
 			AnimalFood[type] = (a.food ?? Array.Empty<string>()).Select(DataKeys.IdOf).ToHashSet();
 			AnimalGround[type] = (a.ground ?? Array.Empty<string>()).Where(k => k != "water").Select(DataKeys.IdOf).ToHashSet();
 			AnimalBiomes[type] = (a.biomes ?? Array.Empty<string>()).Select(b => Array.IndexOf(WorldGen.BiomeNames, b)).ToArray();
@@ -63,16 +79,18 @@ public partial class Main
 	float animalSpawnIn = 8;
 	void SpawnAnimals()
 	{
-		if (current?.Gen != 3 || (animalSpawnIn -= 3) > 0) return;
+		if (current?.Gen != 3 && !Earthlike || (animalSpawnIn -= 3) > 0) return;   // (Biomes worlds, and from 0.1.5.5 Earthlike ones)
 		animalSpawnIn = 20 + (float)rnd.NextDouble() * 40;
 		var P = player.Pos;
 		bool none = !mobList.Any(m => m.T.Animal);
 		double a = rnd.NextDouble() * Math.PI * 2, r = none ? 12 + rnd.NextDouble() * 20 : 30 + rnd.NextDouble() * 30;
 		int x = (int)Math.Floor(P.X + Math.Cos(a) * r), z = (int)Math.Floor(P.Z + Math.Sin(a) * r);
 		if (x < 3 || z < 3 || x >= World.WX - 3 || z >= World.WZ - 3) return;
-		int bi = world.Gen.BiomeOf(x, z);
+		if (Earthlike && !world.ColumnGrown(x >> 4, z >> 4)) return;   // (never in land not grown yet)
+		int bi = Earthlike ? EarthBiomeAt(x, z) : world.Gen.BiomeOf(x, z);
+		var lists = Earthlike ? AnimalEarthBiomes : AnimalBiomes;
 		int About(string type) => mobList.Count(m => m.Type == type && m.Dead == 0 && (m.X - P.X) * (m.X - P.X) + (m.Z - P.Z) * (m.Z - P.Z) < 80 * 80);
-		var kinds = AnimalBiomes.Keys.Where(t => MobTypes.ContainsKey(t) && models.ContainsKey(t) && AnimalBiomes[t].Contains(bi) && About(t) < MobTypes[t].A.nearMax).ToList();
+		var kinds = AnimalBiomes.Keys.Where(t => MobTypes.ContainsKey(t) && models.ContainsKey(t) && lists.TryGetValue(t, out var l) && l.Contains(bi) && About(t) < MobTypes[t].A.nearMax).ToList();
 		if (kinds.Count == 0) return;
 		double w = rnd.NextDouble() * kinds.Sum(t => MobTypes[t].A.spawnWeight); string type = kinds[^1];
 		foreach (var t in kinds) if ((w -= MobTypes[t].A.spawnWeight) < 0) { type = t; break; }
@@ -105,11 +123,15 @@ public partial class Main
 			for (int dz = -3; dz <= 3 && !land; dz++) for (int dx = -3; dx <= 3 && !land; dx++) { int b = world.GetBlock(x + dx, y, z + dz); land = b != 0 && !Blocks.IsWater(b) && world.Solid(x + dx, y, z + dz); }
 			return land ? new Vector3(x + 0.5f, y + 0.6f, z + 0.5f) : null;
 		}
-		if (!AnimalGround[type].Contains(top)) return null;
+		var ground = Earthlike && AnimalEarthGround.TryGetValue(type, out var eg) ? eg : AnimalGround[type];
+		if (!ground.Contains(top) && !(ground.Contains(Blocks.Grass) && GrassFor(top))) return null;   // (0.1.5.5: in Earthlike, "grass" is any grassy top)
 		if (A.minHeight is { } mh && y < world.SeaLevel + mh) return null;
-		if (A.logNear is { } ln && !LogNear(x, y + 1, z, ln, AnimalLogs[type].Count > 0 ? AnimalLogs[type] : null)) return null;
+		var logs = LogsOf(type);
+		if (A.logNear is { } ln && !LogNear(x, y + 1, z, ln, logs.Count > 0 ? logs : null)) return null;
 		return new Vector3(x + 0.5f, y + 1, z + 0.5f);
 	}
+	// the logs an animal wants near (the boar's trees; in Earthlike its earthLogs if it has them)
+	HashSet<int> LogsOf(string type) => Earthlike && AnimalEarthLogs.TryGetValue(type, out var l) ? l : AnimalLogs[type];
 	// a log (any, or one of these) within r across of (x, y, z), from 2 below to 8 above
 	bool LogNear(int x, int y, int z, int r, HashSet<int> which)
 	{
@@ -223,13 +245,13 @@ public partial class Main
 		var A = m.T.A; int under = world.GetBlock(x, y - 1, z);
 		switch (m.Type)
 		{
-			case "chicken": return Blocks.IsGrassy(under);
+			case "chicken": return Blocks.IsGrassy(under) || GrassFor(under);
 			case "duck": return player.WaterAt(m.X, m.Y + 0.3f, m.Z);
 			case "deer":
 				for (int dy = 0; dy <= 3; dy++) for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++) if (Blocks.IsLeaves(world.GetBlock(x + dx, y + dy, z + dz))) return true;
 				return false;
 			case "goat": return GoatTarget(x, y, z) != null;
-			case "boar": return under == Blocks.Grass && LogNear(x, y, z, A.rootNear, AnimalLogs["boar"]);
+			case "boar": return GrassFor(under) && LogNear(x, y, z, A.rootNear, LogsOf("boar"));
 		}
 		return false;
 	}
@@ -240,8 +262,9 @@ public partial class Main
 		if (m.Type == "goat") { if (GoatTarget(x, y, z) is not { } t) return; world.SetBlock(t.x, t.y, t.z, 0); Sound.I?.Place(5); }
 		if (m.Type == "boar")
 		{
-			if (world.GetBlock(x, y - 1, z) != Blocks.Grass) return;
-			world.SetBlock(x, y - 1, z, Blocks.Dirt); Sound.I?.Place(Blocks.Dirt);   // (rooted up: Dirt, which stays Dirt)
+			int under = world.GetBlock(x, y - 1, z);
+			if (!GrassFor(under)) return;
+			world.SetBlock(x, y - 1, z, BareOf(under)); Sound.I?.Place(Blocks.Dirt);   // (rooted up: Dirt, or a grassy soil's bare soil, which stays)
 			if (Truffle > 0 && rnd.NextDouble() < A.truffleChance) drops.Add(Truffle, x + 0.5f, y + 0.3f, z + 0.5f);
 		}
 		m.Happy = Math.Min(A.happyMax, m.Happy + A.forage.happy);

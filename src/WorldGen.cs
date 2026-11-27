@@ -298,7 +298,8 @@ public class WorldGen
 	bool Forest(int x, int z) => x >= 0 && z >= 0 && x < WX && z < WZ && (biomeMap[z * WX + x] == Woods || biomeMap[z * WX + x] == Taiga) && W.Heights[z * WX + x] > SeaLevel;
 	bool IsTrunk(int b) => b == Blocks.Log || b == Blocks.FirLog;
 	// (also used later, on the grown world: can a staircase stand here? ground from `at`, blocks from `get`)
-	public static bool StairFits(StairSpot s, Func<int, int> groundAt, Func<int, int, int, int> get)
+	// (topOk: the ground tops a step takes; null: Grass, Dirt or Snowy Grass, the Biomes worlds'. Earthlike's: EarthCol.StairTop)
+	public static bool StairFits(StairSpot s, Func<int, int> groundAt, Func<int, int, int, int> get, Func<int, bool> topOk = null)
 	{
 		var d = StairDirs[s.Dir];
 		for (int k = 0; k < s.N; k++)
@@ -307,7 +308,7 @@ public class WorldGen
 			if (cx < 1 || cz < 1 || cx >= WX - 1 || cz >= WZ - 1) return false;
 			int gk = groundAt(cz * WX + cx), top = get(cx, gk, cz);
 			if (gk != s.Y - 1 && gk != s.Y - 2) return false;                          // (on level ground: a block lower at most)
-			if (top != Blocks.Grass && top != Blocks.Dirt && top != Blocks.SnowyGrass) return false;
+			if (topOk != null ? !topOk(top) : top != Blocks.Grass && top != Blocks.Dirt && top != Blocks.SnowyGrass) return false;
 			for (int y = gk + 1; y <= s.Y + k + 3; y++) if (get(cx, y, cz) != 0) return false;   // (nothing in the way, and room above)
 		}
 		return true;
@@ -361,7 +362,7 @@ public class WorldGen
 			for (int y = gk + 1; y < s.Y + k; y++) set(cx, y, cz, s.Mat);
 			var a = new int[8];
 			for (int b = 0; b < 8; b++) if ((StairMasks[s.Dir] & (1 << b)) != 0) a[b] = s.Mat;
-			W.PieceMap[Idx(cx, s.Y + k, cz)] = a;
+			W.PieceMap[World.Idx(cx, s.Y + k, cz)] = a;
 			set(cx, s.Y + k, cz, Blocks.Pieces);
 			W.Heights[cz * WX + cx] = Math.Max(W.Heights[cz * WX + cx], s.Y + k);
 		}
@@ -913,7 +914,8 @@ public class WorldGen
 	public static readonly string[] BiomeNames = { "woods", "plains", "desert", "snowy", "swamp", "taiga", "meadow", "badlands" };   // (biomeMap's numbers)
 	static readonly string[] OwnTree = { "oak", "oak", "palm", "fir", "willow", "fir", "oak", null };   // the tree each biome grew before (its code is below)
 	// the trees GrowTree knows how to grow (a TREE_SHAPES row must be one of these: see the data check)
-	public static readonly string[] GrownTrees = { "maple", "cedar", "birch", "cherry", "orange", "aspen", "redwood", "cypress", "juniper", "larch", "holly", "palo_verde", "dead", "prairie_oak", "shrub" };
+	public static readonly string[] GrownTrees = { "maple", "cedar", "birch", "cherry", "orange", "aspen", "redwood", "cypress", "juniper", "larch", "holly", "palo_verde", "dead", "prairie_oak", "shrub",
+		"mahogany", "acacia", "stiltroot", "teak", "burnt" };   // (the last five: Beta 0.1.5.5, Earthlike's trees and the new saplings)
 	static readonly TreeShapeRow[] TreeShapes = Nums.Worldgen.TREE_SHAPES ?? Array.Empty<TreeShapeRow>();
 	static readonly TreeExtraRow[] TreeExtra = Nums.Worldgen.TREE_EXTRA ?? Array.Empty<TreeExtraRow>();
 	// a shape's crown: [the number] or [across, up and down]
@@ -1074,6 +1076,7 @@ public class WorldGen
 				break;
 			}
 			case "dead":   // bleached and leafless: a trunk with a few bare branches sticking out
+			case "burnt":  // (Beta 0.1.5.5) a standing Burnt Log, sometimes with one short lying branch: the same code, its own numbers
 			{
 				Stem(log, x, h, z, th);
 				int n = Span(T.branches, Hash(x, z, s + 2));
@@ -1086,6 +1089,35 @@ public class WorldGen
 				}
 				break;
 			}
+			case "mahogany":   // (Beta 0.1.5.5) a rainforest giant: buttress roots and a broad crown above the canopy
+				Stem(log, x, h, z, th + 1);
+				for (int k = 0; k < 4; k++)
+				{
+					var d = PalmFronds[k];
+					if (Hash(x + d[0], z + d[1], s + 2) >= 0.75) continue;
+					TreeBlock(log, x + d[0], h + 1, z + d[1], true);
+					if (Hash(x + d[0], z + d[1], s + 3) < 0.5) TreeBlock(log, x + d[0], h + 2, z + d[1], true);
+				}
+				Crown(leaves, x, top + 1, z, C[0], C[1], 0.3, s + 1); break;
+			case "acacia":   // (Beta 0.1.5.5) the savanna's flat-topped tree: two branches out to opposite sides, each under a flat double layer of leaves
+			{
+				Stem(log, x, h, z, th);
+				int a = 4 + (int)Math.Floor(Hash(x, z, s + 2) * 4);   // (the diagonal ways a and 11 - a are opposite)
+				for (int j = 0; j < 2; j++)
+				{
+					var d = PalmFronds[j == 0 ? a : 11 - a]; int len = Span(T.branch, Hash3(x, j, z, s + 3));
+					for (int k = 1; k <= len; k++) TreeBlock(log, x + d[0] * k, top + k, z + d[1] * k, true);
+					int ex = x + d[0] * len, ey = top + len, ez = z + d[1] * len;
+					Layer(leaves, ex, ey + 1, ez, C[0], T.sparse, s + 4 + j); Layer(leaves, ex, ey + 2, ez, C[0] - 1.2, T.sparse, s + 6 + j);
+				}
+				break;
+			}
+			case "stiltroot":   // (Beta 0.1.5.5) mangrove-like: a trunk held up on arching stilt roots
+				for (int k = 0; k < 4; k++) { var d = PalmFronds[k]; TreeBlock(log, x + 2 * d[0], h + 1, z + 2 * d[1], true); TreeBlock(log, x + d[0], h + 2, z + d[1], true); }
+				Stem(log, x, h + 2, z, th);
+				Crown(leaves, x, h + 2 + th + 1, z, C[0], C[1], 0.3, s + 1); break;
+			case "teak":   // (Beta 0.1.5.5) tall and straight, with an oval crown
+				Stem(log, x, h, z, th + 1); Crown(leaves, x, top + 1, z, C[0], C[1], 0.3, s + 1); break;
 			case "prairie_oak":   // short, with a wide, flattened crown
 				Stem(log, x, h, z, th + 1); Crown(leaves, x, top + 1, z, C[0], C[1], 0.3, s + 1); break;
 			case "shrub":   // a low bush of leaves, sometimes round a stub of log

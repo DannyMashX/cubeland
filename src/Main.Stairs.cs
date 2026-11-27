@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace Cubeland;
 
-// The staircases (WorldGen.Staircases grows them, in lands 5 and 6). Events on reaching a top step (while WorldGen.EerieOn,
+// The staircases (WorldGen.Staircases grows them, in lands 5 and 6; an Earthlike world's: EarthCol.FindStairs, Main.FindEarthStairs). Events on reaching a top step (while WorldGen.EerieOn,
 // on a visit whose roll came up: see Main.Eerie), and no music near a standing one (always).
 public partial class Main
 {
@@ -52,6 +52,7 @@ public partial class Main
 	void UpdateStairs()
 	{
 		if (world == null || !WorldGen.EerieOn || StairList.Count == 0 || dead) { stairOn = -1; return; }   // (see WorldGen.EerieReady)
+		StairSearchDone();   // (gen 4: a moved staircase's new spot, once found)
 		if (!stairTested && HasArg("--stairtest")) StairTest();
 		int on = player.OnGround ? StairUnder() : -1;
 		if (on == stairOn) return;
@@ -71,6 +72,7 @@ public partial class Main
 		void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
 		Check($"this world is land {current.Land}, with staircases{(world.Gen.Os ? " (an older world given them)" : "")}", world.Gen.HasStairs);
 		var s = StairList.First(o => o.Placed);
+		if (world.Lazy) { GrowNow(s.X >> 4, s.Z >> 4, 1); GD.Print($"STAIRTEST the first staircase: {s.X},{s.Y},{s.Z},{s.Dir},{s.N},{s.Mat}"); }   // (gen 4: its land grown first)
 		int standing = StairList.Count(StairStanding);
 		Check($"staircases stand in the world ({standing} of {StairList.Count} spots)", standing >= 1 && StairStanding(s));
 		var (x, y, z) = StairTopCell(s);
@@ -85,22 +87,23 @@ public partial class Main
 		Check("the time of day jumps", sky.TimeOfDay != t0);
 		player.Pos = new Vector3(x + 0.5f, y + 1.01f, z + 0.5f); var p0 = player.Pos; StairEvent(1, s);
 		int px = Mathf.FloorToInt(player.Pos.X), py = Mathf.FloorToInt(player.Pos.Y), pz = Mathf.FloorToInt(player.Pos.Z);
-		Check($"you're sent somewhere else, onto dry ground (from {p0.X:0},{p0.Y:0},{p0.Z:0} to {player.Pos.X:0.0},{player.Pos.Y:0.00},{player.Pos.Z:0.0}: in {world.GetBlock(px, py, pz)}, on {world.GetBlock(px, py - 1, pz)})", (player.Pos - p0).Length() > 1 && world.GetBlock(px, py, pz) == 0 && world.Solid(px, py - 1, pz) && !Blocks.IsWater(world.GetBlock(px, py - 1, pz)));
+		Check($"you're sent somewhere else, onto dry ground (from {p0.X:0},{p0.Y:0},{p0.Z:0} to {player.Pos.X:0.0},{player.Pos.Y:0.00},{player.Pos.Z:0.0}: in {world.GetBlock(px, py, pz)}, on {world.GetBlock(px, py - 1, pz)})", (player.Pos - p0).Length() > 1 && (world.GetBlock(px, py, pz) == 0 || world.Lazy && EarthRoomAt(px, py, pz)) && world.Solid(px, py - 1, pz) && !Blocks.IsWater(world.GetBlock(px, py - 1, pz)));
 		health = 3; gloom = 0; StairEvent(3, s);
 		Check("it hurts, but never kills", health >= 2 && !dead);
 		health = MaxHealth; StairEvent(3, s);
 		Check("  (and does hurt when you're well)", !inv.Survival || health < MaxHealth);
 		for (int i = 0; i < Inventory.Armor0; i++) inv.SetSlot(i, 0, 0);
-		inv.SetSlot(4, Blocks.Planks, 5);
+		inv.SetSlot(4, Blocks.Planks, 5); int n4 = Math.Max(1, inv.Count[4]);   // (5, or 1 in creative)
 		int kept = drops.All.Count(d => d.Keep); StairEvent(4, s);
-		Check("an item leaves your inventory and lies somewhere else", inv.Id[4] == 0 && drops.All.Count(d => d.Keep && d.Id == Blocks.Planks) == kept + 5);
+		Check($"an item leaves your inventory and lies somewhere else (slot {inv.Id[4]}, {drops.All.Count(d => d.Keep && d.Id == Blocks.Planks)} kept Planks, {kept} kept before)", inv.Id[4] == 0 && drops.All.Count(d => d.Keep && d.Id == Blocks.Planks) == kept + n4);
 		// (anywhere in the world on dry ground, as RandomDryGround picks it: no distance from you is promised)
 		var lies = drops.All.Where(d => d.Keep && d.Id == Blocks.Planks).Select(d => d.P).FirstOrDefault();
 		int lx = Mathf.FloorToInt(lies.X), ly = Mathf.FloorToInt(lies.Y), lz = Mathf.FloorToInt(lies.Z);
-		Check($"  (on dry ground, and it stays: at {lies.X:0},{lies.Y:0},{lies.Z:0})", world.GetBlock(lx, ly, lz) == 0 && world.Solid(lx, ly - 1, lz) && !Blocks.IsWater(world.GetBlock(lx, ly - 1, lz)));
-		StairEvent(2, s);
+		Check($"  (on dry ground, and it stays: at {lies.X:0},{lies.Y:0},{lies.Z:0})", (world.GetBlock(lx, ly, lz) == 0 || world.Lazy && EarthRoomAt(lx, ly, lz)) && world.Solid(lx, ly - 1, lz) && !Blocks.IsWater(world.GetBlock(lx, ly - 1, lz)));
+		int extra0 = extraStairs.Count;
+		StairEvent(2, s); stairSearch?.Wait(); StairSearchDone();   // (gen 4: its new spot looked for away from the game)
 		Check("the staircase is gone", !StairStanding(s) && world.GetBlock(x, y, z) == 0);
-		Check("and stands somewhere else", StairList.Count(StairStanding) == standing);
+		Check("and stands somewhere else", StairList.Count(StairStanding) == standing && (!world.Lazy || extraStairs.Count == extra0 + 1 && StairStanding(extraStairs[^1])));   // (gen 4: a new one, built)
 	}
 
 	void StairEvent(int which, WorldGen.StairSpot s)
@@ -131,6 +134,7 @@ public partial class Main
 	// a random spot on dry land (not water, ice or treetops), standing on top of it
 	Vector3? RandomDryGround()
 	{
+		if (world.Lazy) return EarthDryGround();
 		for (int tries = 0; tries < 400; tries++)
 		{
 			int x = 16 + rnd.Next(World.WX - 32), z = 16 + rnd.Next(World.WZ - 32), y = StairGround(z * World.WX + x);
@@ -169,10 +173,11 @@ public partial class Main
 		// and stand it up again in another high forest, somewhere it still fits: one of the spots the world kept for it...
 		foreach (var o in StairList.Where(o => o != s && Math.Abs(o.X - s.X) + Math.Abs(o.Z - s.Z) > World.WX / 10).OrderBy(_ => rnd.Next()))
 		{
-			if (StairStanding(o) || WorldGen.NearChunks(changed, o.X, o.Z) || !WorldGen.StairFits(o, StairGround, world.GetBlock)) continue;
+			if (StairStanding(o) || WorldGen.NearChunks(changed, o.X, o.Z) || !WorldGen.StairFits(o, StairGround, world.GetBlock, world.Lazy ? EarthCol.StairTop : null)) continue;
 			world.Gen.BuildStair(o, (x, y, z, id) => world.SetBlock(x, y, z, id), StairGround);
 			return;
 		}
+		if (world.Lazy) { EarthStairElsewhere(s, changed); return; }
 		// ...or, if none fit any more, anywhere else in a forest high above the sea (kept in the save as an extra spot)
 		for (int tries = 0; tries < 4000; tries++)
 		{
@@ -188,6 +193,63 @@ public partial class Main
 			StairList.Add(o); extraStairs.Add(o);
 			return;
 		}
+	}
+	// (gen 4) a random spot on dry land, the plan picking it: a cell of woods, plains, meadow, taiga, savanna or dry forest, not sea,
+	// lake or river, its ground over the sea; its columns grown now, then the ground there as above (a plant there is fine)
+	Vector3? EarthDryGround()
+	{
+		var P = world.Plan;
+		for (int tries = 0, grown = 0; tries < 4000 && grown < 16; tries++)
+		{
+			int i = rnd.Next(P.N * P.N), b = P.Biome[i], x = i % P.N * P.Cell + P.Cell / 2, z = i / P.N * P.Cell + P.Cell / 2;
+			if (b is not (EarthPlan.Woods or EarthPlan.Plains or EarthPlan.Meadow or EarthPlan.Taiga or EarthPlan.Savanna or EarthPlan.DryForest)) continue;
+			if (P.Sea[i] || P.Lake[i] || P.River(i) || x < 16 || z < 16 || x >= World.WX - 16 || z >= World.WZ - 16 || P.GroundAt(x, z) <= P.Room + 1) continue;
+			GrowNow(x >> 4, z >> 4, 1); grown++;
+			int y = StairGround(z * World.WX + x), t = world.GetBlock(x, y, z);
+			if (y <= world.SeaLevel || t == 0 || Blocks.IsWater(t) || t == Blocks.Ice || Blocks.B[t].NoCollide) continue;
+			if (!EarthRoomAt(x, y + 1, z) || !EarthRoomAt(x, y + 2, z)) continue;
+			return new Vector3(x + 0.5f, y + 1.01f, z + 0.5f);
+		}
+		return null;
+	}
+	bool EarthRoomAt(int x, int y, int z) { int b = world.GetBlock(x, y, z); return b == 0 || Blocks.B[b].NoCollide && !Blocks.IsWater(b); }
+	// (gen 4) the staircase stood up again elsewhere: its spot looked for on a drawer of its own, away from the game
+	// (EarthCol.StairElsewhere: as the world's staircases are found, on the land drawn bare; never near a chunk with changes now);
+	// then, once found, its land grown and the staircase built there if it still fits (plants and snow in its way go)
+	System.Threading.Tasks.Task<int[]> stairSearch;
+	void EarthStairElsewhere(WorldGen.StairSpot s, HashSet<int> changed)
+	{
+		if (stairSearch != null) return;
+		int sx = s.X, sz = s.Z, seed = rnd.Next();
+		var avoid = new HashSet<int>(changed);   // (and never within 2 chunks of a staircase the world already has)
+		foreach (var o in StairList) avoid.Add((o.Z / World.CS) * (World.WX / World.CS) + o.X / World.CS);
+		stairSearch = System.Threading.Tasks.Task.Run(() => { var d = Drawer(); try { return d.StairElsewhere(sx, sz, avoid, seed); } finally { drawers.Add(d); } });
+	}
+	void StairSearchDone()
+	{
+		if (stairSearch == null || !stairSearch.IsCompleted) return;
+		var st = stairSearch.IsCompletedSuccessfully ? stairSearch.Result : null; stairSearch = null;
+		if (TestRun) GD.Print($"STAIRMOVE {(st == null ? "none" : string.Join(",", st))}");
+		if (st == null || world == null) return;
+		var o = new WorldGen.StairSpot { X = st[0], Y = st[1], Z = st[2], Dir = st[3], N = st[4], Mat = st[5], Placed = true };
+		GrowNow(o.X >> 4, o.Z >> 4, 1);
+		bool Clears(int b) => Blocks.IsSnow(b) || Blocks.Get(b)?.Shape is "plant" or "flat";
+		if (!WorldGen.StairFits(o, EarthStairGround, (x, y, z) => world.GetBlock(x, y, z) is var b && Clears(b) ? 0 : b, EarthCol.StairTop)) return;
+		var d = WorldGen.StairDirs[o.Dir];
+		for (int k = 0; k < o.N; k++)
+		{   // (the plants and snow in its way go first)
+			int cx = o.X + d[0] * k, cz = o.Z + d[1] * k;
+			for (int y = EarthStairGround(cz * World.WX + cx) + 1; y <= o.Y + k + 3; y++) if (world.GetBlock(cx, y, cz) != 0) world.SetBlock(cx, y, cz, 0);
+		}
+		world.Gen.BuildStair(o, (bx, by, bz, id) => world.SetBlock(bx, by, bz, id), EarthStairGround);
+		StairList.Add(o); extraStairs.Add(o);
+	}
+	// (gen 4) the ground in a column under any trees, plants or snow
+	int EarthStairGround(int c)
+	{
+		int x = c % World.WX, z = c / World.WX, y = StairGround(c);
+		while (y > 0 && Blocks.IsSnow(world.GetBlock(x, y, z))) y--;
+		return y;
 	}
 	// staircases that turned up somewhere the world didn't grow a spot for (saved: x, y, z, way, steps, block)
 	readonly List<WorldGen.StairSpot> extraStairs = new();

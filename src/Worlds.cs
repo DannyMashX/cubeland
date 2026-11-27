@@ -132,9 +132,11 @@ public static class Worlds
 	// any change (block) when it was first opened in a version with them. That's decided once, here, and kept in the list and the
 	// save, so building near a staircase later never takes it away. (If the list lost it but the save has it, the save's is used.)
 	// Chunks are 16 x 16 columns, all heights: z / 16 * (width / 16) + x / 16. The same as the web version.
+	// (Beta 0.1.5.5) An Earthlike world (gen 4) the same: its staircases keep away from the chunks that held changes the first
+	// time it's opened in 0.1.5.5 (a world made in 0.1.5.5: none).
 	public static void OldStairs(Info w)
 	{
-		if (w == null || w.Gen != 3 || w.Land >= 5) return;
+		if (w == null || !(w.Gen == 3 && w.Land < 5 || w.Gen == 4)) return;
 		if (w.Os) { w.OsSkip = TidyChunks(w.OsSkip); return; }
 		Save s = null;
 		try { s = LoadSave(w.Id); } catch { return; }   // (a save that can't be read: decide another time, never without its changes)
@@ -142,7 +144,7 @@ public static class Worlds
 		if (s != null && s.Os) w.OsSkip = TidyChunks(s.OsSkip);
 		else
 		{
-			int size = World.ValidSize(w.S, w.H == 640 ? 640 : 192), n = size / World.CS;
+			int size = w.Gen == 4 ? w.S : World.ValidSize(w.S, w.H == 640 ? 640 : 192), n = size / World.CS;
 			var skip = new SortedSet<int>();
 			foreach (long i in s?.Idxs ?? Array.Empty<long>()) if (i >= 0) skip.Add((int)(i / size % size / World.CS * n + i % size / World.CS));
 			w.OsSkip = skip.ToArray();

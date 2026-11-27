@@ -487,18 +487,18 @@ public partial class Main
 				if (t.tree != null && !named.Add(t.tree)) found.Add($"{at}: is there twice");
 				int log = -1, lv = -1;
 				try { log = DataKeys.IdOf(t.log); } catch (InvalidOperationException) { found.Add($"{at}: log \"{t.log}\" isn't a block"); }
-				if (log > 0 && Blocks.Get(log)?.Log != true) found.Add($"{at}: log {t.log} isn't an upright log (\"log\")");
+				if (log > 0 && Blocks.Get(log)?.Log != true && t.tree != "burnt") found.Add($"{at}: log {t.log} isn't an upright log (\"log\")");   // (a burnt tree's Burnt Log isn't in the log group)
 				if (t.leaves != null) { try { lv = DataKeys.IdOf(t.leaves); } catch (InvalidOperationException) { found.Add($"{at}: leaves \"{t.leaves}\" isn't a block"); } }
 				if (lv > 0 && !Blocks.IsLeaves(lv)) found.Add($"{at}: leaves {t.leaves} aren't leaves");
-				if (t.leaves == null && t.tree != "dead") found.Add($"{at}: needs leaves");
+				if (t.leaves == null && t.tree is not ("dead" or "burnt")) found.Add($"{at}: needs leaves");
 				if (t.trunk != null && (t.trunk.Length != 2 || t.trunk[0] < 1 || t.trunk[1] < t.trunk[0])) found.Add($"{at}: trunk should be [shortest, tallest], from 1");
 				if (t.trunk == null && t.tree != "shrub") found.Add($"{at}: needs a trunk");
 				var c = WorldGen.CrownOf(t);
-				int crowns = t.tree is "birch" or "cherry" or "orange" or "aspen" or "prairie_oak" or "shrub" ? 2 : t.tree == "dead" ? 0 : t.tree == "cedar" ? -1 : 1;
+				int crowns = t.tree is "birch" or "cherry" or "orange" or "aspen" or "prairie_oak" or "shrub" or "mahogany" or "stiltroot" or "teak" ? 2 : t.tree is "dead" or "burnt" ? 0 : t.tree == "cedar" ? -1 : 1;
 				if (crowns >= 0 && (c.Length != crowns || c.Any(n => n <= 0))) found.Add($"{at}: crown should be {(crowns == 2 ? "[across, up and down]" : crowns == 1 ? "a number" : "left out")}, more than 0");
 				if (t.tree == "cedar" && (t.tiers == null || t.tiers.Length == 0 || t.gap < 1)) found.Add($"{at}: needs tiers and a gap");
-				if (t.tree is "palo_verde" or "dead" && (t.branch is not { Length: 2 } || t.branch[1] < t.branch[0])) found.Add($"{at}: needs branch [shortest, longest]");
-				if (t.tree == "dead" && (t.branches is not { Length: 2 } || t.branches[1] < t.branches[0])) found.Add($"{at}: needs branches [fewest, most]");
+				if (t.tree is "palo_verde" or "dead" or "burnt" or "acacia" && (t.branch is not { Length: 2 } || t.branch[1] < t.branch[0])) found.Add($"{at}: needs branch [shortest, longest]");
+				if (t.tree is "dead" or "burnt" && (t.branches is not { Length: 2 } || t.branches[1] < t.branches[0])) found.Add($"{at}: needs branches [fewest, most]");
 				if (t.sparse < 0 || t.sparse >= 1) found.Add($"{at}: sparse should be from 0 to under 1");
 			}
 			string[] biomes = { "woods", "plains", "desert", "snowy", "swamp", "taiga", "meadow", "badlands" }, own = { "oak", "palm", "fir", "willow" };

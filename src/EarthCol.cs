@@ -24,7 +24,8 @@ public sealed class EarthCol
 	// a column's blocks, cube by cube from the bottom: index ((y >> 4) * 4096) + ((y & 15) << 8) + (z << 4) + x, the same order
 	// as the store's chunks (so COLHASH reads it straight through)
 	public static int At(int x, int y, int z) => ((y >> 4) << 12) | ((y & 15) << 8) | (z << 4) | x;
-	public int[] Draw(int cx, int cz)
+	// (bare: the land and the trees only, nothing after them: the staircases' own look at it, FindStairs)
+	public int[] Draw(int cx, int cz, bool bare = false)
 	{
 		var col = new int[16 * 16 * H];
 		riverCache.Clear();
@@ -37,7 +38,13 @@ public sealed class EarthCol
 				DrawBlockColumn(col, x, z, cx * 16 + x, cz * 16 + z, s);
 			}
 		Falls(col, cx, cz, spots);
-		if (Gen != null) Trees(col, cx, cz);
+		if (Gen != null)
+		{   // (0.1.5.5: the staircases, then the wild crops and plants, after the trees)
+			Trees(col, cx, cz);
+			if (bare) return col;
+			DrawStairs(col, cx, cz, spots);
+			Life(col, cx, cz, spots);
+		}
 		for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) Snow(col, x, z, spots[z * 16 + x]);
 		return col;
 	}
@@ -160,7 +167,7 @@ public sealed class EarthCol
 		int y = H - 1; while (y > 0 && col[At(x, y, z)] == 0) y--;
 		if (y + 1 >= H) return;
 		int t = col[At(x, y, z)];
-		if (t == EarthIds.Water || t == EarthIds.Ice) return;
+		if (t == EarthIds.Water || t == EarthIds.Ice || LifeTop(t) || t == StairStep) return;   // (0.1.5.5: not on the wild crops and plants, or a step)
 		if (t == EarthIds.Grass) col[At(x, y, z)] = EarthIds.SnowyGrass;
 		col[At(x, y + 1, z)] = s.row.Snow >= 8 ? EarthIds.SnowBlock : EarthIds.Snow + s.row.Snow - 1;
 	}
@@ -192,29 +199,340 @@ public sealed class EarthCol
 			for (int tx = x0 - R; tx < x0 + 16 + R; tx++)
 			{
 				if (tx < 0 || tz < 0 || tx >= P.Size || tz >= P.Size) continue;
-				double h = P.Hash(tx, tz, 7810); if (h >= TreeMax) continue;
-				int cell = SurfCell(tx, tz, out int jx, out int jz), sub = P.SubAt(jx, jz);
-				var tr = TreeRow.Of(sub, P.Biome[cell]); if (tr == null || h >= tr.Density) continue;
-				var s = Probe(tx, tz, RiversFor(Math.Clamp(tx >> 4, 0, P.Size / 16 - 1), Math.Clamp(tz >> 4, 0, P.Size / 16 - 1)));
-				if (s.wet || s.channel >= 0 || s.yg + 1 >= H) continue;
-				string name = tr.Pick(P.Hash((int)Math.Floor(tx / 8.0), (int)Math.Floor(tz / 8.0), 7811));
-				if (!TreeGround(name, TopBlock(s, tx, tz))) continue;
-				int yg = s.yg;
+				string name = TreeKind(tx, tz, out var s); if (name == null) continue;
+				int yg = s.yg; bool stilt = name == "stiltroot";
 				var plan = Gen.PlanTree(name, tx, yg, tz, (a, b, c) => 0, (a, c) => yg);
 				if (plan == null) continue;
 				foreach (var (bx, by, bz, id) in plan)
 				{
 					if (bx < x0 || bx >= x0 + 16 || bz < z0 || bz >= z0 + 16 || by < 0 || by >= H) continue;
 					int k = At(bx - x0, by, bz - z0), there = col[k];
-					if (there == 0 || !Blocks.IsLeaves(id) && Blocks.IsLeaves(there)) col[k] = id;
+					if (there == 0 || !Blocks.IsLeaves(id) && (Blocks.IsLeaves(there) || stilt && there == EarthIds.Water)) col[k] = id;   // (0.1.5.5: a stiltroot's logs may replace Water)
 				}
 			}
 	}
-	// the ground a tree takes: grassy tops, dirt and the soils, the mosses and peat; and sand too for the dry lands' trees
+	// (Beta 0.1.5.5) the tree standing at block column (tx, tz), from the plan alone (the trees pass, and the plants pass so it
+	// leaves tree spots bare): its kind, or null. s is the spot's probe (when a kind is found). Its spot hash under TreeMax and
+	// its row's density; outside a channel, room above; dry, or for a stiltroot still shallow water (StiltWater); its ground
+	// (the top block, under water the bed) one its kind takes
+	string TreeKind(int tx, int tz, out Spot s)
+	{
+		s = default;
+		double h = P.Hash(tx, tz, 7810); if (h >= TreeMax) return null;
+		int cell = SurfCell(tx, tz, out int jx, out int jz), sub = P.SubAt(jx, jz);
+		var tr = TreeRow.Of(sub, P.Biome[cell]); if (tr == null || h >= tr.Density) return null;
+		s = Probe(tx, tz, RiversFor(Math.Clamp(tx >> 4, 0, P.Size / 16 - 1), Math.Clamp(tz >> 4, 0, P.Size / 16 - 1)));
+		if (s.channel >= 0 || s.yg + 1 >= H) return null;
+		string name = tr.Pick(P.Hash((int)Math.Floor(tx / 8.0), (int)Math.Floor(tz / 8.0), 7811));
+		if (s.wet && !(name == "stiltroot" && StiltWater(s))) return null;
+		return TreeGround(name, TopBlock(s, tx, tz)) ? name : null;
+	}
+	// (0.1.5.5) a stiltroot stands in still water (no river), not iced, at most 2 deep
+	bool StiltWater(in Spot s) => s.channel < 0 && s.ys < 0 && !Iced(s) && s.top - s.yg <= 2;
+	// the ground a tree takes: grassy tops, dirt and the soils, the mosses and peat, and (0.1.5.5) Charred Ground; and sand too for
+	// the dry lands' trees; Mud for the wetland trees; and (0.1.5.5) Mud, Sand and Silt for the stiltroot
+	public const int CharredGround = 3935;
 	static bool TreeGround(string name, int top) =>
 		top == EarthIds.Grass || top == EarthIds.SnowyGrass || top == EarthIds.Dirt || top >= 4800 && top <= 4819 && top != 4814
-		|| top == 3920 || top == 3934 || top == EarthIds.Peat || top == 3931 || top == EarthIds.SwampGrass || top == EarthIds.Mud && (name == "willow" || name == "cypress")
-		|| top == EarthIds.Sand && (name == "palm" || name == "palo_verde" || name == "dead" || name == "juniper");
+		|| top == 3920 || top == 3934 || top == EarthIds.Peat || top == 3931 || top == EarthIds.SwampGrass || top == CharredGround
+		|| top == EarthIds.Mud && (name == "willow" || name == "cypress" || name == "stiltroot")
+		|| top == EarthIds.Sand && (name == "palm" || name == "palo_verde" || name == "dead" || name == "juniper" || name == "stiltroot")
+		|| top == EarthIds.Silt && name == "stiltroot";
+
+	// ---- (Beta 0.1.5.5) staircases (pass 5b, after the trees): in land 9 a few short flights of stairs stand in the highest deep
+	// woods, at most one in each region (the map cut into n x n, n = Max(1, Floor(Size / 566 + 0.5))). Found once the plan is made
+	// (FindStairs: Main.FindEarthStairs, from the plan and the chunks a world's builds are in), then drawn by Draw like the trees.
+	// A region's candidates are the plan cells whose middle block is in its middle 60% with a Woods or Taiga biome, the highest
+	// first (Elev; ties lowest z, then lowest x); the first of its first 24 to pass every test is its staircase:
+	//   a. the cells under the blocks 8 out every way are Woods or Taiga too; f. its chunk isn't within 2 of a skipped one;
+	//   b. the drawn ground is at least Room + 6, outside any channel; e. at least 2 logs stand on the ground within 6;
+	//   c, d. its steps fit one of the 4 ways (the first from Hash 7703) on the drawn land: level ground with a grassy or bare top
+	//   and nothing in the way. Its block: Cobbled Andesite (8) a third of the time (Hash 7704), else the nearest log's planks.
+	// Each is [x, y, z, dir, n, mat] (null: none in that region), regions row by row (rz, then rx). The same as the web version. ----
+	public List<int[]> Stairs = new();
+	public const int StairStep = 70;   // (Blocks.Pieces: each step a stairs piece, its shape the game's: Main.FindEarthStairs)
+	public static int StairRegions(int size) => Math.Max(1, (int)Math.Floor(size / 566.0 + 0.5));
+	public static bool StairTop(int t) => t == EarthIds.Grass || t == EarthIds.SnowyGrass || t == EarthIds.SwampGrass || t == EarthIds.Dirt
+		|| t >= 4800 && t <= 4819 && t != 4814;   // (PlantsLikeGrass or PlantsLikeDirt)
+	// the planks of a log's wood: the block keyed <wood>_planks for the log keyed <wood>_log, else Planks
+	public static int PlanksOf(int log)
+	{
+		string k = DataKeys.KeyOf(log);
+		return k != null && k.EndsWith("_log") && DataKeys.TryIdOf(k[..^4] + "_planks", out int p) ? p : Blocks.Planks;
+	}
+	static bool StairSkipped(int x, int z, HashSet<int> skip, int size)
+	{
+		if (skip == null || skip.Count == 0) return false;
+		int nc = size / 16, cx = x >> 4, cz = z >> 4;
+		for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++)
+		{
+			int nx = cx + dx, nz = cz + dz;
+			if (nx >= 0 && nz >= 0 && nx < nc && nz < nc && skip.Contains(nz * nc + nx)) return true;
+		}
+		return false;
+	}
+	public List<int[]> FindStairs(HashSet<int> skip)
+	{
+		int n = StairRegions(P.Size); var list = new List<int[]>();
+		for (int r = 0; r < n * n; r++) list.Add(RegionStair(r, skip));
+		return list;
+	}
+	// region r's staircase (r = rz * n + rx), or null. (Each region on its own, so they can be found side by side.)
+	public int[] RegionStair(int r, HashSet<int> skip)
+	{
+		int n = StairRegions(P.Size), rx = r % n, rz = r / n, S = P.Size, C = P.Cell, h = C / 2, N = P.N, nc = S / 16;
+		int x0 = rx * S / n, x1 = (rx + 1) * S / n, z0 = rz * S / n, z1 = (rz + 1) * S / n;
+		int ax = x0 + (x1 - x0) * 2 / 10, bx = x1 - (x1 - x0) * 2 / 10 - 1, az = z0 + (z1 - z0) * 2 / 10, bz = z1 - (z1 - z0) * 2 / 10 - 1;
+		var cands = new List<int>();
+		for (int gz = 0; gz < N; gz++)
+		{
+			int mz = gz * C + h; if (mz < az || mz > bz) continue;
+			for (int gx = 0; gx < N; gx++)
+			{
+				int mx = gx * C + h; if (mx < ax || mx > bx) continue;
+				int i = gz * N + gx; if (P.Biome[i] == EarthPlan.Woods || P.Biome[i] == EarthPlan.Taiga) cands.Add(i);
+			}
+		}
+		cands.Sort((a, b) => P.Elev[a] != P.Elev[b] ? P.Elev[b].CompareTo(P.Elev[a]) : a.CompareTo(b));
+		// the land round a candidate, drawn bare (trees on, nothing after them), kept while this region chooses
+		var drawn = new Dictionary<int, int[]>();
+		int Get(int x, int y, int z)
+		{
+			if (x < 0 || z < 0 || x >= S || z >= S || y < 0 || y >= H) return 0;
+			int k = (z >> 4) * nc + (x >> 4);
+			if (!drawn.TryGetValue(k, out var col)) drawn[k] = col = Draw(x >> 4, z >> 4, true);
+			return col[At(x & 15, y, z & 15)];
+		}
+		int Ground(int x, int z) => Probe(x, z, RiversFor(x >> 4, z >> 4)).yg;
+		for (int t = 0; t < Math.Min(24, cands.Count); t++) { var f = StairAt(cands[t], skip, Get, Ground); if (f != null) return f; }
+		return null;
+	}
+	// (the game, Main.StairMove: a staircase that moved) a new spot for it, found the same way on the land drawn bare: from `tries`
+	// random cells (seed) of Woods or Taiga further than a tenth of the map from (sx, sz), the plan's ground there at least
+	// Room + 6, the highest 400 tested as above (none near skip's chunks), the first to pass (typically a few seconds, away from
+	// the game; 10 tries in the 777 1024 world all found one, after 13 to 223 tested). Null: none.
+	public int[] StairElsewhere(int sx, int sz, HashSet<int> skip, int seed, int tries = 4000, int test = 400)
+	{
+		var rnd = new Random(seed); int N = P.N, C = P.Cell, S = P.Size, nc = S / 16;
+		var cands = new List<int>(); var seen = new HashSet<int>();
+		for (int t = 0; t < tries; t++)
+		{
+			int i = rnd.Next(N * N), x = i % N * C + C / 2, z = i / N * C + C / 2;
+			if (P.Biome[i] != EarthPlan.Woods && P.Biome[i] != EarthPlan.Taiga || Math.Abs(x - sx) + Math.Abs(z - sz) <= S / 10) continue;
+			if (x < 16 || z < 16 || x >= S - 16 || z >= S - 16 || P.GroundAt(x, z) < P.Room + 6 || !seen.Add(i)) continue;
+			cands.Add(i);
+		}
+		cands.Sort((a, b) => P.Elev[a] != P.Elev[b] ? P.Elev[b].CompareTo(P.Elev[a]) : a.CompareTo(b));
+		var drawn = new Dictionary<int, int[]>();
+		int Get(int x, int y, int z)
+		{
+			if (x < 0 || z < 0 || x >= S || z >= S || y < 0 || y >= H) return 0;
+			int k = (z >> 4) * nc + (x >> 4);
+			if (!drawn.TryGetValue(k, out var col)) { if (drawn.Count >= 16) drawn.Clear(); drawn[k] = col = Draw(x >> 4, z >> 4, true); }
+			return col[At(x & 15, y, z & 15)];
+		}
+		int Ground(int x, int z) => Probe(x, z, RiversFor(x >> 4, z >> 4)).yg;
+		for (int t = 0; t < Math.Min(test, cands.Count); t++) { var f = StairAt(cands[t], skip, Get, Ground); if (f != null) { LastTested = t + 1; return f; } }
+		LastTested = Math.Min(test, cands.Count); return null;
+	}
+	public int LastTested;   // (test: how many StairElsewhere tested)
+	int[] StairAt(int i, HashSet<int> skip, Func<int, int, int, int> get, Func<int, int, int> ground)
+	{
+		int N = P.N, C = P.Cell, x = i % N * C + C / 2, z = i / N * C + C / 2;
+		foreach (var d in WorldGen.StairDirs)
+		{   // a. deep in the woods
+			int px = x + 8 * d[0], pz = z + 8 * d[1];
+			if (px < 0 || pz < 0 || px >= P.Size || pz >= P.Size) return null;
+			int b = P.Biome[pz / C * N + px / C];
+			if (b != EarthPlan.Woods && b != EarthPlan.Taiga) return null;
+		}
+		if (StairSkipped(x, z, skip, P.Size)) return null;   // f. never near builds
+		var s = Probe(x, z, RiversFor(x >> 4, z >> 4));       // b. high enough, not in a channel
+		if (s.channel >= 0 || s.yg < P.Room + 6) return null;
+		int y = s.yg + 1, n = 5 + (int)Math.Floor(P.Hash(x, z, 7702) * 4), d0 = (int)Math.Floor(P.Hash(x, z, 7703) * 4);
+		int logs = 0, best = 1 << 30, near = 0;   // e. trees near: logs standing on the ground within 6, and the nearest
+		for (int dz = -6; dz <= 6; dz++) for (int dx = -6; dx <= 6; dx++)
+		{
+			int b = get(x + dx, ground(x + dx, z + dz) + 1, z + dz);
+			if (!Blocks.IsLogBlock(b)) continue;
+			logs++;
+			int dd = dx * dx + dz * dz; if (dd < best) { best = dd; near = b; }
+		}
+		if (logs < 2) return null;
+		for (int t = 0; t < 4; t++)
+		{   // c, d. the way it goes: a random one first, then the others
+			int dir = (d0 + t) % 4;
+			if (StairFits(x, y, z, dir, n, get, ground)) return new[] { x, y, z, dir, n, P.Hash(x, z, 7704) < 1 / 3.0 ? Blocks.Cobblestone : PlanksOf(near) };
+		}
+		return null;
+	}
+	bool StairFits(int x, int y, int z, int dir, int n, Func<int, int, int, int> get, Func<int, int, int> ground)
+	{
+		int dx = WorldGen.StairDirs[dir][0], dz = WorldGen.StairDirs[dir][1];
+		for (int k = 0; k < n; k++)
+		{
+			int cx = x + dx * k, cz = z + dz * k;
+			if (cx < 1 || cz < 1 || cx >= P.Size - 1 || cz >= P.Size - 1) return false;
+			int gk = ground(cx, cz), top = get(cx, gk, cz);
+			if (gk != y - 1 && gk != y - 2) return false;   // (on level ground: a block lower at most)
+			if (!StairTop(top)) return false;
+			for (int yy = gk + 1; yy <= y + k + 3; yy++) if (get(cx, yy, cz) != 0) return false;   // (nothing in the way, and room above)
+		}
+		return true;
+	}
+	// a staircase's steps in this chunk column: each a stairs piece (Pieces, 70; its shape is the game's), standing on a base of
+	// its block down to the ground
+	void DrawStairs(int[] col, int cx, int cz, Spot[] spots)
+	{
+		foreach (var st in Stairs)
+		{
+			if (st == null) continue;
+			int x = st[0], y = st[1], z = st[2], dx = WorldGen.StairDirs[st[3]][0], dz = WorldGen.StairDirs[st[3]][1], n = st[4], mat = st[5];
+			for (int k = 0; k < n; k++)
+			{
+				int bx = x + dx * k - cx * 16, bz = z + dz * k - cz * 16;
+				if (bx < 0 || bz < 0 || bx >= 16 || bz >= 16) continue;
+				int gk = spots[bz * 16 + bx].yg;
+				for (int yy = gk + 1; yy < y + k; yy++) col[At(bx, yy, bz)] = mat;
+				col[At(bx, y + k, bz)] = StairStep;
+			}
+		}
+	}
+
+	// ---- (Beta 0.1.5.5) life: wild crops, the melon and Dead Bushes (W), then the ground plants (P). Each block column on its
+	// own: it writes only into itself, reading its own drawn blocks (after the trees) and the plan (and the plan's probes of the
+	// columns beside it, for the melon). The first thing that takes a column wins. Every hash is the plan's (P.Hash); a column's
+	// biome is the plan's Biome of its wobbled surface cell (SurfCell), its sub-biome SubAt of that, as the trees use ----
+	public static bool PlantsOn = true;   // (P, the ground plants: Ideas to confirm they belong in 0.1.5.5)
+	static readonly WildCropRow[] WildRows = Nums.Worldgen.WILD_CROPS ?? Array.Empty<WildCropRow>();
+	static readonly DeadBushNumbers DeadRow = Nums.Worldgen.DEAD_BUSHES;
+	static int[] BiomeList(string[] names) => names == null ? Array.Empty<int>() : Array.ConvertAll(names, n => Array.IndexOf(EarthPlan.BiomeNames, n));
+	static readonly int[][] WildBiomes = Array.ConvertAll(WildRows, r => BiomeList(r.earthBiomes)), WildNear = Array.ConvertAll(WildRows, r => BiomeList(r.earthNear));
+	static readonly int MelonRow = Array.FindIndex(WildRows, r => r.crop == "cantaloupe");
+	static readonly int[] DeadBiomes = BiomeList(DeadRow?.earthBiomes);
+	static readonly HashSet<int> DeadGround = new(Array.ConvertAll(DeadRow?.earthGround ?? Array.Empty<string>(), DataKeys.IdOf));
+	static readonly int[] MelonX = { 1, -1, 0, 0 }, MelonZ = { 0, 0, 1, -1 };   // (WorldGen.MelonSides: +x, -x, +z, -z)
+	static readonly int[] NearX = { 1, -1, 0, 0, 1, 1, -1, -1 }, NearZ = { 0, 0, 1, -1, 1, -1, 1, -1 };
+	int BiomeAt(int bx, int bz) => P.Biome[SurfCell(bx, bz, out _, out _)];
+	static bool Dry(in Spot s) => !s.wet && s.channel < 0;
+	// the blocks W and P put in (Snow leaves a column topped by one alone)
+	public static bool LifeTop(int t) => t >= 3700 && t <= 3723 || t >= 3940 && t <= 3961 || t >= 194 && t <= 198;
+	void Life(int[] col, int cx, int cz, Spot[] spots)
+	{
+		for (int z = 0; z < 16; z++)
+			for (int x = 0; x < 16; x++)
+			{
+				int bx = cx * 16 + x, bz = cz * 16 + z; var s = spots[z * 16 + x];
+				int top = TopBlock(s, bx, bz);
+				if (!Wild(col, x, z, bx, bz, s, top) && PlantsOn) Cover(col, x, z, bx, bz, s, top);
+			}
+	}
+	// is block column (x, z) a spot of wild crop row k: some patch middle within the row's spread (lowest z, then lowest x) that
+	// is on the map 8 or more from its edge, under the row's chance, in one of its biomes (the cantaloupe: not in a near biome,
+	// with one 'within' away in any of the 8 ways, clamped to the map), whose tries (today's) land one on it
+	bool CropSpot(int k, int x, int z)
+	{
+		var r = WildRows[k]; int sp = r.spread;
+		for (int mz = z - sp; mz <= z + sp; mz++)
+			for (int mx = x - sp; mx <= x + sp; mx++)
+			{
+				if (mx < 8 || mz < 8 || mx >= P.Size - 8 || mz >= P.Size - 8 || P.Hash(mx, mz, r.seed) > r.chance) continue;
+				int bi = BiomeAt(mx, mz);
+				if (r.earthNear != null) { if (Array.IndexOf(WildNear[k], bi) >= 0 || !NearBiome(mx, mz, r.within, WildNear[k])) continue; }
+				else if (Array.IndexOf(WildBiomes[k], bi) < 0) continue;
+				int n = r.tries[0] + (int)Math.Floor(P.Hash(mx, mz, r.seed + 1) * (r.tries[1] - r.tries[0] + 1));
+				for (int t = 0; t < n; t++)
+				{
+					int px = mx + (int)Math.Floor((P.Hash(mx + t, mz, r.seed + 2) - 0.5) * 2 * sp + 0.5), pz = mz + (int)Math.Floor((P.Hash(mx, mz + t, r.seed + 3) - 0.5) * 2 * sp + 0.5);
+					if (px == x && pz == z) return true;
+				}
+			}
+		return false;
+	}
+	bool NearBiome(int x, int z, int far, int[] list)
+	{
+		for (int k = 0; k < 8; k++)
+			if (Array.IndexOf(list, BiomeAt(Math.Clamp(x + NearX[k] * far, 0, P.Size - 1), Math.Clamp(z + NearZ[k] * far, 0, P.Size - 1))) >= 0) return true;
+		return false;
+	}
+	// W: the first wild crop row that lands here and fits (dry, outside a channel; the top like Grass; air above, 2 for Corn),
+	// then the melon of a cantaloupe spot beside whose melon side (one, by its hash) is here (the first in MelonSides order;
+	// that spot dry with its top like Grass; here dry, top like Grass, air above), then a Dead Bush (its biomes and chance, dry,
+	// air above, its ground). True if it took the column
+	bool Wild(int[] col, int x, int z, int bx, int bz, in Spot s, int top)
+	{
+		int yg = s.yg;
+		if (!Dry(s) || yg + 2 >= H) return false;
+		bool air1 = col[At(x, yg + 1, z)] == 0, air2 = col[At(x, yg + 2, z)] == 0, grass = Blocks.PlantsLikeGrass(top);
+		if (grass && air1)
+		{
+			for (int k = 0; k < WildRows.Length; k++)
+			{
+				bool corn = WildRows[k].crop == "corn";
+				if (corn && !air2 || !CropSpot(k, bx, bz)) continue;
+				col[At(x, yg + 1, z)] = Blocks.CropBlock(WildRows[k].crop, 3);
+				if (corn) col[At(x, yg + 2, z)] = Blocks.CropBlock(WildRows[k].crop, 3, true);
+				return true;
+			}
+			if (MelonRow >= 0)
+				for (int m = 0; m < 4; m++)
+				{
+					int nx = bx - MelonX[m], nz = bz - MelonZ[m];
+					if (nx < 0 || nz < 0 || nx >= P.Size || nz >= P.Size || (int)Math.Floor(P.Hash(nx, nz, WildRows[MelonRow].seed + 4) * 4) != m || !CropSpot(MelonRow, nx, nz)) continue;
+					var n = Probe(nx, nz, RiversFor(nx >> 4, nz >> 4));
+					if (!Dry(n) || !Blocks.PlantsLikeGrass(TopBlock(n, nx, nz))) continue;
+					col[At(x, yg + 1, z)] = Blocks.Cantaloupe; return true;
+				}
+		}
+		if (air1 && DeadRow != null && DeadGround.Contains(top) && P.Hash(bx, bz, DeadRow.seed) <= DeadRow.chance && Array.IndexOf(DeadBiomes, BiomeAt(bx, bz)) >= 0)
+		{ col[At(x, yg + 1, z)] = Blocks.DeadBush; return true; }
+		return false;
+	}
+	// P: one roll (Hash 7850) down the column's cover row (its sub-biome's, else its biome's; none in rows with snow), then the
+	// pick needs its spot, else the column stays bare; never on a tree's spot (TreeKind)
+	const int ShortGrass = 3945, TallGrass = 3946, Fern = 3950, TreeFern = 3951, Vines = 3952, Reeds = 3953, PondLeaves = 3955, DuneGrass = 3956,
+		SeaWeed = 3957, ReefFan = 3959, ThornBush = 3960;
+	static int TwoTallTop(int id) => id switch { TallGrass => 3947, TreeFern => 3961, Reeds => 3954, SeaWeed => 3958, _ => 0 };
+	// the ground a land plant takes: like Grass or Dirt, the mosses, Peat, Rich Soil, Charred Ground, Swamp Grass; and its own
+	static bool CoverGround(int id, int top) =>
+		Blocks.PlantsLikeGrass(top) || Blocks.PlantsLikeDirt(top) || top == 3920 || top == 3934 || top == EarthIds.Peat || top == 3931 || top == CharredGround || top == EarthIds.SwampGrass
+		|| id == DuneGrass && top == EarthIds.Sand || id == ThornBush && (top == EarthIds.Sand || top == 3939 || top == 3928)
+		|| id == Reeds && (top == EarthIds.Mud || top == EarthIds.Silt);
+	void Cover(int[] col, int x, int z, int bx, int bz, in Spot s, int top)
+	{
+		if (s.row.Snow > 0) return;
+		var list = CoverRow.Of(s.sub, P.Biome[SurfCell(bx, bz, out _, out _)]); if (list == null) return;
+		double u = P.Hash(bx, bz, 7850), sum = 0; int pick = 0;
+		foreach (var (id, share) in list) { sum += share; if (u < sum) { pick = id; break; } }
+		if (pick == 0 || TreeKind(bx, bz, out _) != null) return;
+		int yg = s.yg;
+		if (pick is SeaWeed or ReefFan)
+		{   // (in the sea, on the bed, into its water: at least 3 deep for Sea Weed, 2 for a Reef Fan)
+			if (!s.wet || !P.Sea[s.c.i] || s.channel >= 0 || Iced(s) || s.top - yg < (pick == SeaWeed ? 3 : 2)) return;
+			if (col[At(x, yg + 1, z)] != EarthIds.Water || pick == SeaWeed && col[At(x, yg + 2, z)] != EarthIds.Water) return;
+			col[At(x, yg + 1, z)] = pick; if (pick == SeaWeed) col[At(x, yg + 2, z)] = TwoTallTop(pick);
+			return;
+		}
+		if (pick == PondLeaves)
+		{   // (on still water that isn't the sea or a river, 1 to 3 deep, not iced: in the air on its top)
+			if (!s.wet || P.Sea[s.c.i] || s.channel >= 0 || Iced(s) || s.top - yg < 1 || s.top - yg > 3 || s.top + 1 >= H || col[At(x, s.top + 1, z)] != 0) return;
+			col[At(x, s.top + 1, z)] = PondLeaves; return;
+		}
+		if (pick == Vines)
+		{   // (from the lowest leaves above top + 2 with air under them, 1-3 down, into air only)
+			for (int y = yg + 3; y < H; y++)
+			{
+				if (!Blocks.IsLeaves(col[At(x, y, z)]) || col[At(x, y - 1, z)] != 0) continue;
+				int len = 1 + (int)Math.Floor(P.Hash(bx, bz, 7851) * 3);
+				for (int k = 1; k <= len && col[At(x, y - k, z)] == 0; k++) col[At(x, y - k, z)] = Vines;
+				return;
+			}
+			return;
+		}
+		int up = TwoTallTop(pick);   // (a land plant: dry, outside a channel, its ground, air above (2 for the two-tall))
+		if (!Dry(s) || yg + 2 >= H || !CoverGround(pick, top) || col[At(x, yg + 1, z)] != 0 || up != 0 && col[At(x, yg + 2, z)] != 0) return;
+		col[At(x, yg + 1, z)] = pick; if (up != 0) col[At(x, yg + 2, z)] = up;
+	}
 
 	// lakes and rivers freeze over where the summer stays this cold (degrees: the warmest month, Temp + Swing)
 	public static double FreezeSummer = 2;
@@ -522,14 +840,14 @@ public sealed class Surf
 		R(EarthPlan.LichenWoods, top: TundraMoss, rock: LichenStone, patch: G, cut: 0.45);
 		R(EarthPlan.LarchStand);
 		R(EarthPlan.Muskeg, top: BogMoss, patch: EarthIds.Peat, cut: 0.6);
-		R(EarthPlan.OldBurn);   // (0.1.5.5: Charred Ground)
+		R(EarthPlan.OldBurn, patch: EarthCol.CharredGround, cut: 0.55);   // (0.1.5.5: patches of Charred Ground)
 		// temperate
 		R(EarthPlan.OldGrowth, rock: MossyStone); R(EarthPlan.BirchGrove); R(EarthPlan.Clearing); R(EarthPlan.FernRavine, rock: MossyStone);
 		R(EarthPlan.Parkland); R(EarthPlan.Tallgrass); R(EarthPlan.Shortgrass); R(EarthPlan.Steppe, patch: K, cut: 0.6);
 		R(EarthPlan.Wildflowers); R(EarthPlan.WetMeadow, patch: EarthIds.Mud, cut: 0.65);
 		R(EarthPlan.ReedMarsh, top: EarthIds.Mud); R(EarthPlan.SwampForest, top: EarthIds.Grass, patch: EarthIds.Mud, cut: 0.55);
 		R(EarthPlan.Fen, top: EarthIds.Peat, patch: BogMoss, cut: 0.5);
-		R(EarthPlan.RockyScrub, top: K, patch: LG, cut: 0.55); R(EarthPlan.FireScar);   // (0.1.5.5: Charred Ground)
+		R(EarthPlan.RockyScrub, top: K, patch: LG, cut: 0.55); R(EarthPlan.FireScar, patch: EarthCol.CharredGround, cut: 0.6);   // (0.1.5.5: patches of Charred Ground)
 		// hot
 		R(EarthPlan.FernUnder); R(EarthPlan.FloodForest); R(EarthPlan.CloudForest, rock: MossyStone); R(EarthPlan.WoodedSavanna);
 		R(EarthPlan.Waterhole, patch: EarthIds.Mud, cut: 0.55); R(EarthPlan.Mounds, patch: Hardpan, cut: 0.68);
@@ -560,8 +878,8 @@ public sealed class Surf
 }
 
 // the trees by sub-biome and biome (pass 5; to become worldgen.json's EARTH_TREES once agreed): the kinds and their shares, and the
-// density (a tree's chance at each block). Draft 2's table with today's trees only (0.1.5.3's plain trees): the new woods
-// (Mahogany, Acacia, Stiltroot, Teak) and the Tree Fern come in 0.1.5.5, so rainforest, savanna and dry forest have stand-ins.
+// density (a tree's chance at each block). Draft 2's table; in 0.1.5.5 the new woods (Mahogany, Acacia, Stiltroot, Teak) took
+// the stand-ins' places, and burnt trees stand in the old burns and fire scars.
 // A sub-biome without a row uses its biome's; a row with density 0 has none (a clearing).
 public sealed class TreeRow
 {
@@ -587,17 +905,17 @@ public sealed class TreeRow
 		R(EarthPlan.Taiga, 0.035, ("fir", 0.55), ("larch", 0.2), ("birch", 0.15), ("aspen", 0.1));
 		R(EarthPlan.Meadow, 0.002, ("cherry", 0.6), ("prairie_oak", 0.4));
 		R(EarthPlan.Badlands, 0.002, ("juniper", 0.6), ("dead", 0.4));
-		R(EarthPlan.Rainforest, 0.04, ("oak", 0.6), ("palm", 0.4));          // (stand-ins: Mahogany and palm in 0.1.5.5)
-		R(EarthPlan.Savanna, 0.002, ("prairie_oak", 1));                     // (stand-in: Acacia in 0.1.5.5)
+		R(EarthPlan.Rainforest, 0.04, ("mahogany", 0.55), ("palm", 0.45));
+		R(EarthPlan.Savanna, 0.002, ("acacia", 1));
 		R(EarthPlan.Alpine, 0.004, ("fir", 0.5), ("larch", 0.5));
 		R(EarthPlan.DryScrub, 0.006, ("juniper", 0.4), ("cedar", 0.2), ("holly", 0.2), ("shrub", 0.2));
-		R(EarthPlan.DryForest, 0.015, ("prairie_oak", 0.5), ("cedar", 0.5)); // (stand-ins: Teak and Acacia in 0.1.5.5)
+		R(EarthPlan.DryForest, 0.015, ("teak", 0.75), ("acacia", 0.25));
 		// sub-biomes with trees of their own
 		R(EarthPlan.ForestTundra, 0.004, ("fir", 0.6), ("larch", 0.4));
 		R(EarthPlan.LichenWoods, 0.008, ("fir", 0.7), ("larch", 0.3));
 		R(EarthPlan.LarchStand, 0.03, ("larch", 1));
 		R(EarthPlan.Muskeg, 0.004, ("fir", 0.5), ("larch", 0.5));
-		R(EarthPlan.OldBurn, 0.006, ("birch", 0.5), ("aspen", 0.5));
+		R(EarthPlan.OldBurn, 0.008, ("birch", 0.35), ("aspen", 0.35), ("burnt", 0.3));
 		R(EarthPlan.OldGrowth, 0.04, ("oak", 0.4), ("maple", 0.3), ("cedar", 0.3));
 		R(EarthPlan.BirchGrove, 0.035, ("birch", 0.6), ("aspen", 0.4));
 		R(EarthPlan.Clearing, 0);
@@ -606,9 +924,10 @@ public sealed class TreeRow
 		R(EarthPlan.Steppe, 0.001, ("shrub", 1)); R(EarthPlan.Wildflowers, 0);
 		R(EarthPlan.WetMeadow, 0.002, ("willow", 1));
 		R(EarthPlan.ReedMarsh, 0); R(EarthPlan.SwampForest, 0.03, ("willow", 0.5), ("cypress", 0.5)); R(EarthPlan.Fen, 0.002, ("larch", 1));
-		R(EarthPlan.RockyScrub, 0.004, ("juniper", 1)); R(EarthPlan.FireScar, 0.002, ("shrub", 1));
+		R(EarthPlan.RockyScrub, 0.004, ("juniper", 1)); R(EarthPlan.FireScar, 0.003, ("shrub", 0.6), ("burnt", 0.4));
 		R(EarthPlan.CloudForest, 0.02, ("oak", 1));
-		R(EarthPlan.WoodedSavanna, 0.006, ("prairie_oak", 1)); R(EarthPlan.Waterhole, 0);
+		R(EarthPlan.FloodForest, 0.03, ("mahogany", 0.5), ("palm", 0.5));
+		R(EarthPlan.WoodedSavanna, 0.006, ("acacia", 0.8), ("teak", 0.2)); R(EarthPlan.Waterhole, 0);
 		R(EarthPlan.ThornScrub, 0.002, ("shrub", 0.5), ("dead", 0.5));
 		R(EarthPlan.DuneSea, 0); R(EarthPlan.Pavement, 0); R(EarthPlan.Oasis, 0.02, ("palm", 1)); R(EarthPlan.DryRiverbed, 0.002, ("dead", 1));
 		R(EarthPlan.SaltFlats, 0); R(EarthPlan.CrackedBed, 0); R(EarthPlan.SandSea, 0);
@@ -616,7 +935,81 @@ public sealed class TreeRow
 		R(EarthPlan.Scree, 0); R(EarthPlan.Cliffs, 0); R(EarthPlan.Snowfield, 0); R(EarthPlan.PeakGlacier, 0);
 		R(EarthPlan.Floodplain, 0.006, ("oak", 0.5), ("willow", 0.5)); R(EarthPlan.Delta, 0.002, ("willow", 1));
 		R(EarthPlan.ReedBed, 0); R(EarthPlan.BogEdge, 0); R(EarthPlan.SandBeach, 0); R(EarthPlan.Shingle, 0); R(EarthPlan.SeaCliffs, 0);
-		R(EarthPlan.Dunes, 0); R(EarthPlan.SaltMarsh, 0); R(EarthPlan.StiltSwamp, 0);   // (Stiltroot in 0.1.5.5)
+		R(EarthPlan.Dunes, 0); R(EarthPlan.SaltMarsh, 0); R(EarthPlan.StiltSwamp, 0.03, ("stiltroot", 1));
+		return d;
+	}
+}
+
+// (Beta 0.1.5.5) the ground plants by sub-biome and biome (P; desktop draft 1, agreed with web): the plants and their shares of
+// the columns, rolled once a column, in this order; Flowers (-1) is the 5 Flowers 194-198 at a fifth of its share each, in that
+// order. A sub-biome without a row uses its biome's; none: no plants
+public static class CoverRow
+{
+	const int ShortGrass = 3945, TallGrass = 3946, Bunch = 3948, GreyShrub = 3949, Fern = 3950, TreeFern = 3951, Vines = 3952, Reeds = 3953,
+		Pond = 3955, Dune = 3956, SeaWeed = 3957, ReefFan = 3959, Thorn = 3960, TundraShrub = 3940, Cotton = 3941, Fireweed = 3942,
+		Gentian = 3943, Edelweiss = 3944, Flowers = -1;
+	static readonly Dictionary<int, (int id, double share)[]> Rows = Make();
+	public static (int id, double share)[] Of(int sub, int biome) => Rows.TryGetValue(sub, out var r) || Rows.TryGetValue(biome, out r) ? r : null;
+	static Dictionary<int, (int, double)[]> Make()
+	{
+		var d = new Dictionary<int, (int, double)[]>();
+		void R(int n, params (int id, double share)[] mix)
+		{
+			var l = new List<(int, double)>();
+			foreach (var (id, share) in mix) if (id == Flowers) for (int f = 194; f <= 198; f++) l.Add((f, share / 5)); else l.Add((id, share));
+			d[n] = l.ToArray();
+		}
+		// biomes (desert, badlands, snowy lands, glacier, bare rock, snow peaks, lakes and both wastes: none)
+		R(EarthPlan.Woods, (ShortGrass, 0.25), (Fern, 0.04), (Flowers, 0.02));
+		R(EarthPlan.Plains, (ShortGrass, 0.3), (TallGrass, 0.15), (Flowers, 0.02));
+		R(EarthPlan.Taiga, (ShortGrass, 0.08), (Fern, 0.06));
+		R(EarthPlan.Meadow, (ShortGrass, 0.35), (TallGrass, 0.05), (Flowers, 0.05));
+		R(EarthPlan.Swamp, (ShortGrass, 0.15), (Reeds, 0.06), (Pond, 0.08));
+		R(EarthPlan.Tundra, (TundraShrub, 0.06), (Cotton, 0.02));
+		R(EarthPlan.Rainforest, (Fern, 0.2), (TreeFern, 0.04), (Vines, 0.03));
+		R(EarthPlan.Savanna, (ShortGrass, 0.2), (TallGrass, 0.15));
+		R(EarthPlan.Alpine, (ShortGrass, 0.25), (Gentian, 0.02), (Edelweiss, 0.01));
+		R(EarthPlan.DryScrub, (GreyShrub, 0.06), (Bunch, 0.06));
+		R(EarthPlan.DryForest, (ShortGrass, 0.12), (Bunch, 0.05));
+		R(EarthPlan.Ocean, (SeaWeed, 0.02));
+		// cold and boreal
+		foreach (int n in new[] { EarthPlan.LichenField, EarthPlan.FrostCracks, EarthPlan.ForestTundra, EarthPlan.LichenWoods }) R(n, (TundraShrub, 0.06), (Cotton, 0.02));
+		foreach (int n in new[] { EarthPlan.ThawBogs, EarthPlan.Muskeg, EarthPlan.BogEdge }) R(n, (Cotton, 0.12));
+		R(EarthPlan.Fen, (Reeds, 0.12), (Cotton, 0.06), (Pond, 0.1));
+		R(EarthPlan.OldBurn, (Fireweed, 0.2), (ShortGrass, 0.1));
+		// temperate and grassland
+		R(EarthPlan.OldGrowth, (Fern, 0.15), (ShortGrass, 0.1));
+		R(EarthPlan.BirchGrove, (ShortGrass, 0.25), (Fern, 0.03));
+		R(EarthPlan.Clearing, (ShortGrass, 0.4), (Flowers, 0.08));
+		R(EarthPlan.FernRavine, (Fern, 0.35));
+		R(EarthPlan.Parkland, (ShortGrass, 0.35), (TallGrass, 0.05), (Flowers, 0.01));
+		R(EarthPlan.Tallgrass, (TallGrass, 0.45), (ShortGrass, 0.1), (Flowers, 0.03));
+		R(EarthPlan.Shortgrass, (ShortGrass, 0.4), (Bunch, 0.1));
+		R(EarthPlan.Steppe, (Bunch, 0.25), (GreyShrub, 0.05));
+		R(EarthPlan.Wildflowers, (Flowers, 0.3), (ShortGrass, 0.2));
+		R(EarthPlan.WetMeadow, (ShortGrass, 0.3), (Reeds, 0.1));
+		R(EarthPlan.Treeline, (ShortGrass, 0.15), (Edelweiss, 0.01));
+		// wetlands and shores
+		R(EarthPlan.ReedMarsh, (Reeds, 0.3), (Pond, 0.15));
+		R(EarthPlan.ReedBed, (Reeds, 0.25), (Pond, 0.1));
+		R(EarthPlan.SwampForest, (ShortGrass, 0.1), (Fern, 0.05), (Pond, 0.05));
+		R(EarthPlan.Floodplain, (ShortGrass, 0.25), (Reeds, 0.06));
+		R(EarthPlan.Delta, (Reeds, 0.15));
+		R(EarthPlan.SaltMarsh, (Reeds, 0.08));
+		R(EarthPlan.Waterhole, (Reeds, 0.15), (Pond, 0.1));
+		// tropical
+		R(EarthPlan.FernUnder, (Fern, 0.3), (TreeFern, 0.15));
+		R(EarthPlan.FloodForest, (Fern, 0.1), (Reeds, 0.04), (TreeFern, 0.03));
+		R(EarthPlan.CloudForest, (Fern, 0.15), (TreeFern, 0.06), (Vines, 0.08));
+		R(EarthPlan.WoodedSavanna, (ShortGrass, 0.2), (TallGrass, 0.15));
+		// dry, and the sea
+		R(EarthPlan.RockyScrub, (GreyShrub, 0.05));
+		R(EarthPlan.FireScar, (Fireweed, 0.08), (Bunch, 0.08));
+		R(EarthPlan.ThornScrub, (Thorn, 0.05), (Bunch, 0.08));
+		R(EarthPlan.Oasis, (ShortGrass, 0.3));
+		R(EarthPlan.Dunes, (Dune, 0.15));
+		R(EarthPlan.WeedBeds, (SeaWeed, 0.2));
+		R(EarthPlan.Reef, (ReefFan, 0.15));
 		return d;
 	}
 }

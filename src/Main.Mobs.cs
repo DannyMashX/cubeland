@@ -646,7 +646,8 @@ public partial class Main
 	}
 	void RemoveMob(Mob m) { m.Root.QueueFree(); mobList.Remove(m); }
 	// a grassy spot with room to stand, between minR and maxR blocks from you
-	Vector3? FindMobSpot(float minR, float maxR)
+	// grassy: in Earthlike any grassy top counts as Grass (the cows; and with EarthMobGrass, on in 0.1.5.5, the other mobs too)
+	Vector3? FindMobSpot(float minR, float maxR, bool grassy = false)
 	{
 		for (int tries = 0; tries < 12; tries++)
 		{
@@ -655,7 +656,8 @@ public partial class Main
 			if (x < 2 || z < 2 || x >= World.WX - 2 || z >= World.WZ - 2) continue;
 			int y = World.WY - 1;
 			while (y > 0 && world.GetBlock(x, y, z) == 0) y--;
-			if (world.GetBlock(x, y, z) != Blocks.Grass || world.GetBlock(x, y + 1, z) != 0 || world.GetBlock(x, y + 2, z) != 0) continue;
+			int top = world.GetBlock(x, y, z);
+			if (!(top == Blocks.Grass || (grassy || EarthMobGrass) && GrassFor(top)) || world.GetBlock(x, y + 1, z) != 0 || world.GetBlock(x, y + 2, z) != 0) continue;
 			return new Vector3(x + 0.5f, y + 1, z + 0.5f);
 		}
 		return null;
@@ -874,7 +876,9 @@ public partial class Main
 			}
 			// falling, swimming and bumping into blocks (in a joined game the host's game does this)
 			if (!netClient) {
-			if (player.WaterAt(m.X, m.Y + 0.5f, m.Z)) { m.Vy += (2 - m.Vy) * Math.Min(1, dt * 3); if (m.Bumped && !(m.Type == "duck" && !m.Ashore)) m.Vy = 5; }   // float up, paddle out over edges (a duck stays in, unless it's coming to you for food)
+			int riverMid = m.Type == "duck" ? 0 : world.GetBlock((int)MathF.Floor(m.X), (int)MathF.Floor(m.Y + 0.5f), (int)MathF.Floor(m.Z));   // (0.1.5.5: rivers carry mobs, not ducks: the water where the swim test looks)
+			if (riverMid == Blocks.FallingWater) m.Vy = -3;   // (down falling water at 3 a second)
+			else if (player.WaterAt(m.X, m.Y + 0.5f, m.Z)) { m.Vy += (2 - m.Vy) * Math.Min(1, dt * 3); if (m.Bumped && !(m.Type == "duck" && !m.Ashore)) m.Vy = 5; }   // float up, paddle out over edges (a duck stays in, unless it's coming to you for food)
 			else m.Vy = Math.Max(-40, m.Vy - 28 * dt);
 			ox = m.X; oz = m.Z; m.OnGround = false; m.Bumped = false;
 			int steps = Math.Max(1, (int)MathF.Ceiling(Math.Max(Math.Abs(m.Vx), Math.Max(Math.Abs(m.Vy), Math.Abs(m.Vz))) * dt / 0.3f));
@@ -883,6 +887,11 @@ public partial class Main
 				if (m.Vx != 0) { float b = m.X; m.X += m.Vx * dt / steps; if (MobBlocked(m, m.X, m.Y, m.Z)) { m.X = b; m.Bumped = true; m.Vx = 0; } }
 				if (m.Vz != 0) { float b = m.Z; m.Z += m.Vz * dt / steps; if (MobBlocked(m, m.X, m.Y, m.Z)) { m.Z = b; m.Bumped = true; m.Vz = 0; } }
 				if (m.Vy != 0) { float b = m.Y, v = m.Vy; m.Y += m.Vy * dt / steps; if (MobBlocked(m, m.X, m.Y, m.Z)) { m.Y = b; if (v < 0) m.OnGround = true; m.Vy = 0; } }
+			}
+			if (Blocks.RiverCurrent(riverMid, out float rcx, out float rcz))
+			{   // (0.1.5.5) a river carries it along, after its own walking, through its usual collision
+				float b = m.X; m.X += rcx * dt; if (MobBlocked(m, m.X, m.Y, m.Z)) m.X = b;
+				b = m.Z; m.Z += rcz * dt; if (MobBlocked(m, m.X, m.Y, m.Z)) m.Z = b;
 			}
 			if (m.Y < -10) { RemoveMob(m); continue; }
 			}

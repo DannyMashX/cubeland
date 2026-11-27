@@ -469,7 +469,7 @@ public partial class Main
 			foreach (var (i, left) in s.TorchBurn) if (world.TorchBurn.ContainsKey(i)) world.TorchBurn[i] = Math.Max(0, left);
 			if (s.Crops != null) foreach (var (i, left) in s.Crops) if (world.Crops.ContainsKey(i)) world.Crops[i] = Math.Max(0, left);
 			if (s.Fert != null) foreach (var (i, n) in s.Fert) if (world.FertLeft.ContainsKey(i)) world.FertLeft[i] = Math.Max(1, n);
-			if (s.Grazed != null) foreach (var (i, left) in s.Grazed) if (i >= 0 && i < world.Blocks.Length && world.Blocks[i] == Blocks.Dirt) world.Grazed[i] = Math.Max(0, left);
+			if (s.Grazed != null) foreach (var (i, left) in s.Grazed) if (i >= 0 && i < world.Blocks.Length && World.Regrows(world.Blocks[i])) world.Grazed[i] = Math.Max(0, left);
 			if (s.Saplings != null) foreach (var (i, n) in s.Saplings) if (world.Saplings.ContainsKey(i)) world.Saplings[i] = Math.Clamp(n, 0, World.SaplingHits - 1);
 			if (s.Grown != null) foreach (long i in s.Grown) if (world.Edits.ContainsKey(i)) world.Grown.Add(i);
 			pendingSave = s;

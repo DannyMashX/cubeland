@@ -1,5 +1,20 @@
 [
     {
+        "version":  "Beta 0.1.5.5",
+        "folder":  "beta-0.1.5.5",
+        "date":  "2026-11-27",
+        "notes":  "New: Earthlike worlds come to life. Trees grow by climate, including four new woods: tall Mahogany in rainforests, flat-topped Acacia on the savanna, Stiltroot standing in shallow swamp water, and Teak in dry forests. Old burns hold burnt trees on Charred Ground.",
+        "changes":  [
+                        "New: Earthlike worlds come to life. Trees grow by climate, including four new woods: tall Mahogany in rainforests, flat-topped Acacia on the savanna, Stiltroot standing in shallow swamp water, and Teak in dry forests. Old burns hold burnt trees on Charred Ground.",
+                        "New: 21 kinds of ground plants grow across Earthlike land by biome: prairie grasses, forest ferns and Tree Ferns, flower clearings, marsh reeds, bog cotton grass, seaweed and more.",
+                        "New: wild crops grow in Earthlike worlds where they belong: Potatoes in meadows and alpine lands, Flax in meadows and on the plains, Turnips in snowy lands and the taiga, Corn on the plains and savanna, Cantaloupes near deserts and badlands, and Dead Bushes in the dry lands.",
+                        "New: Mahogany, Acacia, Stiltroot and Teak saplings grow into their trees.",
+                        "New: animals live in Earthlike worlds, each in the lands that suit it. Cows graze the grassy soils, which grow back; goats climb the rocky ground; boar root under the trees. Rivers carry animals along, as they carry you.",
+                        "New: in Earthlike worlds, mobs spawn at night on the grassy soils too.",
+                        "Changed: Earthlike worlds you\u0027ve already made grow the new trees, plants and animals too, apart from the spots you\u0027ve changed, so one could even sprout inside a building."
+                    ]
+    },
+    {
         "version":  "Beta 0.1.5.4",
         "folder":  "beta-0.1.5.4",
         "date":  "2026-11-27",

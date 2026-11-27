@@ -605,7 +605,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.5.4"></script>
+<script src="textures.js?v=beta-0.1.5.5"></script>
 <!-- Earthlike worlds: the plan and the land drawing (the desktop version's C#, translated), run in a Worker (see Earthlike worlds) -->
 <script type="text/plain" id="earth-src">
 // (made by cs2js.py from the desktop plan code: do not edit by hand; fixes go in the translator or the overrides)
@@ -4355,7 +4355,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 	// as the store's chunks (so COLHASH reads it straight through)
 	function   CAt( x,  y,  z) { return ( ((y >> 4) << 12) | ((y & 15) << 8) | (z << 4) | x); }
 
-	function  Draw( cx,  cz,  trees)
+	function  Draw( cx,  cz,  trees,  bare = false)
 	{
 		let col = new Int32Array( 16 * 16 * ColH());
 		riverCache.clear();
@@ -4368,6 +4368,8 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 				DrawBlockColumn(col, x, z, cx * 16 + x, cz * 16 + z, s, rivers);
 			}
 		if (trees) Trees(col, cx, cz);
+		if (bare) return col;   // (Beta 0.1.5.5: the staircases' tests, the land and its trees only)
+		if (trees) { if (!(TestOff & 1)) DrawStairs(col, cx, cz, spots); if (!(TestOff & 2)) Wild(col, cx, cz, spots); }   // (Beta 0.1.5.5: with the trees, so not in the tests without them)
 		for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) Snow(col, x, z, spots[z * 16 + x]);
 		return col;
 	}
@@ -4515,6 +4517,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 		if (y + 1 >= ColH()) return;
 		let t = col[CAt(x, y, z)];
 		if (t == 50 || t == 99) return;
+		if (t == 70 || t >= 3700 && t <= 3723 || t >= 3940 && t <= 3961 || t >= 194 && t <= 198) return;   // (Beta 0.1.5.5: a step, a crop, a Dead Bush or a plant on top)
 		if (t == 1) col[CAt(x, y, z)] = 98;
 		col[CAt(x, y + 1, z)] = s.row.Snow >= 8 ? 387 : 380 + s.row.Snow - 1;
 	}
@@ -4551,30 +4554,429 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 			for (let tx = x0 - R; tx < x0 + 16 + R; tx++)
 			{
 				if (tx < 0 || tz < 0 || tx >= Size || tz >= Size) continue;
-				let h = Hash(tx, tz, 7810); if (h >= TreeMax) continue;
-				let cell = SurfCell(tx, tz, SurfJ); let jx = SurfJ[0], jz = SurfJ[1], sub = SubAt(jx, jz);
-				let tr = TreeRow.Of(sub, Biome[cell]); if (tr == null || h >= tr.Density) continue;
-				let s = Probe(tx, tz, RiversFor(clamp(tx >> 4, 0, (Size / 16 | 0) - 1), clamp(tz >> 4, 0, (Size / 16 | 0) - 1)));
-				if (s.wet || s.channel >= 0 || s.yg + 1 >= ColH()) continue;
-				let name = tr.Pick(Hash(Math.floor(tx / 8.0), Math.floor(tz / 8.0), 7811));
-				if (!TreeGround(name, TopBlock(s, tx, tz))) continue;
-				let yg = s.yg;
+				let name = TreeKind(tx, tz); if (name == null) continue;
+				let yg = TreeKindSpot.yg, stilt = name == "stiltroot";
 				let plan = PlanTreeHook(name, tx, yg, tz);
 				if (plan == null) continue;
 				for (const [bx, by, bz, id] of plan)
 				{
 					if (bx < x0 || bx >= x0 + 16 || bz < z0 || bz >= z0 + 16 || by < 0 || by >= ColH()) continue;
 					let k = CAt(bx - x0, by, bz - z0), there = col[k];
-					if (there == 0 || !IsLeavesHook(id) && IsLeavesHook(there)) col[k] = id;
+					if (there == 0 || !IsLeavesHook(id) && (IsLeavesHook(there) || stilt && there == 50)) col[k] = id;   // (a stiltroot's logs into still water too)
 				}
 			}
 	}
+
+	// (Beta 0.1.5.5) the kind of tree standing at block (tx, tz), or null: the trees pass's own test. Hash(tx, tz, 7810) under
+	// TreeMax and its row's density; the kind is the row's pick by Hash(floor(tx / 8), floor(tz / 8), 7811); outside any channel,
+	// with room above (yg + 1 < H), on dry land (a stiltroot also in shallow still water: StiltWater), on ground its kind takes.
+	// Its spot (the Probe) is left in TreeKindSpot.
+	let TreeKindSpot = null;
+	function TreeKind( tx,  tz)
+	{
+		TreeKindSpot = null;
+		let h = Hash(tx, tz, 7810); if (h >= TreeMax) return null;
+		let cell = SurfCell(tx, tz, SurfJ); let jx = SurfJ[0], jz = SurfJ[1], sub = SubAt(jx, jz);
+		let tr = TreeRow.Of(sub, Biome[cell]); if (tr == null || h >= tr.Density) return null;
+		let s = Probe(tx, tz, RiversFor(clamp(tx >> 4, 0, (Size / 16 | 0) - 1), clamp(tz >> 4, 0, (Size / 16 | 0) - 1)));
+		if (s.channel >= 0 || s.yg + 1 >= ColH()) return null;
+		let name = tr.Pick(Hash(Math.floor(tx / 8.0), Math.floor(tz / 8.0), 7811));
+		if (s.wet && !(name == "stiltroot" && StiltWater(s))) return null;
+		if (!TreeGround(name, TopBlock(s, tx, tz))) return null;
+		TreeKindSpot = s;
+		return name;
+	}
+
+	// (Beta 0.1.5.5) still water a stiltroot stands in: no river, at most 2 deep, not iced over (DrawBlockColumn's Ice test)
+	function  StiltWater(  s) { return ( s.channel < 0 && s.ys < 0 && s.top - s.yg <= 2 && !(Sea[s.c.i] ? s.sub == SeaIce : Temp[s.c.i] + Swing[s.c.i] < FreezeSummer)); }
 
 	// the ground a tree takes: grassy tops, dirt and the soils, the mosses and peat; and sand too for the dry lands' trees
 	function  TreeGround( name,  top) { return (
 		top == 1 || top == 98 || top == 2 || top >= 4800 && top <= 4819 && top != 4814
 		|| top == 3920 || top == 3934 || top == 205 || top == 3931 || top == 58 || top == 203 && (name == "willow" || name == "cypress")
-		|| top == 6 && (name == "palm" || name == "palo_verde" || name == "dead" || name == "juniper")); }
+		|| top == 6 && (name == "palm" || name == "palo_verde" || name == "dead" || name == "juniper")
+		|| top == 3935 || name == "stiltroot" && (top == 203 || top == 6 || top == 3930)); }   // (Beta 0.1.5.5: Charred Ground; a stiltroot's Mud, Sand, Silt)
+
+	// ---- (Beta 0.1.5.5) staircases (pass 5b, after the trees): in land 9 a few short flights of stairs stand in the highest deep
+	// woods, at most one in each region (the map cut into n x n, n = Max(1, Floor(Size / 566 + 0.5))). Found once the plan is made
+	// (FindStairs, in every Worker, from the plan and the chunks a world's builds are in), then drawn by Draw like the trees.
+	// A region's candidates are the plan cells whose middle block is in its middle 60% with a Woods or Taiga biome, the highest
+	// first (KEPT Elev; ties lowest z, then lowest x); the first of its first 24 to pass every test is its staircase:
+	//   a. the cells under the blocks 8 out every way are Woods or Taiga too; f. its chunk isn't within 2 of a skipped one;
+	//   b. the drawn ground is at least Room + 6, outside any channel; e. at least 2 logs stand on the ground within 6;
+	//   c, d. its steps fit one of the 4 ways (the first from Hash 7703) on the drawn land: level ground with a grassy or bare top
+	//   and nothing in the way. Its block: Cobbled Andesite (8) a third of the time (Hash 7704), else the nearest log's planks.
+	// Each is [x, y, z, dir, n, mat] (null: none in that region), regions row by row (rz, then rx).
+	let Stairs = [];
+	let TestOff = 0;   // (testing: 1 = draw no staircases, 2 = no wild crops)
+	function SetTestOff( v) { TestOff = v; }
+	const  StairDirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+	function IsLogHook(id) { return typeof __EARTH_IS_LOG === "function" ? __EARTH_IS_LOG(id) : false; }
+
+	function PlanksHook(id) { return typeof __EARTH_PLANKS === "function" ? __EARTH_PLANKS(id) : 7; }
+
+	function SetStairs( list) { Stairs = list; }
+
+	function  StairTop( t) { return ( t == 1 || t == 98 || t == 58 || t == 2 || t >= 4800 && t <= 4819 && t != 4814); }   // (PlantsLikeGrass or PlantsLikeDirt)
+
+	function StairSkipped( x,  z,  skip)
+	{
+		if (skip == null || skip.size == 0) return false;
+		let nc = Size / 16 | 0, cx = x >> 4, cz = z >> 4;
+		for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++)
+		{
+			let nx = cx + dx, nz = cz + dz;
+			if (nx >= 0 && nz >= 0 && nx < nc && nz < nc && skip.has(nz * nc + nx)) return true;
+		}
+		return false;
+	}
+
+	function FindStairs( skip)
+	{
+		let n = Math.max(1, Math.floor(Size / 566.0 + 0.5)), C = Cell, h = C / 2 | 0, nc = Size / 16 | 0, out = [];
+		for (let rz = 0; rz < n; rz++) for (let rx = 0; rx < n; rx++)
+		{
+			let x0 = Math.floor(rx * Size / n), x1 = Math.floor((rx + 1) * Size / n), z0 = Math.floor(rz * Size / n), z1 = Math.floor((rz + 1) * Size / n);
+			let ax = x0 + Math.floor((x1 - x0) * 2 / 10), bx = x1 - Math.floor((x1 - x0) * 2 / 10) - 1;
+			let az = z0 + Math.floor((z1 - z0) * 2 / 10), bz = z1 - Math.floor((z1 - z0) * 2 / 10) - 1;
+			let cands = [];
+			for (let gz = 0; gz < N; gz++)
+			{
+				let mz = gz * C + h; if (mz < az || mz > bz) continue;
+				for (let gx = 0; gx < N; gx++)
+				{
+					let mx = gx * C + h; if (mx < ax || mx > bx) continue;
+					let i = gz * N + gx; if (Biome[i] == Woods || Biome[i] == Taiga) cands.push(i);
+				}
+			}
+			cands.sort((a, b) => Elev[b] - Elev[a] || a - b);
+			// the land round a candidate, drawn bare (trees on, nothing after them), kept while this region chooses
+			let drawn = new Map();
+			const get = (x, y, z) => {
+				if (x < 0 || z < 0 || x >= Size || z >= Size || y < 0 || y >= ColH()) return 0;
+				let k = (z >> 4) * nc + (x >> 4), col = drawn.get(k);
+				if (col === undefined) { col = Draw(x >> 4, z >> 4, true, true); drawn.set(k, col); }
+				return col[CAt(x & 15, y, z & 15)];
+			};
+			const ground = (x, z) => Probe(x, z, RiversFor(x >> 4, z >> 4)).yg;
+			let found = null;
+			for (let t = 0; t < Math.min(24, cands.length) && found == null; t++) found = StairAt(cands[t], skip, get, ground);
+			out.push(found);
+		}
+		return out;
+	}
+
+	// (Beta 0.1.5.5) a staircase stood up again elsewhere in play (desktop's EarthCol.StairElsewhere): up to `tries` random plan
+	// cells of Woods or Taiga, more than Size / 10 from (sx, sz) and 16 in from the edge, the plan's ground there Room + 6 or more;
+	// highest first (then by index), each tested as the world's staircases are (StairAt: on the land drawn bare, never near a chunk
+	// in skip, the chunks changed now), up to `test` of them. Its random is a small seeded one: nothing to compare, the game's pick.
+	let LastTested = 0;   // (test: how many it tested)
+	function StairElsewhere( sx,  sz,  skip,  seed,  tries = 4000,  test = 400)
+	{
+		let a = seed >>> 0;
+		const rnd = n => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return Math.floor(((t ^ (t >>> 14)) >>> 0) / 4294967296 * n); };
+		let C = Cell, h = C / 2 | 0, S = Size, nc = S / 16 | 0, cands = [], seen = new Set();
+		for (let t = 0; t < tries; t++)
+		{
+			let i = rnd(N * N), x = (i % N) * C + h, z = (i / N | 0) * C + h;
+			if (Biome[i] != Woods && Biome[i] != Taiga || Math.abs(x - sx) + Math.abs(z - sz) <= S / 10) continue;
+			if (x < 16 || z < 16 || x >= S - 16 || z >= S - 16 || GroundAt(x, z) < Room + 6 || seen.has(i)) continue;
+			seen.add(i); cands.push(i);
+		}
+		cands.sort((p, q) => Elev[q] - Elev[p] || p - q);
+		let drawn = new Map();
+		const get = (x, y, z) => {
+			if (x < 0 || z < 0 || x >= S || z >= S || y < 0 || y >= ColH()) return 0;
+			let k = (z >> 4) * nc + (x >> 4), col = drawn.get(k);
+			if (col === undefined) { if (drawn.size >= 16) drawn.clear(); col = Draw(x >> 4, z >> 4, true, true); drawn.set(k, col); }
+			return col[CAt(x & 15, y, z & 15)];
+		};
+		const ground = (x, z) => Probe(x, z, RiversFor(x >> 4, z >> 4)).yg;
+		for (let t = 0; t < Math.min(test, cands.length); t++) { let f = StairAt(cands[t], skip, get, ground); if (f != null) { LastTested = t + 1; return f; } }
+		LastTested = Math.min(test, cands.length); return null;
+	}
+
+	// (Beta 0.1.5.5) spots for the staircase events that put you or a thing somewhere else (desktop's EarthDryGround, its plan half):
+	// up to 16 random plan cells (of up to 4000 tries) of Woods, Plains, Meadow, Taiga, Savanna or Dry Forest, not sea, lake or river,
+	// 16 in from the edge, the plan's ground there over Room + 1; each its middle [x, z]. The game grows each and checks its ground.
+	function DrySpots()
+	{
+		let C = Cell, h = C / 2 | 0, out = [];
+		for (let t = 0; t < 4000 && out.length < 16; t++)
+		{
+			let i = Math.floor(Math.random() * N * N), b = Biome[i], x = (i % N) * C + h, z = (i / N | 0) * C + h;
+			if (b != Woods && b != Plains && b != Meadow && b != Taiga && b != Savanna && b != DryForest) continue;
+			if (Sea[i] || Lake[i] || River(i) || x < 16 || z < 16 || x >= Size - 16 || z >= Size - 16 || GroundAt(x, z) <= Room + 1) continue;
+			out.push([x, z]);
+		}
+		return out;
+	}
+
+	function StairAt( i,  skip,  get,  ground)
+	{
+		let x = (i % N) * Cell + (Cell / 2 | 0), z = (i / N | 0) * Cell + (Cell / 2 | 0);
+		for (const [dx, dz] of StairDirs)
+		{   // a. deep in the woods
+			let px = x + 8 * dx, pz = z + 8 * dz;
+			if (px < 0 || pz < 0 || px >= Size || pz >= Size) return null;
+			let b = Biome[(pz / Cell | 0) * N + (px / Cell | 0)];
+			if (b != Woods && b != Taiga) return null;
+		}
+		if (StairSkipped(x, z, skip)) return null;   // f. never near builds
+		let s = Probe(x, z, RiversFor(x >> 4, z >> 4));   // b. high enough, not in a channel
+		if (s.channel >= 0 || s.yg < Room + 6) return null;
+		let y = s.yg + 1, n = 5 + Math.floor(Hash(x, z, 7702) * 4), d0 = Math.floor(Hash(x, z, 7703) * 4);
+		let logs = 0, best = 1 << 30, near = 0;   // e. trees near: logs standing on the ground within 6, and the nearest
+		for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++)
+		{
+			let b = get(x + dx, ground(x + dx, z + dz) + 1, z + dz);
+			if (!IsLogHook(b)) continue;
+			logs++;
+			let d = dx * dx + dz * dz; if (d < best) { best = d; near = b; }
+		}
+		if (logs < 2) return null;
+		for (let t = 0; t < 4; t++)
+		{   // c, d. the way it goes: a random one first, then the others
+			let dir = (d0 + t) % 4;
+			if (StairFits(x, y, z, dir, n, get, ground)) return [x, y, z, dir, n, Hash(x, z, 7704) < 1 / 3.0 ? 8 : PlanksHook(near)];
+		}
+		return null;
+	}
+
+	function StairFits( x,  y,  z,  dir,  n,  get,  ground)
+	{
+		let dx = StairDirs[dir][0], dz = StairDirs[dir][1];
+		for (let k = 0; k < n; k++)
+		{
+			let cx = x + dx * k, cz = z + dz * k;
+			if (cx < 1 || cz < 1 || cx >= Size - 1 || cz >= Size - 1) return false;
+			let gk = ground(cx, cz), top = get(cx, gk, cz);
+			if (gk != y - 1 && gk != y - 2) return false;   // (on level ground: a block lower at most)
+			if (!StairTop(top)) return false;
+			for (let yy = gk + 1; yy <= y + k + 3; yy++) if (get(cx, yy, cz) != 0) return false;   // (nothing in the way, and room above)
+		}
+		return true;
+	}
+
+	// a staircase's steps in this chunk column: each a stairs piece (Pieces, 70; its shape is the main thread's, see pieceMap),
+	// standing on a base of its block down to the ground
+	function DrawStairs( col,  cx,  cz,   spots)
+	{
+		for (const st of Stairs)
+		{
+			if (st == null) continue;
+			let x = st[0], y = st[1], z = st[2], dx = StairDirs[st[3]][0], dz = StairDirs[st[3]][1], n = st[4], mat = st[5];
+			for (let k = 0; k < n; k++)
+			{
+				let bx = x + dx * k - cx * 16, bz = z + dz * k - cz * 16;
+				if (bx < 0 || bz < 0 || bx >= 16 || bz >= 16) continue;
+				let gk = spots[bz * 16 + bx].yg;
+				for (let yy = gk + 1; yy < y + k; yy++) col[CAt(bx, yy, bz)] = mat;
+				col[CAt(bx, y + k, bz)] = 70;
+			}
+		}
+	}
+
+	// ---- (Beta 0.1.5.5) wild crops and Dead Bushes (pass 5c, after the staircases; worldgen.json's earthBiomes, earthNear and
+	// earthGround), column by column from the column's own drawn blocks and the plan. The first that takes a column wins: the crop
+	// rows in order, then a Cantaloupe, then a Dead Bush. A column's biome is the plan's at its wobbled cell (SurfCell), as the
+	// trees'. Every hash is the plan's.
+	//   A crop row's patch middle (mx, mz): on the map, 8 or more from its edge, Hash(mx, mz, seed) <= chance, its biome in
+	//   earthBiomes (a Cantaloupe: not in earthNear, but one of the 8 spots 12 away is); its tries are today's (seed + 1..3). A
+	//   column a try lands on gets the row's ripe crop (Corn: both halves) if it's dry, outside a channel, with a grassy top
+	//   (PlantsLikeGrass) and air above. A Cantaloupe's melon: on the one side its spot picks (Hash seed + 4) of a vine spot
+	//   whose own top is grassy (dry, outside a channel), into air on a grassy top. A Dead Bush: Hash(x, z, seed) <= chance in its
+	//   earthBiomes, on its earthGround, dry, into air.
+	function WildHook() { return typeof __EARTH_WILD === "object" ? __EARTH_WILD : null; }
+
+	const  MelonSides = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+	const  Round8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+	function  GrassTop( t) { return ( t == 1 || t == 98 || t == 58 || t >= 4810 && t <= 4819 && t != 4814); }   // (PlantsLikeGrass)
+
+	function  WildBiome( bx,  bz) { return ( Biome[SurfCell(bx, bz, SurfJ)]); }
+
+	function WildMiddle( r,  mx,  mz)
+	{
+		if (mx < 8 || mz < 8 || mx >= Size - 8 || mz >= Size - 8) return false;
+		if (Hash(mx, mz, r.seed) > r.chance) return false;
+		let b = WildBiome(mx, mz);
+		if (r.near == null) return r.biomes.includes(b);
+		if (r.near.includes(b)) return false;
+		for (const [dx, dz] of Round8)
+			if (r.near.includes(WildBiome(clamp(mx + r.within * dx, 0, Size - 1), clamp(mz + r.within * dz, 0, Size - 1)))) return true;
+		return false;
+	}
+
+	function WildSpot( r,  x,  z)
+	{
+		let sp = r.spread;
+		for (let mz = z - sp; mz <= z + sp; mz++)
+			for (let mx = x - sp; mx <= x + sp; mx++)
+			{
+				if (!WildMiddle(r, mx, mz)) continue;
+				let n = r.tries[0] + Math.floor(Hash(mx, mz, r.seed + 1) * (r.tries[1] - r.tries[0] + 1));
+				for (let k = 0; k < n; k++)
+				{
+					let px = mx + Math.floor((Hash(mx + k, mz, r.seed + 2) - 0.5) * 2 * sp + 0.5), pz = mz + Math.floor((Hash(mx, mz + k, r.seed + 3) - 0.5) * 2 * sp + 0.5);
+					if (px == x && pz == z) return true;
+				}
+			}
+		return false;
+	}
+
+	function Wild( col,  cx,  cz,   spots)
+	{
+		let L = WildHook(); if (L == null) return;
+		for (let z = 0; z < 16; z++)
+			for (let x = 0; x < 16; x++)
+			{
+				let s = spots[z * 16 + x], bx = cx * 16 + x, bz = cz * 16 + z, top = TopBlock(s, bx, bz);
+				if (!WildCol(L, col, x, z, bx, bz, s, top) && L.plants) Cover(col, x, z, bx, bz, s, top);
+			}
+	}
+
+	// W in one column: true if it took it
+	function WildCol( L,  col,  x,  z,  bx,  bz,   s,  top)
+	{
+		if (s.wet || s.channel >= 0 || s.yg + 2 >= ColH()) return false;
+		let yg = s.yg, air1 = col[CAt(x, yg + 1, z)] == 0, air2 = col[CAt(x, yg + 2, z)] == 0;
+		if (GrassTop(top) && air1)
+		{
+			for (const r of L.rows)
+			{
+				if (r.corn && !air2 || !WildSpot(r, bx, bz)) continue;
+				col[CAt(x, yg + 1, z)] = r.ripe;
+				if (r.corn) col[CAt(x, yg + 2, z)] = r.top;
+				return true;
+			}
+			if (L.melonRow != null)
+				for (const [dx, dz] of MelonSides)
+				{   // (the vine spot on the other side, whose melon points this way)
+					let px = bx - dx, pz = bz - dz, r = L.melonRow;
+					if (px < 0 || pz < 0 || px >= Size || pz >= Size) continue;
+					let w = MelonSides[Math.floor(Hash(px, pz, r.seed + 4) * 4)];
+					if (w[0] != dx || w[1] != dz || !WildSpot(r, px, pz)) continue;
+					let ps = Probe(px, pz, RiversFor(px >> 4, pz >> 4));
+					if (ps.wet || ps.channel >= 0 || !GrassTop(TopBlock(ps, px, pz))) continue;
+					col[CAt(x, yg + 1, z)] = L.melon; return true;
+				}
+		}
+		if (air1 && L.bush != null && L.bush.ground.includes(top) && Hash(bx, bz, L.bush.seed) <= L.bush.chance && L.bush.biomes.includes(WildBiome(bx, bz)))
+		{ col[CAt(x, yg + 1, z)] = L.bush.id; return true; }
+		return false;
+	}
+
+	// ---- (Beta 0.1.5.5) P, the ground plants (in Wild, a column W didn't take): one roll (Hash 7850) down the column's cover row
+	// (__coverOf: its sub-biome's, else its biome's; none in rows with snow); the pick then needs its spot, else the column stays
+	// bare; never on a tree's spot (TreeKind). Land plants: dry, outside a channel, on their ground (CoverGround), with air above
+	// (2 for the two-tall). Sea Weed (two tall) and Reef Fans: in the sea's water on its bed, 3 (2) deep or more, not iced. Pond
+	// Leaves: on a lake or pond's still water 1 to 3 deep, not iced, in the air on its top. Hanging Vines: from the lowest leaves
+	// above top + 2 with air under them, 1-3 (Hash 7851) down into air.
+	function  TwoTallTop( id) { return ( id == 3946 ? 3947 : id == 3951 ? 3961 : id == 3953 ? 3954 : id == 3957 ? 3958 : 0); }
+
+	function  CoverGround( id,  top) { return (
+		GrassTop(top) || top == 2 || top >= 4800 && top <= 4809 || top == 3920 || top == 3934 || top == 205 || top == 3931 || top == 3935 || top == 58
+		|| id == 3956 && top == 6 || id == 3960 && (top == 6 || top == 3939 || top == 3928) || id == 3953 && (top == 203 || top == 3930)); }
+
+	// a wet column whose water's top is frozen (the sea where it's sea ice; a river or lake where summer stays below freezing)
+	function  Iced(  s) { let ic = s.ys >= 0 ? s.channel : s.c.i; return ( Sea[s.c.i] && s.ys < 0 ? s.sub == SeaIce : Temp[ic] + Swing[ic] < FreezeSummer); }
+
+	function Cover( col,  x,  z,  bx,  bz,   s,  top)
+	{
+		if (s.row.Snow > 0) return;
+		let list = __coverOf(s.sub, Biome[SurfCell(bx, bz, SurfJ)]); if (list == null) return;
+		let u = Hash(bx, bz, 7850), sum = 0, pick = 0;
+		for (const [id, share] of list) { sum += share; if (u < sum) { pick = id; break; } }
+		if (pick == 0 || TreeKind(bx, bz) != null) return;
+		let yg = s.yg, H = ColH();
+		if (pick == 3957 || pick == 3959)
+		{   // (Sea Weed, a Reef Fan: in the sea, on its bed)
+			if (!s.wet || !Sea[s.c.i] || s.channel >= 0 || Iced(s) || s.top - yg < (pick == 3957 ? 3 : 2)) return;
+			if (col[CAt(x, yg + 1, z)] != 50 || pick == 3957 && col[CAt(x, yg + 2, z)] != 50) return;
+			col[CAt(x, yg + 1, z)] = pick; if (pick == 3957) col[CAt(x, yg + 2, z)] = 3958;
+			return;
+		}
+		if (pick == 3955)
+		{   // (Pond Leaves: on still water that isn't the sea or a river)
+			if (!s.wet || Sea[s.c.i] || s.channel >= 0 || Iced(s) || s.top - yg < 1 || s.top - yg > 3 || s.top + 1 >= H || col[CAt(x, s.top + 1, z)] != 0) return;
+			col[CAt(x, s.top + 1, z)] = 3955; return;
+		}
+		if (pick == 3952)
+		{   // (Hanging Vines)
+			for (let y = yg + 3; y < H; y++)
+			{
+				if (!IsLeavesHook(col[CAt(x, y, z)]) || col[CAt(x, y - 1, z)] != 0) continue;
+				let len = 1 + Math.floor(Hash(bx, bz, 7851) * 3);
+				for (let k = 1; k <= len && col[CAt(x, y - k, z)] == 0; k++) col[CAt(x, y - k, z)] = 3952;
+				return;
+			}
+			return;
+		}
+		let up = TwoTallTop(pick);
+		if (s.wet || s.channel >= 0 || yg + 2 >= H || !CoverGround(pick, top) || col[CAt(x, yg + 1, z)] != 0 || up != 0 && col[CAt(x, yg + 2, z)] != 0) return;
+		col[CAt(x, yg + 1, z)] = pick; if (up != 0) col[CAt(x, yg + 2, z)] = up;
+	}
+
+	// the cover rows (desktop draft 1's P4 table): [plant, share] in roll order; "flowers" (-1) is the 5 Flowers 194-198 at a fifth each
+	let __coverRows = null;
+	function __coverOf( sub,  biome)
+	{
+		if (__coverRows == null)
+		{
+			const SG = 3945, TG = 3946, BU = 3948, GS = 3949, FE = 3950, TF = 3951, VI = 3952, RE = 3953, PO = 3955, DU = 3956, SW = 3957, RF = 3959, TH = 3960,
+				TS = 3940, CO = 3941, FW = 3942, GE = 3943, ED = 3944, FL = -1;
+			__coverRows = new Map();
+			const R = (n, ...mix) => { const l = []; for (const [id, share] of mix) if (id == FL) for (let f = 194; f <= 198; f++) l.push([f, share / 5]); else l.push([id, share]); __coverRows.set(n, l); };
+			R(Woods, [SG, 0.25], [FE, 0.04], [FL, 0.02]);
+			R(Plains, [SG, 0.3], [TG, 0.15], [FL, 0.02]);
+			R(Taiga, [SG, 0.08], [FE, 0.06]);
+			R(Meadow, [SG, 0.35], [TG, 0.05], [FL, 0.05]);
+			R(Swamp, [SG, 0.15], [RE, 0.06], [PO, 0.08]);
+			R(Tundra, [TS, 0.06], [CO, 0.02]);
+			R(Rainforest, [FE, 0.2], [TF, 0.04], [VI, 0.03]);
+			R(Savanna, [SG, 0.2], [TG, 0.15]);
+			R(Alpine, [SG, 0.25], [GE, 0.02], [ED, 0.01]);
+			R(DryScrub, [GS, 0.06], [BU, 0.06]);
+			R(DryForest, [SG, 0.12], [BU, 0.05]);
+			R(Ocean, [SW, 0.02]);
+			for (const n of [LichenField, FrostCracks, ForestTundra, LichenWoods]) R(n, [TS, 0.06], [CO, 0.02]);
+			for (const n of [ThawBogs, Muskeg, BogEdge]) R(n, [CO, 0.12]);
+			R(Fen, [RE, 0.12], [CO, 0.06], [PO, 0.1]);
+			R(OldBurn, [FW, 0.2], [SG, 0.1]);
+			R(OldGrowth, [FE, 0.15], [SG, 0.1]);
+			R(BirchGrove, [SG, 0.25], [FE, 0.03]);
+			R(Clearing, [SG, 0.4], [FL, 0.08]);
+			R(FernRavine, [FE, 0.35]);
+			R(Parkland, [SG, 0.35], [TG, 0.05], [FL, 0.01]);
+			R(Tallgrass, [TG, 0.45], [SG, 0.1], [FL, 0.03]);
+			R(Shortgrass, [SG, 0.4], [BU, 0.1]);
+			R(Steppe, [BU, 0.25], [GS, 0.05]);
+			R(Wildflowers, [FL, 0.3], [SG, 0.2]);
+			R(WetMeadow, [SG, 0.3], [RE, 0.1]);
+			R(Treeline, [SG, 0.15], [ED, 0.01]);
+			R(ReedMarsh, [RE, 0.3], [PO, 0.15]);
+			R(ReedBed, [RE, 0.25], [PO, 0.1]);
+			R(SwampForest, [SG, 0.1], [FE, 0.05], [PO, 0.05]);
+			R(Floodplain, [SG, 0.25], [RE, 0.06]);
+			R(Delta, [RE, 0.15]);
+			R(SaltMarsh, [RE, 0.08]);
+			R(Waterhole, [RE, 0.15], [PO, 0.1]);
+			R(FernUnder, [FE, 0.3], [TF, 0.15]);
+			R(FloodForest, [FE, 0.1], [RE, 0.04], [TF, 0.03]);
+			R(CloudForest, [FE, 0.15], [TF, 0.06], [VI, 0.08]);
+			R(WoodedSavanna, [SG, 0.2], [TG, 0.15]);
+			R(RockyScrub, [GS, 0.05]);
+			R(FireScar, [FW, 0.08], [BU, 0.08]);
+			R(ThornScrub, [TH, 0.05], [BU, 0.08]);
+			R(Oasis, [SG, 0.3]);
+			R(Dunes, [DU, 0.15]);
+			R(WeedBeds, [SW, 0.2]);
+			R(Reef, [RF, 0.15]);
+		}
+		return __coverRows.has(sub) ? __coverRows.get(sub) : __coverRows.has(biome) ? __coverRows.get(biome) : null;
+	}
 
 
 	// a plan rock's block
@@ -4826,7 +5228,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
       [LichenWoods, { Top: 3920, Rock: 3926, Patch: -1, Cut: 0.45 }],
       [LarchStand, {  }],
       [Muskeg, { Top: 3934, Patch: 205, Cut: 0.6 }],
-      [OldBurn, {  }],
+      [OldBurn, { Patch: 3935, Cut: 0.55 }],
       [OldGrowth, { Rock: 3938 }],
       [BirchGrove, {  }],
       [Clearing, {  }],
@@ -4841,7 +5243,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
       [SwampForest, { Top: 1, Patch: 203, Cut: 0.55 }],
       [Fen, { Top: 205, Patch: 3934, Cut: 0.5 }],
       [RockyScrub, { Top: 0, Patch: -2, Cut: 0.55 }],
-      [FireScar, {  }],
+      [FireScar, { Patch: 3935, Cut: 0.6 }],
       [FernUnder, {  }],
       [FloodForest, {  }],
       [CloudForest, { Rock: 3938 }],
@@ -4908,16 +5310,16 @@ function EarthPlan(seed, size, room = 0, __from = null) {
       [Taiga, 0.035, ['fir', 'larch', 'birch', 'aspen'], [0.55, 0.2, 0.15, 0.1]],
       [Meadow, 0.002, ['cherry', 'prairie_oak'], [0.6, 0.4]],
       [Badlands, 0.002, ['juniper', 'dead'], [0.6, 0.4]],
-      [Rainforest, 0.04, ['oak', 'palm'], [0.6, 0.4]],
-      [Savanna, 0.002, ['prairie_oak'], [1]],
+      [Rainforest, 0.04, ['mahogany', 'palm'], [0.55, 0.45]],
+      [Savanna, 0.002, ['acacia'], [1]],
       [Alpine, 0.004, ['fir', 'larch'], [0.5, 0.5]],
       [DryScrub, 0.006, ['juniper', 'cedar', 'holly', 'shrub'], [0.4, 0.2, 0.2, 0.2]],
-      [DryForest, 0.015, ['prairie_oak', 'cedar'], [0.5, 0.5]],
+      [DryForest, 0.015, ['teak', 'acacia'], [0.75, 0.25]],
       [ForestTundra, 0.004, ['fir', 'larch'], [0.6, 0.4]],
       [LichenWoods, 0.008, ['fir', 'larch'], [0.7, 0.3]],
       [LarchStand, 0.03, ['larch'], [1]],
       [Muskeg, 0.004, ['fir', 'larch'], [0.5, 0.5]],
-      [OldBurn, 0.006, ['birch', 'aspen'], [0.5, 0.5]],
+      [OldBurn, 0.008, ['birch', 'aspen', 'burnt'], [0.35, 0.35, 0.3]],
       [OldGrowth, 0.04, ['oak', 'maple', 'cedar'], [0.4, 0.3, 0.3]],
       [BirchGrove, 0.035, ['birch', 'aspen'], [0.6, 0.4]],
       [Clearing, 0, [], []],
@@ -4931,9 +5333,10 @@ function EarthPlan(seed, size, room = 0, __from = null) {
       [SwampForest, 0.03, ['willow', 'cypress'], [0.5, 0.5]],
       [Fen, 0.002, ['larch'], [1]],
       [RockyScrub, 0.004, ['juniper'], [1]],
-      [FireScar, 0.002, ['shrub'], [1]],
+      [FireScar, 0.003, ['shrub', 'burnt'], [0.6, 0.4]],
+      [FloodForest, 0.03, ['mahogany', 'palm'], [0.5, 0.5]],
       [CloudForest, 0.02, ['oak'], [1]],
-      [WoodedSavanna, 0.006, ['prairie_oak'], [1]],
+      [WoodedSavanna, 0.006, ['acacia', 'teak'], [0.8, 0.2]],
       [Waterhole, 0, [], []],
       [ThornScrub, 0.002, ['shrub', 'dead'], [0.5, 0.5]],
       [DuneSea, 0, [], []],
@@ -4957,7 +5360,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
       [SeaCliffs, 0, [], []],
       [Dunes, 0, [], []],
       [SaltMarsh, 0, [], []],
-      [StiltSwamp, 0, [], []],
+      [StiltSwamp, 0.03, ['stiltroot'], [1]],
       ]) __treeRows.set(k, Object.assign(new TreeRow(), { Names: names, Shares: shares, Density: d }));
     }
     const r = __treeRows.has(sub) ? __treeRows.get(sub) : __treeRows.has(biome) ? __treeRows.get(biome) : null;
@@ -5646,7 +6049,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 		Keep(); Lap("keep");
   }
 
-  return { get Seed() { return Seed; }, get Size() { return Size; }, get Cell() { return Cell; }, get N() { return N; }, get Room() { return Room; }, get Amp() { return Amp; }, get Tall() { return Tall; }, RoomFor, get High() { return High; }, get ExtraNoise() { return ExtraNoise; }, get WideMax() { return WideMax; }, get Wide() { return Wide; }, get Plates() { return Plates; }, get PX() { return PX; }, get PZ() { return PZ; }, get VX() { return VX; }, get VZ() { return VZ; }, get Cont() { return Cont; }, get Plate() { return Plate; }, get Other() { return Other; }, get Bd() { return Bd; }, get Ds() { return Ds; }, get Shape() { return Shape; }, get ShapeSize() { return ShapeSize; }, get Lift() { return Lift; }, get Cut() { return Cut; }, get ContNote() { return ContNote; }, get Edge() { return Edge; }, get Elev() { return Elev; }, get Temp() { return Temp; }, get Rain() { return Rain; }, get Swing() { return Swing; }, get Season() { return Season; }, get Humid() { return Humid; }, get Inland() { return Inland; }, get Level() { return Level; }, get Flow() { return Flow; }, get Down() { return Down; }, get Order() { return Order; }, get Sea() { return Sea; }, get Lake() { return Lake; }, get SeaDist() { return SeaDist; }, get RiverDist() { return RiverDist; }, get LakeDist() { return LakeDist; }, get BigDist() { return BigDist; }, get Biome() { return Biome; }, get IslSkip() { return IslSkip; }, get Islands() { return Islands; }, get Volcanoes() { return Volcanoes; }, get Woods() { return Woods; }, get Plains() { return Plains; }, get Desert() { return Desert; }, get Snowy() { return Snowy; }, get Swamp() { return Swamp; }, get Taiga() { return Taiga; }, get Meadow() { return Meadow; }, get Badlands() { return Badlands; }, get Tundra() { return Tundra; }, get Glacier() { return Glacier; }, get Rainforest() { return Rainforest; }, get Savanna() { return Savanna; }, get Alpine() { return Alpine; }, get Crags() { return Crags; }, get Peaks() { return Peaks; }, get Ocean() { return Ocean; }, get LakeB() { return LakeB; }, get ColdWaste() { return ColdWaste; }, get HotWaste() { return HotWaste; }, get DryScrub() { return DryScrub; }, get DryForest() { return DryForest; }, get BiomeNames() { return BiomeNames; }, get SQ2() { return SQ2; }, get StepTimes() { return StepTimes; }, Imul, Hash, ValueNoise, Fbm, Smoothstep, Bump, get Rate() { return Rate; }, get PlateR() { return PlateR; }, get Crust() { return Crust; }, get EdgeCrust() { return EdgeCrust; }, get OtherCrust() { return OtherCrust; }, get LeadFace() { return LeadFace; }, get EdgeLead() { return EdgeLead; }, get LeadEdge() { return LeadEdge; }, get LeadMax() { return LeadMax; }, get LeadMin() { return LeadMin; }, get LeadWob() { return LeadWob; }, get LeadTarget() { return LeadTarget; }, get LeadSMin() { return LeadSMin; }, get LeadSMax() { return LeadSMax; }, get LeadSz() { return LeadSz; }, get LeadH() { return LeadH; }, get LeadHMin() { return LeadHMin; }, get LeadMade() { return LeadMade; }, get LeadFirst() { return LeadFirst; }, get LeadCoastMin() { return LeadCoastMin; }, get LeadThin() { return LeadThin; }, get LeadLocal() { return LeadLocal; }, get EdgeNX() { return EdgeNX; }, get EdgeNZ() { return EdgeNZ; }, IsLead, get LeadNote() { return LeadNote; }, get ContId() { return ContId; }, get Majors() { return Majors; }, get Minors() { return Minors; }, get Micros() { return Micros; }, get MicrosMade() { return MicrosMade; }, get Continents() { return Continents; }, get BigIslands() { return BigIslands; }, get MeetChance() { return MeetChance; }, get MeetPull() { return MeetPull; }, get ShareFall() { return ShareFall; }, get GapShare() { return GapShare; }, get IslandGap() { return IslandGap; }, get EdgeLo() { return EdgeLo; }, get EdgeHi() { return EdgeHi; }, get EdgeFade() { return EdgeFade; }, get ShapesAcross() { return ShapesAcross; }, get Belt() { return Belt; }, get LeadCost() { return LeadCost; }, get GroupSpeed() { return GroupSpeed; }, get JoinHigh() { return JoinHigh; }, get JoinWide() { return JoinWide; }, get SutureHigh() { return SutureHigh; }, get SutureWide() { return SutureWide; }, get KeepCells() { return KeepCells; }, MakePlates, EdgeSweep, MakeHeight, get LeadAct() { return LeadAct; }, Leading, EdgeKind, get WX() { return WX; }, get WZ() { return WZ; }, get MX() { return MX; }, get MZ() { return MZ; }, get Cur() { return Cur; }, get CX() { return CX; }, get CZ() { return CZ; }, get Lat() { return Lat; }, get WindSweeps() { return WindSweeps; }, MakeClimate, get OldLake() { return OldLake; }, LakeBig, get LakeMinArea() { return LakeMinArea; }, get LakeDeep() { return LakeDeep; }, get BasinDeep() { return BasinDeep; }, get PanDeep() { return PanDeep; }, get Lapse() { return Lapse; }, Hump, Hemisphere, WindAt, BeltWind, ClimateAt, PlateBlur, get BandAt() { return BandAt; }, get BandVal() { return BandVal; }, get WxAt() { return WxAt; }, get WxVal() { return WxVal; }, get WzAt() { return WzAt; }, get WzVal() { return WzVal; }, Knots, Blur, get DX() { return DX; }, get DZ() { return DZ; }, get IceLakeShare() { return IceLakeShare; }, get IceGentle() { return IceGentle; }, get IceWin() { return IceWin; }, get LakeCap() { return LakeCap; }, get LakeGaveWay() { return LakeGaveWay; }, get IceBowl() { return IceBowl; }, DigIceLakes, MakeWater, get RiverRho8() { return RiverRho8; }, get RiverPX() { return RiverPX; }, get RiverPZ() { return RiverPZ; }, get RiverSX() { return RiverSX; }, get RiverSZ() { return RiverSZ; }, get RiverEX() { return RiverEX; }, get RiverEZ() { return RiverEZ; }, get RiverUp() { return RiverUp; }, get RiverSmooth() { return RiverSmooth; }, MakeRiverLines, RiverCurve, MakeDistances, Chamfer, Slope, Fingerprint, Catchment, get RiverStart() { return RiverStart; }, RiverMin, River, RiverWidth, RiverDepth, Pace, get Braid() { return Braid; }, MakeBraids, get ColdDry() { return ColdDry; }, get HotDry() { return HotDry; }, BiomeFor, MakeBiomes, get FirstSub() { return FirstSub; }, get Crevasses() { return Crevasses; }, get Meltwater() { return Meltwater; }, get Nunataks() { return Nunataks; }, get GlacialGravel() { return GlacialGravel; }, get FrostStone() { return FrostStone; }, get WindGravel() { return WindGravel; }, get FrozenSalt() { return FrozenSalt; }, get LichenField() { return LichenField; }, get FrostCracks() { return FrostCracks; }, get ThawBogs() { return ThawBogs; }, get ForestTundra() { return ForestTundra; }, get LichenWoods() { return LichenWoods; }, get LarchStand() { return LarchStand; }, get Muskeg() { return Muskeg; }, get OldBurn() { return OldBurn; }, get OldGrowth() { return OldGrowth; }, get BirchGrove() { return BirchGrove; }, get Clearing() { return Clearing; }, get FernRavine() { return FernRavine; }, get Parkland() { return Parkland; }, get Tallgrass() { return Tallgrass; }, get Shortgrass() { return Shortgrass; }, get Steppe() { return Steppe; }, get Wildflowers() { return Wildflowers; }, get WetMeadow() { return WetMeadow; }, get ReedMarsh() { return ReedMarsh; }, get SwampForest() { return SwampForest; }, get Fen() { return Fen; }, get RockyScrub() { return RockyScrub; }, get FireScar() { return FireScar; }, get FernUnder() { return FernUnder; }, get FloodForest() { return FloodForest; }, get CloudForest() { return CloudForest; }, get WoodedSavanna() { return WoodedSavanna; }, get Waterhole() { return Waterhole; }, get Mounds() { return Mounds; }, get ThornScrub() { return ThornScrub; }, get DuneSea() { return DuneSea; }, get Pavement() { return Pavement; }, get Oasis() { return Oasis; }, get DryRiverbed() { return DryRiverbed; }, get SaltFlats() { return SaltFlats; }, get CrackedBed() { return CrackedBed; }, get SandSea() { return SandSea; }, get Treeline() { return Treeline; }, get Scree() { return Scree; }, get Cliffs() { return Cliffs; }, get Snowfield() { return Snowfield; }, get PeakGlacier() { return PeakGlacier; }, get Floodplain() { return Floodplain; }, get Canyon() { return Canyon; }, get Delta() { return Delta; }, get ReedBed() { return ReedBed; }, get BogEdge() { return BogEdge; }, get SandBeach() { return SandBeach; }, get Shingle() { return Shingle; }, get SeaCliffs() { return SeaCliffs; }, get Dunes() { return Dunes; }, get SaltMarsh() { return SaltMarsh; }, get StiltSwamp() { return StiltSwamp; }, get Reef() { return Reef; }, get WeedBeds() { return WeedBeds; }, get SeaIce() { return SeaIce; }, get DeepSea() { return DeepSea; }, get Trench() { return Trench; }, get FjordS() { return FjordS; }, get TroughS() { return TroughS; }, get CirqueS() { return CirqueS; }, get MoraineS() { return MoraineS; }, get Erratics() { return Erratics; }, get Fan() { return Fan; }, get Mesas() { return Mesas; }, get Tors() { return Tors; }, get Gullies() { return Gullies; }, get KarstS() { return KarstS; }, get TowerKarst() { return TowerKarst; }, get LoessHills() { return LoessHills; }, get Yardangs() { return Yardangs; }, get Platform() { return Platform; }, get FogCoast() { return FogCoast; }, get SubNames() { return SubNames; }, get IceOld() { return IceOld; }, get IceCut() { return IceCut; }, get IceBroad() { return IceBroad; }, get IceRagged() { return IceRagged; }, get IceBroadW() { return IceBroadW; }, get IceRaggedW() { return IceRaggedW; }, get IceSeal() { return IceSeal; }, get IceSealW() { return IceSealW; }, get IceTurn() { return IceTurn; }, IceWob, SubAt, get BiomeColors() { return BiomeColors; }, get SubColors() { return SubColors; }, get SubParent() { return SubParent; }, get HistSteps() { return HistSteps; }, get HG() { return HG; }, get YoungSeaChance() { return YoungSeaChance; }, get RiftReach() { return RiftReach; }, get DriftGap() { return DriftGap; }, get DriftEdge() { return DriftEdge; }, get DriftTurn() { return DriftTurn; }, get GroupMax() { return GroupMax; }, get SuperEdge() { return SuperEdge; }, get DriftReach() { return DriftReach; }, get LloydRounds() { return LloydRounds; }, get SpreadPasses() { return SpreadPasses; }, get SpreadR() { return SpreadR; }, get ContGapNote() { return ContGapNote; }, get SuperLeg() { return SuperLeg; }, get SuperSpan() { return SuperSpan; }, get SuperBay() { return SuperBay; }, get LobeDeep() { return LobeDeep; }, get SuperShapeNote() { return SuperShapeNote; }, get ForcedJoin() { return ForcedJoin; }, get JoinRoom() { return JoinRoom; }, get SuperWide() { return SuperWide; }, get LandShare() { return LandShare; }, get Terrane() { return Terrane; }, get Terranes() { return Terranes; }, get TerraneCont() { return TerraneCont; }, get SutureDist() { return SutureDist; }, get RiftBorn() { return RiftBorn; }, get YoungSea() { return YoungSea; }, get Groups() { return Groups; }, get GroupOf() { return GroupOf; }, get GDirX() { return GDirX; }, get GDirZ() { return GDirZ; }, get GSpin() { return GSpin; }, get GCenX() { return GCenX; }, get GCenZ() { return GCenZ; }, get HSpinC() { return HSpinC; }, get HSpinS() { return HSpinS; }, get SpinMin() { return SpinMin; }, get SpinMax() { return SpinMax; }, get AwayRest() { return AwayRest; }, get DirFromDrift() { return DirFromDrift; }, get SpinTry() { return SpinTry; }, get HOffX() { return HOffX; }, get HOffZ() { return HOffZ; }, get PieceStartX() { return PieceStartX; }, get PieceStartZ() { return PieceStartZ; }, get histCont0() { return histCont0; }, get histTer0() { return histTer0; }, get YsA() { return YsA; }, get YsB() { return YsB; }, get partner() { return partner; }, get PiecePlate() { return PiecePlate; }, get DriftRounds() { return DriftRounds; }, get Trails() { return Trails; }, get RangeYoung() { return RangeYoung; }, get RangeMid() { return RangeMid; }, get RangeOld() { return RangeOld; }, get HistNote() { return HistNote; }, get DriftNote() { return DriftNote; }, ChamferH, MakeForward, StartCellOf, MakeYoungSea, MakeHistory, get YoungSeaNote() { return YoungSeaNote; }, TrailAt, get PlateGroup() { return PlateGroup; }, ThinNote, get GUp() { return GUp; }, get GCoast() { return GCoast; }, get GArc0() { return GArc0; }, get GRift0() { return GRift0; }, get GMid0() { return GMid0; }, get GShelf() { return GShelf; }, get GSz() { return GSz; }, get GOceanDist() { return GOceanDist; }, get GJoinDist() { return GJoinDist; }, get GContDist() { return GContDist; }, get HotX() { return HotX; }, get HotZ() { return HotZ; }, get Oro() { return Oro; }, get ArcC() { return ArcC; }, get Isl() { return Isl; }, get RiftZ() { return RiftZ; }, get MidZ() { return MidZ; }, get Hot() { return Hot; }, get Craton() { return Craton; }, get Basin() { return Basin; }, get Margin() { return Margin; }, get SedT() { return SedT; }, get Datum() { return Datum; }, get Frame() { return Frame; }, get MetaTop() { return MetaTop; }, get BdB() { return BdB; }, get ContF() { return ContF; }, get Rock() { return Rock; }, MakeGeo, BoxBlur, At, Hash3, Noise3, Wave, Frac, GroundAt, ColAt, RockAt, SoilAt, Deep, GoldVein, BasaltOres, GabbroOres, get RockColors() { return RockColors; }, get NoErode() { return NoErode; }, get Elev0() { return Elev0; }, get Temp0() { return Temp0; }, get Rain0() { return Rain0; }, get Wear() { return Wear; }, get IceWas() { return IceWas; }, get Trough() { return Trough; }, get Moraine() { return Moraine; }, get Alluvium() { return Alluvium; }, get Loess() { return Loess; }, get Karst() { return Karst; }, get Dune() { return Dune; }, get ScreeT() { return ScreeT; }, get SurfK() { return SurfK; }, get LoessShare() { return LoessShare; }, get Coast() { return Coast; }, get Fjord() { return Fjord; }, get Head() { return Head; }, get ErodeRounds() { return ErodeRounds; }, get KRiver() { return KRiver; }, get KIce() { return KIce; }, Erodibility, Dissolves, get rn() { return rn; }, Route, Erode, get KeepAll() { return KeepAll; }, get PlanHash() { return PlanHash; }, get KeepHash() { return KeepHash; }, KeepDoubles, KeepInts, KeepBytes, KeepBools, get KeepNames() { return KeepNames; }, get KeepNaN() { return KeepNaN; }, Keep, KeepFingerprint, get GravelRock() { return GravelRock; }, get GravelMaxSum() { return GravelMaxSum; }, get GravelRocks() { return GravelRocks; }, MakeGravelRock, Drop, ColH, CAt, Draw, get riverCache() { return riverCache; }, RiversFor, Probe, SurfaceHere, DrawBlockColumn, BedBlock, TopBlock, Snow, StillTop, PlanTreeHook, IsLeavesHook, get TreeReach() { return TreeReach; }, get TreeMax() { return TreeMax; }, Trees, TreeGround, get FreezeSummer() { return FreezeSummer; }, BlockOf, Surface, PatchHere, SurfBlock, Resolve, get Wobble() { return Wobble; }, get SurfJ() { return SurfJ; }, SurfCell, RockAt2, get Keep0() { return Keep0; }, get Grassy0() { return Grassy0; }, get LandGravel0() { return LandGravel0; }, get HostGravel0() { return HostGravel0; }, Soft, GrassyOf, get Bank() { return Bank; }, get BankSlope() { return BankSlope; }, get Pieces() { return Pieces; }, RiversNear, get Meander() { return Meander; }, RiverAt, HostAt, IsOre, RockId, GravelOf, OreId, get __export() { return __export; } };
+  return { get Seed() { return Seed; }, get Size() { return Size; }, get Cell() { return Cell; }, get N() { return N; }, get Room() { return Room; }, get Amp() { return Amp; }, get Tall() { return Tall; }, RoomFor, get High() { return High; }, get ExtraNoise() { return ExtraNoise; }, get WideMax() { return WideMax; }, get Wide() { return Wide; }, get Plates() { return Plates; }, get PX() { return PX; }, get PZ() { return PZ; }, get VX() { return VX; }, get VZ() { return VZ; }, get Cont() { return Cont; }, get Plate() { return Plate; }, get Other() { return Other; }, get Bd() { return Bd; }, get Ds() { return Ds; }, get Shape() { return Shape; }, get ShapeSize() { return ShapeSize; }, get Lift() { return Lift; }, get Cut() { return Cut; }, get ContNote() { return ContNote; }, get Edge() { return Edge; }, get Elev() { return Elev; }, get Temp() { return Temp; }, get Rain() { return Rain; }, get Swing() { return Swing; }, get Season() { return Season; }, get Humid() { return Humid; }, get Inland() { return Inland; }, get Level() { return Level; }, get Flow() { return Flow; }, get Down() { return Down; }, get Order() { return Order; }, get Sea() { return Sea; }, get Lake() { return Lake; }, get SeaDist() { return SeaDist; }, get RiverDist() { return RiverDist; }, get LakeDist() { return LakeDist; }, get BigDist() { return BigDist; }, get Biome() { return Biome; }, get IslSkip() { return IslSkip; }, get Islands() { return Islands; }, get Volcanoes() { return Volcanoes; }, get Woods() { return Woods; }, get Plains() { return Plains; }, get Desert() { return Desert; }, get Snowy() { return Snowy; }, get Swamp() { return Swamp; }, get Taiga() { return Taiga; }, get Meadow() { return Meadow; }, get Badlands() { return Badlands; }, get Tundra() { return Tundra; }, get Glacier() { return Glacier; }, get Rainforest() { return Rainforest; }, get Savanna() { return Savanna; }, get Alpine() { return Alpine; }, get Crags() { return Crags; }, get Peaks() { return Peaks; }, get Ocean() { return Ocean; }, get LakeB() { return LakeB; }, get ColdWaste() { return ColdWaste; }, get HotWaste() { return HotWaste; }, get DryScrub() { return DryScrub; }, get DryForest() { return DryForest; }, get BiomeNames() { return BiomeNames; }, get SQ2() { return SQ2; }, get StepTimes() { return StepTimes; }, Imul, Hash, ValueNoise, Fbm, Smoothstep, Bump, get Rate() { return Rate; }, get PlateR() { return PlateR; }, get Crust() { return Crust; }, get EdgeCrust() { return EdgeCrust; }, get OtherCrust() { return OtherCrust; }, get LeadFace() { return LeadFace; }, get EdgeLead() { return EdgeLead; }, get LeadEdge() { return LeadEdge; }, get LeadMax() { return LeadMax; }, get LeadMin() { return LeadMin; }, get LeadWob() { return LeadWob; }, get LeadTarget() { return LeadTarget; }, get LeadSMin() { return LeadSMin; }, get LeadSMax() { return LeadSMax; }, get LeadSz() { return LeadSz; }, get LeadH() { return LeadH; }, get LeadHMin() { return LeadHMin; }, get LeadMade() { return LeadMade; }, get LeadFirst() { return LeadFirst; }, get LeadCoastMin() { return LeadCoastMin; }, get LeadThin() { return LeadThin; }, get LeadLocal() { return LeadLocal; }, get EdgeNX() { return EdgeNX; }, get EdgeNZ() { return EdgeNZ; }, IsLead, get LeadNote() { return LeadNote; }, get ContId() { return ContId; }, get Majors() { return Majors; }, get Minors() { return Minors; }, get Micros() { return Micros; }, get MicrosMade() { return MicrosMade; }, get Continents() { return Continents; }, get BigIslands() { return BigIslands; }, get MeetChance() { return MeetChance; }, get MeetPull() { return MeetPull; }, get ShareFall() { return ShareFall; }, get GapShare() { return GapShare; }, get IslandGap() { return IslandGap; }, get EdgeLo() { return EdgeLo; }, get EdgeHi() { return EdgeHi; }, get EdgeFade() { return EdgeFade; }, get ShapesAcross() { return ShapesAcross; }, get Belt() { return Belt; }, get LeadCost() { return LeadCost; }, get GroupSpeed() { return GroupSpeed; }, get JoinHigh() { return JoinHigh; }, get JoinWide() { return JoinWide; }, get SutureHigh() { return SutureHigh; }, get SutureWide() { return SutureWide; }, get KeepCells() { return KeepCells; }, MakePlates, EdgeSweep, MakeHeight, get LeadAct() { return LeadAct; }, Leading, EdgeKind, get WX() { return WX; }, get WZ() { return WZ; }, get MX() { return MX; }, get MZ() { return MZ; }, get Cur() { return Cur; }, get CX() { return CX; }, get CZ() { return CZ; }, get Lat() { return Lat; }, get WindSweeps() { return WindSweeps; }, MakeClimate, get OldLake() { return OldLake; }, LakeBig, get LakeMinArea() { return LakeMinArea; }, get LakeDeep() { return LakeDeep; }, get BasinDeep() { return BasinDeep; }, get PanDeep() { return PanDeep; }, get Lapse() { return Lapse; }, Hump, Hemisphere, WindAt, BeltWind, ClimateAt, PlateBlur, get BandAt() { return BandAt; }, get BandVal() { return BandVal; }, get WxAt() { return WxAt; }, get WxVal() { return WxVal; }, get WzAt() { return WzAt; }, get WzVal() { return WzVal; }, Knots, Blur, get DX() { return DX; }, get DZ() { return DZ; }, get IceLakeShare() { return IceLakeShare; }, get IceGentle() { return IceGentle; }, get IceWin() { return IceWin; }, get LakeCap() { return LakeCap; }, get LakeGaveWay() { return LakeGaveWay; }, get IceBowl() { return IceBowl; }, DigIceLakes, MakeWater, get RiverRho8() { return RiverRho8; }, get RiverPX() { return RiverPX; }, get RiverPZ() { return RiverPZ; }, get RiverSX() { return RiverSX; }, get RiverSZ() { return RiverSZ; }, get RiverEX() { return RiverEX; }, get RiverEZ() { return RiverEZ; }, get RiverUp() { return RiverUp; }, get RiverSmooth() { return RiverSmooth; }, MakeRiverLines, RiverCurve, MakeDistances, Chamfer, Slope, Fingerprint, Catchment, get RiverStart() { return RiverStart; }, RiverMin, River, RiverWidth, RiverDepth, Pace, get Braid() { return Braid; }, MakeBraids, get ColdDry() { return ColdDry; }, get HotDry() { return HotDry; }, BiomeFor, MakeBiomes, get FirstSub() { return FirstSub; }, get Crevasses() { return Crevasses; }, get Meltwater() { return Meltwater; }, get Nunataks() { return Nunataks; }, get GlacialGravel() { return GlacialGravel; }, get FrostStone() { return FrostStone; }, get WindGravel() { return WindGravel; }, get FrozenSalt() { return FrozenSalt; }, get LichenField() { return LichenField; }, get FrostCracks() { return FrostCracks; }, get ThawBogs() { return ThawBogs; }, get ForestTundra() { return ForestTundra; }, get LichenWoods() { return LichenWoods; }, get LarchStand() { return LarchStand; }, get Muskeg() { return Muskeg; }, get OldBurn() { return OldBurn; }, get OldGrowth() { return OldGrowth; }, get BirchGrove() { return BirchGrove; }, get Clearing() { return Clearing; }, get FernRavine() { return FernRavine; }, get Parkland() { return Parkland; }, get Tallgrass() { return Tallgrass; }, get Shortgrass() { return Shortgrass; }, get Steppe() { return Steppe; }, get Wildflowers() { return Wildflowers; }, get WetMeadow() { return WetMeadow; }, get ReedMarsh() { return ReedMarsh; }, get SwampForest() { return SwampForest; }, get Fen() { return Fen; }, get RockyScrub() { return RockyScrub; }, get FireScar() { return FireScar; }, get FernUnder() { return FernUnder; }, get FloodForest() { return FloodForest; }, get CloudForest() { return CloudForest; }, get WoodedSavanna() { return WoodedSavanna; }, get Waterhole() { return Waterhole; }, get Mounds() { return Mounds; }, get ThornScrub() { return ThornScrub; }, get DuneSea() { return DuneSea; }, get Pavement() { return Pavement; }, get Oasis() { return Oasis; }, get DryRiverbed() { return DryRiverbed; }, get SaltFlats() { return SaltFlats; }, get CrackedBed() { return CrackedBed; }, get SandSea() { return SandSea; }, get Treeline() { return Treeline; }, get Scree() { return Scree; }, get Cliffs() { return Cliffs; }, get Snowfield() { return Snowfield; }, get PeakGlacier() { return PeakGlacier; }, get Floodplain() { return Floodplain; }, get Canyon() { return Canyon; }, get Delta() { return Delta; }, get ReedBed() { return ReedBed; }, get BogEdge() { return BogEdge; }, get SandBeach() { return SandBeach; }, get Shingle() { return Shingle; }, get SeaCliffs() { return SeaCliffs; }, get Dunes() { return Dunes; }, get SaltMarsh() { return SaltMarsh; }, get StiltSwamp() { return StiltSwamp; }, get Reef() { return Reef; }, get WeedBeds() { return WeedBeds; }, get SeaIce() { return SeaIce; }, get DeepSea() { return DeepSea; }, get Trench() { return Trench; }, get FjordS() { return FjordS; }, get TroughS() { return TroughS; }, get CirqueS() { return CirqueS; }, get MoraineS() { return MoraineS; }, get Erratics() { return Erratics; }, get Fan() { return Fan; }, get Mesas() { return Mesas; }, get Tors() { return Tors; }, get Gullies() { return Gullies; }, get KarstS() { return KarstS; }, get TowerKarst() { return TowerKarst; }, get LoessHills() { return LoessHills; }, get Yardangs() { return Yardangs; }, get Platform() { return Platform; }, get FogCoast() { return FogCoast; }, get SubNames() { return SubNames; }, get IceOld() { return IceOld; }, get IceCut() { return IceCut; }, get IceBroad() { return IceBroad; }, get IceRagged() { return IceRagged; }, get IceBroadW() { return IceBroadW; }, get IceRaggedW() { return IceRaggedW; }, get IceSeal() { return IceSeal; }, get IceSealW() { return IceSealW; }, get IceTurn() { return IceTurn; }, IceWob, SubAt, get BiomeColors() { return BiomeColors; }, get SubColors() { return SubColors; }, get SubParent() { return SubParent; }, get HistSteps() { return HistSteps; }, get HG() { return HG; }, get YoungSeaChance() { return YoungSeaChance; }, get RiftReach() { return RiftReach; }, get DriftGap() { return DriftGap; }, get DriftEdge() { return DriftEdge; }, get DriftTurn() { return DriftTurn; }, get GroupMax() { return GroupMax; }, get SuperEdge() { return SuperEdge; }, get DriftReach() { return DriftReach; }, get LloydRounds() { return LloydRounds; }, get SpreadPasses() { return SpreadPasses; }, get SpreadR() { return SpreadR; }, get ContGapNote() { return ContGapNote; }, get SuperLeg() { return SuperLeg; }, get SuperSpan() { return SuperSpan; }, get SuperBay() { return SuperBay; }, get LobeDeep() { return LobeDeep; }, get SuperShapeNote() { return SuperShapeNote; }, get ForcedJoin() { return ForcedJoin; }, get JoinRoom() { return JoinRoom; }, get SuperWide() { return SuperWide; }, get LandShare() { return LandShare; }, get Terrane() { return Terrane; }, get Terranes() { return Terranes; }, get TerraneCont() { return TerraneCont; }, get SutureDist() { return SutureDist; }, get RiftBorn() { return RiftBorn; }, get YoungSea() { return YoungSea; }, get Groups() { return Groups; }, get GroupOf() { return GroupOf; }, get GDirX() { return GDirX; }, get GDirZ() { return GDirZ; }, get GSpin() { return GSpin; }, get GCenX() { return GCenX; }, get GCenZ() { return GCenZ; }, get HSpinC() { return HSpinC; }, get HSpinS() { return HSpinS; }, get SpinMin() { return SpinMin; }, get SpinMax() { return SpinMax; }, get AwayRest() { return AwayRest; }, get DirFromDrift() { return DirFromDrift; }, get SpinTry() { return SpinTry; }, get HOffX() { return HOffX; }, get HOffZ() { return HOffZ; }, get PieceStartX() { return PieceStartX; }, get PieceStartZ() { return PieceStartZ; }, get histCont0() { return histCont0; }, get histTer0() { return histTer0; }, get YsA() { return YsA; }, get YsB() { return YsB; }, get partner() { return partner; }, get PiecePlate() { return PiecePlate; }, get DriftRounds() { return DriftRounds; }, get Trails() { return Trails; }, get RangeYoung() { return RangeYoung; }, get RangeMid() { return RangeMid; }, get RangeOld() { return RangeOld; }, get HistNote() { return HistNote; }, get DriftNote() { return DriftNote; }, ChamferH, MakeForward, StartCellOf, MakeYoungSea, MakeHistory, get YoungSeaNote() { return YoungSeaNote; }, TrailAt, get PlateGroup() { return PlateGroup; }, ThinNote, get GUp() { return GUp; }, get GCoast() { return GCoast; }, get GArc0() { return GArc0; }, get GRift0() { return GRift0; }, get GMid0() { return GMid0; }, get GShelf() { return GShelf; }, get GSz() { return GSz; }, get GOceanDist() { return GOceanDist; }, get GJoinDist() { return GJoinDist; }, get GContDist() { return GContDist; }, get HotX() { return HotX; }, get HotZ() { return HotZ; }, get Oro() { return Oro; }, get ArcC() { return ArcC; }, get Isl() { return Isl; }, get RiftZ() { return RiftZ; }, get MidZ() { return MidZ; }, get Hot() { return Hot; }, get Craton() { return Craton; }, get Basin() { return Basin; }, get Margin() { return Margin; }, get SedT() { return SedT; }, get Datum() { return Datum; }, get Frame() { return Frame; }, get MetaTop() { return MetaTop; }, get BdB() { return BdB; }, get ContF() { return ContF; }, get Rock() { return Rock; }, MakeGeo, BoxBlur, At, Hash3, Noise3, Wave, Frac, GroundAt, ColAt, RockAt, SoilAt, Deep, GoldVein, BasaltOres, GabbroOres, get RockColors() { return RockColors; }, get NoErode() { return NoErode; }, get Elev0() { return Elev0; }, get Temp0() { return Temp0; }, get Rain0() { return Rain0; }, get Wear() { return Wear; }, get IceWas() { return IceWas; }, get Trough() { return Trough; }, get Moraine() { return Moraine; }, get Alluvium() { return Alluvium; }, get Loess() { return Loess; }, get Karst() { return Karst; }, get Dune() { return Dune; }, get ScreeT() { return ScreeT; }, get SurfK() { return SurfK; }, get LoessShare() { return LoessShare; }, get Coast() { return Coast; }, get Fjord() { return Fjord; }, get Head() { return Head; }, get ErodeRounds() { return ErodeRounds; }, get KRiver() { return KRiver; }, get KIce() { return KIce; }, Erodibility, Dissolves, get rn() { return rn; }, Route, Erode, get KeepAll() { return KeepAll; }, get PlanHash() { return PlanHash; }, get KeepHash() { return KeepHash; }, KeepDoubles, KeepInts, KeepBytes, KeepBools, get KeepNames() { return KeepNames; }, get KeepNaN() { return KeepNaN; }, Keep, KeepFingerprint, get GravelRock() { return GravelRock; }, get GravelMaxSum() { return GravelMaxSum; }, get GravelRocks() { return GravelRocks; }, MakeGravelRock, Drop, ColH, CAt, Draw, get riverCache() { return riverCache; }, RiversFor, Probe, SurfaceHere, DrawBlockColumn, BedBlock, TopBlock, Snow, StillTop, PlanTreeHook, IsLeavesHook, get TreeReach() { return TreeReach; }, get TreeMax() { return TreeMax; }, Trees, TreeGround, TreeKind, StiltWater, get Stairs() { return Stairs; }, SetStairs, SetTestOff, FindStairs, StairFits, StairElsewhere, get LastTested() { return LastTested; }, DrySpots, Wild, WildSpot, Cover, Iced, get FreezeSummer() { return FreezeSummer; }, BlockOf, Surface, PatchHere, SurfBlock, Resolve, get Wobble() { return Wobble; }, get SurfJ() { return SurfJ; }, SurfCell, RockAt2, get Keep0() { return Keep0; }, get Grassy0() { return Grassy0; }, get LandGravel0() { return LandGravel0; }, get HostGravel0() { return HostGravel0; }, Soft, GrassyOf, get Bank() { return Bank; }, get BankSlope() { return BankSlope; }, get Pieces() { return Pieces; }, RiversNear, get Meander() { return Meander; }, RiverAt, HostAt, IsOre, RockId, GravelOf, OreId, get __export() { return __export; } };
 }
 </script>
 <script>
@@ -5656,7 +6059,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.5.4';
+const GAME_VERSION = 'Beta 0.1.5.5';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -5767,7 +6170,7 @@ const Worlds = (() => {
   function create(name, seedText, gen = 3, mode = 'creative', size = WORLD_DEFAULT, biomes = 1) {
     const w = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name || '').trim().slice(0, 32) || `World ${list.length + 1}`,
       seed: seedFrom(seedText), gen, h: TALL_WORLDS ? 640 : 192, s: TALL_WORLDS ? 640 : validSize(size, 192), b: validBiomes(biomes), land: LAND_VERSION, mode: mode === 'survival' ? 'survival' : 'creative', ver: GAME_VERSION, created: Date.now(), played: Date.now() };
-    if (gen === 4) Object.assign(w, { h: 640, s: size === 1024 ? 1024 : 2048, b: 1, land: EARTH_LAND });   // (Earthlike: 640 tall, 1024 or 2048 across)
+    if (gen === 4) Object.assign(w, { h: 640, s: size === 1024 ? 1024 : 2048, b: 1, land: EARTH_LAND, os: 1, osSkip: [] });   // (Earthlike: 640 tall, 1024 or 2048 across; no builds yet near its staircases)
     list.push(w); saveList();
     return w;
   }
@@ -6477,8 +6880,33 @@ function riverCurrent(b) {
   const k = b - RIVER_WATER, s = RIVER_SPEED[k >> 3], w = RIVER_WAYS[k & 7];
   return [w[0] * s, w[1] * s];
 }
+// (Beta 0.1.5.5) what the game keeps of an Earthlike world's plan (from the first Worker to make it): each plan cell's biome (the
+// KEPT Biome bytes, N x N cells of Cell blocks), and the staircases its land has (see the engine's FindStairs), which go in with
+// the world's other staircases (stairSpots)
+let earthPlan = null;
+const EARTH_BIOME_NAMES = ['woods', 'plains', 'desert', 'snowy', 'swamp', 'taiga', 'meadow', 'badlands', 'tundra', 'glacier', 'rainforest', 'savanna', 'alpine', 'crags', 'peaks', 'ocean', 'lake', 'cold_waste', 'hot_waste', 'dry_scrub', 'dry_forest'];
+const earthBiomeAt = (x, z) => earthPlan ? earthPlan.biome[Math.floor(z / earthPlan.cell) * earthPlan.n + Math.floor(x / earthPlan.cell)] : -1;
+function earthPlanIn(m) {
+  earthPlan = { biome: m.biome, cell: m.cell, n: m.n, stairs: m.stairs };
+  for (const st of m.stairs || []) if (st) stairSpots.push({ x: st[0], y: st[1], z: st[2], dir: st[3], n: st[4], mat: st[5], placed: true, plan: true });
+}
+// a column grown: its staircases' steps (the ones its changes haven't touched) get their stairs shape
+function earthStairPieces(cx, cz) {
+  for (const s of stairSpots) {
+    if (!s.plan) continue;
+    const [dx, dz] = STAIR_DIRS[s.dir];
+    for (let k = 0; k < s.n; k++) {
+      const x = s.x + dx * k, z = s.z + dz * k, i = idx(x, s.y + k, z);
+      if (x >> 4 !== cx || z >> 4 !== cz || edits.has(i)) continue;
+      const a = new Int32Array(8);
+      for (let b = 0; b < 8; b++) if (STAIR_MASKS[s.dir] & (1 << b)) a[b] = s.mat;
+      pieceMap.set(i, a);
+    }
+  }
+}
 const EARTH_TABLES = ['EARTH_GROUND', 'EARTH_PLANTS', 'EARTH_ROCKS', 'EARTH_SOILS', 'EARTH_GRAVELS', 'EARTH_WOODS', 'EARTH_FENCES', 'RIVER_WATER'];
 for (const t of EARTH_TABLES) addBlockRows(BLOCK_DATA[t] || []);
+for (const t of EARTH_TABLES) for (const r of BLOCK_DATA[t] || []) if (r.sapling !== undefined) BLOCKS[r.id].sapling = rowIdFor(r.sapling, r.id);   // (Beta 0.1.5.5: their leaves drop their saplings)
 addBlockRows(doorRows(BLOCK_DATA.EARTH_DOORS || []));
 for (const r of BLOCK_DATA.EARTH_DOORS || []) DOOR_OF_ITEM.set(r.item, r.first);
 addBlockRows(formRows(BLOCK_DATA.EARTH_FORMS || []));
@@ -7544,6 +7972,33 @@ function growTree(name, x, h, z) {
       layer(leaves, x, top + len + 1, z, T.crown, T.sparse, s + 1); layer(leaves, x, top + len + 2, z, T.crown - 1.2, T.sparse, s + 5);
       break;
     }
+    case 'mahogany': {   // (Beta 0.1.5.5) a rainforest giant: buttress roots, and a broad crown above the canopy
+      stem(log, x, h, z, th + 1);
+      for (let k = 0; k < 4; k++) {
+        const [dx, dz] = PALM_FRONDS[k];
+        if (hash(x + dx, z + dz, s + 2) < 0.75) { treeBlock(log, x + dx, h + 1, z + dz, true); if (hash(x + dx, z + dz, s + 3) < 0.5) treeBlock(log, x + dx, h + 2, z + dz, true); }
+      }
+      crown(leaves, x, top + 1, z, T.crown[0], T.crown[1], 0.3, s + 1); break;
+    }
+    case 'acacia': {   // (Beta 0.1.5.5) the savanna's flat top: two branches out to opposite corners, each under a flat double layer of leaves
+      stem(log, x, h, z, th);
+      const a = 4 + Math.floor(hash(x, z, s + 2) * 4), C = Array.isArray(T.crown) ? T.crown[0] : T.crown;
+      [a, 11 - a].forEach((way, j) => {
+        const [dx, dz] = PALM_FRONDS[way], len = span(T.branch, hash3(x, j, z, s + 3));
+        for (let k = 1; k <= len; k++) treeBlock(log, x + dx * k, top + k, z + dz * k, true);
+        const ex = x + dx * len, ey = top + len, ez = z + dz * len;
+        layer(leaves, ex, ey + 1, ez, C, T.sparse, s + 4 + j); layer(leaves, ex, ey + 2, ez, C - 1.2, T.sparse, s + 6 + j);
+      });
+      break;
+    }
+    case 'stiltroot': {   // (Beta 0.1.5.5) mangrove-like: a trunk held up on arching stilt roots
+      for (let k = 0; k < 4; k++) { const [dx, dz] = PALM_FRONDS[k]; treeBlock(log, x + 2 * dx, h + 1, z + 2 * dz, true); treeBlock(log, x + dx, h + 2, z + dz, true); }
+      stem(log, x, h + 2, z, th);
+      crown(leaves, x, h + 2 + th + 1, z, T.crown[0], T.crown[1], 0.3, s + 1); break;
+    }
+    case 'teak':   // (Beta 0.1.5.5) tall and straight, with an oval crown
+      stem(log, x, h, z, th + 1); crown(leaves, x, top + 1, z, T.crown[0], T.crown[1], 0.3, s + 1); break;
+    case 'burnt':   // (Beta 0.1.5.5) a burnt tree: a standing Burnt Log, sometimes with one short lying branch (the dead tree's code)
     case 'dead': {   // bleached and leafless: a trunk with a few bare branches sticking out
       stem(log, x, h, z, th);
       const n = span(T.branches, hash(x, z, s + 2));
@@ -7970,7 +8425,7 @@ function stairFits(s, groundAt, get) {
     if (cx < 1 || cz < 1 || cx >= WX - 1 || cz >= WZ - 1) return false;
     const gk = groundAt(cz * WX + cx), top = get(cx, gk, cz);
     if (gk !== s.y - 1 && gk !== s.y - 2) return false;                          // (on level ground: a block lower at most)
-    if (top !== 1 && top !== 2 && top !== SNOWY_GRASS) return false;
+    if (top !== 1 && top !== 2 && top !== SNOWY_GRASS && !(EARTH && (plantsLikeGrass(top) || plantsLikeDirt(top)))) return false;   // (Earthlike: the soils too)
     for (let y = gk + 1; y <= s.y + k + 3; y++) if (get(cx, y, cz) !== 0) return false;   // (nothing in the way, and room above)
   }
   return true;
@@ -11813,14 +12268,19 @@ function removeMob(m) {
   mobs.splice(mobs.indexOf(m), 1);
 }
 // find a grassy spot with room to stand, somewhere between minR and maxR blocks from the player
-function findMobSpot(minR, maxR) {
+// (Beta 0.1.5.5) A5: in Earthlike, the night mobs and the others find their spots on the grassy soils too, as cows do (see
+// findMobSpot; the desktop version's EarthMobGrass)
+const EARTH_MOBS_READY = true;
+const EARTH_MOBS_ON = EARTH_MOBS_READY || /[?&]earthmobs\b/.test(location.search);
+function findMobSpot(minR, maxR, cows = false) {
   for (let tries = 0; tries < 12; tries++) {
     const a = Math.random() * Math.PI * 2, r = minR + Math.random() * (maxR - minR);
     const x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
     if (x < 2 || z < 2 || x >= WX - 2 || z >= WZ - 2) continue;
     let y = WY - 1;
     while (y > 0 && !getBlock(x, y, z)) y--;
-    if (getBlock(x, y, z) !== 1 || getBlock(x, y + 1, z) || getBlock(x, y + 2, z)) continue;  // grass, open air above
+    const top = getBlock(x, y, z);
+    if (!(top === 1 || EARTH && (cows || EARTH_MOBS_ON) && plantsLikeGrass(top)) || getBlock(x, y + 1, z) || getBlock(x, y + 2, z)) continue;  // grass, open air above
     return [x + 0.5, y + 1, z + 0.5];
   }
   return null;
@@ -11918,8 +12378,8 @@ function spawnCows() {
   cowSpawnIn = 20 + Math.random() * 40;
   if (mobs.filter(m => MOB_TYPES[m.type].cow && (m.x - player.x) ** 2 + (m.z - player.z) ** 2 < 80 * 80).length >= 6) return;
   const none = !mobs.some(m => MOB_TYPES[m.type].cow);
-  const s = findMobSpot(none ? 12 : 30, none ? 32 : 60);
-  if (!s) return;
+  const s = findMobSpot(none ? 12 : 30, none ? 32 : 60, true);
+  if (!s || EARTH && !COW_EARTH_BIOMES.includes(earthBiomeAt(Math.floor(s[0]), Math.floor(s[2])))) return;   // (Earthlike: only in their biomes)
   const n = 2 + Math.floor(Math.random() * 3);
   for (let k = 0; k < n; k++) {
     const x = s[0] + (Math.random() - 0.5) * 5, z = s[2] + (Math.random() - 0.5) * 5, y = standSpot(x, s[1], z);
@@ -11957,7 +12417,7 @@ function cowThink(m, dt) {
     m.state = 'idle';
     if ((m.grazing -= dt) <= 0) {
       const x = Math.floor(m.x), y = Math.floor(m.y) - 1, z = Math.floor(m.z);
-      if (getBlock(x, y, z) === 1) { graze(x, y, z); m.happy = Math.min(COW.happyMax, m.happy + COW.grazeHappy); }
+      if (grazable(getBlock(x, y, z))) { graze(x, y, z); m.happy = Math.min(COW.happyMax, m.happy + COW.grazeHappy); }
       m.timer = 1 + Math.random() * 2;
     }
     return true;
@@ -11987,7 +12447,7 @@ function cowThink(m, dt) {
   // standing about and not very happy: graze (if it's on grass)
   if (m.state !== 'walk' && m.happy < COW.grazeBelow && (m.grazeIn -= dt) <= 0) {
     m.grazeIn = 5 + Math.random() * 10;
-    if (getBlock(Math.floor(m.x), Math.floor(m.y) - 1, Math.floor(m.z)) === 1) { m.grazing = COW.grazeTime; return true; }
+    if (grazable(getBlock(Math.floor(m.x), Math.floor(m.y) - 1, Math.floor(m.z)))) { m.grazing = COW.grazeTime; return true; }
   }
   return false;
 }
@@ -12006,7 +12466,7 @@ function calve(a, b) {
 }
 // eaten grass: Dirt for now, back to Grass in a few minutes (tickFarm counts it down)
 function graze(x, y, z) {
-  setBlock(x, y, z, 2);
+  setBlock(x, y, z, grazedTo(getBlock(x, y, z)));
   grazed.set(idx(x, y, z), COW.regrowMin + Math.random() * (COW.regrowMax - COW.regrowMin));
   Sound.place(1);
 }
@@ -12082,6 +12542,24 @@ for (const [type, a] of Object.entries(ANIMALS)) {
   ANIMAL_BIOMES[type] = (a.biomes || []).map(b => BIOME_NAMES.indexOf(b));
   ANIMAL_LOGS[type] = new Set((a.logs || []).map(idOf));   // (boar: the trees they root under)
 }
+// (Beta 0.1.5.5) in Earthlike: each kind's biomes there (earthBiomes, the plan's names), the ground it stands on (earthGround if it
+// has one, else ground), where "grass" is every grassy top (plantsLikeGrass: Grass, Snowy Grass, Swamp Grass and the 9 grassy
+// soils), and its trees there (earthLogs, else logs). Cows: COW.earthBiomes
+const ANIMAL_EARTH = {};
+for (const [type, a] of Object.entries(ANIMALS)) {
+  if (!a || typeof a !== 'object') continue;
+  const g = a.earthGround || a.ground || [];
+  ANIMAL_EARTH[type] = { ground: new Set(g.filter(k => k !== 'water' && k !== 'grass').map(idOf)), grass: g.includes('grass'),
+    biomes: (a.earthBiomes || []).map(b => EARTH_BIOME_NAMES.indexOf(b)), logs: new Set((a.earthLogs || a.logs || []).map(idOf)) };
+}
+const COW_EARTH_BIOMES = (COW.earthBiomes || []).map(b => EARTH_BIOME_NAMES.indexOf(b));
+const animalGround = (type, top) => EARTH ? ANIMAL_EARTH[type].ground.has(top) || ANIMAL_EARTH[type].grass && plantsLikeGrass(top) : ANIMAL_GROUND[type].has(top);
+const animalLogs = type => EARTH ? ANIMAL_EARTH[type].logs : ANIMAL_LOGS[type];
+// what a cow grazes and a boar roots up: Grass and, in Earthlike, every grassy top (to Dirt; a grassy soil 4810 + k to its bare
+// soil 4800 + k); what grows back (Dirt to Grass, 4800 + k to 4810 + k)
+const grazable = b => b === 1 || EARTH && plantsLikeGrass(b);
+const grazedTo = b => b >= 4810 && b <= 4819 ? b - 10 : 2;
+const grazedBare = b => b === 2 || EARTH && b >= 4800 && b <= 4809 && b !== 4804;
 const isAnimal = m => !!MOB_TYPES[m.type].animal;
 const randIn = ([lo, hi]) => lo + Math.random() * (hi - lo);
 const kinNear = (m, r) => mobs.filter(o => o !== m && o.type === m.type && !o.dead && (o.x - m.x) ** 2 + (o.z - m.z) ** 2 < r * r).length;
@@ -12097,14 +12575,15 @@ function spawnAnimal(type, x, y, z, baby = 0) {
 // if fewer than nearMax of them are about, comes as a group (some young), on their kind of ground ----
 let animalSpawnIn = 8;
 function spawnAnimals() {
-  if (GEN !== 3 || (animalSpawnIn -= 3) > 0) return;
+  if (GEN !== 3 && !EARTH || (animalSpawnIn -= 3) > 0) return;
   animalSpawnIn = 20 + Math.random() * 40;
   const none = !mobs.some(isAnimal);
   const a = Math.random() * Math.PI * 2, r = none ? 12 + Math.random() * 20 : 30 + Math.random() * 30;
   const x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
   if (x < 3 || z < 3 || x >= WX - 3 || z >= WZ - 3) return;
-  const bi = colBiome(x, z), about = type => mobs.filter(m => m.type === type && !m.dead && (m.x - player.x) ** 2 + (m.z - player.z) ** 2 < 80 * 80).length;
-  const kinds = Object.keys(ANIMALS).filter(t => MOB_TYPES[t] && (window.MODELS || {})[t] && ANIMAL_BIOMES[t].includes(bi) && about(t) < ANIMALS[t].nearMax);
+  if (EARTH && !world.grown(x >> 4, z >> 4)) return;   // (Earthlike: never in land that hasn't grown)
+  const bi = EARTH ? earthBiomeAt(x, z) : colBiome(x, z), about = type => mobs.filter(m => m.type === type && !m.dead && (m.x - player.x) ** 2 + (m.z - player.z) ** 2 < 80 * 80).length;
+  const kinds = Object.keys(ANIMALS).filter(t => MOB_TYPES[t] && (window.MODELS || {})[t] && (EARTH ? ANIMAL_EARTH[t].biomes : ANIMAL_BIOMES[t]).includes(bi) && about(t) < ANIMALS[t].nearMax);
   if (!kinds.length) return;
   let w = Math.random() * kinds.reduce((s, t) => s + ANIMALS[t].spawnWeight, 0), type = kinds[kinds.length - 1];
   for (const t of kinds) if ((w -= ANIMALS[t].spawnWeight) < 0) { type = t; break; }
@@ -12134,9 +12613,9 @@ function animalSpot(type, x, z) {
     for (let dz = -3; dz <= 3 && !land; dz++) for (let dx = -3; dx <= 3 && !land; dx++) { const b = getBlock(x + dx, y, z + dz); land = !!b && !isWater(b) && solid(x + dx, y, z + dz); }
     return land ? [x + 0.5, y + 0.6, z + 0.5] : null;
   }
-  if (!ANIMAL_GROUND[type].has(top)) return null;
+  if (!animalGround(type, top)) return null;
   if (A.minHeight !== undefined && y < SEA_LEVEL + A.minHeight) return null;
-  if (A.logNear !== undefined && !logNear(x, y + 1, z, A.logNear, ANIMAL_LOGS[type].size ? ANIMAL_LOGS[type] : null)) return null;
+  if (A.logNear !== undefined && !logNear(x, y + 1, z, A.logNear, animalLogs(type).size ? animalLogs(type) : null)) return null;
   return [x + 0.5, y + 1, z + 0.5];
 }
 // a log (any, or one of these) within r across of (x, y, z), from 2 below to 8 above
@@ -12233,11 +12712,11 @@ function animalYoung(a, b) {
 // near their trees)
 function canForage(m, x, y, z) {
   const A = ANIMALS[m.type], under = getBlock(x, y - 1, z);
-  if (m.type === 'chicken') return grassy(under);
+  if (m.type === 'chicken') return grassy(under) || EARTH && plantsLikeGrass(under);
   if (m.type === 'duck') return waterAt(m.x, m.y + 0.3, m.z);
   if (m.type === 'deer') { for (let dy = 0; dy <= 3; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) if (isLeaves(getBlock(x + dx, y + dy, z + dz))) return true; return false; }
   if (m.type === 'goat') return !!goatTarget(x, y, z);
-  if (m.type === 'boar') return under === 1 && logNear(x, y, z, A.rootNear, ANIMAL_LOGS.boar);
+  if (m.type === 'boar') return grazable(under) && logNear(x, y, z, A.rootNear, animalLogs('boar'));
   return false;
 }
 // foraging done: happier, and for some, a change to the land
@@ -12245,8 +12724,9 @@ function forageDone(m, x, y, z) {
   const A = ANIMALS[m.type];
   if (m.type === 'goat') { const t = goatTarget(x, y, z); if (!t) return; setBlock(t[0], t[1], t[2], 0); Sound.place(5); }
   if (m.type === 'boar') {
-    if (getBlock(x, y - 1, z) !== 1) return;
-    setBlock(x, y - 1, z, 2); Sound.place(2);   // (rooted up: Dirt, which stays Dirt)
+    const g = getBlock(x, y - 1, z);
+    if (!grazable(g)) return;
+    setBlock(x, y - 1, z, grazedTo(g)); Sound.place(2);   // (rooted up: Dirt, or a grassy soil's bare soil, which stays)
     if (TRUFFLE > 0 && Math.random() < A.truffleChance) dropItem(TRUFFLE, x + 0.5, y + 0.3, z + 0.5);
   }
   m.happy = Math.min(A.happyMax, m.happy + A.forage.happy);
@@ -12617,7 +13097,9 @@ function updateMobs(dt) {
       }
     }
     if (!Net.client) {   // falling, swimming and bumping into blocks (in a joined game the host's game does this)
-    if (waterAt(m.x, m.y + 0.5, m.z)) {    // in water: float up to the surface, and paddle out over edges
+    const fallWater = EARTH && m.type !== 'duck' && getBlock(Math.floor(m.x), Math.floor(m.y + 0.5), Math.floor(m.z)) === RIVER_FALLING;   // (at the swim test's spot)
+    if (fallWater) m.vy = -3;   // (Beta 0.1.5.5: down falling water at 3 a second)
+    else if (waterAt(m.x, m.y + 0.5, m.z)) {    // in water: float up to the surface, and paddle out over edges
       m.vy += (2 - m.vy) * Math.min(1, dt * 3);
       if (m.bumped && !(m.type === 'duck' && !m.ashore)) m.vy = 5;   // (a duck stays in the water, unless it's coming to you for food)
     } else m.vy = Math.max(-40, m.vy - 28 * dt);
@@ -12638,6 +13120,10 @@ function updateMobs(dt) {
         }
       }
     }
+    // (Beta 0.1.5.5) a river carries it along (not a duck, which paddles): in running water (at the swim test's spot, feet + 0.5) it
+    // moves with the current
+    const cur = EARTH && m.type !== 'duck' ? riverCurrent(getBlock(Math.floor(m.x), Math.floor(m.y + 0.5), Math.floor(m.z))) : null;
+    if (cur) for (const [ax, d] of [['x', cur[0] * dt], ['z', cur[1] * dt]]) { const before = m[ax]; m[ax] += d; if (mobBlocked(m, m.x, m.y, m.z)) m[ax] = before; }
     if (m.y < -10) { removeMob(m); continue; }
     }
     // walking animation: legs swing in diagonal pairs while moving
@@ -14734,11 +15220,13 @@ function tickFarm(dt) {
   }
   // grass a cow ate grows back (if it's still Dirt with nothing on top)
   for (const [i, left] of [...grazed]) {
-    if (world.get(i) !== 2) { grazed.delete(i); continue; }
+    const bare = world.get(i);   // (Earthlike: a column not grown reads its changes)
+    if (!grazedBare(bare)) { grazed.delete(i); continue; }
     if (left - step > 0) { grazed.set(i, left - step); continue; }
-    grazed.delete(i);
     const [x, y, z] = fromIdx(i);
-    if (!solid(x, y + 1, z) && !isWater(getBlock(x, y + 1, z))) setBlock(x, y, z, 1);
+    if (EARTH && !world.grown(x >> 4, z >> 4)) { grazed.set(i, 0); continue; }   // (it grows back once its column has grown)
+    grazed.delete(i);
+    if (!solid(x, y + 1, z) && !isWater(getBlock(x, y + 1, z))) setBlock(x, y, z, bare === 2 ? 1 : bare + 10);
   }
   // dry tilled soil with nothing growing on it turns back into Dirt after a while
   for (const i of [...soils]) {
@@ -15172,6 +15660,11 @@ function stairEvent(which, s) {
     const t = Math.random();
     if (Net.client) Net.toHost({ t: 'stime', time: t }); else timeOfDay = t;
   } else if (which === 1) {   // you're somewhere else
+    if (EARTH) {   // (Earthlike: somewhere the plan picks, grown first)
+      const id = Worlds.current.id;
+      earthDryGround().then(to => { if (!to || !worldLoaded || Worlds.current.id !== id) return; [player.x, player.y, player.z] = to; player.vx = player.vy = player.vz = 0; player.fly = false; stairOn = -1; });
+      return;
+    }
     const to = randomDryGround();
     if (to) { [player.x, player.y, player.z] = to; player.vx = player.vy = player.vz = 0; player.fly = false; stairOn = -1; }
   } else if (which === 2) {   // the staircase is gone, and stands somewhere else
@@ -15192,6 +15685,21 @@ function stairGround(c) {
     if (b === 0 || isLeaves(b) || (BLOCKS[b] && (BLOCKS[b].needs === 'axe' || BLOCKS[b].shape === 'plant' || BLOCKS[b].shape === 'flat'))) y--; else break;
   }
   return y;
+}
+// (Beta 0.1.5.5) Earthlike (desktop's EarthDryGround): a random spot on dry land, the plan picking it (a Worker's DrySpots: up to 16
+// cells of Woods, Plains, Meadow, Taiga, Savanna or Dry Forest, not sea, lake or river, the plan's ground over the sea); each one's
+// columns grown now in turn, then the ground there as for the other worlds (a plant there is fine), standing on top of it
+const earthRoomAt = (x, y, z) => { const b = getBlock(x, y, z); return b === 0 || !!(BLOCKS[b] && BLOCKS[b].noCollide) && !isWater(b); };
+async function earthDryGround() {
+  for (const [x, z] of await Earth.drySpots()) {
+    await Earth.growNow(x >> 4, z >> 4, 1);
+    if (!worldLoaded || !EARTH) return null;
+    const y = stairGround(z * WX + x), t = getBlock(x, y, z);
+    if (y <= SEA_LEVEL || !t || isWater(t) || t === ICE || BLOCKS[t].noCollide) continue;
+    if (!earthRoomAt(x, y + 1, z) || !earthRoomAt(x, y + 2, z)) continue;
+    return [x + 0.5, y + 1.01, z + 0.5];
+  }
+  return null;
 }
 // a random spot on dry land (not water, ice or treetops), standing on top of it
 function randomDryGround() {
@@ -15222,6 +15730,7 @@ function stairMove(s) {
     buildStair(o, put, stairGround);
     return;
   }
+  if (EARTH) { earthStairElsewhere(s, built); return; }   // (Earthlike: see earthStairElsewhere)
   // ...or, if none fit any more, anywhere else in a forest high above the sea (kept in the save as an extra spot)
   for (let t = 0; t < 4000; t++) {
     const x = 16 + Math.floor(Math.random() * (WX - 32)), z = 16 + Math.floor(Math.random() * (WZ - 32));
@@ -15237,12 +15746,47 @@ function stairMove(s) {
     return;
   }
 }
+// (Beta 0.1.5.5) Earthlike (desktop's EarthStairElsewhere): the staircase stood up again elsewhere, its spot looked for by a
+// Worker, away from the game (the engine's StairElsewhere: as the world's staircases are found, on the land drawn bare, never near
+// a chunk with changes now, nor near any staircase the world has: the land is drawn bare, so its own spots look free); then, once found, its land grown and the staircase built there if it still fits (the plants and snow
+// in its way go first), kept in the save as an extra spot. One search at a time. (Test: earthStairLast, what the last one found.)
+let stairSearch = false, earthStairLast = null;
+function earthStairElsewhere(s, built) {
+  if (stairSearch) return;
+  stairSearch = true;
+  const id = Worlds.current.id, skip = new Set(built);
+  for (const o of stairSpots) skip.add(chunkOfIndex(idx(o.x, 0, o.z)));
+  Earth.elsewhere(s.x, s.z, [...skip], Math.floor(Math.random() * 2147483647)).then(async m => {
+    earthStairLast = { st: m.st, tested: m.tested, ms: m.ms, built: false };
+    if (!m.st || !worldLoaded || Worlds.current.id !== id) return;
+    const [x, y, z, dir, n, mat] = m.st, o = { x, y, z, dir, n, mat, placed: true };
+    await Earth.growNow(x >> 4, z >> 4, 1);
+    if (!worldLoaded || Worlds.current.id !== id) return;
+    const clears = b => isSnow(b) || !!(BLOCKS[b] && (BLOCKS[b].shape === 'plant' || BLOCKS[b].shape === 'flat'));
+    if (!stairFits(o, earthStairGround, (bx, by, bz) => { const b = getBlock(bx, by, bz); return clears(b) ? 0 : b; })) return;
+    const [dx, dz] = STAIR_DIRS[o.dir];
+    for (let k = 0; k < o.n; k++) {   // (the plants and snow in its way go first)
+      const cx = o.x + dx * k, cz = o.z + dz * k;
+      for (let yy = earthStairGround(cz * WX + cx) + 1; yy <= o.y + k + 3; yy++) if (getBlock(cx, yy, cz) !== 0) setBlock(cx, yy, cz, 0);
+    }
+    buildStair(o, (bx, by, bz, b) => setBlock(bx, by, bz, b), earthStairGround);
+    stairSpots.push(o); extraStairs.push(o); earthStairLast.built = true;
+  }).catch(() => {}).finally(() => { stairSearch = false; });
+}
+// (gen 4) the ground in a column under any trees, plants or snow
+function earthStairGround(c) {
+  const x = c % WX, z = Math.floor(c / WX);
+  let y = stairGround(c);
+  while (y > 0 && isSnow(getBlock(x, y, z))) y--;
+  return y;
+}
 // one stack from your inventory (not what you're wearing) lands on the ground somewhere far away, and stays there
-function stairTakeItem() {
+function stairTakeItem(to) {
   const full = [];
   for (let i = 0; i < ARMOR0; i++) if (HOTBAR[i] && (!Net.client || !HOTBAR_DATA[i])) full.push(i);
-  const to = full.length ? randomDryGround() : null;
-  if (!to) return;
+  if (EARTH && to === undefined) { if (full.length) earthDryGround().then(t => { if (t) stairTakeItem(t); }); return; }   // (Earthlike: from the plan)
+  if (to === undefined) to = full.length ? randomDryGround() : null;
+  if (!to || !full.length) return;
   const i = full[Math.floor(Math.random() * full.length)], id = HOTBAR[i], n = Math.max(1, HOTBAR_COUNT[i] | 0), wear = HOTBAR_WEAR[i] | 0, data = HOTBAR_DATA[i] || null;
   setSlot(i, 0, 0);
   if (Net.client) { Net.toHost({ t: 'sdrop', id, n, w: wear, x: to[0], y: to[1], z: to[2] }); return; }
@@ -15395,6 +15939,19 @@ function settleOldStairs(s) {
   for (const c of cols) { const x = c % WX, z = Math.floor(c / WX); setColSkyTop(x, z, computeSkyTop(x, z, WY - 1)); }
   stairCands = null; stairGround0.clear();
 }
+// (Beta 0.1.5.5) an Earthlike world made before Earthlike's staircases (0.1.5.3, 0.1.5.4), opened here for the first time: the
+// chunks its save had changed are settled in its record, as for old Biomes worlds, before the plan is made, so its staircases
+// stand away from them (the engine's FindStairs). New ones start settled, with none.
+function settleEarthStairs(s) {
+  if (Worlds.current.os === 1 && Array.isArray(Worlds.current.osSkip)) return;
+  let skip;
+  if (s && s.os === 1 && Array.isArray(s.osSkip)) skip = stairSkipSet(s.osSkip);
+  else {
+    skip = new Set();
+    if (s && s.idxs) for (const i of readIdxs(s.idxs, s.i8)) if (i < world.length) skip.add(chunkOfIndex(i));
+  }
+  Worlds.mark({ os: 1, osSkip: [...skip].sort((a, b) => a - b) });
+}
 const saveExtraStairs = () => extraStairs.flatMap(o => [o.x, o.y, o.z, o.dir, o.n, o.mat]);
 function loadExtraStairs(a) {
   if (!Array.isArray(a)) return;
@@ -15508,7 +16065,7 @@ function applySave(s) {
   for (const [i, n] of s.saplings || []) if (saplings.has(i)) saplings.set(i, Math.max(0, Math.min(SAPLING.growHits - 1, n | 0)));   // (below its last tick)
   for (const i of s.grown || []) if (edits.has(i)) grown.add(i);
   for (const [i, n] of s.fert || []) if (BLOCKS[world.get(i)] && BLOCKS[world.get(i)].fert) fertLeft.set(i, Math.max(1, n | 0));
-  for (const [i, left] of s.grazed || []) if (world.get(i) === 2) grazed.set(i, Math.max(0, +left || 0));
+  for (const [i, left] of s.grazed || []) if (grazedBare(world.get(i))) grazed.set(i, Math.max(0, +left || 0));
   applyPlayerSave(s);
 }
 // blocks you changed, put back on top of the freshly grown terrain (also used when joining a friend's game)
@@ -15587,8 +16144,8 @@ function applyPlayerSave(s) {
   if (EARTH && Worlds.current.temp) Earth.start().catch(() => {});   // (a friend's Earthlike world: the plans are made while their game sends what's changed)
   if (Worlds.current.temp || MENU_ONLY) return;   // (no world in the main menu.) A friend's world: it loads once their game sends it (see Multiplayer)
   try {
-    if (EARTH) await Earth.open();   // (Earthlike: the plans, and the land round the start, before the save goes in)
     const s = await Worlds.load(Worlds.current.id);
+    if (EARTH) { settleEarthStairs(s && s.seed === seed ? s : null); await Earth.open(); }   // (Earthlike: the plans, and the land round the start, before the save goes in)
     settleOldStairs(s && s.seed === seed ? s : null);   // (an old world opened for the first time in this version)
     if (s && s.seed === seed) applySave(s);
     else {
@@ -16339,12 +16896,25 @@ function earthPack(col, ncy, transp, lut) {
   transfer.push(pn.buffer, h.buffer, sky.buffer);
   return { pals, places, pn, h, sky, top, transfer };
 }
+// (Beta 0.1.5.5) the ground plants (P) in Earthlike land (the desktop version's EarthCol.PlantsOn)
+const EARTH_PLANTS_READY = true;
 let earthWorkerUrl = null;
 function earthWorkerSource() {
   const keys = {}, lying = {};
   for (const r of WORLDGEN.TREE_SHAPES) for (const k of [r.log, r.leaves]) if (k) keys[k] = idOf(k);
   for (const id of new Set([...Object.values(keys), 4, FIR_LOG, PALM_LOG, WILLOW_LOG])) for (const axis of [1, 2]) { const t = turned(id, axis); if (t !== id) lying[id * 4 + axis] = t; }
   const leaves = Object.keys(BLOCKS).map(Number).filter(isLeaves);
+  // (Beta 0.1.5.5) the logs (standing or lying: a staircase's trees) and each standing log's planks (the block keyed <wood>_planks
+  // for <wood>_log; none: Oak Planks); and the wild crops' and Dead Bushes' rows in Earthlike terms (see the engine's Wild)
+  const logs = Object.keys(BLOCKS).map(Number).filter(isLogBlock), planks = {};
+  for (const id of logs) { const k = blockKey(id); if (BLOCKS[id].log && !BLOCKS[id].axis && /_log$/.test(k)) planks[id] = keyOr(k.replace(/_log$/, '_planks'), 7); }
+  const EB = ['woods', 'plains', 'desert', 'snowy', 'swamp', 'taiga', 'meadow', 'badlands', 'tundra', 'glacier', 'rainforest', 'savanna', 'alpine', 'crags', 'peaks', 'ocean', 'lake', 'cold_waste', 'hot_waste', 'dry_scrub', 'dry_forest'];
+  const eb = list => (list || []).map(b => EB.indexOf(b));
+  const rows = (WORLDGEN.WILD_CROPS || []).filter(r => r.earthBiomes || r.earthNear).map(r => ({ crop: r.crop, seed: r.seed, chance: r.chance, tries: r.tries, spread: r.spread, within: r.within || 12,
+    biomes: r.earthNear ? null : eb(r.earthBiomes), near: r.earthNear ? eb(r.earthNear) : null, ripe: CROP_STAGES[r.crop][CROP_RIPE], top: r.crop === 'corn' ? CORN_TOP[CROP_RIPE] : 0, corn: r.crop === 'corn' }));
+  const DB = WORLDGEN.DEAD_BUSHES;
+  const wild = { plants: EARTH_PLANTS_READY, rows, melonRow: rows.findIndex(r => r.crop === 'cantaloupe'), melon: keyOr('cantaloupe', 0),
+    bush: DB && DB.earthBiomes ? { seed: DB.seed, chance: DB.chance, biomes: eb(DB.earthBiomes), ground: (DB.earthGround || []).map(idOf), id: keyOr('dead_bush', 0) } : null };
   return [
     document.getElementById('earth-src').textContent,
     '// ---- the trees\' shapes (the game\'s own: treeShape and what it calls), into a Map, never a world',
@@ -16365,6 +16935,9 @@ function earthWorkerSource() {
     'self.__EARTH_PLAN_TREE = (name, x, y, z) => { const g = treeShape(name, x, y, z); if (!g.size) return null; const out = [];',
     '  for (const [i, id] of g) out.push([i % WX, Math.floor(i / (WX * WZ)), Math.floor(i / WX) % WZ, id]); return out; };',
     'self.__EARTH_IS_LEAVES = isLeaves;',
+    `const LOGS = new Set(${JSON.stringify(logs)}), PLANKS = ${JSON.stringify(planks)};`,
+    'self.__EARTH_IS_LOG = b => LOGS.has(b); self.__EARTH_PLANKS = b => PLANKS[b] || 7;',
+    `const WILD = ${JSON.stringify(wild)}; WILD.melonRow = WILD.melonRow >= 0 ? WILD.rows[WILD.melonRow] : null; self.__EARTH_WILD = WILD;`,
     '// ---- what the game asks: "plan" (make it), "spawn" (where players start), "draw" (a column: its blocks, y then z then x),',
     '// "grow" (a column drawn and packed, ready to go in: see earthPack)',
     'let P = null, TRANSP = new Set(), LUT = null;',
@@ -16376,12 +16949,20 @@ function earthWorkerSource() {
     '      seed = m.seed; WX = WZ = m.size; LAND = m.land === undefined ? 9 : m.land;   // (land: 9; tests may ask another)',
     '      P = m.from ? EarthPlan(m.seed, m.size, m.room || 0, m.from) : EarthPlan(m.seed, m.size, m.room || 0);   // (from: a copy of another Worker\'s)',
     '      WY = 2 * P.Room; TRANSP = new Set(m.transp || []);',
-    '      postMessage({ kind: "plan", ms: Math.round(performance.now() - t0), room: P.Room, planHash: P.PlanHash >>> 0, ...(m.share ? { from: P.__export() } : {}) });',
+    '      const t1 = performance.now(), stairs = P.FindStairs(new Set(m.skip || []));   // (Beta 0.1.5.5: the staircases, never near the chunks in skip)',
+    '      P.SetStairs(stairs);',
+    '      postMessage({ kind: "plan", ms: Math.round(t1 - t0), stairMs: Math.round(performance.now() - t1), room: P.Room, planHash: P.PlanHash >>> 0, stairs, biome: P.Biome.slice(), cell: P.Cell, n: P.N, ...(m.share ? { from: P.__export() } : {}) });',
+    '    } else if (m.kind === "testoff") { P.SetTestOff(m.off);',
     '    } else if (m.kind === "spawn") {',
     '      const [x, z] = earthSpawn(P); postMessage({ kind: "spawn", x, z });',
     '    } else if (m.kind === "draw") {',
     '      const t0 = performance.now(), col = P.Draw(m.cx, m.cz, m.trees !== false);',
     '      postMessage({ kind: "draw", id: m.id, cx: m.cx, cz: m.cz, col, ms: performance.now() - t0 }, [col.buffer]);',
+    '    } else if (m.kind === "dry") {   // (Beta 0.1.5.5: spots for the staircase events, see earthDryGround)',
+    '      postMessage({ kind: "dry", spots: P.DrySpots() });',
+    '    } else if (m.kind === "elsewhere") {   // (Beta 0.1.5.5: a staircase stood up again elsewhere, see earthStairElsewhere)',
+    '      const t0 = performance.now(), st = P.StairElsewhere(m.sx, m.sz, new Set(m.skip), m.seed);',
+    '      postMessage({ kind: "elsewhere", st, tested: P.LastTested, ms: Math.round(performance.now() - t0) });',
     '    } else if (m.kind === "grow") {',
     '      const t0 = performance.now(), col = P.Draw(m.cx, m.cz, true);',
     '      if (!LUT) LUT = new Int32Array(1 << 16).fill(-1);',
@@ -16404,15 +16985,17 @@ function earthSeedFrom(text) {
   if (/^-?\d+$/.test(text)) return parseInt(text, 10) | 0;
   let h = 0; for (const c of text) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0; return h;
 }
-function earthColTest(seedText, size, trees = true, land = 9) {
+function earthColTest(seedText, size, trees = true, land = 9, off = 0) {   // (off, testing: 1 no staircases, 2 no wild crops)
   return new Promise((resolve, reject) => {
     const w = earthWorker(), ncx = size / 16 | 0, todo = [];
-    let h = 2166136261, hs = 2166136261, plan = null, start = null, ms = 0, n = 0; const rc = new Array(25).fill(0);
+    let h = 2166136261, hs = 2166136261, plan = null, start = null, ms = 0, n = 0; const rc = new Array(25).fill(0), life = new Map();
+    // (Beta 0.1.5.5) LIFECOUNT: every log (standing or lying), Burnt Log, Earthlike plant, flower, crop, Cantaloupe and Dead Bush in all 34 columns
+    const alive = b => isLogBlock(b) || b >= 3994 && b <= 3996 || b >= 3940 && b <= 3961 || b >= 194 && b <= 198 || b >= 3700 && b <= 3723;
     const next = () => { const t = todo.shift(); w.postMessage({ kind: 'draw', id: t[2], cx: t[0], cz: t[1], trees }); };
     w.onmessage = e => {
       const m = e.data;
       if (m.kind === 'error') { w.terminate(); reject(new Error(m.message)); return; }
-      if (m.kind === 'plan') { plan = m; w.postMessage({ kind: 'spawn' }); return; }
+      if (m.kind === 'plan') { plan = m; if (off) w.postMessage({ kind: 'testoff', off }); w.postMessage({ kind: 'spawn' }); return; }
       if (m.kind === 'spawn') {
         start = m.x + ',' + m.z;
         for (let kz = 0; kz < 5; kz++) for (let kx = 0; kx < 5; kx++) todo.push([(2 * kx + 1) * ncx / 10 | 0, (2 * kz + 1) * ncx / 10 | 0, 'c']);
@@ -16422,14 +17005,16 @@ function earthColTest(seedText, size, trees = true, land = 9) {
       }
       ms += m.ms; n++;
       const col = m.col;
+      for (let k = 0; k < col.length; k++) { const b = col[k]; if (b && alive(b)) life.set(b, (life.get(b) || 0) + 1); }
       if (m.id === 'c') for (let k = 0; k < col.length; k++) { h = Math.imul(h ^ col[k], 16777619) >>> 0; if (col[k] >= 3891 && col[k] <= 3915) rc[col[k] - 3891]++; }
       else for (let k = 0; k < col.length; k++) hs = Math.imul(hs ^ col[k], 16777619) >>> 0;
       if (todo.length) { next(); return; }
       w.terminate();
       const hx = v => (v >>> 0).toString(16).padStart(8, '0');
-      resolve(`${seedText} ${size} ${trees ? 'trees' : 'notrees'} land ${land}: COLHASH ${hx(h)} SPAWNHASH ${hx(hs)} start ${start} PLANHASH ${hx(plan.planHash)} (plan ${plan.ms} ms, ${(ms / n).toFixed(1)} ms a column) RIVERCOUNT ${rc.map((c, k) => c ? (3891 + k) + ':' + c : '').filter(Boolean).join(' ') || 'none'}`);
+      resolve(`${seedText} ${size} ${trees ? 'trees' : 'notrees'}${off ? ' off' + off : ''} land ${land}: COLHASH ${hx(h)} SPAWNHASH ${hx(hs)} start ${start} PLANHASH ${hx(plan.planHash)} (plan ${plan.ms} ms, ${(ms / n).toFixed(1)} ms a column) RIVERCOUNT ${rc.map((c, k) => c ? (3891 + k) + ':' + c : '').filter(Boolean).join(' ') || 'none'}` +
+        ` STAIRS ${plan.stairs.map(s => s ? s.join(',') : 'none').join(' ')} (${plan.stairMs} ms) LIFECOUNT ${[...life].sort((a, b) => a[0] - b[0]).map(([b, c]) => b + ':' + c).join(' ') || 'none'}`);
     };
-    w.postMessage({ kind: 'plan', seed: earthSeedFrom(seedText), size, land });
+    w.postMessage({ kind: 'plan', seed: earthSeedFrom(seedText), size, land, skip: [] });
   });
 }
 
@@ -16465,7 +17050,7 @@ const Earth = (() => {
   function start() {
     if (started) return started;
     const transp = Object.keys(BLOCKS).map(Number).filter(b => BLOCKS[b].transparent);
-    const base = { kind: 'plan', seed, size: WX, land: LAND, room: EARTH_ROOM, transp };
+    const base = { kind: 'plan', seed, size: WX, land: LAND, room: EARTH_ROOM, transp, skip: Worlds.current.os === 1 && Array.isArray(Worlds.current.osSkip) ? Worlds.current.osSkip : [] };
     return started = new Promise((resolve, reject) => {
       let left = N;
       for (let n = 0; n < N; n++) {
@@ -16478,13 +17063,14 @@ const Earth = (() => {
           if (m.kind === 'plan') {
             if (m.room !== EARTH_ROOM) { reject(new Error(`the plan's sea is at ${m.room}, not ${EARTH_ROOM}`)); return; }
             if (plan && m.planHash !== plan.planHash) { reject(new Error('a copy of the plan came out different')); return; }
+            if (plan && JSON.stringify(m.stairs) !== JSON.stringify(plan.stairs)) { reject(new Error("a copy of the plan's staircases came out different")); return; }
             if (m.from) {   // (the first plan: the others get its arrays, moved to the last one rather than copied again)
               const bufs = new Set();
               for (const v of Object.values(m.from)) if (v && v.buffer instanceof ArrayBuffer) bufs.add(v.buffer);
               for (let k = 1; k < N; k++) workers[k].postMessage({ ...base, from: m.from }, k === N - 1 ? [...bufs] : []);
               delete m.from;
             }
-            if (!plan) plan = m;
+            if (!plan) { plan = m; earthPlanIn(m); }
             idle.push(w);
             if (--left === 0) resolve(plan);
           } else {
@@ -16511,6 +17097,7 @@ const Earth = (() => {
     if (world.grown(cx, cz)) return false;
     world.install(cx, cz, m);
     grownCols.add(k);
+    earthStairPieces(cx, cz);   // (Beta 0.1.5.5)
     let torch = false;
     const list = colEdits.get(k);
     if (list) {
@@ -16674,7 +17261,9 @@ const Earth = (() => {
   // (testing) how it stands
   const state = () => ({ workers: N, plan: plan && { ms: plan.ms, planHash: (plan.planHash >>> 0).toString(16).padStart(8, '0') }, live, grown: grownCols.size,
     drawing: drawing.size - drawn.length, waiting: drawn.length, pending: pending.length, failed: failed.size, far: farBuilds.length });
-  return { start, open, settle, joined, tick, pumpBuilds, growNow, spawn, state, get live() { return live; } };
+  const drySpots = () => start().then(() => ask({ kind: 'dry' })).then(m => m.spots);
+  const elsewhere = (sx, sz, skip, seed) => start().then(() => ask({ kind: 'elsewhere', sx, sz, skip, seed }));
+  return { start, open, settle, joined, tick, pumpBuilds, growNow, spawn, state, drySpots, elsewhere, get live() { return live; } };
 })();
 
 // ===================== Game loop =====================
@@ -16974,13 +17563,15 @@ if (/[?&]datacheck\b/.test(location.search)) {
     const ANIMAL_FIELDS = ['perChunk', 'crowdedAt', 'nearRange', 'happyMax', 'mateCooldown', 'mateCost', 'babyTime', 'babyFoodBoost', 'babyHealth', 'fedMax', 'foodHappy',
       'food', 'forage', 'biomes', 'ground', 'group', 'nearMax', 'spawnWeight', 'logNear', 'logs', 'minHeight', 'layTime', 'scratchTime', 'fertChance', 'peckTime', 'peckChance',
       'eggReach', 'duckRate', 'duckReach', 'followRange', 'waterRange', 'shyRange', 'sowEvery', 'sowChance', 'sowClear', 'nibbleEvery', 'nibbleChance', 'nibbleRange',
-      'milkTime', 'rootNear', 'truffleChance', 'angerTime', 'cubs', 'cubChance', 'prey', 'preyFlee', 'huntCool', 'huntRange', 'huntHeight', 'chaseTime', 'retry', 'mealHappy', 'cubRange', 'cubNear'];
+      'milkTime', 'rootNear', 'truffleChance', 'angerTime', 'cubs', 'cubChance', 'prey', 'preyFlee', 'huntCool', 'huntRange', 'huntHeight', 'chaseTime', 'retry', 'mealHappy', 'cubRange', 'cubNear',
+      'earthBiomes', 'earthGround', 'earthLogs'];
     for (const [t, a] of Object.entries(AN)) {
       if (t.startsWith('_')) continue;
       const at = `mobs.ANIMALS.${t}`;
       if (!animalTypes.includes(t)) md.push(`${at}: isn't a MOBS row with animal`);
       for (const f of Object.keys(a)) if (!f.startsWith('_') && !ANIMAL_FIELDS.includes(f)) md.push(`${at}: "${f}" isn't something the game reads`);
-      for (const f of ['food', 'ground', 'logs']) (a[f] || []).forEach(k => { if (!blockKeyKnown(k)) md.push(`${at}.${f}: "${k}" isn't a block or item`); });
+      for (const f of ['food', 'ground', 'logs', 'earthGround', 'earthLogs']) (a[f] || []).forEach(k => { if (!blockKeyKnown(k)) md.push(`${at}.${f}: "${k}" isn't a block or item`); });
+      (a.earthBiomes || []).forEach(b => { if (!EARTH_BIOME_NAMES.includes(b)) md.push(`${at}.earthBiomes: "${b}" isn't an Earthlike biome`); });
       (a.biomes || []).forEach(b => { if (!BIOME_NAMES.includes(b)) md.push(`${at}.biomes: "${b}" isn't a biome`); });
       (a.prey || []).forEach(p => { if (!animalTypes.includes(p)) md.push(`${at}.prey: "${p}" isn't an animal`); });
       for (const f of ['group', 'cubs', 'layTime', 'scratchTime', 'peckTime']) if (a[f] !== undefined && !(Array.isArray(a[f]) && a[f].length === 2 && a[f][0] <= a[f][1])) md.push(`${at}.${f}: should be [fewest, most]`);
@@ -17227,7 +17818,8 @@ if (/[?&]datacheck\b/.test(location.search)) {
     // each mix's shares add up to 1 at most, and the extra rows' rules are numbers the code reads
     const NEEDS = { maple: ['trunk', 'crown'], cedar: ['trunk', 'tiers', 'gap'], birch: ['trunk', 'crown2'], cherry: ['trunk', 'crown2'], orange: ['trunk', 'crown2'],
       aspen: ['trunk', 'crown2'], redwood: ['trunk', 'crown'], cypress: ['trunk', 'crown'], juniper: ['trunk', 'crown'], larch: ['trunk', 'crown', 'sparse?'],
-      holly: ['trunk', 'crown', 'sparse?'], palo_verde: ['trunk', 'crown', 'branch', 'sparse'], dead: ['trunk', 'branches', 'branch'], prairie_oak: ['trunk', 'crown2'], shrub: ['crown2'] };
+      holly: ['trunk', 'crown', 'sparse?'], palo_verde: ['trunk', 'crown', 'branch', 'sparse'], dead: ['trunk', 'branches', 'branch'], prairie_oak: ['trunk', 'crown2'], shrub: ['crown2'],
+      mahogany: ['trunk', 'crown2'], acacia: ['trunk', 'crown', 'branch', 'sparse'], stiltroot: ['trunk', 'crown2'], teak: ['trunk', 'crown2'], burnt: ['trunk', 'branches', 'branch'] };
     const pair = v => Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && n >= 0) && v[0] <= v[1];
     const shapes = new Set();
     (W.TREE_SHAPES || []).forEach((r, k) => {
@@ -17235,10 +17827,11 @@ if (/[?&]datacheck\b/.test(location.search)) {
       if (!needs) { wd.push(`${at}: the game has no tree shape "${r.tree}"`); return; }
       if (shapes.has(r.tree)) wd.push(`${at}: more than once`);
       shapes.add(r.tree);
-      const known = ['tree', 'log', ...(r.tree === 'dead' ? [] : ['leaves']), ...needs.map(f => f.replace(/[2?]$/, ''))];
+      const bare = r.tree === 'dead' || r.tree === 'burnt';   // (no leaves; a burnt tree's log is a Burnt Log, which isn't a log)
+      const known = ['tree', 'log', ...(bare ? [] : ['leaves']), ...needs.map(f => f.replace(/[2?]$/, ''))];
       for (const f of Object.keys(r)) if (!f.startsWith('_') && !known.includes(f)) wd.push(`${at}: "${f}" isn't something this tree reads`);
-      if (!blockKeyKnown(r.log) || !BLOCKS[idOf(r.log)].log) wd.push(`${at}: log should be a log`);
-      if (r.tree !== 'dead' && (!blockKeyKnown(r.leaves) || !isLeaves(idOf(r.leaves)))) wd.push(`${at}: leaves should be leaves`);
+      if (!blockKeyKnown(r.log) || !(BLOCKS[idOf(r.log)].log || r.tree === 'burnt')) wd.push(`${at}: log should be a log`);
+      if (!bare && (!blockKeyKnown(r.leaves) || !isLeaves(idOf(r.leaves)))) wd.push(`${at}: leaves should be leaves`);
       for (const n of needs) {
         const f = n.replace(/[2?]$/, ''), v = r[f];
         if (v === undefined && n.endsWith('?')) continue;
@@ -17267,7 +17860,11 @@ if (/[?&]datacheck\b/.test(location.search)) {
     });
     // the wild crops (land 5 on, grown in the rows' order): each a crop of blocks.json CROPS (once), biomes or near (with within)
     // biomes, ground blocks, a chance, tries [fewest, most] and a spread; the dead bushes: biomes, ground blocks and a chance
-    fieldsKnown(W.WILD_CROPS || [], ['crop', 'seed', 'biomes', 'near', 'within', 'ground', 'chance', 'tries', 'spread'], 'worldgen.WILD_CROPS', wd);
+    fieldsKnown(W.WILD_CROPS || [], ['crop', 'seed', 'biomes', 'near', 'within', 'ground', 'chance', 'tries', 'spread', 'earthBiomes', 'earthNear'], 'worldgen.WILD_CROPS', wd);
+    // (Beta 0.1.5.5) Earthlike's: earthBiomes or earthNear (the plan's biome names), and the Dead Bushes' earthGround blocks
+    const EARTH_BIOMES = ['woods', 'plains', 'desert', 'snowy', 'swamp', 'taiga', 'meadow', 'badlands', 'tundra', 'glacier', 'rainforest', 'savanna', 'alpine', 'crags', 'peaks', 'ocean', 'lake', 'cold_waste', 'hot_waste', 'dry_scrub', 'dry_forest'];
+    const earthOk = (at, list) => { if (list === undefined) return; if (!Array.isArray(list) || !list.length) wd.push(`${at}: should be a list of Earthlike biomes`); else list.forEach(b => { if (!EARTH_BIOMES.includes(b)) wd.push(`${at}: "${b}" isn't an Earthlike biome`); }); };
+    (W.WILD_CROPS || []).forEach((r, k) => { earthOk(`worldgen.WILD_CROPS.${k}.earthBiomes`, r.earthBiomes); earthOk(`worldgen.WILD_CROPS.${k}.earthNear`, r.earthNear); if (r.earthBiomes && r.earthNear) wd.push(`worldgen.WILD_CROPS.${k}: has earthBiomes or earthNear (not both)`); });
     const crops = new Set((BL && BL.CROPS || []).map(r => r.crop)), wildSeen = new Set();
     (W.WILD_CROPS || []).forEach((r, k) => {
       if (!crops.has(r.crop)) wd.push(`worldgen.WILD_CROPS.${k}: "${r.crop}" isn't a crop (blocks.json CROPS)`);
@@ -17290,7 +17887,9 @@ if (/[?&]datacheck\b/.test(location.search)) {
     });
     const DB = W.DEAD_BUSHES;
     if (DB !== undefined) {
-      fieldsKnown([DB], ['seed', 'biomes', 'ground', 'chance'], 'worldgen.DEAD_BUSHES', wd);
+      fieldsKnown([DB], ['seed', 'biomes', 'ground', 'chance', 'earthBiomes', 'earthGround'], 'worldgen.DEAD_BUSHES', wd);
+      earthOk('worldgen.DEAD_BUSHES.earthBiomes', DB.earthBiomes);
+      if (DB.earthGround !== undefined) groundOk('worldgen.DEAD_BUSHES.earthGround', DB.earthGround);
       if (!Number.isInteger(DB.seed)) wd.push('worldgen.DEAD_BUSHES: seed is a whole number');
       biomesOk('worldgen.DEAD_BUSHES.biomes', DB.biomes);
       groundOk('worldgen.DEAD_BUSHES.ground', DB.ground);

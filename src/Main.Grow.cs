@@ -24,7 +24,11 @@ public partial class Main
 	static int GrowWorkers => Math.Max(1, System.Environment.ProcessorCount - 2);
 	int GrowReach => (settings?.RenderDist ?? 10) + 2;
 	int DropReach => (settings?.RenderDist ?? 10) + 4;
-	EarthCol Drawer() => drawers.TryTake(out var d) ? d : new EarthCol(world.Plan, new WorldGen(world, world.Gen.Seed, 4) { Land = world.Gen.Land, BiomeScale = world.Gen.BiomeScale });   // (the world's land: its trees grow as its saplings do)
+	EarthCol Drawer()
+	{   // (the world's land: its trees grow as its saplings do; and its staircases)
+		var d = drawers.TryTake(out var o) ? o : new EarthCol(world.Plan, new WorldGen(world, world.Gen.Seed, 4) { Land = world.Gen.Land, BiomeScale = world.Gen.BiomeScale });
+		d.Stairs = earthStairs; return d;
+	}
 
 	// the columns the land grows round: yours, and (hosting) every player's
 	List<(int cx, int cz)> GrowCentres()
@@ -122,6 +126,37 @@ public partial class Main
 			var d = Drawer(); try { cols[n] = World.Prepare(d.Draw(want[n].cx, want[n].cz)); } finally { drawers.Add(d); }
 		});
 		for (int n = 0; n < want.Count; n++) { world.InstallColumn(want[n].cx, want[n].cz, cols[n]); grownCols.Add(want[n].cz * World.NCX + want[n].cx); }
+	}
+
+	// (Beta 0.1.5.5) an Earthlike world's staircases (EarthCol.FindStairs; the regions side by side): found once the plan is made,
+	// before any column grows, then drawn by every drawer, each step given its stairs shape now (a step changed since: the save's
+	// change wins as it loads, as in the Biomes worlds). None within 2 chunks of the chunks that held builds when the world was
+	// first opened in a version with them (Worlds.OldStairs; a friend has them from the host's "info").
+	List<int[]> earthStairs = new();
+	void FindEarthStairs()
+	{
+		if (!WorldGen.EerieOn || world == null || !world.Lazy || world.Plan == null) return;
+		var skip = new HashSet<int>(current?.OsSkip ?? Array.Empty<int>());
+		var sw = System.Diagnostics.Stopwatch.StartNew();
+		int n = EarthCol.StairRegions(world.Plan.Size); var found = new int[n * n][];
+		Parallel.For(0, n * n, new ParallelOptions { MaxDegreeOfParallelism = GrowWorkers }, r =>
+		{
+			var d = Drawer(); try { found[r] = d.RegionStair(r, skip); } finally { drawers.Add(d); }
+		});
+		earthStairs = found.ToList();
+		foreach (var st in found)
+		{
+			if (st == null) continue;
+			var o = new WorldGen.StairSpot { X = st[0], Y = st[1], Z = st[2], Dir = st[3], N = st[4], Mat = st[5], Placed = true };
+			world.Gen.StairSpots.Add(o);
+			var dd = WorldGen.StairDirs[o.Dir];
+			for (int k = 0; k < o.N; k++)
+			{
+				var a = new int[8]; for (int b = 0; b < 8; b++) if ((WorldGen.StairMasks[o.Dir] & (1 << b)) != 0) a[b] = o.Mat;
+				world.PieceMap[World.Idx(o.X + dd[0] * k, o.Y + k, o.Z + dd[1] * k)] = a;
+			}
+		}
+		if (TestRun) GD.Print($"EARTHSTAIRS {string.Join(" ", found.Select(st => st == null ? "none" : string.Join(",", st)))} (skip [{string.Join(",", skip.OrderBy(c => c))}], {sw.ElapsedMilliseconds} ms)");
 	}
 
 	// where a new Earthlike world's players start: from the plan, the nearest dry land to the map's middle (cells outward, ring
