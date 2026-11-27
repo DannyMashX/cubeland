@@ -1,5 +1,19 @@
 [
     {
+        "version": "Beta 0.1.5.4",
+        "folder": "beta-0.1.5.4",
+        "date": "2026-11-27",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-beta-0.1.5.4/CubeLand-Beta-0.1.5.4-windows.zip",
+        "size": 78076263,
+        "exe": "CubeLand-Beta-0.1.5.4-windows/CubeLand.exe",
+        "changes": [
+            "New: Earthlike rivers now run downhill: gently over flat land, quickly down slopes and in rapids down steep ones, and where a river drops 2 blocks or more its water falls. A river carries you along, and anything you drop floats off downstream. Wading in the shallows pushes you half as hard, and you can't swim up falling water.",
+            "New: you can hear rivers nearby, a soft rush beside calm water and a louder roar by rapids.",
+            "New: a block taken out of a river fills back in with running water.",
+            "Changed: Earthlike worlds you've already made get running rivers too, apart from the spots you've changed."
+        ]
+    },
+    {
         "version": "Beta 0.1.5.3",
         "folder": "beta-0.1.5.3",
         "date": "2026-11-27",
