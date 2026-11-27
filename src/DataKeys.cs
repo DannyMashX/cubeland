@@ -13,9 +13,10 @@ public static class DataKeys
 	// The rules (the same, in the same order, as the web version's blockKey):
 	//  0 is "air"; snow-logged: "snowy:" + its inner block's key; a shape item: form + ":" + its block's key ("slab:grass");
 	//  a piece item: "piece:" + its block's key; anything else: its name in lower case with _ between words, then any
-	//  states that aren't the usual one after a #, in this order: layer (deep sets, 2-8), wall and count (torches), facing
-	//  and lit (anything with a front), facing, half, hinge and open (a door as it stands, always all four), level (water), stage (Grain and the
-	//  other crops, always; then top for Corn's upper block), layers (snow, 2-7), axis (lying logs),
+	//  states that aren't the usual one after a #, in this order: layer (deep sets, 2-8), in (an ore in a rock: Earthlike's),
+	//  wall and count (torches), facing and lit (anything with a front), facing, half, hinge and open (a door as it stands,
+	//  always all four), level (water), flow and pace (river water: always both), stage (Grain and the other crops, always; then
+	//  top for Corn's upper block), top (any other two-tall plant's upper block), layers (snow, 2-7), axis (lying logs),
 	//  look (Red Bricks' other looks), placed (a flat block whose drop is an item of the same name).
 	public static string KeyOf(int id)
 	{
@@ -33,12 +34,15 @@ public static class DataKeys
 	{
 		var states = new List<string>();
 		if (d.Layer >= 2) states.Add($"layer={d.Layer}");
+		if (d.In != null) states.Add($"in={d.In}");
 		if (d.Shape == "torch") { if (d.Wi > 0) states.Add($"wall={d.Wi}"); if (d.Count > 1) states.Add($"count={d.Count}"); }
 		if (d.Front != null) { if (d.Facing > 0) states.Add($"facing={d.Facing}"); if (d.Lit) states.Add("lit"); }
 		if (d.Shape == "door") states.Add($"facing={d.Facing},half={d.Half},hinge={d.Hinge},open={d.Open}");   // (a door as it stands: always all four)
 		if (d.Liquid && d.Level > 0) states.Add($"level={d.Level}");
+		if (d.Flow >= 0) states.Add($"flow={d.Flow},pace={d.Pace}");
 		if (Blocks.IsCrop(id)) states.Add($"stage={Array.IndexOf(Blocks.GrainStages, id)}");
 		else if (d.Crop != null) { states.Add($"stage={d.Stage}"); if (d.Top) states.Add("top"); }   // (the other crops: their stage, always; Corn's upper block: top)
+		else if (d.Top) states.Add("top");   // (a two-tall plant's upper block)
 		if (d.Shape == "snow" && d.Layers >= 2) states.Add($"layers={d.Layers}");
 		if (d.Axis > 0) states.Add($"axis={d.Axis}");
 		if (d.Look > 0) states.Add($"look={d.Look}");
@@ -56,7 +60,24 @@ public static class DataKeys
 			for (int id = 1; id < Blocks.MaxId; id++) if (Blocks.Get(id) != null) m.TryAdd(KeyOf(id), id);
 			ids = m;
 		}
-		return key != null && ids.TryGetValue(key, out int v) ? v : throw new InvalidOperationException($"a data file names \"{key}\", which no block or item has (see DataKeys.cs)");
+		return key != null && (ids.TryGetValue(key, out int v) || ids.TryGetValue(NewKey(key), out v)) ? v : throw new InvalidOperationException($"a data file names \"{key}\", which no block or item has (see DataKeys.cs)");
+	}
+	// Old keys (the Andesite rename, Beta 0.1.5.2: same ids, new names) still find their blocks: a key nothing has is tried again
+	// with each part between ':' having its name (before any '#') swapped by this list, exact names only. (The same in the web
+	// version.)
+	public static readonly Dictionary<string, string> OldNames = new()
+	{
+		["stone"] = "andesite", ["cobblestone"] = "cobbled_andesite", ["stone_bricks"] = "andesite_bricks", ["chiseled_stone"] = "chiseled_andesite",
+	};
+	public static string NewKey(string key)
+	{
+		var parts = key.Split(':');
+		for (int k = 0; k < parts.Length; k++)
+		{
+			int h = parts[k].IndexOf('#'); string name = h < 0 ? parts[k] : parts[k][..h];
+			if (OldNames.TryGetValue(name, out var now)) parts[k] = now + (h < 0 ? "" : parts[k][h..]);
+		}
+		return string.Join(":", parts);
 	}
 	// the same, for a key from a save (an unknown one is just not found)
 	public static bool TryIdOf(string key, out int id) { try { id = IdOf(key); return true; } catch (InvalidOperationException) { id = 0; return false; } }

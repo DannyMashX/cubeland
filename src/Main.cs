@@ -865,7 +865,7 @@ public partial class Main : Node3D
 			{
 				("more than one stack's worth", Bad(L(Dirt, Sand), L(40, 30), L(0, 0))),
 				("a bag inside", Bad(L(Bag), L(1), L(0))),
-				("a thing that isn't one", Bad(L(4000), L(1), L(0))),
+				("a thing that isn't one", Bad(L(Enumerable.Range(1000, Blocks.MaxId - 1000).First(i => Blocks.Get(i) == null)), L(1), L(0))),   // (the first id from 1000 that's nothing: 4000 is Mahogany Log since Beta 0.1.5.2)
 				("lists that don't match", Bad(L(Dirt, Sand), L(4), L(0, 0))),
 				("none of a thing", Bad(L(Dirt), L(0), L(0))),
 				("a number that isn't whole", Bad(L(Dirt), L(2.5), L(0))),
@@ -1137,7 +1137,8 @@ public partial class Main : Node3D
 			}
 			int Y = y + 1, oak = K("oak_fence"), cherry = K("cherry_fence");
 			var fences = Enumerable.Range(1, Blocks.B.Length - 1).Where(Blocks.IsFence).ToArray();
-			Check($"16 fences, each showing its own wood's planks, and a 3D icon (a post with rails each way): {fences.Length}", fences.Length == 16 && fences.All(f => Blocks.B[f].Of > 0 && Blocks.B[f].T[0] == Blocks.B[Blocks.B[f].Of].T[0])
+			int earthFences = fences.Count(f => Blocks.B[f].Earthlike);   // (Earthlike's 4 woods' fences, hidden until it's ready)
+			Check($"16 fences and Earthlike's 4, each showing its own wood's planks, and a 3D icon (a post with rails each way): {fences.Length - earthFences} and {earthFences}", fences.Length - earthFences == 16 && earthFences == 4 && fences.All(f => Blocks.B[f].Of > 0 && Blocks.B[f].T[0] == Blocks.B[Blocks.B[f].Of].T[0])
 				&& Atlas.Is3DIcon(oak) && Atlas.IconBoxes(oak).Length == 5 && Blocks.StackMaxOf(oak) > 1);
 			// a line: glass, oak, oak (a door beside it), cherry, oak, stone
 			int door = Enumerable.Range(1, Blocks.B.Length - 1).First(i => Blocks.B[i]?.Shape == "door");
@@ -1428,7 +1429,7 @@ public partial class Main : Node3D
 			Check("Hearts in a tooltip: 2 -> 0.5, 4 -> 1, 6 -> 1.5", Hearts(2) == "0.5" && Hearts(4) == "1" && Hearts(6) == "1.5");
 			Check("every creative block and item is in a tab", AllCreative().All(i => TabPlace(i).at != int.MaxValue) && CreativeTabs.Length == 9);
 			ShowHowTo(Blocks.FormItem("stairs", Blocks.Stone));
-			Check("How to make Stone Stairs: the Cutter, 3 Stone make 4", howPanel.Visible && howTitle.Text == "How to make Stone Stairs" && howList.GetChildren().Count(c => !c.IsQueuedForDeletion()) == 1);
+			Check("How to make Andesite Stairs (Stone Stairs before Beta 0.1.5.2): the Cutter, 3 Andesite make 4", howPanel.Visible && howTitle.Text == "How to make Andesite Stairs" && howList.GetChildren().Count(c => !c.IsQueuedForDeletion()) == 1);
 			ShowHowTo(Blocks.Grass);
 			Check("How to make Grass: can't be made", howList.GetChildren().Where(c => !c.IsQueuedForDeletion()).OfType<Label>().Any(l => l.Text.StartsWith("Can't be made")));
 			CloseInventory();
@@ -1744,7 +1745,7 @@ public partial class Main : Node3D
 				Check("FELLING ALONE: a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
 			}
 			Check("OFF: nothing half broken, no cracks", stages.Count == 0);
-			Check($"new worlds are land {World.NewLand} (this one: {current.Land}); staircases only in lands 5 and 6 ({world.Gen.StairSpots.Count} spots)", World.NewLand == (World.OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0) && current.Land == World.NewLand
+			Check($"new worlds are land {World.NewLand} (this one: {current.Land}); staircases only in lands 5 to 8 ({world.Gen.StairSpots.Count} spots)", World.NewLand == (World.RockBlobsOn && WorldGen.EerieOn ? (World.OreSpreadOn ? 8 : 7) : (World.OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0)) && current.Land == World.NewLand
 				&& (world.Gen.StairSpots.Count > 0) == (world.Gen.HasStairs && current.Gen == 3));
 		}
 		if (args.Contains("--stagetest") && !stageTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
@@ -1812,7 +1813,7 @@ public partial class Main : Node3D
 			Swings(x0 + 1, y, z0 + 5, side: true);
 			Check("a put-down log touching a tree stays up", world.GetBlock(x0 + 1, y + 4, z0 + 5) == Blocks.Log && world.GetBlock(x0 + 1, y + 2, z0 + 5) == 0);
 			}   // (felling on)
-			Check($"new worlds are land {World.NewLand} (this one: {current.Land}); staircases only in lands 5 and 6 ({world.Gen.StairSpots.Count} spots)", World.NewLand == (World.OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0) && current.Land == World.NewLand
+			Check($"new worlds are land {World.NewLand} (this one: {current.Land}); staircases only in lands 5 to 8 ({world.Gen.StairSpots.Count} spots)", World.NewLand == (World.RockBlobsOn && WorldGen.EerieOn ? (World.OreSpreadOn ? 8 : 7) : (World.OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0)) && current.Land == World.NewLand
 				&& (world.Gen.StairSpots.Count > 0) == (world.Gen.HasStairs && current.Gen == 3));
 			// half broken, to look at
 			Grow(x0 + 3, y, z0 + 4, Blocks.Stone); Hold(Tool("pickaxe", "stone")); Aim(x0 + 3, y, z0 + 4); Break(); Break();

@@ -412,11 +412,12 @@ public partial class Main
 		if (!ready || tempWorld || discarding || current == null || netClient) return false;   // (a friend's world: their game saves it)
 		saveTimer = 0;
 		falling.Settle();
+		bool wide = World.PiecesNeedWide(world.PieceMap.Values);   // (a piece of a block numbered 4096 or more: the pieces go with "pg": 8192)
 		var s = new Worlds.Save
 		{
 			Seed = current.Seed, SavedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 			Idxs = world.Edits.Keys.ToArray(), Ids = world.Edits.Values.ToArray(),
-			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => (long)v))).ToArray(),
+			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => wide ? v : World.SpotOut(v)))).ToArray(), Pg = wide ? World.GroupMul : 0,
 			Stairs = SaveExtraStairs(), Os = current.Os, OsSkip = current.OsSkip,
 			Player = new() { X = player.Pos.X, Y = player.Pos.Y, Z = player.Pos.Z, Yaw = player.Yaw, Pitch = player.Pitch, Fly = player.Flying, Health = health, Gloom = gloom, DarkTime = darkTime, LightTime = lightTime },
 			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Wear = inv.Wear.ToArray(), Selected = inv.Selected, OffSel = inv.OffSel,
@@ -443,10 +444,11 @@ public partial class Main
 		{
 			var s = Worlds.LoadSave(current.Id);
 			if (s == null || s.Seed != current.Seed) return;
+			int pg = s.Pg > 0 ? s.Pg : World.OldGroupMul;
 			for (int k = 0; k + 8 < s.Pieces.Length; k += 9)
 			{
 				var a = new int[8];
-				for (int j = 0; j < 8; j++) { long v = s.Pieces[k + 1 + j]; int id = v < 0 || v > int.MaxValue ? 0 : (int)v, b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
+				for (int j = 0; j < 8; j++) { long v = World.SpotIn(s.Pieces[k + 1 + j], pg); int id = v < 0 || v > int.MaxValue ? 0 : (int)v, b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
 				if (a.Any(v => v != 0)) world.PieceMap[s.Pieces[k]] = a;
 			}
 			world.ApplyEdits(s.Idxs, s.Ids);

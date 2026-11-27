@@ -162,6 +162,11 @@ public sealed class BlocksData
 	public Dictionary<string, string> FORM_NAMES;   // the forms (piece, slab, ...) in order, each with the word its items' names end in
 	public SnowyRow[] SNOWY;           // the snow-logged blocks: a torch, flower or other small thing with snow lying round it
 	public FormRow[] FORMS;            // each block you can cut (in Blocks.Splittable's order), with its piece and shape items' ids
+	// Earthlike's (Earthly Extravaganza): read after everything above, so nothing before them moves. Every row has earthlike:
+	// hidden (not in Items, the creative inventory, search or recipes) while WorldGen.EarthlikeReady is false
+	public BlockRow[] EARTH_GROUND, EARTH_PLANTS, EARTH_ROCKS, EARTH_SOILS, EARTH_GRAVELS, EARTH_WOODS, EARTH_FENCES, RIVER_WATER;
+	public DoorRow[] EARTH_DOORS;
+	public FormRow[] EARTH_FORMS;
 }
 public sealed class BlockRow
 {
@@ -177,7 +182,7 @@ public sealed class BlockRow
 	public int[] front, wall;          // [x, z] (wall: a torch leaning off a wall, the way to it; null standing)
 	public int stage;                  // Grain: its stage (desktop finds it by its place in Blocks.GrainStages; the check compares); CROPS: its stage (0-3)
 	public string crop;                // CROPS: which crop it is (numbers.json CROPS)
-	public bool top;                   // CROPS: Corn's upper block
+	public bool top;                   // CROPS: Corn's upper block; EARTH_PLANTS: a two-tall plant's upper block
 	public string of;                  // FENCES: the planks it's made of, by key
 	public string plants, returns;     // items: the crop a seed puts down; what's left in your hand after eating it (by key)
 	public bool bag; public string full;   // a bag (holds a mix of things, up to one stack's worth); its picture while it holds anything
@@ -190,6 +195,13 @@ public sealed class BlockRow
 	public string sapling;             // leaves: their sapling (dropped now and then, broken without a hoe: numbers.json SAPLING), by key
 	public string grows;               // a sapling: the tree it grows into (oak, fir, palm, willow, or a worldgen.json TREE_SHAPES tree)
 	public bool sand;                  // a sapling that can be planted on Sand too
+	public bool earthlike;             // Earthlike's (the EARTH_ tables and RIVER_WATER): hidden until WorldGen.EarthlikeReady
+	public bool falls;                 // it falls like Sand (the new gravels: today's Dirt, Sand and Gravel are still in Falling.Falls)
+	public bool tint;                  // it takes the climate's colour, like Grass
+	public bool water;                 // a plant standing in still water (its space counts as still water too)
+	public string @in;                 // an ore in a rock: the rock (its key's in= state: copper_ore#in=granite)
+	public int? flow;                  // river water: the way it runs (0-7: E, SE, S, SW, W, NW, N, NE; 8 falling)
+	public int pace;                   // river water: 0 gentle, 1 quick, 2 rapids
 }
 // a SNOWY row: a snow-logged block. It's its inner block (by key) with that block's fields, then this row's own (only drop and
 // box so far), with inner and snowed 1
@@ -207,11 +219,13 @@ public sealed class DoorRow
 {
 	public string of;
 	public int item, first;
+	public bool earthlike;             // (EARTH_DOORS' rows: see BlockRow.earthlike)
 }
 public sealed class FormRow
 {
 	public string of;
 	public int piece, slab, vslab, stairs, quarter, vstairs, vquarter;
+	public bool earthlike;             // (EARTH_FORMS' rows: see BlockRow.earthlike)
 }
 // data/worldgen.json: how the land is grown (blocks by key). Changing it changes worlds already made (their untouched ground
 // is grown again from the seed every time they load), so a change needs a new land version.

@@ -11,12 +11,23 @@ public static partial class Blocks
 {
 	// the tables, in the order they're read (the same as the web version, and the order they come in the file)
 	public static readonly string[] RowTables = { "BASE", "KILN", "TORCHES", "WATER", "LYING_LOGS", "SNOW", "TOOLS", "DEEP_STONE", "SOILS", "GRAIN", "COLOURS", "METALS", "DEEP_ORES", "FOUNDRY", "GEAR", "FLOWERS", "WOODS", "CROPS", "FENCES" };
+	// Earthlike's row tables (Earthly Extravaganza), read after everything else (FORMS too), so no block before them moves: every
+	// row has earthlike (hidden until WorldGen.EarthlikeReady); then EARTH_DOORS and EARTH_FORMS, like DOORS and FORMS
+	public static readonly string[] EarthRowTables = { "EARTH_GROUND", "EARTH_PLANTS", "EARTH_ROCKS", "EARTH_SOILS", "EARTH_GRAVELS", "EARTH_WOODS", "EARTH_FENCES", "RIVER_WATER" };
+	// ...but since Beta 0.1.5.2 the new rocks show before Earthlike does ("Show every new rock"), so these rows have no earthlike:
+	// EARTH_ROCKS' rocks and their cobbled, bricks and polished forms (4400-4479 and 4760-4799; not the ores in them, Laterite,
+	// Flint Nodules or Flint), every EARTH_GRAVELS row, and those rocks' EARTH_FORMS rows (pieces 4500-5029). The same in the web
+	// version.
+	public static bool ShownEarthRow(string table, int id) => table == "EARTH_GRAVELS" || table == "EARTH_ROCKS" && id is >= 4400 and < 4480 or >= 4760 and < 4800;
+	public static bool ShownEarthForm(int piece) => piece is >= 4500 and < 5030;
 	// every table in the file, in its order there (the row tables, then the doors as they stand, the snow-logged blocks and the
-	// pieces and shapes)
-	public static readonly string[] FileTables = RowTables.Concat(new[] { "DOORS", "SNOWY", "FORMS" }).ToArray();
+	// pieces and shapes, then Earthlike's)
+	public static readonly string[] FileTables = RowTables.Concat(new[] { "DOORS", "SNOWY", "FORMS" }).Concat(EarthRowTables).Concat(new[] { "EARTH_DOORS", "EARTH_FORMS" }).ToArray();
 	public static BlockRow[] RowTable(BlocksData d, string name) => (BlockRow[])typeof(BlocksData).GetField(name).GetValue(d) ?? Array.Empty<BlockRow>();
 	// every row, table by table
 	public static List<BlockRow> AllRows(BlocksData d) => RowTables.SelectMany(t => RowTable(d, t)).ToList();
+	// Earthlike's rows, table by table
+	public static List<BlockRow> EarthRows(BlocksData d) => EarthRowTables.SelectMany(t => RowTable(d, t)).ToList();
 
 	// a row's pictures: one name for every side, [side, top, bottom], or [side, top, bottom, front]
 	public static string[] RowPictures(BlockRow r)
@@ -39,6 +50,7 @@ public static partial class Blocks
 		Food = r.food, Tool = r.tool, Material = r.material, Damage = r.damage, Log = r.log, Grows = r.grows, Sand = r.sand,
 		Crop = r.crop, Stage = r.stage, Top = r.top,
 		Bag = r.bag, Full = r.full != null ? pics(new[] { r.full })[0] : -1,
+		Earthlike = r.earthlike, Falls = r.falls, Tint = r.tint, Water = r.water, In = r.@in, Flow = r.flow ?? -1, Pace = r.pace,
 	};
 	// the key a row goes by: DataKeys' rules, from the block it makes (a flat block is "#placed" when its drop is the item of the
 	// same name). A key two rows share can't be pointed at (-1).
@@ -57,7 +69,7 @@ public static partial class Blocks
 	static int RowRef(Dictionary<string, int> keys, string key, BlockRow r) => KeyRef(keys, key, $"block {r.id} ({r.name})");
 	// the block a key names among the rows (0 for none); who: what names it, for the message if it isn't one block
 	public static int KeyRef(Dictionary<string, int> keys, string key, string who) => key == null ? 0
-		: keys.TryGetValue(key, out int id) ? id >= 0 ? id : throw new InvalidOperationException($"data/blocks.json: {who} names \"{key}\", which more than one block is")
+		: keys.TryGetValue(key, out int id) || keys.TryGetValue(DataKeys.NewKey(key), out id) ? id >= 0 ? id : throw new InvalidOperationException($"data/blocks.json: {who} names \"{key}\", which more than one block is")
 		: throw new InvalidOperationException($"data/blocks.json: {who} names \"{key}\", which no block is");
 	// the other blocks a row names: drop, places, handDrop [thing, fewest, most], dye, fruit, sapling, plants, returns, of (a fence's planks)
 	public static void RowRefs(BlockDef b, BlockRow r, Dictionary<string, int> keys)
@@ -98,7 +110,7 @@ public static partial class Blocks
 			{
 				Name = itemDef.Name, T = new[] { edge, edge, edge, (half == 0 ? bottom : top)[0] }, Transparent = true, Shape = "door",
 				Facing = facing, Hinge = hinge, Open = open, Half = half, Box = DoorBox(facing, hinge, open == 1), Drop = item,
-				Sound = "wood", Needs = ofDef.Needs,
+				Sound = "wood", Needs = ofDef.Needs, Earthlike = r.earthlike,
 			});
 		}
 	}
@@ -140,7 +152,7 @@ public static partial class Blocks
 	{
 		foreach (var (f, word) in names)
 			yield return (FormRowId(r, f), f == "piece"
-				? new BlockDef { Name = $"{ofDef.Name} {word}", T = ofDef.T, Item = true, Piece = of }
-				: new BlockDef { Name = $"{ofDef.Name} {word}", T = ofDef.T, Item = true, Form = f, Of = of });
+				? new BlockDef { Name = $"{ofDef.Name} {word}", T = ofDef.T, Item = true, Piece = of, Earthlike = r.earthlike }
+				: new BlockDef { Name = $"{ofDef.Name} {word}", T = ofDef.T, Item = true, Form = f, Of = of, Earthlike = r.earthlike });
 	}
 }

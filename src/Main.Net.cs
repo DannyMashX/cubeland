@@ -163,12 +163,12 @@ public partial class Main
 	static List<int> Ints(List<object> l) => l?.Select(o => (int)BinaryPack.Num(o)).ToList() ?? new();
 	static List<long> Longs(List<object> l) => l?.Select(o => o is long n ? n : (long)BinaryPack.Num(o)).ToList() ?? new();   // (lists holding block numbers)
 	static int IdIn(long v) => v < 0 || v > int.MaxValue ? -1 : (int)v;   // (a block id from a list of block numbers and ids: -1 if it can't be one)
-	void ApplyNetPieces(List<long> list)
+	void ApplyNetPieces(List<long> list, int pg = World.GroupMul)   // (pg: how the spots are packed: sets always 8192, a welcome says, 4096 if not)
 	{
 		for (int k = 0; k + 8 < list.Count; k += 9)
 		{
 			var a = new int[8];
-			for (int j = 0; j < 8; j++) { int id = IdIn(list[k + 1 + j]), b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id >= 0 && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
+			for (int j = 0; j < 8; j++) { int id = IdIn(World.SpotIn(list[k + 1 + j], pg)), b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id >= 0 && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
 			if (a.Any(v => v != 0)) world.PieceMap[list[k]] = a;
 		}
 	}
@@ -262,7 +262,7 @@ public partial class Main
 			var pcs = new List<object>(); foreach (var (i, a) in world.PieceMap) { pcs.Add(i); foreach (var v in a) pcs.Add(v); }
 			var wm = new Dictionary<string, object> { ["t"] = "welcome", ["id"] = conn.PeerId };
 			PutBlockList(wm, world.Edits, Idx8);
-			wm["pieces"] = pcs; wm["time"] = sky.TimeOfDay; wm["x"] = player.Pos.X + 1; wm["y"] = player.Pos.Y; wm["z"] = player.Pos.Z; wm["yaw"] = player.Yaw;
+			wm["pieces"] = pcs; wm["pg"] = World.GroupMul; wm["time"] = sky.TimeOfDay; wm["x"] = player.Pos.X + 1; wm["y"] = player.Pos.Y; wm["z"] = player.Pos.Z; wm["yaw"] = player.Yaw;
 			if (Idx8) wm["i8"] = true;
 			conn.Send(wm);
 			// everyone's skins: yours, and the other friends'
@@ -553,7 +553,7 @@ public partial class Main
 	void ApplyWelcome(Dictionary<string, object> d)
 	{
 		myId = d.S("id") ?? myId;
-		ApplyNetPieces(Longs(d.L("pieces")));
+		ApplyNetPieces(Longs(d.L("pieces")), d.TryGetValue("pg", out var pgv) && pgv != null ? (int)BinaryPack.Num(pgv) : World.OldGroupMul);
 		var (idxs, ids) = GetBlockList(d);
 		world.ApplyEdits(idxs, ids);
 		var dirtyNow = new HashSet<int>();

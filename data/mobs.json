@@ -43,7 +43,7 @@
       "shyRange": 8, "sowEvery": 20, "sowChance": 0.03333333333333333, "sowClear": 4, "nibbleEvery": 10, "nibbleChance": 0.2, "nibbleRange": 1.5 },
     "goat": { "perChunk": 8, "crowdedAt": 4, "nearRange": 6, "happyMax": 180, "mateCooldown": 300, "mateCost": 60, "babyTime": 600, "babyFoodBoost": 60, "fedMax": 5, "foodHappy": 90, "babyHealth": 3,
       "food": ["grain", "turnip"], "forage": { "time": 2, "every": [10, 20], "below": 180, "happy": 30 },
-      "biomes": ["badlands", "snowy"], "ground": ["grass", "snowy_grass", "sand", "terracotta", "orange_terracotta", "pink_terracotta", "red_terracotta", "white_terracotta", "yellow_terracotta", "stone"],
+      "biomes": ["badlands", "snowy"], "ground": ["grass", "snowy_grass", "sand", "terracotta", "orange_terracotta", "pink_terracotta", "red_terracotta", "white_terracotta", "yellow_terracotta", "andesite"],
       "group": [2, 4], "nearMax": 6, "spawnWeight": 3, "minHeight": 8, "milkTime": 300 },
     "boar": { "perChunk": 8, "crowdedAt": 4, "nearRange": 6, "happyMax": 180, "mateCooldown": 300, "mateCost": 60, "babyTime": 600, "babyFoodBoost": 60, "fedMax": 5, "foodHappy": 90, "babyHealth": 4,
       "food": ["potato", "corn", "truffle"], "forage": { "time": 2, "every": [30, 60], "below": 180, "happy": 30 },

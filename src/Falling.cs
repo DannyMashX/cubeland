@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace Cubeland;
@@ -12,7 +13,8 @@ public partial class Falling : Node3D
 {
 	// K: its own number, so players in a multiplayer game know which one is which. Y: the height of its bottom; Ty: (joined game) where the host's game says it is
 	public class Block { public int Id, K, X, Z; public float Y, Ty, Vy, LightT; public MeshInstance3D Mesh; public ShaderMaterial Mat; }
-	public static readonly HashSet<int> Falls = new() { Blocks.Dirt, Blocks.Sand, Blocks.Gravel };
+	public static readonly HashSet<int> Falls = new HashSet<int> { Blocks.Dirt, Blocks.Sand, Blocks.Gravel }
+		.Concat(Enumerable.Range(1, Blocks.MaxId - 1).Where(i => Blocks.Get(i)?.Falls == true)).ToHashSet();   // (and the rows with "falls": the new gravels)
 	public readonly List<Block> All = new();
 	public bool Client;   // in a friend's world: their game moves them and puts the blocks down
 	int count;

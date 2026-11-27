@@ -39,7 +39,7 @@ public partial class Main
 	public static int[] ShapesIn(string[] forms, bool tall)
 	{
 		foreach (var f in forms) if (Array.IndexOf(Blocks.Forms, f) < 0) throw new InvalidOperationException($"data/creative.json: the Shapes tab has \"{f}\", which isn't a shape");
-		return Blocks.Splittable.Where(b => tall || Array.IndexOf(Blocks.DeepBlocks, b) < 0).SelectMany(b => forms.Select(f => Blocks.FormItem(f, b))).Where(i => Blocks.Get(i) != null).ToArray();
+		return Blocks.Splittable.Where(b => (tall || Array.IndexOf(Blocks.DeepBlocks, b) < 0) && Blocks.Shown(b)).SelectMany(b => forms.Select(f => Blocks.FormItem(f, b))).Where(i => Blocks.Get(i) != null).ToArray();
 	}
 	// every block and item the creative inventory has (before the shapes): Items, every item row, and each kind of torch (lit,
 	// smoldering, burnt, ever: a standing one)

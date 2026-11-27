@@ -80,7 +80,9 @@ public sealed class BlockStore
 	}
 
 	// fills every chunk from a freshly grown world (one byte per block, in world-index order)
-	public void Load(byte[] raw)
+	// over (lands 7 and 8: the rock blobs): for a chunk (its low corner x0, y0, z0), fills a 4096-block overlay (index
+	// (ly << 8) | (lz << 4) | lx) with the ids that replace the grown bytes, 0 where the byte stays
+	public void Load(byte[] raw, Action<int, int, int, int[]> over = null)
 	{
 		int ncxz = ncx * ncz;
 		Parallel.For(0, ncxz * ncy, k =>
@@ -88,13 +90,21 @@ public sealed class BlockStore
 			int cx = k % ncx, cz = (k / ncx) % ncz, cy = k / ncxz;
 			Span<int> place = stackalloc int[256]; place.Fill(-1);
 			var pal = new int[8]; int n = 0; var b = new byte[4096];
+			int[] ov = null;
+			if (over != null) { ov = new int[4096]; over(cx * CS, cy * CS, cz * CS, ov); }
 			for (int ly = 0; ly < CS; ly++) for (int lz = 0; lz < CS; lz++)
 			{
 				int row = ((cy * CS + ly) * wz + cz * CS + lz) * wx + cx * CS, l = (ly << 8) | (lz << 4);
 				for (int lx = 0; lx < CS; lx++)
 				{
-					int id = raw[row + lx], p = place[id];
-					if (p < 0)
+					int id = raw[row + lx], p;
+					if (ov != null && ov[l | lx] != 0)
+					{   // (an id over 255: found in the palette, or added)
+						id = ov[l | lx]; p = -1;
+						for (int q = 0; q < n; q++) if (pal[q] == id) { p = q; break; }
+						if (p < 0) { if (n == pal.Length) Array.Resize(ref pal, n * 2); pal[n] = id; p = n++; }
+					}
+					else if ((p = place[id]) < 0)
 					{
 						if (n == pal.Length) Array.Resize(ref pal, n * 2);
 						pal[n] = id; place[id] = p = n++;

@@ -48,13 +48,17 @@ public class BlockDef
 	public string Grows;           // a sapling: the tree it grows into
 	public bool Sand;              // a sapling that can be planted on Sand too
 	public int Hinge, Open, Half;  // a door as it stands: its hinge (0 left, 1 right, as you look at its front), open (0/1), half (0 bottom, 1 top)
+	public bool Earthlike;         // Earthlike's (data/blocks.json's EARTH_ tables): hidden until WorldGen.EarthlikeReady (see Shown)
+	public bool Falls, Tint, Water;   // it falls like Sand; it takes the climate's colour; a plant standing in still water
+	public string In;              // an ore in a rock: the rock (its key's in= state)
+	public int Flow = -1, Pace;    // river water: the way it runs (0-7, 8 falling; -1: not river water) and its pace (0-2)
 	public BlockDef Copy() => (BlockDef)MemberwiseClone();
 }
 
 // Every block and item in the game (the same numbers as the web version, so saved worlds line up).
 public static partial class Blocks
 {
-	public const int MaxId = 4096;
+	public const int MaxId = 8192;   // (ids 1-8191: Earthlike's blocks go up to 5051)
 	// Strata (640-tall worlds): from sea level down, a new layer of stone every 64 blocks, down to bedrock at the very bottom.
 	// Layer 1 is the normal Stone (and everything above sea level); layers 2-8 are blocks 113-119, each darker and
 	// harder: past a few layers, only a better pickaxe can mine it (see StrataPickaxe). All of them are called Stone.
@@ -82,8 +86,9 @@ public static partial class Blocks
 	static readonly Dictionary<(string form, int b), int> formItem = new();
 	public static int FormSum(string form, int b)
 	{
-		int i = Array.IndexOf(DeepBlocks, b), e = Array.IndexOf(ExtraFormBlocks, b);
+		int i = Array.IndexOf(DeepBlocks, b), e = Array.IndexOf(ExtraFormBlocks, b), g = Array.IndexOf(EarthFormBlocks, b), h = Array.IndexOf(EarthFormBlocks2, b);
 		return i >= 0 ? DeepFormItem + 7 * i + Array.IndexOf(Forms, form) : e >= 0 ? ExtraFormItem + 7 * e + Array.IndexOf(Forms, form)
+			: g >= 0 ? EarthFormItem + 7 * g + Array.IndexOf(Forms, form) : h >= 0 ? EarthFormItem2 + 7 * h + Array.IndexOf(Forms, form)
 			: b >= FirstCloth && b < FirstCloth + Cloths ? ClothFormItem + 7 * (b - FirstCloth) + Array.IndexOf(Forms, form)
 			: (form == "piece" ? PieceItem : ShapeItem[form]) + b;
 	}
@@ -95,6 +100,14 @@ public static partial class Blocks
 	public const int ExtraFormItem = 2000;
 	public static readonly int[] ExtraFormBlocks = { Sandstone, PalmLog, PalmLeaves, PalmPlanks, StrippedPalmLog, WillowLog, WillowLeaves, WillowPlanks, StrippedWillowLog,
 		SandstoneBricks, ChiseledSandstone, SmoothSandstone, Mud, MudBricks, Peat, Ice };
+	// Earthlike's rocks (Geology Draft 2, then the erosion draft): their piece, slab, stairs... items are 4500 + 7 x (the block's
+	// place in EarthFormBlocks) + the form, and 4830 + 7 x (its place in EarthFormBlocks2) + the form. (0 keeps a dropped row's
+	// place: Slate Tiles' 4675-4681 and Phyllite Tiles' 4984-4990 stay spare)
+	public const int EarthFormItem = 4500, EarthFormItem2 = 4830;
+	public static readonly int[] EarthFormBlocks = Enumerable.Range(4400, 11).Concat(Enumerable.Range(4420, 11))
+		.Concat(new[] { 4440, 4443, 4444, 0, 4449, 4460, 4463, 4464, 4465, 4466, 4468, 4469, 4470, 4471 }).ToArray();
+	public static readonly int[] EarthFormBlocks2 = Enumerable.Range(4760, 10).Concat(Enumerable.Range(4770, 10))
+		.Concat(new[] { 4792, 4793, 0, 4782, 4783, 4784, 4785, 4788 }).ToArray();
 	public static int StoneLayer(int b) => b == 3 ? 1 : Get(b)?.Layer ?? 0;
 	// the deepest layer each pickaxe can mine, by what it's made of (copper and up are still to come)
 	public static readonly Dictionary<string, int> StrataPickaxe = Nums.N.STRATA_PICKAXE;   // (data/numbers.json)
@@ -108,7 +121,7 @@ public static partial class Blocks
 	// Biomes (gen 3 worlds): Sandstone under desert sand, Snowy Grass in snowy lands, Ice on their frozen water, Swamp Grass in swamps
 	public const int Sandstone = 97, SnowyGrass = 98, Ice = 99, SwampGrass = 58;
 	public static bool IsGrassy(int b) => b == Grass || b == SnowyGrass || b == SwampGrass;   // grass of any biome (dirt underneath; flowers and hoes)
-	public static bool TakesBiomeTint(int b) => b == Grass || b == SwampGrass || IsLeaves(b);   // coloured by the climate where they are (Biome worlds)
+	public static bool TakesBiomeTint(int b) => b == Grass || b == SwampGrass || IsLeaves(b) || B[b]?.Tint == true;   // coloured by the climate where they are (Biome worlds)
 	// Fir: the snowy biome's wood (Oak is the original wood: Log, Leaves, Planks and Stripped Log above)
 	public const int FirLog = 251, FirLeaves = 252, FirPlanks = 253, StrippedFirLog = 254;
 	// Palm: the desert's trees (their leaves sometimes drop Dates). Willow: the swamp's trees
@@ -344,7 +357,10 @@ public static partial class Blocks
 				logOf[r.id] = b.Drop;
 			}
 		// the doors as they stand (DOORS): each door's 32 states, from its row (see DoorBlocks); doorOf: an item's first state
-		foreach (var dr in Nums.Blocks.DOORS ?? Array.Empty<DoorRow>())
+		PutDoors(Nums.Blocks.DOORS, keys);
+		void PutDoors(DoorRow[] doorRows, Dictionary<string, int> keys)
+		{
+		foreach (var dr in doorRows ?? Array.Empty<DoorRow>())
 		{
 			int of = KeyRef(keys, dr.of, $"the DOORS row of {dr.item}");
 			if (dr.item < 1 || dr.item >= MaxId || B[dr.item] is not { Item: true } itemDef) throw new InvalidOperationException($"data/blocks.json: a DOORS row's item {dr.item} isn't an item");
@@ -357,6 +373,7 @@ public static partial class Blocks
 			}
 			doorOf[dr.item] = dr.first;
 		}
+		}
 		// Torches (rows: lit = 22-41, smoldering = 81-92, burnt = 170-181, ever = 182-193), found by (burn, wall, count)
 		foreach (var r in Nums.Blocks.TORCHES ?? Array.Empty<BlockRow>()) torchIds[$"{B[r.id].Burn}:{B[r.id].Wi}:{B[r.id].Count}"] = r.id;
 		// the tools (rows: stone 207-211; copper, iron, bronite, rosium, steel from 644), in the rows' order
@@ -368,11 +385,14 @@ public static partial class Blocks
 		// piece and shape items: data/blocks.json's FORMS (each block you can cut, with its items' ids), named with FORM_NAMES
 		// (Pieces, block 70, is a row: which block fills each of its 8 spots is kept separately)
 		var formNames = Nums.Blocks.FORM_NAMES ?? throw new InvalidOperationException("data/blocks.json has no FORM_NAMES");
-		var forms = Nums.Blocks.FORMS ?? Array.Empty<FormRow>();
-		Splittable = forms.Select(f => KeyRef(keys, f.of, "a FORMS row")).ToArray();
+		Splittable = PutForms(Nums.Blocks.FORMS, keys);
+		int[] PutForms(FormRow[] formRows, Dictionary<string, int> keys)
+		{
+		var forms = formRows ?? Array.Empty<FormRow>();
+		var ofs = forms.Select(f => KeyRef(keys, f.of, "a FORMS row")).ToArray();
 		for (int k = 0; k < forms.Length; k++)
 		{
-			var f = forms[k]; int of = Splittable[k];
+			var f = forms[k]; int of = ofs[k];
 			foreach (var (id, d) in FormItems(f, of, B[of], formNames))
 			{
 				if (id < 1 || id >= MaxId) throw new InvalidOperationException($"data/blocks.json: {d.Name} is {id}, which isn't 1-{MaxId - 1}");
@@ -380,6 +400,8 @@ public static partial class Blocks
 				B[id] = d;
 				formItem[(d.Piece > 0 ? "piece" : d.Form, of)] = id;
 			}
+		}
+		return ofs;
 		}
 		// snow-logged: a torch, flower or other small thing with snow lying round it (data/blocks.json's SNOWY; see SnowLogged): its
 		// inner block, then the row's own drop and box, with Inner and Snowed 1
@@ -396,14 +418,38 @@ public static partial class Blocks
 			SnowLoggable[k] = inner;
 			snowLoggedIds[inner] = s.id;
 		}
+		// Earthlike's blocks (EARTH_GROUND ... RIVER_WATER, then EARTH_DOORS and EARTH_FORMS), read last so no block or picture before
+		// them moves. Their rows can name any row (and keys stay one per block: see DataKeys)
+		var earth = EarthRows(Nums.Blocks).Select(r => (r, b: RowDef(r, P))).ToList();
+		var allKeys = RowKeys(rows.Concat(earth));
+		foreach (var (r, b) in earth)
+		{
+			RowRefs(b, r, allKeys);
+			if (r.id < 1 || r.id >= MaxId) throw new InvalidOperationException($"data/blocks.json: block {r.id} ({r.name}) isn't 1-{MaxId - 1}");
+			if (B[r.id] != null) throw new InvalidOperationException($"data/blocks.json: block {r.id} ({r.name}) is there twice");
+			B[r.id] = b;
+		}
+		Logs = Logs.Concat(earth.Where(x => x.r.log).Select(x => x.r.id)).ToArray();
+		foreach (var (r, b) in earth)
+			if (b.Axis > 0 && Get(b.Drop)?.Log == true)
+			{
+				if (!turned.TryAdd((b.Drop, b.Axis), r.id)) throw new InvalidOperationException($"data/blocks.json: {b.Name} {r.id} lies along axis {b.Axis}, and so does {turned[(b.Drop, b.Axis)]}");
+				logOf[r.id] = b.Drop;
+			}
+		PutDoors(Nums.Blocks.EARTH_DOORS, allKeys);
+		Splittable = Splittable.Concat(PutForms(Nums.Blocks.EARTH_FORMS, allKeys)).ToArray();
+		rows = rows.Concat(earth).ToList();
 		// the lists the blocks' fields make: the item rows, Items, and each block's looks (itself, then the rows with a look that
-		// drop it, by look)
-		ItemRows = rows.Where(x => x.r.item).Select(x => x.r.id).ToArray();
-		Items = Enumerable.Range(1, MaxId - 1).Where(i => B[i] is { Inventory: true, Snowed: 0 } d && (d.Layer <= 1 || World.TallWorlds)).ToArray();
+		// drop it, by look). Earthlike's are left out until it's ready (Shown)
+		ItemRows = rows.Where(x => x.r.item && Shown(x.r.id)).Select(x => x.r.id).ToArray();
+		Items = Enumerable.Range(1, MaxId - 1).Where(i => B[i] is { Inventory: true, Snowed: 0 } d && (d.Layer <= 1 || World.TallWorlds) && Shown(i)).ToArray();
 		foreach (var g in rows.Where(x => x.b.Look > 0).GroupBy(x => x.b.Drop))
 			looks[g.Key] = g.OrderBy(x => x.b.Look).Select(x => x.r.id).Prepend(g.Key).ToArray();
 	}
 	static readonly Dictionary<int, int[]> looks = new();
+	// a block the game shows (in Items, the creative inventory, search, the Shapes tab and recipes): all but Earthlike's, until
+	// it's ready
+	public static bool Shown(int id) => WorldGen.EarthlikeReady || B[id] is not { Earthlike: true };
 
 	// ---- Doors: one for each wood (data/blocks.json's DOORS). The item puts down a door 2 blocks tall: 32 states (see DoorBlocks) ----
 	static readonly Dictionary<int, int> doorOf = new();

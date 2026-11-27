@@ -604,7 +604,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.5.1"></script>
+<script src="textures.js?v=beta-0.1.5.2"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -612,7 +612,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.5.1';
+const GAME_VERSION = 'Beta 0.1.5.2';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -665,18 +665,28 @@ const validBiomes = b => typeof b === "number" && b >= BIOMES_MIN && b <= BIOMES
 // 2: ores as common at every depth, in every layer of stone (see placeOres). 3 (Trees and Leaves): land 1 plus the new trees
 // (see biomeTree), without the ore spread; 4: land 3 plus the ore spread. 5 and 6 (Farming & animals): land 3 and land 4, plus
 // that update's world growth (the wild crops and Dead Bushes, see 8a, and the staircases, see Staircases). Land 5 is out (Beta 0.1.5.0), so
-// what it grows must never change; land 6 is still only made in testing. While ORE_SPREAD_READY is false, new worlds are made without the ore spread;
+// what it grows must never change; land 6 is still only made in testing. 7 and 8 (Earthly Extravaganza): lands 5 and 6 with blobs of
+// the new rocks in the Andesite (every world type but Earthlike, see Rock blobs); the new rocks' pictures are in, so with
+// ROCK_BLOBS_READY true new worlds get them (land 7, or 8 with the ore spread) whenever they'd be land 5 or 6. (While it was
+// false they were made without, and ?rockblobs turned them on for testing.) While ORE_SPREAD_READY is false, new worlds are made without the ore spread;
 // while EERIE_READY is false, without lands 5 and 6 (so: land 3). A saved world always grows with the land it was made with, up to the newest one this code
 // knows (so a world made while testing, or one from a later version, is never grown differently). Both switches must match the
 // desktop version's (OreSpreadReady, EerieReady). (Test: ?orespread in the address gives new worlds the ore spread, ?eerieon the
 // staircases; ?eerieon also turns on the rare events, see Rare events.)
-const LAND_KNOWN = 6;
+const LAND_KNOWN = 8;
 const ORE_SPREAD_READY = false;
 const EERIE_READY = true;
 const EERIE_ON = EERIE_READY || /[?&]eerieon\b/.test(location.search);
-const LAND_VERSION = (EERIE_ON ? 5 : 3) + (ORE_SPREAD_READY || /[?&]orespread\b/.test(location.search) ? 1 : 0);   // what new worlds are made as
+// Earthly Extravaganza: while EARTHLIKE_READY is false, there are no Earthlike worlds, and their blocks (earthlike in
+// data/blocks.json) stay hidden. It must match the desktop version's (EarthlikeReady).
+const EARTHLIKE_READY = false;
+const ROCK_BLOBS_READY = true;   // (must match the desktop version's World.RockBlobsReady)
+const ROCK_BLOBS_ON = ROCK_BLOBS_READY || /[?&]rockblobs\b/.test(location.search);
+const ORE_SPREAD_ON = ORE_SPREAD_READY || /[?&]orespread\b/.test(location.search);
+const LAND_VERSION = ROCK_BLOBS_ON && EERIE_ON ? (ORE_SPREAD_ON ? 8 : 7) : (EERIE_ON ? 5 : 3) + (ORE_SPREAD_ON ? 1 : 0);   // what new worlds are made as
 const validLand = l => Math.min(LAND_KNOWN, Math.max(0, l | 0));
-const oreSpread = land => land === 2 || land === 4 || land === 6;   // (lands with the ore spread)
+const oreSpread = land => land === 2 || land === 4 || land === 6 || land === 8;   // (lands with the ore spread)
+const rockBlobs = land => land === 7 || land === 8;   // (lands with the rock blobs)
 const newTrees = land => land >= 3;                                 // (lands with the Trees and Leaves trees)
 const hasStairs = land => land >= 5;                                // (lands with the staircases)
 const wildCrops = land => land >= 5;                                // (lands with crops growing wild, and Dead Bushes, in Biomes worlds)
@@ -840,25 +850,33 @@ const world = (() => {
   function get(i) { const r = Math.floor(i / WX), x = i - r * WX, y = Math.floor(r / WZ); return at(x, y, r - y * WZ); }
   function set(i, id) { const r = Math.floor(i / WX), x = i - r * WX, y = Math.floor(r / WZ); put(x, y, r - y * WZ, id); }
   // fills every column from the freshly grown world (one byte per block, in world-index order)
-  function load(src) {
-    const map = new Int16Array(256);
+  // over(x0, y0, z0, o): fills o (4096, by (ly << 8) | (lz << 4) | lx) with the blocks put over the grown ones in the chunk with
+  // that low corner (the rock blobs: 0 = the grown block), and says whether it put any
+  function load(src, over = null) {
+    const map = new Int16Array(256), o = over ? new Int32Array(4096) : null, omap = new Map();
     for (let cz = 0; cz < NCZ; cz++) for (let cx = 0; cx < NCX; cx++) {
       const c = cols[cz * NCX + cx], pn = info[cz * NCX + cx].pn;
       for (let cy = 0; cy < NCY; cy++) {
         map.fill(-1);
         let a = new Int32Array(8), n = 0;
-        const b = new Uint8Array(4096);
+        let any = false;
+        if (o) { o.fill(0); omap.clear(); any = over(cx * CS, cy * CS, cz * CS, o); }
+        const b = any ? new Uint16Array(4096) : new Uint8Array(4096);
         for (let ly = 0; ly < CS; ly++) for (let lz = 0; lz < CS; lz++) {
           const row = ((cy * CS + ly) * WZ + cz * CS + lz) * WX + cx * CS, l = (ly << 8) | (lz << 4);
           for (let lx = 0; lx < CS; lx++) {
-            const id = src[row + lx];
-            let p = map[id];
-            if (p < 0) { if (n === a.length) { const g = new Int32Array(n * 2); g.set(a); a = g; } a[n] = id; map[id] = p = n++; }
+            const id = any && o[l | lx] ? o[l | lx] : src[row + lx];
+            let p = id < 256 ? map[id] : omap.has(id) ? omap.get(id) : -1;
+            if (p < 0) {
+              if (n === a.length) { const g = new Int32Array(n * 2); g.set(a); a = g; }
+              a[n] = id; p = n++;
+              if (id < 256) map[id] = p; else omap.set(id, p);
+            }
             b[l | lx] = p;
           }
         }
         if (n === 1) { c[2 * cy] = Int32Array.of(a[0]); pn[cy] = 1; c[2 * cy + 1] = SHARED; }
-        else { c[2 * cy] = a; pn[cy] = n; c[2 * cy + 1] = b; }
+        else { c[2 * cy] = a; pn[cy] = n; c[2 * cy + 1] = any && n <= WIDE ? Uint8Array.from(b) : b; }
       }
     }
   }
@@ -942,8 +960,19 @@ function rowKey(r) {
   if (r.shape === 'flat' && r.drop === k && [...blockRows.values()].some(o => o.item && keySlug(o.name) === k)) s.push('placed');
   return k + (s.length ? '#' + s.join(',') : '');
 }
+// Old keys (the Andesite rename, Beta 0.1.5.2: same ids, new names) still find their blocks: a key nothing has is tried again with
+// each part between ':' having its name (before any '#') swapped by this list, exact names only. (The same in the desktop version:
+// DataKeys.NewKey.)
+const OLD_NAMES = new Map([['stone', 'andesite'], ['cobblestone', 'cobbled_andesite'], ['stone_bricks', 'andesite_bricks'], ['chiseled_stone', 'chiseled_andesite']]);
+function newKey(key) {
+  return key.split(':').map(part => {
+    const h = part.indexOf('#'), name = h < 0 ? part : part.slice(0, h);
+    return OLD_NAMES.has(name) ? OLD_NAMES.get(name) + (h < 0 ? '' : part.slice(h)) : part;
+  }).join(':');
+}
 // the id of the row with key k, which block `by` names
 function rowIdFor(k, by) {
+  if (!rowIds.has(k) && rowIds.has(newKey(k))) k = newKey(k);
   if (!rowIds.get(k)) throw new Error(`The game's data (data/blocks.json): block ${by} names "${k}", which ${rowIds.has(k) ? 'is the key of more than one block' : "isn't one of its blocks"}`);
   return rowIds.get(k);
 }
@@ -1049,18 +1078,19 @@ addBlockRows(BLOCK_DATA.TOOLS);   // (data/blocks.json TOOLS: tool = which kind,
 const ROCK = 212, ROCK_BLOCK = 62, CRUDE_AXE = 213;
 // Strata (640-tall worlds): from sea level down, a new layer of stone every 64 blocks, down to bedrock at the very bottom.
 // Layer 1 is the normal Stone (and everything above sea level); layers 2-8 are blocks 113-119, each darker and harder:
-// past a few layers, only a better pickaxe can mine it (see STRATA_PICKAXE). All of them are called Stone. Bedrock (120) can't be broken in survival (and nothing can break the bottom layer of the world).
+// past a few layers, only a better pickaxe can mine it (see STRATA_PICKAXE). All of them are called Andesite. Bedrock (120) can't be broken in survival (and nothing can break the bottom layer of the world).
 const STRATA_LAYERS = 8, STRATA_THICK = 64, STRATA = 113, BEDROCK = 120;
-// Each deep layer has its own stone set, in that layer's shade: Stone (113-119), Cobblestone (121-127), Stone Bricks (128-134)
-// and Chiseled Stone (135-141), pictures 124-130 and 132-152. They keep the plain names and are as hard as their layer.
-// Deep Stone gives that layer's Cobblestone, which the Kiln turns back into that layer's Stone.
+// Each deep layer has its own stone set, in that layer's shade: Andesite (113-119), Cobbled Andesite (121-127), Andesite Bricks
+// (128-134) and Chiseled Andesite (135-141), pictures 124-130 and 132-152. They keep the plain names and are as hard as their layer.
+// Deep Andesite gives that layer's Cobbled Andesite, which the Kiln turns back into that layer's Andesite. (Until Beta 0.1.5.2 they
+// were Stone, Cobblestone, Stone Bricks and Chiseled Stone: old keys still work, see OLD_NAMES.)
 const DEEP_COBBLE = 121, DEEP_BRICKS = 128, DEEP_CHISELED = 135;
 const DEEP_SET = { 3: STRATA, 8: DEEP_COBBLE, 9: DEEP_BRICKS, 69: DEEP_CHISELED };   // a normal stone-set block -> its layer-2 version
 const deepRow = b => Array.from({ length: STRATA_LAYERS - 1 }, (_, k) => DEEP_SET[b] + k);   // its versions in layers 2, 3, ...
 const deepShown = b => TALL_WORLDS ? deepRow(b) : [];   // the same, but only while tall worlds are on (for the inventory and recipes)
 addBlockRows(BLOCK_DATA.DEEP_STONE);   // (data/blocks.json DEEP_STONE)
 const DEEP_BLOCKS = [3, 8, 9, 69].flatMap(deepRow);
-// what a piece, slab or stairs of this block gives when broken (Stone, deep or not, gives its Cobblestone)
+// what a piece, slab or stairs of this block gives when broken (Andesite, deep or not, gives its Cobbled Andesite)
 const stoneDropOf = b => b === 3 || (b >= STRATA && b < BEDROCK) ? BLOCKS[b].drop : b;
 const stoneLayer = b => b === 3 ? 1 : (BLOCKS[b] && BLOCKS[b].layer) || 0;
 // the deepest layer each pickaxe can mine, by what it's made of (copper and up are still to come)
@@ -1203,7 +1233,7 @@ function doorRows(rows) {
     return Array.from({ length: 32 }, (_, s) => {
       const facing = s >> 3, hinge = (s >> 2) & 1, open = (s >> 1) & 1, half = s & 1;
       return { id: r.first + s, name: item.name, pictures: [edge, edge, edge, key + (half ? '_top' : '_bottom')], shape: 'door', facing, hinge, open, half,
-        transparent: true, box: open ? DOOR_OPEN_BOX[facing][hinge] : DOOR_SHUT_BOX[facing & 1], drop: key, sound: 'wood', needs: 'axe' };
+        transparent: true, box: open ? DOOR_OPEN_BOX[facing][hinge] : DOOR_SHUT_BOX[facing & 1], drop: key, sound: 'wood', needs: 'axe', ...(r.earthlike ? { earthlike: true } : {}) };
     });
   });
 }
@@ -1214,7 +1244,7 @@ const isFlower = id => FLOWERS.includes(id);
 const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 // Survival digging rules:
 // Logs and planks can only be cut with an axe, and an axe is needed to craft them into planks and sticks.
-// Stone-type blocks (Stone, Cobblestone, Stone Bricks, Bricks) can only be mined with a pickaxe. Stone gives Cobblestone.
+// Stone-type blocks (Andesite, Cobbled Andesite, Andesite Bricks, Bricks) can only be mined with a pickaxe. Andesite gives Cobbled Andesite.
 // The soil family (Dirt, Grass, Sand, Gravel and Clay) can be dug by hand, but then gives 1-8 pieces instead of
 // the whole block (a shovel gets you the whole block). Grass gives Dirt.
 // Bricks, Terracotta, the chiseled blocks and the Furnace count as stone-type too.
@@ -1260,8 +1290,12 @@ const pieceMap = new Map();     // world index -> Int32Array(8) of spots (0 = em
 // stairs, quarter... share one, and each loose piece has its own (the lowest of 1-15 free in that space when it's put
 // down). Spots with the same value are one thing: they break together, and nothing joins up (two slabs stay a double
 // slab, 8 pieces stay 8 pieces). Group 0: pieces from before groups (and the world's own), which keep the old rule (the
-// same block's spots make the shape). Saved and sent as they are. Exactly as the desktop version.
-const PIECE_GROUP = 4096;   // (block ids stay under 4096)
+// same block's spots make the shape). Exactly as the desktop version (World.GroupMul).
+// Saves and welcomes from before Earthly Extravaganza packed them as block + 4096 x group (block ids were under 4096), and a
+// save still does while every spot's block is under 4096 (so a world that never held a newer block saves exactly as before,
+// and opens in older versions); otherwise it's block + 8192 x group, marked "pg": 8192. A save or welcome without pg is 4096.
+// 'sets' always carry 8192 (only the same version can join).
+const PIECE_GROUP = 8192;   // (block ids stay under 8192)
 const spotBlock = v => v % PIECE_GROUP;   // the block in a spot
 // the value for a new thing of block id put into the spots `a` (before it's put in)
 function newSpotValue(a, id) {
@@ -1284,11 +1318,22 @@ function formItem(form, b) { const r = FORM_ITEMS.get(b); return r ? r[form] : 0
 // how the older blocks' form items were numbered (the datacheck holds their rows to it; the Trees and Leaves woods' are at
 // their wood's first id + 10, 20, 30 or 40 for the log, stripped log, planks and leaves; the Linen Cloths', 3740-3752, are at
 // 3800 + 7 x (the cloth's place) + the form)
+// Earthlike's rocks (Geology Draft 2, then the erosion draft): 4500 + 7 x (the block's place in EARTH_FORM_BLOCKS) + the form,
+// and 4830 + 7 x (its place in EARTH_FORM_BLOCKS_2) + the form (a 0 keeps a dropped row's place: Slate Tiles' 4675-4681 and
+// Phyllite Tiles' 4984-4990 stay spare). The Earthlike woods' are at their wood's first id + 10 to + 46, as the Trees and Leaves woods'.
+const EARTH_FORM_ITEM = 4500, EARTH_FORM_ITEM_2 = 4830;
+const EARTH_FORM_BLOCKS = [...Array.from({ length: 11 }, (_, k) => 4400 + k), ...Array.from({ length: 11 }, (_, k) => 4420 + k),
+  4440, 4443, 4444, 0, 4449, 4460, 4463, 4464, 4465, 4466, 4468, 4469, 4470, 4471];
+const EARTH_FORM_BLOCKS_2 = [...Array.from({ length: 10 }, (_, k) => 4760 + k), ...Array.from({ length: 10 }, (_, k) => 4770 + k),
+  4792, 4793, 0, 4782, 4783, 4784, 4785, 4788];
 function formSum(form, b) {
   const i = DEEP_BLOCKS.indexOf(b);
   const e = EXTRA_FORM_BLOCKS.indexOf(b);
-  if (b >= 2200 && b < 3400) return b - b % 100 + 10 * (b % 100 + 1) + FORMS.indexOf(form);
+  const g = EARTH_FORM_BLOCKS.indexOf(b), h = EARTH_FORM_BLOCKS_2.indexOf(b);
+  if ((b >= 2200 && b < 3400 || b >= 4000 && b < 4400) && b % 100 < 4) return b - b % 100 + 10 * (b % 100 + 1) + FORMS.indexOf(form);
   if (b >= 3740 && b <= 3752) return 3800 + 7 * (b - 3740) + FORMS.indexOf(form);
+  if (g >= 0) return EARTH_FORM_ITEM + 7 * g + FORMS.indexOf(form);
+  if (h >= 0) return EARTH_FORM_ITEM_2 + 7 * h + FORMS.indexOf(form);
   return i >= 0 ? DEEP_FORM_ITEM + 7 * i + FORMS.indexOf(form) : e >= 0 ? EXTRA_FORM_ITEM + 7 * e + FORMS.indexOf(form)
     : (form === 'piece' ? PIECE_ITEM : SHAPE_ITEM[form]) + b;
 }
@@ -1319,10 +1364,21 @@ function formRows(rows) {
   const names = BLOCK_DATA.FORM_NAMES, forms = Object.keys(names).filter(f => !f.startsWith('_'));
   return rows.flatMap(r => forms.map(f => {
     const b = blockRows.get(rowIdFor(r.of, r[f]));
-    return { id: r[f], name: b.name + ' ' + names[f], pictures: b.pictures, item: true, ...(f === 'piece' ? { piece: r.of } : { form: f, of: r.of }) };
+    return { id: r[f], name: b.name + ' ' + names[f], pictures: b.pictures, item: true, ...(f === 'piece' ? { piece: r.of } : { form: f, of: r.of }), ...(r.earthlike ? { earthlike: true } : {}) };
   }));
 }
 addBlockRows(formRows(BLOCK_DATA.FORMS));   // (every piece, slab, stairs... item: formItem(form, b))
+// Earthly Extravaganza's blocks (data/blocks.json EARTH_GROUND ... RIVER_WATER, then EARTH_DOORS and EARTH_FORMS, as FORMS):
+// earthlike = hidden (not in your inventory, the creative inventory, search, recipes or the Shapes tab) until Earthlike worlds
+// come; only Earthlike's land puts them down. A door's states and a form's items are earthlike when their row is.
+const RIVER_WATER = 3891;   // (+ 8 x pace + flow: data/blocks.json RIVER_WATER)
+const EARTH_TABLES = ['EARTH_GROUND', 'EARTH_PLANTS', 'EARTH_ROCKS', 'EARTH_SOILS', 'EARTH_GRAVELS', 'EARTH_WOODS', 'EARTH_FENCES', 'RIVER_WATER'];
+for (const t of EARTH_TABLES) addBlockRows(BLOCK_DATA[t] || []);
+addBlockRows(doorRows(BLOCK_DATA.EARTH_DOORS || []));
+for (const r of BLOCK_DATA.EARTH_DOORS || []) DOOR_OF_ITEM.set(r.item, r.first);
+addBlockRows(formRows(BLOCK_DATA.EARTH_FORMS || []));
+for (const r of BLOCK_DATA.EARTH_FORMS || []) { const b = rowIdFor(r.of, 'EARTH_FORMS'); SPLITTABLE.push(b); FORM_ITEMS.set(b, r); }   // (after FORMS': the Shapes tab and the Cutter)
+const isShown = id => EARTHLIKE_READY || !(BLOCKS[id] && BLOCKS[id].earthlike);   // (hidden until Earthlike worlds come)
 const formOf = id => BLOCKS[id] && BLOCKS[id].form;
 // ---- Keys: a name for every id that both editions make the same way, so the shared data files (data/*.json) can say
 // "oak_planks" or "slab:oak_planks" instead of a number. Made from what each block IS, not just its name:
@@ -1350,11 +1406,13 @@ function blockKey(id) {
 function keyStates(b) {
   const s = [];
   if (b.layer > 1) s.push('layer=' + b.layer);
+  if (b.in) s.push('in=' + b.in);   // (an ore in another rock: the rock, as a key word)
   if (b.shape === 'torch') { if (b.wi) s.push('wall=' + b.wi); if (b.count > 1) s.push('count=' + b.count); }
   if (b.front) { if (b.facing) s.push('facing=' + b.facing); if (b.lit) s.push('lit'); }
   if (b.level) s.push('level=' + b.level);
+  if (b.flow !== undefined) s.push('flow=' + b.flow, 'pace=' + b.pace);   // (river water: always both)
   if (b.stage !== undefined) s.push('stage=' + b.stage);
-  if (b.top) s.push('top');   // (Corn's upper block)
+  if (b.top) s.push('top');   // (a two-tall plant's upper block: Corn's, Tall Grass's...)
   if (b.shape === 'snow' && b.layers > 1) s.push('layers=' + b.layers);
   if (b.axis) s.push('axis=' + b.axis);
   if (b.look) s.push('look=' + b.look);
@@ -1375,6 +1433,7 @@ function idOf(key) {
     keyIds = new Map([['air', 0]]);
     for (const id of Object.keys(BLOCKS).map(Number)) if (BLOCKS[id]) keyIds.set(blockKey(id), id);
   }
+  if (!keyIds.has(key) && typeof key === 'string' && keyIds.has(newKey(key))) return keyIds.get(newKey(key));   // (an old key: see OLD_NAMES)
   if (!keyIds.has(key)) throw new Error(`The game's data (data/*.json) names "${key}", which isn't a block or item`);
   return keyIds.get(key);
 }
@@ -1412,7 +1471,7 @@ function putPieces(x, y, z, i, a, snow) {
   else { if (snow && world.get(i) === PIECES_IN_SNOW) dropSnowballs(1, x, y, z); setBlock(x, y, z, 0); }
 }
 // Every block you can pick from the inventory (press E): data/blocks.json's inventory (the deep layers' only while tall worlds are on)
-const ITEMS = Object.keys(BLOCKS).map(Number).filter(id => BLOCKS[id].inventory && (TALL_WORLDS || !(BLOCKS[id].layer > 1)));
+const ITEMS = Object.keys(BLOCKS).map(Number).filter(id => BLOCKS[id].inventory && (TALL_WORLDS || !(BLOCKS[id].layer > 1)) && isShown(id));
 // a block with other looks (and each of the looks) -> the block and its looks, in order: it's put down as one of them at random
 // (Red Bricks: data/blocks.json's look)
 const LOOKS = {};
@@ -1908,7 +1967,7 @@ function climate(x, z, e) {
 let biomeMap = new Uint8Array(WX * WZ);   // every column's biome while the world grows (biome worlds; all Woods otherwise): then kept in its columns (see colBiome)
 if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) biomeMap[z * WX + x] = biomeAt(x, z);
 const grassy = b => b === 1 || b === SNOWY_GRASS || b === SWAMP_GRASS;   // grass of any biome (dirt underneath; flowers and hoes)
-const takesBiomeTint = b => b === 1 || b === SWAMP_GRASS || isLeaves(b);    // grass and leaves: coloured by the climate where they are
+const takesBiomeTint = b => b === 1 || b === SWAMP_GRASS || isLeaves(b) || !!(BLOCKS[b] && BLOCKS[b].tint);    // grass and leaves (and data/blocks.json's tint): coloured by the climate where they are
 // the colour grass and leaves take on here, as [r, g, b] multipliers for their green pixels (1 = as drawn). It fades over a wider
 // way than the land's shape so colours blend between biomes. Only in Biome worlds.
 function grassTint(x, z) {
@@ -1953,7 +2012,10 @@ function generateHills() {
       dens[(gy * nz + gz) * nx + gx] = (base - y) + n * 2 * amp;
     }
   }
-  const col = new Float32Array(ny);
+  // Land 7 on: every step of the blend is rounded to 32 bits, the way the desktop edition does it, so new worlds match it
+  // block for block. Lands 0-6 keep the 64-bit blend they were released with (so old worlds never change; at rare spots
+  // they differ from desktop by a block).
+  const col = new Float32Array(ny), R32 = LAND >= 7, F = Math.fround;
   for (let z = 0; z < WZ; z++) {
     const gz = (z / GX) | 0, fz = (z % GX) / GX;
     for (let x = 0; x < WX; x++) {
@@ -1962,11 +2024,13 @@ function generateHills() {
         const o = gy * nz;
         const a = dens[(o + gz) * nx + gx], b = dens[(o + gz) * nx + gx + 1];
         const c = dens[(o + gz + 1) * nx + gx], d = dens[(o + gz + 1) * nx + gx + 1];
-        col[gy] = (a + (b - a) * fx) * (1 - fz) + (c + (d - c) * fx) * fz;
+        col[gy] = R32 ? F(F(F(a + F(F(b - a) * fx)) * F(1 - fz)) + F(F(c + F(F(d - c) * fx)) * fz))
+          : (a + (b - a) * fx) * (1 - fz) + (c + (d - c) * fx) * fz;
       }
       for (let y = 0; y < WY - 2; y++) {
         const gy = (y / GY) | 0, fy = (y % GY) / GY;
-        if (col[gy] + (col[gy + 1] - col[gy]) * fy > 0 || y === 0) raw[idx(x, y, z)] = RAW;
+        const v = R32 ? F(col[gy] + F(F(col[gy + 1] - col[gy]) * fy)) : col[gy] + (col[gy + 1] - col[gy]) * fy;
+        if (v > 0 || y === 0) raw[idx(x, y, z)] = RAW;
       }
     }
   }
@@ -3174,7 +3238,85 @@ if (/[?&]worldhash\b/.test(location.search)) {   // (testing: a fingerprint of t
   }
   window.WILD = { grown: wildGrown, kept: Object.values(wildKept).reduce((a, [n]) => a + n, 0), byKey: wildKept };
 }
-world.load(raw); raw = null;
+// ---- Rock blobs (lands 7 and 8: every world type but Earthlike; Geology Draft 2, section 5) ----
+// Blobs of the new rocks inside the Andesite, put in as the grown world is packed into chunks (the one-byte world can't hold
+// their ids): only Andesite (Stone, 3) in the grown world changes, so the ores, dirt, gravel, sand, water and caves stay exactly
+// where they were (the late list goes in after, as before; it never sits on Andesite). The world is cut into 32 x 32 x 32 regions
+// (y, then z, then x, each from 0), each with BLOB_TRIES tries (k from 0); try k's numbers are h(n) = hash3(region x, y, z,
+// 13000 + 10 k + n): n 7: under BLOB_CHANCE, or no blob from this try; n 0-2: the middle, the region's low corner + floor(h x 32)
+// on each axis (x, y, z); n 3-5: the half sizes, x 2 + 4 h, y 1.5 + 2.5 h, z 2 + 4 h; n 6: the rock, floor(h x 4) in its band's
+// list (BLOB_ROCKS), the band by the middle's height: from the sea level - 24 up, the beds; under LIFT + 24, the deep rocks;
+// between, the middle. A block is in a blob if q = (dx/ax)^2 + (dy/ay)^2 + (dz/az)^2 (dx... whole blocks from the middle) is
+// under 0.7, or under 1.3 and under 0.7 + 0.6 x noise3(x / 3, y / 3, z / 3, 13300) (the warp: one noise for every blob). A blob
+// reaches ceil(1.15 x its half size) each way (so never past the regions next to its own). Where blobs overlap, the first in the
+// order above wins; each chunk works out its own blocks from the blobs that reach it, in that order. (The same as the desktop
+// version: WorldGen.MakeBlobs and BlobsIn.)
+const BLOB_ROCKS = [[4400, 4401, 4402, 4406],    // the beds: Limestone, Shale, Chalk, Slate
+                    [4409, 4410, 4407, 4404],    // the middle: Marble, Quartzite, Schist, Basalt
+                    [4403, 4408, 4405, 4404]];   // the deep rocks: Granite, Gneiss, Gabbro, Basalt
+const BLOB_TRIES = 24, BLOB_CHANCE = 0.85, BLOB_R = 32;
+function makeBlobs() {
+  const NRX = WX / BLOB_R | 0, NRY = WY / BLOB_R | 0, NRZ = WZ / BLOB_R | 0, nr = NRX * NRY * NRZ, cap = nr * BLOB_TRIES;
+  const s = { NRX, NRY, NRZ, first: new Int32Array(nr + 1), x: new Int32Array(cap), y: new Int32Array(cap), z: new Int32Array(cap),
+    ex: new Int32Array(cap), ey: new Int32Array(cap), ez: new Int32Array(cap), rock: new Int32Array(cap),
+    ax: new Float64Array(cap), ay: new Float64Array(cap), az: new Float64Array(cap), made: new Map(), count: 0 };
+  let n = 0;
+  for (let ry = 0; ry < NRY; ry++) for (let rz = 0; rz < NRZ; rz++) for (let rx = 0; rx < NRX; rx++) {
+    s.first[(ry * NRZ + rz) * NRX + rx] = n;
+    for (let k = 0; k < BLOB_TRIES; k++) {
+      const salt = 13000 + 10 * k;
+      if (hash3(rx, ry, rz, salt + 7) >= BLOB_CHANCE) continue;
+      s.x[n] = rx * BLOB_R + Math.floor(hash3(rx, ry, rz, salt) * BLOB_R);
+      s.y[n] = ry * BLOB_R + Math.floor(hash3(rx, ry, rz, salt + 1) * BLOB_R);
+      s.z[n] = rz * BLOB_R + Math.floor(hash3(rx, ry, rz, salt + 2) * BLOB_R);
+      s.ax[n] = 2 + 4 * hash3(rx, ry, rz, salt + 3); s.ay[n] = 1.5 + 2.5 * hash3(rx, ry, rz, salt + 4); s.az[n] = 2 + 4 * hash3(rx, ry, rz, salt + 5);
+      const band = s.y[n] >= SEA_LEVEL - 24 ? 0 : s.y[n] < LIFT + 24 ? 2 : 1;
+      s.rock[n] = BLOB_ROCKS[band][Math.floor(hash3(rx, ry, rz, salt + 6) * 4)];
+      s.ex[n] = Math.ceil(1.15 * s.ax[n]); s.ey[n] = Math.ceil(1.15 * s.ay[n]); s.ez[n] = Math.ceil(1.15 * s.az[n]);
+      n++;
+    }
+  }
+  s.first[nr] = s.count = n;
+  return s;
+}
+// one chunk's blob blocks (its low corner x0, y0, z0) into o; true if it put any
+function blobsIn(s, src, x0, y0, z0, o) {
+  let any = false;
+  const ry0 = Math.max(0, Math.trunc((y0 - 8) / BLOB_R)), ry1 = Math.min(s.NRY - 1, Math.trunc((y0 + CS + 8) / BLOB_R));
+  const rz0 = Math.max(0, Math.trunc((z0 - 8) / BLOB_R)), rz1 = Math.min(s.NRZ - 1, Math.trunc((z0 + CS + 8) / BLOB_R));
+  const rx0 = Math.max(0, Math.trunc((x0 - 8) / BLOB_R)), rx1 = Math.min(s.NRX - 1, Math.trunc((x0 + CS + 8) / BLOB_R));
+  for (let ry = ry0; ry <= ry1; ry++) for (let rz = rz0; rz <= rz1; rz++) for (let rx = rx0; rx <= rx1; rx++) {
+    const r = (ry * s.NRZ + rz) * s.NRX + rx;
+    for (let n = s.first[r]; n < s.first[r + 1]; n++) {
+      const cx = s.x[n], cy = s.y[n], cz = s.z[n];
+      const ya = Math.max(Math.max(1, cy - s.ey[n]), y0), yb = Math.min(Math.min(WY - 1, cy + s.ey[n]), y0 + CS - 1);
+      const za = Math.max(Math.max(0, cz - s.ez[n]), z0), zb = Math.min(Math.min(WZ - 1, cz + s.ez[n]), z0 + CS - 1);
+      const xa = Math.max(Math.max(0, cx - s.ex[n]), x0), xb = Math.min(Math.min(WX - 1, cx + s.ex[n]), x0 + CS - 1);
+      if (ya > yb || za > zb || xa > xb) continue;
+      const ax = s.ax[n], ay = s.ay[n], az = s.az[n], rock = s.rock[n];
+      for (let y = ya; y <= yb; y++) for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) {
+        const l = ((y - y0) << 8) | ((z - z0) << 4) | (x - x0);
+        if (o[l] !== 0 || src[(y * WZ + z) * WX + x] !== 3) continue;   // (an earlier blob's, or not Andesite)
+        const dx = (x - cx) / ax, dy = (y - cy) / ay, dz = (z - cz) / az, q = dx * dx + dy * dy + dz * dz;
+        if (q >= 1.3 || q >= 0.7 && q >= 0.7 + 0.6 * noise3(x / 3.0, y / 3.0, z / 3.0, 13300)) continue;
+        o[l] = rock; any = true;
+        s.made.set(rock, (s.made.get(rock) || 0) + 1);
+      }
+    }
+  }
+  return any;
+}
+{
+  const blobs = rockBlobs(LAND) && GEN <= 3 ? makeBlobs() : null, src = raw;
+  let stone = 0;
+  if (blobs && /[?&]worldhash\b/.test(location.search)) for (let i = 0; i < src.length; i++) if (src[i] === 3) stone++;
+  world.load(raw, blobs ? (x0, y0, z0, o) => blobsIn(blobs, src, x0, y0, z0, o) : null); raw = null;
+  if (blobs && /[?&]worldhash\b/.test(location.search)) {   // (testing: as the desktop version's BLOBS line)
+    let all = 0; for (const v of blobs.made.values()) all += v;
+    window.BLOBS_LINE = `BLOBS ${blobs.count} blobs, ${all} of ${stone} Andesite (${(100 * all / Math.max(1, stone)).toFixed(1)}%): ` +
+      [4400, 4401, 4402, 4406, 4409, 4410, 4407, 4404, 4403, 4408, 4405].map(r => `${blockKey(r)} ${blobs.made.get(r) || 0}`).join(', ');
+  }
+}
 for (let k = 0; k < lateKept.length; k += 2) {
   const i = lateKept[k];
   world.set(i, lateKept[k + 1]);
@@ -4038,6 +4180,7 @@ function dropTorchesAround(x, y, z) {
 // on the first thing it hits, knocking off whatever small thing was in the spot it lands in. Land the world was made with
 // that floats over a cave stays put until something next to it changes.
 const FALLS = new Set([2, 6, 11]);   // Dirt, Sand, Gravel
+for (const r of blockRows.values()) if (r.falls) FALLS.add(r.id);   // (and data/blocks.json's falls: the Earthlike gravels)
 const fallQueue = new Set(), falling = [];
 let fallCount = 0;   // every falling block gets its own number (k), for multiplayer
 // (a block changed here: it and the blocks next to it get checked. Not when a save is loaded, so floating land stays put)
@@ -8923,11 +9066,11 @@ const invIcons = [];   // the creative list's pictures: [canvas, id, drawn yet]
 // The tabs are in data/creative.json (by key; { tall: [...] }: only while tall worlds are on). INV_TABS: [[name, [id, ...]], ...]
 const CREATIVE = gameData('creative');
 const INV_TABS = CREATIVE.TABS.map(t => [t.name, t.forms
-  ? SPLITTABLE.filter(b => TALL_WORLDS || !DEEP_BLOCKS.includes(b)).flatMap(b => t.forms.map(f => {
+  ? SPLITTABLE.filter(b => (TALL_WORLDS || !DEEP_BLOCKS.includes(b)) && isShown(b)).flatMap(b => t.forms.map(f => {
     if (f !== 'piece' && !SHAPE_ITEM[f]) throw new Error(`The game's data (data/creative.json) has a shape "${f}", which isn't one of the Cutter's`);
     return formItem(f, b);
   }))
-  : t.items.flatMap(x => typeof x === 'string' ? [idOf(x)] : TALL_WORLDS ? x.tall.map(idOf) : [])]);
+  : t.items.flatMap(x => typeof x === 'string' ? [idOf(x)] : TALL_WORLDS ? x.tall.map(idOf) : []).filter(isShown)]);
 const SHAPES_TAB = Math.max(0, CREATIVE.TABS.findIndex(t => t.forms));   // (where a shape not in the lists goes)
 const TAB_OF = new Map();
 INV_TABS.forEach(([, ids], k) => ids.forEach(id => { if (!TAB_OF.has(id)) TAB_OF.set(id, k); }));
@@ -9018,7 +9161,7 @@ document.getElementById('bench-in').append(benchIn);
 document.getElementById('bench-out').append(benchOut);
 let benchBlock = 0;
 const benchIcons = [];
-SPLITTABLE.filter(id => TALL_WORLDS || !DEEP_BLOCKS.includes(id)).forEach(id => {   // (the deep layers' stone only while tall worlds are on)
+SPLITTABLE.filter(id => (TALL_WORLDS || !DEEP_BLOCKS.includes(id)) && isShown(id)).forEach(id => {   // (the deep layers' stone only while tall worlds are on)
   const slot = document.createElement('div');
   slot.className = 'slot';
   const c = document.createElement('canvas'); c.width = c.height = TILE;
@@ -10085,7 +10228,7 @@ function gatherSave() {
   return {
     version: 1, seed, savedAt: Date.now(),
     idxs: packIdxs(idxs), ...(IDX8 ? { i8: true } : {}), ids: ids.buffer, ...(wide ? { wide: true } : {}),
-    pieces: gatherPieces(),
+    ...piecesForSave(),
     stairs: saveExtraStairs(),
     ...(Worlds.current.os === 1 ? { os: 1, osSkip: Worlds.current.osSkip } : {}),   // (an old world's staircases: see step 9 of the world's growth)
     player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health,
@@ -10134,15 +10277,23 @@ function gatherPieces() {
   for (const [i, a] of pieceMap) out.push(i, ...a);
   return out;
 }
-function applyPieces(list) {
+// for a save (and a welcome): { pieces, pg } as said above, pg only when it's needed
+function piecesForSave() {
+  const list = gatherPieces();
+  for (let k = 0; k + 8 < list.length; k += 9) for (let s = 1; s <= 8; s++) if (spotBlock(list[k + s]) >= 4096) return { pieces: list, pg: PIECE_GROUP };
+  for (let k = 0; k + 8 < list.length; k += 9) for (let s = 1; s <= 8; s++) { const v = list[k + s]; list[k + s] = v % PIECE_GROUP + 4096 * Math.floor(v / PIECE_GROUP); }
+  return { pieces: list };
+}
+function applyPieces(list, pg = PIECE_GROUP) {   // (pg: the group's multiplier in the list; a save's or welcome's own pg, or 4096 without)
   if (!Array.isArray(list)) return;
+  const m = pg === 8192 ? 8192 : 4096;
   for (let k = 0; k + 8 < list.length; k += 9) {
-    const a = Int32Array.from(list.slice(k + 1, k + 9), v => { const b = BLOCKS[spotBlock(v)]; return b && !b.item && b.shape !== 'pieces' ? v : 0; });   // (block + group)
+    const a = Int32Array.from(list.slice(k + 1, k + 9), v => { v = v % m + PIECE_GROUP * Math.floor(v / m); const b = BLOCKS[spotBlock(v)]; return b && !b.item && b.shape !== 'pieces' ? v : 0; });   // (block + group)
     if (a.some(v => v)) pieceMap.set(list[k], a);
   }
 }
 function applySave(s) {
-  applyPieces(s.pieces);
+  applyPieces(s.pieces, s.pg || 4096);
   loadExtraStairs(s.stairs);
   applyEdits(readIdxs(s.idxs, s.i8), s.wide ? new Uint32Array(s.ids) : new Uint8Array(s.ids));
   for (const [i, left] of s.drying || []) if (drying.has(i)) drying.set(i, Math.max(0, +left || 0));
@@ -10185,7 +10336,9 @@ function applyPlayerSave(s) {
   if (player.gloom >= player.health) player.gloom = Math.max(0, player.health - 1);   // (never load straight into a gloom death)
   drawHearts();
   if (isFinite(s.time)) timeOfDay = s.time;
-  if (Array.isArray(s.hotbar) && s.hotbar.length === 10) {
+  // (worlds saved before Pack & Plate have just the hotbar's 10 slots, later ones all NS: either comes back, the same as the desktop
+  // version's. Before Beta 0.1.5.2 only 10 did, so a saved world's slots never came back: a survival world's were lost)
+  if (Array.isArray(s.hotbar) && (s.hotbar.length === 10 || s.hotbar.length === NS)) {
     s.hotbar.forEach((id, i) => { HOTBAR[i] = id === 0 || ITEMS.includes(id) || isItem(id) ? id : 0; HOTBAR_COUNT[i] = counted(HOTBAR[i]) ? Math.max(1, (s.counts || [])[i] | 0) : 0; HOTBAR_WEAR[i] = (s.wear || [])[i] | 0; HOTBAR_DATA[i] = (s.data || [])[i] || null; });
     offSel = Math.min(s.offSel | 0, offCount() - 1);
     drawHotbarIcons();
@@ -10422,7 +10575,7 @@ addEventListener('pagehide', () => autoSave());
       friends.set(conn.peer, { conn, name, hue, seen: performance.now() });
       setOther(conn.peer, { name, hue, x: player.x + 1, y: player.y, z: player.z, yaw: 0 });
       const save = gatherSave();
-      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ...(save.i8 ? { i8: true } : {}), [save.wide ? 'idw' : 'ids']: save.ids, pieces: save.pieces, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
+      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ...(save.i8 ? { i8: true } : {}), [save.wide ? 'idw' : 'ids']: save.ids, pieces: save.pieces, ...(save.pg ? { pg: save.pg } : {}), time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
       // everyone's skins: yours, and the other friends' here already
       if (PlayerSkin.url) conn.send(skinMsg('host', PlayerSkin.url));
       for (const [id, s] of skins) if (id !== conn.peer && friends.has(id)) conn.send(skinMsg(id, s));
@@ -10555,7 +10708,7 @@ addEventListener('pagehide', () => autoSave());
     if (d.t === 'refuse') { alert(d.why); leave(); }
     else if (d.t === 'welcome') {
       myId = d.id;
-      applyPieces(d.pieces);
+      applyPieces(d.pieces, d.pg || 4096);
       applyEdits(readIdxs(toBuf(d.idxs), d.i8), d.idw ? new Uint32Array(toBuf(d.idw)) : new Uint8Array(toBuf(d.ids)));   // (idw: 4-byte ids, when the world has blocks past 255; i8: 8-byte block numbers)
       Object.assign(player, { x: d.x, y: d.y, z: d.z, yaw: d.yaw || 0, vx: 0, vy: 0, vz: 0 });
       timeOfDay = d.time;
@@ -11132,7 +11285,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
   // checked on their own: every deep layer's block and ore once, and nothing else. Each thing in one tab only, and every
   // block you can pick in a tab (one left out would quietly go in Building).
   const V = D.creative, cd = [];
-  const expand = (t, tall) => t.forms ? SPLITTABLE.filter(b => tall || !DEEP_BLOCKS.includes(b)).flatMap(b => t.forms.map(f => key(formItem(f, b))))
+  const expand = (t, tall) => t.forms ? SPLITTABLE.filter(b => (tall || !DEEP_BLOCKS.includes(b)) && isShown(b)).flatMap(b => t.forms.map(f => key(formItem(f, b))))
     : (t.items || []).flatMap(x => typeof x === 'string' ? [x] : tall && x && Array.isArray(x.tall) ? x.tall : []);
   if (!V) cd.push('creative: not in textures.js');
   else {
@@ -11148,7 +11301,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
     const all = V.TABS.flatMap(t => expand(t, true)), once = new Set();
     for (const k of all) { if (once.has(k) && !k.startsWith('(no block')) cd.push(`creative.TABS: ${k} is in more than one place (only the first counts)`); once.add(k); }
     for (const id of ITEMS) if (!once.has(key(id))) cd.push(`creative.TABS: ${key(id)} isn't in any tab (so it goes in Building, at the end)`);
-    for (const id of Object.keys(BLOCKS).map(Number)) if (BLOCKS[id] && BLOCKS[id].item && !isPiece(id) && !formOf(id) && !once.has(key(id)) && (TALL_WORLDS || !deep.includes(key(id))))
+    for (const id of Object.keys(BLOCKS).map(Number)) if (BLOCKS[id] && BLOCKS[id].item && !isPiece(id) && !formOf(id) && !once.has(key(id)) && (TALL_WORLDS || !deep.includes(key(id))) && isShown(id))
       cd.push(`creative.TABS: ${key(id)} isn't in any tab (so creative doesn't have it)`);
   }
   out.creative = cd;
@@ -11217,7 +11370,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
   const BLOCK_FIELDS = ['id', 'name', 'pictures', 'icon', 'transparent', 'noCollide', 'liquid', 'shape', 'box', 'drop', 'places', 'handDrop', 'item', 'food',
     'tool', 'material', 'damage', 'pick', 'layer', 'level', 'front', 'facing', 'lit', 'wall', 'wi', 'count', 'burn', 'axis', 'layers', 'soil', 'wet', 'fert',
     'stage', 'dye', 'armor', 'pack', 'belt', 'tools', 'piece', 'form', 'of', 'snowed', 'inner', 'needs', 'shovel', 'leaves', 'sound', 'inventory', 'look', 'log', 'fruit', 'hinge', 'open', 'half', 'grows', 'sand', 'sapling',
-    'crop', 'top', 'plants', 'returns', 'bag', 'full'];
+    'crop', 'top', 'plants', 'returns', 'bag', 'full', 'earthlike', 'falls', 'tint', 'water', 'flow', 'pace', 'in'];
   const blockAsData = id => {
     const b = BLOCKS[id]; if (!b) return undefined;
     return Object.fromEntries(Object.entries(b).map(([f, v]) => f === 't' ? ['pictures', v.map(t => TILE_NAMES[t])] : f === 'icon' || f === 'full' ? [f, TILE_NAMES[v]]
@@ -11227,10 +11380,11 @@ if (/[?&]datacheck\b/.test(location.search)) {
   // (in the order the game loads them, which is the file's order: a row can only name blocks loaded before it or with it)
   // (FORMS' rows each make 7 items: they're checked as those items, see formRows)
   const BLOCK_TABLES = ['BASE', 'KILN', 'TORCHES', 'WATER', 'LYING_LOGS', 'SNOW', 'TOOLS', 'DEEP_STONE', 'SOILS', 'GRAIN', 'COLOURS', 'METALS', 'DEEP_ORES', 'FOUNDRY',
-    'GEAR', 'FLOWERS', 'WOODS', 'CROPS', 'FENCES', 'DOORS', 'SNOWY', 'FORMS'];
+    'GEAR', 'FLOWERS', 'WOODS', 'CROPS', 'FENCES', 'DOORS', 'SNOWY', 'FORMS', ...EARTH_TABLES, 'EARTH_DOORS', 'EARTH_FORMS'];
   if (!BL) bd.push('blocks: not in textures.js');
   else {
-    const made = { DOORS: () => doorRows(BL.DOORS || []), SNOWY: () => snowyRows(BL.SNOWY || []), FORMS: () => formRows(BL.FORMS || []) };
+    const made = { DOORS: () => doorRows(BL.DOORS || []), SNOWY: () => snowyRows(BL.SNOWY || []), FORMS: () => formRows(BL.FORMS || []),
+      EARTH_DOORS: () => doorRows(BL.EARTH_DOORS || []), EARTH_FORMS: () => formRows(BL.EARTH_FORMS || []) };
     const madeRows = {};
     const rowsOf = table => {
       if (!made[table]) return BL[table] || [];
@@ -11251,7 +11405,32 @@ if (/[?&]datacheck\b/.test(location.search)) {
       diff(blockAsData(r.id), rowAsData(r), `blocks.${table} ${r.id}`, bd);
       if (typeof r.name === 'string' && rowKey(r) !== key(r.id)) bd.push(`${at}: its key is "${rowKey(r)}", but the game's block ${r.id} is "${key(r.id)}"`);
     });
-    for (const table of BLOCK_TABLES) fieldsKnown(BL[table] || [], table === 'FORMS' ? ['of', ...FORMS] : table === 'SNOWY' ? ['id', 'inner', 'drop', 'box'] : table === 'DOORS' ? ['of', 'item', 'first'] : BLOCK_FIELDS, `blocks.${table}`, bd);
+    for (const table of BLOCK_TABLES) fieldsKnown(BL[table] || [], table === 'FORMS' ? ['of', ...FORMS] : table === 'EARTH_FORMS' ? ['of', ...FORMS, 'earthlike'] : table === 'SNOWY' ? ['id', 'inner', 'drop', 'box']
+      : table === 'DOORS' ? ['of', 'item', 'first'] : table === 'EARTH_DOORS' ? ['of', 'item', 'first', 'earthlike'] : BLOCK_FIELDS, `blocks.${table}`, bd);
+    // Earthly Extravaganza's rows: earthlike is true on every row of its tables (their doors' and forms' too) and on no other;
+    // river water's flow and pace are only in RIVER_WATER, each row at RIVER_WATER + 8 x pace + flow, still (level 0) and liquid;
+    // in (the rock an ore is in, a key word) only in EARTH_ROCKS; top only in CROPS and EARTH_PLANTS; water (it stands in still
+    // water) and a plant's top only on EARTH_PLANTS' plants; fences only in FENCES and EARTH_FENCES; falls and tint are true
+    // (except the rows shown before Earthlike worlds come, which leave it out, the same as the desktop version's check: EARTH_ROCKS
+    // ids 4400-4479 and 4760-4799, every EARTH_GRAVELS row, and EARTH_FORMS rows with piece 4500-5029, the rocks' shapes)
+    const earthTable = tb => EARTH_TABLES.includes(tb) || tb === 'EARTH_DOORS' || tb === 'EARTH_FORMS';
+    const shownEarly = (tb, r) => tb === 'EARTH_GRAVELS' || tb === 'EARTH_ROCKS' && (r.id >= 4400 && r.id <= 4479 || r.id >= 4760 && r.id <= 4799)
+      || tb === 'EARTH_FORMS' && r.piece >= 4500 && r.piece <= 5029;
+    for (const table of BLOCK_TABLES) {
+      for (const r of BL[table] || []) if ((r.earthlike === true) !== (earthTable(table) && !shownEarly(table, r)) || (r.earthlike !== undefined && r.earthlike !== true))
+        bd.push(`blocks.${table} ${r.id !== undefined ? r.id : r.of}: earthlike is true on Earthly Extravaganza's tables' rows (but not the rocks, gravels and rock shapes shown before Earthlike) and left out on others`);
+      for (const r of rowsOf(table)) {
+        const at = `blocks.${table} ${r.id}`;
+        if ((r.flow !== undefined || r.pace !== undefined) && (table !== 'RIVER_WATER' || !(Number.isInteger(r.flow) && r.flow >= 0 && r.flow <= 8 && Number.isInteger(r.pace) && r.pace >= 0 && r.pace <= 2)
+            || r.id !== RIVER_WATER + 8 * r.pace + r.flow || r.liquid !== true || r.level !== 0)) bd.push(`${at}: flow (0-8) and pace (0-2) are river water's, in RIVER_WATER, at ${RIVER_WATER} + 8 x pace + flow, liquid and level 0`);
+        if (r.in !== undefined && (table !== 'EARTH_ROCKS' || typeof r.in !== 'string' || !/^[a-z0-9_]+$/.test(r.in))) bd.push(`${at}: in (the rock an ore is in, a key word: a-z, 0-9 and _) is only for EARTH_ROCKS`);
+        if (r.top !== undefined && (r.top !== true || !['CROPS', 'EARTH_PLANTS'].includes(table) || table === 'EARTH_PLANTS' && r.shape !== 'plant')) bd.push(`${at}: top is true, on a crop or an EARTH_PLANTS plant`);
+        if (r.water !== undefined && (r.water !== true || table !== 'EARTH_PLANTS' || r.shape !== 'plant')) bd.push(`${at}: water is true, on an EARTH_PLANTS plant`);
+        if (r.shape === 'fence' && !['FENCES', 'EARTH_FENCES'].includes(table)) bd.push(`${at}: a fence is in FENCES or EARTH_FENCES`);
+        for (const f of ['falls', 'tint']) if (r[f] !== undefined && r[f] !== true) bd.push(`${at}: ${f} is true or left out`);
+      }
+    }
+    if ((BL.RIVER_WATER || []).length !== 25) bd.push(`blocks.RIVER_WATER: should be the 25 rows ${RIVER_WATER}-${RIVER_WATER + 24} (8 ways and falling, 3 paces; falling only at pace 2)`);
     // what blocks are: needs is the tool you must hold (axe or pickaxe); shovel, leaves and inventory are true when they're there;
     // sound is one the game has; a look is another look (1 up, each once) of the block it drops, which has no look of its own
     const looked = new Set();
@@ -11273,8 +11452,8 @@ if (/[?&]datacheck\b/.test(location.search)) {
       }
     }
     // doors: each made of planks the game has, its carried door an item, and its 32 states right after that
-    (BL.DOORS || []).forEach((r, k) => {
-      const at = `blocks.DOORS.${k} (${r.of})`, item = rowOf.get(r.item);
+    for (const dt of ['DOORS', 'EARTH_DOORS']) (BL[dt] || []).forEach((r, k) => {
+      const at = `blocks.${dt}.${k} (${r.of})`, item = rowOf.get(r.item);
       if (!blockKeyKnown(r.of)) bd.push(`${at}: of is the planks it's made of`);
       if (!item || !item.item) bd.push(`${at}: item is the door you carry (an item)`);
       if (r.first !== r.item + 1) bd.push(`${at}: first is the id after its item`);
@@ -11299,7 +11478,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
     const FN = BL.FORM_NAMES || {};
     if (Object.keys(FN).filter(f => !f.startsWith('_')).join() !== FORMS.join()) bd.push(`blocks.FORM_NAMES: should name the forms ${FORMS.join(', ')}, in that order`);
     for (const f of FORMS) if (typeof FN[f] !== 'string' || !FN[f]) bd.push(`blocks.FORM_NAMES.${f}: should be a name`);
-    (BL.FORMS || []).forEach((r, k) => { const b = blockKeyKnown(r.of) && idOf(r.of); if (b) for (const f of FORMS) if (r[f] !== formSum(f, b)) bd.push(`blocks.FORMS.${k} (${r.of}): ${f} should be ${formSum(f, b)} (see formItem), not ${r[f]}`); });
+    for (const ft of ['FORMS', 'EARTH_FORMS']) (BL[ft] || []).forEach((r, k) => { const b = blockKeyKnown(r.of) && idOf(r.of); if (b) for (const f of FORMS) if (r[f] !== formSum(f, b)) bd.push(`blocks.${ft}.${k} (${r.of}): ${f} should be ${formSum(f, b)} (see formItem), not ${r[f]}`); });
     // the families: the code still finds their blocks by number (WATER + level, soilId, GRAIN_STAGES, the colours' lists...),
     // so each table must be just those blocks, each the one the code expects there
     const span = (a, n) => Array.from({ length: n }, (_, k) => a + k), sorted = ids => [...ids].sort((a, c) => a - c).join(', ');
@@ -11325,7 +11504,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
     for (let n = 1; n < SNOW_BLOCK - SNOW + 1; n++) want(SNOW + n - 1, { shape: 'snow', layers: n }, `snow: ${SNOW} + layers - 1`);
     const nameOf = id => rowOf.get(id) && rowOf.get(id).name;
     for (const b of Object.keys(DEEP_SET).map(Number)) deepRow(b).forEach((id, k) => want(id, { name: nameOf(b), layer: k + 2, drop: b === 3 ? key(DEEP_COBBLE + k) : undefined },
-      `the deep layers: ${key(b)} in layer ${k + 2} is ${DEEP_SET[b]} + ${k}${b === 3 ? ', and gives that layer\'s Cobblestone' : ''}`));
+      `the deep layers: ${key(b)} in layer ${k + 2} is ${DEEP_SET[b]} + ${k}${b === 3 ? ', and gives that layer\'s Cobbled Andesite' : ''}`));
     ORES.forEach((ore, k) => { for (let n = 2; n <= STRATA_LAYERS; n++) want(oreIn(ore, n), { name: nameOf(ore), layer: n, pick: rowOf.get(ore) && rowOf.get(ore).pick, drop: key(CHUNK[METALS[k]]) },
       `a deep ore: ${key(ore)} in layer ${n} is ${DEEP_ORE} + 7 x ${k} + ${n - 2}, mined and dropping like the ore`); });
     // torches: the code finds them by (burn, wall, count) (see torchVariant), and carries the standing one of each burn

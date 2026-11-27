@@ -29,6 +29,7 @@ public static class Worlds
 		public int Version = 1, Seed; public long SavedAt;
 		public long[] Idxs = Array.Empty<long>(); public int[] Ids = Array.Empty<int>();
 		public long[] Pieces = Array.Empty<long>();   // pieces: index, 8 block ids, index, ... (64-bit, as block numbers are; old saves' numbers read the same)
+		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public int Pg;   // (how Pieces' spots are packed: 8192, or left out for 4096: see World.GroupMul)
 		public PlayerSave Player; public float Time;
 		public int[] Hotbar, Counts, Wear; public int Selected, OffSel; public Dictionary<int, Inventory.PackData> Data;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();

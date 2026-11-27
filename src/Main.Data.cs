@@ -33,7 +33,28 @@ public partial class Main
 		if (args.FirstOrDefault(a => a.StartsWith("--listdump=")) is { } ld) { ListDump(ld[11..]); any = true; }
 		if (args.Contains("--datacheck")) { DataCheck(); any = true; }
 		if (args.FirstOrDefault(a => a.StartsWith("--resave=")) is { } rs) { Resave(rs[9..]); any = true; }
+		if (args.Contains("--packtest")) { PackTest(); any = true; }
 		return any;
+	}
+
+	// (testing) pieces packed as block + 8192 x group, and saves' old packing (block + 4096 x group, or "Pg": 8192 only when a
+	// piece's block is 4096 or more): see World.GroupMul
+	static void PackTest()
+	{
+		static void Check(string what, bool ok) => GD.Print($"{(ok ? "PASS" : "FAIL")} {what}");
+		int v1 = 3 + World.GroupMul * 5, v2 = 4403 + World.GroupMul * 2;
+		Check("an old block's spot packs the old way and back", World.SpotOut(v1) == 3 + 4096 * 5 && World.SpotIn(World.SpotOut(v1), World.OldGroupMul) == v1);
+		Check("a 0.1.5.0 spot (block + 4096 x group) reads as block + 8192 x group", World.SpotIn(12 + 4096 * 15, 4096) == 12 + 8192 * 15 && World.SpotIn(0, 4096) == 0 && World.SpotIn(7, 4096) == 7);
+		Check("a spot packed with pg 8192 reads as it is", World.SpotIn(v2, 8192) == v2 && World.SpotBlock(v2) == 4403 && v2 / World.GroupMul == 2);
+		Check("pieces of today's blocks don't need pg", !World.PiecesNeedWide(new[] { new[] { v1, 0, 0, 0, 0, 0, 0, 3 } }));
+		Check("a piece of Granite (4403) needs pg 8192", World.PiecesNeedWide(new[] { new[] { 0, v2, 0, 0, 0, 0, 0, 0 } }));
+		var opts = new System.Text.Json.JsonSerializerOptions { IncludeFields = true };   // (as Worlds saves them)
+		string plain = System.Text.Json.JsonSerializer.Serialize(new Worlds.Save(), opts), wide = System.Text.Json.JsonSerializer.Serialize(new Worlds.Save { Pg = 8192 }, opts);
+		Check("a save without wide pieces has no Pg (byte for byte as before)", !plain.Contains("\"Pg\"") && plain == wide.Replace(",\"Pg\":8192", ""));
+		Check("a save with wide pieces says Pg 8192", wide.Contains("\"Pg\":8192") && System.Text.Json.JsonSerializer.Deserialize<Worlds.Save>(wide, opts).Pg == 8192 && System.Text.Json.JsonSerializer.Deserialize<Worlds.Save>(plain, opts).Pg == 0);
+		Check("Earthlike's blocks are hidden until it's ready (but the new rocks and gravels show, since Beta 0.1.5.2)", !Blocks.Shown(4800) && !Blocks.Shown(4480) && Blocks.Shown(3) && !Blocks.Items.Contains(4800) && !Blocks.ItemRows.Contains(726) && Blocks.Items.Contains(3) && Blocks.Shown(4403) && Blocks.Items.Contains(4403) && Blocks.Items.Contains(4766) && Blocks.Items.Contains(5030) && Blocks.Shown(4521) && Blocks.Shown(4471) && !Blocks.Shown(4010));
+		Check("Earthlike's keys", DataKeys.KeyOf(4480) == "copper_ore#in=granite" && DataKeys.KeyOf(3947) == "tall_grass#top" && DataKeys.KeyOf(3891) == "water#flow=0,pace=0" && DataKeys.KeyOf(3915) == "water#flow=8,pace=2" && DataKeys.KeyOf(3716) == "corn#stage=2,top");
+		Check("the new gravels fall, and take the tint where they should", Falling.Falls.Contains(5030) && Falling.Falls.Contains(Blocks.Gravel) && !Falling.Falls.Contains(4403) && Blocks.TakesBiomeTint(4810) && Blocks.TakesBiomeTint(3945) && !Blocks.TakesBiomeTint(4800));
 	}
 
 	// (testing) every saved world in a folder (a copy: never the real worlds folder) read and written back into its out/ folder,
@@ -159,7 +180,7 @@ public partial class Main
 		var d = GameData.Read<SmeltingData>("smelting");
 		if (d == null) { found.Add("data/smelting.json is missing"); return found; }
 		UnreadFields(GameData.File("smelting").Value, typeof(SmeltingData), "smelting", found);
-		if (OS.GetCmdlineUserArgs().Contains("--dataplant")) { d.FUEL["peat"] = 7; d.SMELTS.First(s => s.tall).from = "cobblestone#layer=3"; }   // (two mistakes the check has to find)
+		if (OS.GetCmdlineUserArgs().Contains("--dataplant")) { d.FUEL["peat"] = 7; d.SMELTS.First(s => s.tall).from = "cobbled_andesite#layer=3"; }   // (two mistakes the check has to find)
 		string Name(int id) => $"{DataKeys.KeyOf(id)} ({id})";
 		string Show(Kilns.Smelt s) => $"{Name(s.Out)} <- {string.Join(" + ", s.Needs.Select(n => $"{n.N} {Name(n.Id)}"))} at {s.At}";
 		void SameSmelts(string what, Kilns.Smelt[] file, Kilns.Smelt[] game)
@@ -306,7 +327,7 @@ public partial class Main
 			var inTabs = listed.ToHashSet();
 			foreach (int id in AllCreative().Where(i => !inTabs.Contains(i))) found.Add($"{Name(id)} is in the creative inventory but in no tab");
 			for (int id = 1; id < Blocks.MaxId; id++)
-				if (Blocks.Get(id) is { Item: true } b && b.Piece == 0 && b.Form == null && !inTabs.Contains(id)) found.Add($"{Name(id)} is an item, but in no tab (creative wouldn't have it)");
+				if (Blocks.Get(id) is { Item: true } b && b.Piece == 0 && b.Form == null && !inTabs.Contains(id) && Blocks.Shown(id)) found.Add($"{Name(id)} is an item, but in no tab (creative wouldn't have it)");
 		}
 		catch (InvalidOperationException x) { found.Add(x.Message); }
 		if (OS.GetCmdlineUserArgs().Contains("--datashow"))
@@ -635,7 +656,7 @@ public partial class Main
 		GD.Print($"LISTDUMP {n} blocks to {path}");
 	}
 
-	// blocks.json against the blocks: each row, every field (pictures by name, the blocks it names by id) and its key; ids 1-4095
+	// blocks.json against the blocks: each row, every field (pictures by name, the blocks it names by id) and its key; ids 1-8191
 	// (and on desktop, under Blocks.MaxId), none twice; pictures 1, 3 or 4 names; the blocks a row names are rows, one each.
 	// The families: the code still finds their blocks by number (Water + level, SoilId, GrainStages, the colours' lists...), so
 	// each family's table must be just those blocks, each the one the code expects there.
@@ -652,14 +673,14 @@ public partial class Main
 		var d = doc.RootElement.Deserialize<BlocksData>(GameData.Opts);
 		if (plant)
 		{   // (more mistakes the check has to find: five in BASE, and one or two in each family)
-			BlockRow Row(int id) => Blocks.AllRows(d).First(r => r.id == id);
+			BlockRow Row(int id) => Blocks.AllRows(d).Concat(Blocks.EarthRows(d)).First(r => r.id == id);
 			Row(2).name = "Dirtt"; Row(1).drop = "dirrt";
 			using (var two = JsonDocument.Parse("[\"sand\", \"sand\"]")) Row(6).pictures = two.RootElement.Clone();
 			Row(12).id = 11; Row(706).id = 5000;
 			Row(74).facing = 2; Row(75).drop = "kilnn"; Row(53).level = 4; Row(361).drop = "oak_planks"; Row(383).box = new[] { 0f, 0, 0, 1, 0.6f, 1 };
 			Row(95).wet = true; Row(44).stage = 3; Row(601).name = "Orange Dyee"; Row(250).soil = true; Row(143).drop = "copper_chunk";
 			d.FOUNDRY = d.FOUNDRY.Where(r => r.id != 158).ToArray(); Row(196).dye = "red_dye";
-			Row(115).layer = 5; Row(113).drop = "cobblestone#layer=3"; Row(128).name = "Stone Brick"; d.DEEP_STONE = d.DEEP_STONE.Where(r => r.id != 141).ToArray();
+			Row(115).layer = 5; Row(113).drop = "cobbled_andesite#layer=3"; Row(128).name = "Andesite Brick"; d.DEEP_STONE = d.DEEP_STONE.Where(r => r.id != 141).ToArray();
 			Row(480).pick = 1; Row(490).drop = "iron_chunk";
 			if (d.TORCHES != null)
 			{
@@ -686,6 +707,12 @@ public partial class Main
 				if (d.WOODS.Any(r => r.grows != null)) { Row(2303).sapling = "maple_log"; Row(2408).grows = "birchh"; Row(195).sand = true; }
 				d.DOORS[1].first += 1; d.DOORS[2].of = "oak_log"; d.DOORS = d.DOORS[..^1];
 			}
+			if (d.EARTH_GROUND is { Length: > 0 } && d.RIVER_WATER is { Length: > 0 } && d.EARTH_FORMS is { Length: > 0 } && d.EARTH_DOORS is { Length: > 0 })
+			{   // (Earthlike's rows: a row without earthlike, a river water out of its place, an ore's rock that isn't a key word, a fence
+				// outside the fences' tables, a plant's top in a table not its own, earthlike off on a form row and on a door row)
+				Row(3920).earthlike = false; Row(3893).pace = 1; Row(4481).@in = "Basalt Rock"; Row(3776).shape = null; Row(3995).top = true;
+				d.EARTH_FORMS[0].earthlike = false; d.EARTH_DOORS[0].earthlike = false;
+			}
 			if (Blocks.AllRows(d).Any(r => r.sound != null))
 			{   // (7c: the fields that were lists)
 				Row(4).needs = "pickaxe"; Row(61).needs = "hoe"; Row(5).leaves = null; Row(11).shovel = null; Row(7).sound = "woood";
@@ -696,11 +723,11 @@ public partial class Main
 		var inFile = doc.RootElement.EnumerateObject().Select(p => p.Name).Where(Blocks.FileTables.Contains).ToList();
 		if (plant) inFile.Reverse();   // (a table out of its place)
 		if (!inFile.SequenceEqual(Blocks.FileTables.Where(inFile.Contains))) found.Add($"blocks: the tables should come in the order {string.Join(", ", Blocks.FileTables)}, not {string.Join(", ", inFile)}");
-		var tables = Blocks.RowTables.Select(t => (t, rows: Blocks.RowTable(d, t))).ToList();
+		var tables = Blocks.RowTables.Concat(Blocks.EarthRowTables).Select(t => (t, rows: Blocks.RowTable(d, t))).ToList();
 		var all = tables.SelectMany(x => x.rows.Select(r => (x.t, r))).ToList();
 		foreach (var g in all.GroupBy(x => x.r.id).Where(g => g.Count() > 1)) found.Add($"blocks: id {g.Key} is used {g.Count()} times ({string.Join(", ", g.Select(x => $"{x.t} {x.r.name}"))})");
-		foreach (var (t, r) in all.Where(x => x.r.id < 1 || x.r.id > 4095)) found.Add($"{t}: id {r.id} ({r.name}) isn't 1-4095");
-		foreach (var (t, r) in all.Where(x => x.r.id >= Blocks.MaxId && x.r.id <= 4095)) found.Add($"{t}: id {r.id} ({r.name}) is past the end of desktop's block list (Blocks.MaxId {Blocks.MaxId})");
+		foreach (var (t, r) in all.Where(x => x.r.id < 1 || x.r.id > 8191)) found.Add($"{t}: id {r.id} ({r.name}) isn't 1-8191");
+		foreach (var (t, r) in all.Where(x => x.r.id >= Blocks.MaxId && x.r.id <= 8191)) found.Add($"{t}: id {r.id} ({r.name}) is past the end of desktop's block list (Blocks.MaxId {Blocks.MaxId})");
 		// each row as a block (its pictures stand-ins: they're compared by name), then the blocks rows name
 		var defs = new List<(string t, BlockRow r, BlockDef b)>();
 		foreach (var (t, r) in all)
@@ -725,9 +752,18 @@ public partial class Main
 			// (fields only the families have, which desktop finds by number: only on the blocks that are those)
 			if (t != "SOILS" && (r.soil || r.wet || r.fert)) found.Add($"{t} {r.id} ({r.name}): soil, wet and fert are only for SOILS");
 			if (t != "GRAIN" && t != "CROPS" && r.stage != 0) found.Add($"{t} {r.id} ({r.name}): stage is only for GRAIN and CROPS");
-			if (t != "CROPS" && (r.crop != null || r.top)) found.Add($"{t} {r.id} ({r.name}): crop and top are only for CROPS");
+			if (t != "CROPS" && r.crop != null || r.top && t is not ("CROPS" or "EARTH_PLANTS")) found.Add($"{t} {r.id} ({r.name}): crop is only for CROPS, and top for CROPS and EARTH_PLANTS");
+			// (Earthlike's: earthlike on every row of the EARTH_ tables and RIVER_WATER but the shown rocks and gravels, and only theirs; flow and pace only river
+			// water's, each at 3891 + 8 x pace + flow (3915 falling: flow 8, pace 2); in only an ore's in EARTH_ROCKS, a key word;
+			// water and top only a plant's in EARTH_PLANTS)
+			if (r.earthlike != (Blocks.EarthRowTables.Contains(t) && !Blocks.ShownEarthRow(t, r.id))) found.Add($"{t} {r.id} ({r.name}): earthlike is for every row of the EARTH_ tables and RIVER_WATER but the rocks and gravels shown since Beta 0.1.5.2 (Blocks.ShownEarthRow), and only theirs");
+			if ((t == "RIVER_WATER") != (r.flow != null) || (t != "RIVER_WATER" && r.pace != 0)) found.Add($"{t} {r.id} ({r.name}): flow and pace are river water's (RIVER_WATER), and every one of its rows has flow");
+			if (t == "RIVER_WATER" && (r.flow is < 0 or > 8 || r.pace is < 0 or > 2 || r.id != (r.flow == 8 ? 3915 : 3891 + 8 * r.pace + r.flow) || (r.flow == 8 && r.pace != 2) || !r.liquid || r.level != 0))
+				found.Add($"RIVER_WATER {r.id}: should be 3891 + 8 x pace + flow (0-7; 3915 falling, flow 8 pace 2), liquid, level 0 (it's flow {r.flow}, pace {r.pace})");
+			if (r.@in != null && (t != "EARTH_ROCKS" || !System.Text.RegularExpressions.Regex.IsMatch(r.@in, "^[a-z0-9_]+$"))) found.Add($"{t} {r.id} ({r.name}): in (an ore's rock) is only for EARTH_ROCKS' ores, a key word like granite, not \"{r.@in}\"");
+			if ((r.water || r.top && t == "EARTH_PLANTS") && (t != "EARTH_PLANTS" || r.shape != "plant")) found.Add($"{t} {r.id} ({r.name}): water and a plant's top are for EARTH_PLANTS' plants (shape plant)");
 			if (t == "CROPS" && (r.crop == null || r.stage is < 0 or > 3 || (r.top && (r.crop != "corn" || r.stage < 2)))) found.Add($"CROPS {r.id} ({r.name}): a crop needs its crop and a stage 0-3 (top: Corn's, stages 2 and 3)");
-			if ((t == "FENCES") != (r.shape == "fence") || (t == "FENCES" && r.of == null)) found.Add($"{t} {r.id} ({r.name}): fences (shape fence, with of) are FENCES' rows, and only theirs");
+			if ((t is "FENCES" or "EARTH_FENCES") != (r.shape == "fence") || (t is "FENCES" or "EARTH_FENCES" && r.of == null)) found.Add($"{t} {r.id} ({r.name}): fences (shape fence, with of) are FENCES' and EARTH_FENCES' rows, and only theirs");
 		}
 		// the families: just the blocks the code finds by number
 		static int[] Span(int a, int n) => Enumerable.Range(a, n).ToArray();
@@ -850,11 +886,13 @@ public partial class Main
 		{
 			var names = d.FORM_NAMES ?? new Dictionary<string, string>();
 			if (!names.Keys.SequenceEqual(Blocks.Forms)) found.Add($"FORM_NAMES: should be the forms {string.Join(", ", Blocks.Forms)}, in that order, not {string.Join(", ", names.Keys)}");
-			var forms = d.FORMS ?? Array.Empty<FormRow>();
+			var forms = (d.FORMS ?? Array.Empty<FormRow>()).Concat(d.EARTH_FORMS ?? Array.Empty<FormRow>()).ToArray();   // (then EARTH_FORMS' rows: they're Blocks.Splittable's last ones)
+			int earthFrom = d.FORMS?.Length ?? 0;
 			var ofs = new List<int>(); var itemIds = new HashSet<int>();
 			for (int k = 0; k < forms.Length; k++)
 			{
 				var f = forms[k]; int of;
+				if (f.earthlike != (k >= earthFrom && !Blocks.ShownEarthForm(f.piece))) found.Add($"FORMS {k} ({f.of}): earthlike is for every EARTH_FORMS row but the rocks' (shown since Beta 0.1.5.2: Blocks.ShownEarthForm), and only theirs");
 				try { of = Blocks.KeyRef(keys, f.of, $"FORMS {k}"); }
 				catch (InvalidOperationException x) { found.Add(x.Message); continue; }
 				ofs.Add(of);
@@ -866,8 +904,8 @@ public partial class Main
 					{
 						string form = item.Piece > 0 ? "piece" : item.Form, at = $"FORMS {k} ({f.of}).{form} {id}";
 						fileDef.TryAdd(id, item);
-						int sum = of >= 2200 && of < 3400 && of % 100 < 4 ? of - of % 100 + 10 * (of % 100 + 1) + Array.IndexOf(Blocks.Forms, form) : Blocks.FormSum(form, of);
-						if (id != sum) found.Add($"{at}: should be {sum} (the older blocks': 100 + b, 1000 + b..., or from 1800 or 2000; the cloths': from 3800; the newer woods': B + 10 to B + 46)");
+						int sum = (of >= 2200 && of < 3400 || of >= 4000 && of < 4400) && of % 100 < 4 ? of - of % 100 + 10 * (of % 100 + 1) + Array.IndexOf(Blocks.Forms, form) : Blocks.FormSum(form, of);
+						if (id != sum) found.Add($"{at}: should be {sum} (the older blocks': 100 + b, 1000 + b..., or from 1800 or 2000; the cloths': from 3800; the newer woods': B + 10 to B + 46; Earthlike's rocks': from 4500 and 4830)");
 						if (rowOf.ContainsKey(id) || !itemIds.Add(id)) found.Add($"{at}: id {id} is another block's or item's too");
 						if (Blocks.Get(id) is not { } game) { found.Add($"{at}: the game has no block {id}"); continue; }
 						if (BlockVal(typeof(BlockDef).GetField("T"), game) is var gp && gp != pics) found.Add($"{at} pictures: file {pics}; game {gp}");
@@ -927,9 +965,11 @@ public partial class Main
 			var defOf = new Dictionary<int, BlockDef>();
 			foreach (var (_, r, b) in defs) defOf.TryAdd(r.id, b);
 			var doorIds = new HashSet<int>(); var doorItems = new HashSet<int>();
-			for (int k = 0; k < d.DOORS.Length; k++)
+			var doorRows = d.DOORS.Concat(d.EARTH_DOORS ?? Array.Empty<DoorRow>()).ToArray();   // (then EARTH_DOORS')
+			for (int k = 0; k < doorRows.Length; k++)
 			{
-				var dr = d.DOORS[k]; string at = $"DOORS {k} ({dr.of}, item {dr.item})";
+				var dr = doorRows[k]; string at = $"{(k < d.DOORS.Length ? "DOORS" : "EARTH_DOORS")} {(k < d.DOORS.Length ? k : k - d.DOORS.Length)} ({dr.of}, item {dr.item})";
+				if (dr.earthlike != k >= d.DOORS.Length) found.Add($"{at}: earthlike is for every EARTH_DOORS row, and only theirs");
 				int of;
 				try { of = Blocks.KeyRef(keys, dr.of, at); }
 				catch (InvalidOperationException x) { found.Add(x.Message); continue; }
@@ -1018,12 +1058,12 @@ public partial class Main
 				if (Blocks.IsLeaves(id) != fd.Leaves) found.Add($"{at}: leaves in the game {Blocks.IsLeaves(id)}, in the file {fd.Leaves}");
 				if (Sound.MatOf(id) != (fd.Sound ?? "stone")) found.Add($"{at}: sounds like {Sound.MatOf(id)} in the game, {fd.Sound ?? "stone (left out)"} in the file");
 				if (string.Join(" ", Blocks.LooksOf(id)) is var gl && string.Join(" ", FileLooks(id)) is var fl && gl != fl) found.Add($"{at}: looks {gl} in the game, {fl} in the file");
-				if (fd.Inventory && fd.Snowed == 0 && (fd.Layer <= 1 || World.TallWorlds)) fileItems.Add(id);
+				if (fd.Inventory && fd.Snowed == 0 && (fd.Layer <= 1 || World.TallWorlds) && (WorldGen.EarthlikeReady || !fd.Earthlike)) fileItems.Add(id);
 			}
 			string Ids(IEnumerable<int> ids) => string.Join(", ", ids.Order());
 			if (Ids(Blocks.Items) is var gi && Ids(fileItems) is var fi && gi != fi)
 				found.Add($"Items: the game's are [{Ids(Blocks.Items.Except(fileItems))}] beyond the file's, the file's [{Ids(fileItems.Except(Blocks.Items))}] beyond the game's");
-			var fileCreative = fileItems.Concat(all.Where(x => x.r.item || x.r.shape == "torch" && x.r.wi == 0 && x.r.count == 1).Select(x => x.r.id)).ToHashSet();
+			var fileCreative = fileItems.Concat(all.Where(x => (x.r.item && (WorldGen.EarthlikeReady || !x.r.earthlike)) || x.r.shape == "torch" && x.r.wi == 0 && x.r.count == 1).Select(x => x.r.id)).ToHashSet();
 			if (Ids(AllCreative()) is var gc && Ids(fileCreative) is var fc && gc != fc)
 				found.Add($"the creative inventory: the game's has [{Ids(AllCreative().Except(fileCreative))}] beyond Items, the item rows and each kind of torch, which have [{Ids(fileCreative.Except(AllCreative()))}] beyond it");
 		}

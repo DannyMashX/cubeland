@@ -66,10 +66,16 @@ public partial class World
 	// 2 = the ores as common at every depth, and in every layer of stone (deep ores: "the ore spread"). 3 = the Trees and Leaves
 	// trees (Biomes worlds), without the ore spread; 4 = the trees and the ore spread; 5 and 6 = lands 3 and 4 with the Farming
 	// & animals update's world growth (so far: the staircases, Biomes worlds). Until that update is out, more can still be added
-	// to lands 5 and 6. LandVersion: the newest this code knows.
-	public const int LandVersion = 6;
+	// to lands 5 and 6. 7 and 8 = lands 5 and 6 with blobs of the new rocks in the Andesite (Earthly Extravaganza, every world type
+	// but Earthlike: WorldGen.RockBlobs). LandVersion: the newest this code knows.
+	public const int LandVersion = 8;
 	public static int ValidLand(int l) => Math.Clamp(l, 0, LandVersion);   // (a saved world keeps the land it was made with, up to the newest)
-	public static bool OreSpread(int land) => land == 2 || land == 4 || land == 6;   // (lands with the ore spread)
+	public static bool OreSpread(int land) => land == 2 || land == 4 || land == 6 || land == 8;   // (lands with the ore spread)
+	public static bool RockBlobs(int land) => land == 7 || land == 8;   // (lands with the rock blobs)
+	// The rock blobs (their pictures are in): new worlds are made with them (land 7, or 8). While RockBlobsReady was false they
+	// were made without (land 5, or 6), and --rockblobs turned them on for testing. The same as the web version.
+	public const bool RockBlobsReady = true;
+	public static readonly bool RockBlobsOn = RockBlobsReady || System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--rockblobs") >= 0;
 	public static bool NewTrees(int land) => land >= 3;                  // (lands with the Trees and Leaves trees)
 	public static bool Staircases(int land) => land >= 5;   // (lands with the staircases)
 	public static bool WildCrops(int land) => land >= 5;   // (Farming & animals: crops growing wild, and Dead Bushes, in Biomes worlds)
@@ -78,7 +84,7 @@ public partial class World
 	// (land 5 or 6) only once WorldGen.EerieReady. The same as the web version.
 	public const bool OreSpreadReady = false;
 	public static readonly bool OreSpreadOn = OreSpreadReady || System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--orespread") >= 0;
-	public static int NewLand => (OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0);
+	public static int NewLand => RockBlobsOn && WorldGen.EerieOn ? (OreSpreadOn ? 8 : 7) : (OreSpreadOn ? 4 : 3) + (WorldGen.EerieOn ? 2 : 0);
 
 	// height: 640 for tall worlds, 192 otherwise; size: how far across (see ValidSize); biomes: how big the biomes are
 	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1, int land = 0)
@@ -106,8 +112,18 @@ public partial class World
 			Godot.GD.Print($"STAIRS {Gen.StairSpots.Count} spots: " + string.Join(" ", Gen.StairSpots.FindAll(s => s.Placed).ConvertAll(s => $"{s.X},{s.Y},{s.Z},{s.Dir},{s.N},{s.Mat}")));
 		}
 		var packTime = System.Diagnostics.Stopwatch.StartNew();
-		Blocks.Load(Raw); Raw = null;
+		// (lands 7 and 8: the rock blobs go in as the world is packed, each chunk filling its own: WorldGen.RockBlobs)
+		var blobs = RockBlobs(Gen.Land) ? Gen.MakeBlobs() : null; long blobMs = packTime.ElapsedMilliseconds;
+		var raw = Raw; Blocks.Load(Raw, blobs == null ? null : (x0, y0, z0, over) => Gen.BlobsIn(blobs, raw, x0, y0, z0, over)); Raw = null;
 		foreach (var l in late) Blocks[l.i] = l.id;
+		if (blobs != null && System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--worldhash") >= 0)
+		{
+			long stone = 0; foreach (byte b in raw) if (b == Cubeland.Blocks.Stone) stone++;
+			long all = 0; foreach (var n in blobs.Made) all += n;
+			var parts = new List<string>();
+			for (int k = 0; k < WorldGen.BlobRockList.Length; k++) parts.Add($"{DataKeys.KeyOf(WorldGen.BlobRockList[k])} {blobs.Made[k]}");
+			Godot.GD.Print($"BLOBS {blobs.Count} blobs, {all} of {stone} Andesite ({100.0 * all / Math.Max(1, stone):0.0}%), the list in {blobMs} ms, packed with them in {packTime.ElapsedMilliseconds} ms: " + string.Join(", ", parts));
+		}
 		if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--worldhash") >= 0)   // (testing: how much the packed blocks take)
 		{
 			var (bytes, uniform) = Blocks.Usage();
@@ -521,8 +537,14 @@ public partial class World
 	// a vertical shape, or one loose piece) shares a group, 1-15, the lowest free in that space; spots saved before groups came
 	// in are group 0 (they keep the old rule: the same block's spots are one shape). Things never join together: two slabs
 	// stay a double slab, 8 pieces stay 8 pieces. Same numbers as the web version.
-	public const int GroupMul = 4096;
+	// GroupMul is 8192 (Earthlike's blocks go past 4096). Saves and welcomes from before held block + 4096 x group, and a save
+	// still does unless a piece's block is 4096 or more (then it says "pg": 8192): so a save that never needed it is byte for
+	// byte as before. SpotIn reads a spot packed either way; SpotOut packs one the old way.
+	public const int GroupMul = 8192, OldGroupMul = 4096;
 	public static int SpotBlock(int v) => v % GroupMul;
+	public static long SpotIn(long v, int pg) => pg == OldGroupMul && v > 0 ? v % OldGroupMul + GroupMul * (v / OldGroupMul) : v;
+	public static long SpotOut(int v) => SpotBlock(v) + (long)OldGroupMul * (v / GroupMul);
+	public static bool PiecesNeedWide(IEnumerable<int[]> spots) { foreach (var a in spots) foreach (int v in a) if (v != 0 && SpotBlock(v) >= OldGroupMul) return true; return false; }
 	static int FreeGroup(int[] a) { for (int g = 1; g <= 15; g++) if (Array.TrueForAll(a, v => v / GroupMul != g)) return g; return 15; }
 	public bool SetPiece(int x, int y, int z, int s, int id)
 	{

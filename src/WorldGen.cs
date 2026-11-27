@@ -59,6 +59,100 @@ public class WorldGen
 			fz);
 	}
 
+	// ---- rock blobs (lands 7 and 8: every world type but Earthlike; Geology Draft 2, section 5) ----
+	// Blobs of the new rocks inside the Andesite, put in as the grown world is packed into chunks (the one-byte world can't hold
+	// their ids): only Andesite (Stone, 3) in the grown world changes, so the ores, dirt, gravel, sand, water and caves stay
+	// exactly where they were (and the late list goes in after, as before). The blobs: the world is cut into 32 x 32 x 32
+	// regions (y, then z, then x, each from 0), each with BlobTries tries (k from 0); try k's numbers are
+	// h(n) = Hash3(region x, y, z, 13000 + 10 k + n):
+	//   n 7: under BlobChance, or no blob from this try;
+	//   n 0-2: the middle, the region's low corner + floor(h x 32) on each axis (x, y, z);
+	//   n 3-5: the half sizes: x 2 + 4 h (2-6), y 1.5 + 2.5 h (1.5-4), z 2 + 4 h;
+	//   n 6: the rock, floor(h x 4) in its band's list (BlobRocks); the band by the middle's height: from the sea level - 24 up:
+	//        the beds; under Lift + 24: the deep rocks; between: the middle rocks.
+	// A block is in a blob if q = (dx/ax)^2 + (dy/ay)^2 + (dz/az)^2 (dx etc. whole blocks from the middle) is under 0.7, or under
+	// 1.3 and under 0.7 + 0.6 x Noise3(x / 3, y / 3, z / 3, 13300) (the warp: one noise for every blob). A blob reaches
+	// ceil(1.15 x its half size) from its middle each way (so never past the regions next to its own). Where blobs overlap, the
+	// first in the order above wins. (A chunk works out its own blocks from the blobs that reach it, in that order, so the
+	// chunks can be packed side by side.)
+	public static readonly int[][] BlobRocks = {
+		new[] { 4400, 4401, 4402, 4406 },   // the beds: Limestone, Shale, Chalk, Slate
+		new[] { 4409, 4410, 4407, 4404 },   // the middle: Marble, Quartzite, Schist, Basalt
+		new[] { 4403, 4408, 4405, 4404 } }; // the deep rocks: Granite, Gneiss, Gabbro, Basalt
+	public static readonly int[] BlobRockList = { 4400, 4401, 4402, 4406, 4409, 4410, 4407, 4404, 4403, 4408, 4405 };
+	public static int BlobTries = 24; public static double BlobChance = 0.85;
+	public sealed class BlobSet
+	{
+		public int NRX, NRY, NRZ, Count;
+		public int[] First;   // each region's first blob (regions in order (ry * NRZ + rz) * NRX + rx); First[regions] = Count
+		public int[] X, Y, Z, EX, EY, EZ, Rock; public double[] AX, AY, AZ;
+		public long[] Made = new long[BlobRockList.Length];   // (how many blocks of each rock: for the test print)
+	}
+	public BlobSet MakeBlobs()
+	{
+		const int R = 32;
+		var s = new BlobSet { NRX = WX / R, NRY = WY / R, NRZ = WZ / R };
+		int nr = s.NRX * s.NRY * s.NRZ, cap = nr * BlobTries;
+		s.First = new int[nr + 1]; s.X = new int[cap]; s.Y = new int[cap]; s.Z = new int[cap]; s.EX = new int[cap]; s.EY = new int[cap]; s.EZ = new int[cap];
+		s.Rock = new int[cap]; s.AX = new double[cap]; s.AY = new double[cap]; s.AZ = new double[cap];
+		int n = 0;
+		for (int ry = 0; ry < s.NRY; ry++)
+			for (int rz = 0; rz < s.NRZ; rz++)
+				for (int rx = 0; rx < s.NRX; rx++)
+				{
+					s.First[(ry * s.NRZ + rz) * s.NRX + rx] = n;
+					for (int k = 0; k < BlobTries; k++)
+					{
+						int salt = 13000 + 10 * k;
+						if (Hash3(rx, ry, rz, salt + 7) >= BlobChance) continue;
+						s.X[n] = rx * R + (int)Math.Floor(Hash3(rx, ry, rz, salt) * R);
+						s.Y[n] = ry * R + (int)Math.Floor(Hash3(rx, ry, rz, salt + 1) * R);
+						s.Z[n] = rz * R + (int)Math.Floor(Hash3(rx, ry, rz, salt + 2) * R);
+						s.AX[n] = 2 + 4 * Hash3(rx, ry, rz, salt + 3); s.AY[n] = 1.5 + 2.5 * Hash3(rx, ry, rz, salt + 4); s.AZ[n] = 2 + 4 * Hash3(rx, ry, rz, salt + 5);
+						int band = s.Y[n] >= SeaLevel - 24 ? 0 : s.Y[n] < Lift + 24 ? 2 : 1;
+						s.Rock[n] = BlobRocks[band][(int)Math.Floor(Hash3(rx, ry, rz, salt + 6) * 4)];
+						s.EX[n] = (int)Math.Ceiling(1.15 * s.AX[n]); s.EY[n] = (int)Math.Ceiling(1.15 * s.AY[n]); s.EZ[n] = (int)Math.Ceiling(1.15 * s.AZ[n]);
+						n++;
+					}
+				}
+		s.First[nr] = s.Count = n;
+		return s;
+	}
+	// one chunk's blob blocks (its low corner x0, y0, z0; 16 each way) into over (index (ly << 8) | (lz << 4) | lx)
+	public void BlobsIn(BlobSet s, byte[] raw, int x0, int y0, int z0, int[] over)
+	{
+		const int R = 32; long[] made = new long[BlobRockList.Length];
+		int ry0 = Math.Max(0, (y0 - 8) / R), ry1 = Math.Min(s.NRY - 1, (y0 + 16 + 8) / R);
+		int rz0 = Math.Max(0, (z0 - 8) / R), rz1 = Math.Min(s.NRZ - 1, (z0 + 16 + 8) / R);
+		int rx0 = Math.Max(0, (x0 - 8) / R), rx1 = Math.Min(s.NRX - 1, (x0 + 16 + 8) / R);
+		for (int ry = ry0; ry <= ry1; ry++)
+			for (int rz = rz0; rz <= rz1; rz++)
+				for (int rx = rx0; rx <= rx1; rx++)
+				{
+					int r = (ry * s.NRZ + rz) * s.NRX + rx;
+					for (int n = s.First[r]; n < s.First[r + 1]; n++)
+					{
+						int cx = s.X[n], cy = s.Y[n], cz = s.Z[n];
+						int ya = Math.Max(Math.Max(1, cy - s.EY[n]), y0), yb = Math.Min(Math.Min(WY - 1, cy + s.EY[n]), y0 + 15);
+						int za = Math.Max(Math.Max(0, cz - s.EZ[n]), z0), zb = Math.Min(Math.Min(WZ - 1, cz + s.EZ[n]), z0 + 15);
+						int xa = Math.Max(Math.Max(0, cx - s.EX[n]), x0), xb = Math.Min(Math.Min(WX - 1, cx + s.EX[n]), x0 + 15);
+						if (ya > yb || za > zb || xa > xb) continue;
+						double ax = s.AX[n], ay = s.AY[n], az = s.AZ[n]; int rock = s.Rock[n];
+						for (int y = ya; y <= yb; y++)
+							for (int z = za; z <= zb; z++)
+								for (int x = xa; x <= xb; x++)
+								{
+									int l = ((y - y0) << 8) | ((z - z0) << 4) | (x - x0);
+									if (over[l] != 0 || raw[Idx(x, y, z)] != Blocks.Stone) continue;   // (an earlier blob's, or not Andesite)
+									double dx = (x - cx) / ax, dy = (y - cy) / ay, dz = (z - cz) / az, q = dx * dx + dy * dy + dz * dz;
+									if (q >= 1.3 || q >= 0.7 && q >= 0.7 + 0.6 * Noise3(x / 3.0, y / 3.0, z / 3.0, 13300)) continue;
+									over[l] = rock; made[Array.IndexOf(BlobRockList, rock)]++;
+								}
+					}
+				}
+		for (int k = 0; k < made.Length; k++) if (made[k] != 0) System.Threading.Interlocked.Add(ref s.Made[k], made[k]);
+	}
+
 	byte[] world => W.Raw;   // (the world grows one byte per block; World packs it into chunks afterwards)
 	static int Idx(int x, int y, int z) => (int)World.Idx(x, y, z);   // (gens 1 to 3 grow a whole world at once, one byte a block: never past an int)
 	static int WX => World.WX; static int WZ => World.WZ;
@@ -169,7 +263,7 @@ public class WorldGen
 	// don't run. It must match EERIE_READY in the web game's index.html. (Test: `--eerieon` turns it on anyway.)
 	public const bool EerieReady = true;
 	public static readonly bool EerieOn = EerieReady || Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--eerieon") >= 0;
-	// Realistic worlds ("Earthlike", world type 4, from land 7) are held back for Beta 0.2.0.0: while EarthlikeReady is false none
+	// Realistic worlds ("Earthlike", world type 4, land 9) are held back for Earthly Extravaganza: while EarthlikeReady is false none
 	// can be made, and everything built for them stays off. It must match EARTHLIKE_READY in the web game. (Test: `--earthlike`
 	// turns it on anyway.) The other world types never read it: they grow exactly the same land with it on or off.
 	public const bool EarthlikeReady = false;
