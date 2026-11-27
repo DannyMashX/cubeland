@@ -39,6 +39,7 @@ public static class Atlas
 	static readonly int[] SawFrames = { Tile("cutter_saw_frame_0"), Tile("cutter_saw_1") };
 	public static Image Image;          // TILE*NT x TILE, the plain strip (used to draw icons)
 	public static ImageTexture Texture; // the padded GPU copy, used by the world's blocks
+	public static int[] RiverTiles;     // (since Beta 0.1.6.0) a running river's top by pace (gentle, quick, rapids), then falling water
 
 	// The GPU atlas is a grid, Cols pictures across (a single strip got too wide for graphics cards once the cut-shape
 	// pictures came in). The plain Image used for icons is still one strip.
@@ -139,6 +140,7 @@ public static class Atlas
 				img.Convert(Image.Format.Rgba8);
 				files[name] = img;
 			}
+		RiverTiles = Tiles("river_calm", "river_quick", "river_rapids", "river_falling");   // (moving river water: ChunkMesher.AddWater)
 		Image = Image.CreateEmpty(TILE * NT, TILE, false, Image.Format.Rgba8);
 		for (int t = 0; t < NT; t++)
 		{

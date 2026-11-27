@@ -274,7 +274,7 @@ public partial class Main
 		var name = new LineEdit { PlaceholderText = "Name", MaxLength = 32, CustomMinimumSize = new Vector2(150, 34) };
 		var seed = new LineEdit { PlaceholderText = "Seed (blank = random)", MaxLength = 24, CustomMinimumSize = new Vector2(170, 34) };
 		var gen = new OptionButton { TooltipText = "Terrain style" }; gen.AddItem("Biomes", 3); gen.AddItem("Rolling hills", 2); gen.AddItem("Plateaus", 1);
-		if (WorldGen.EarthlikeOn) gen.AddItem("Earthlike (preview)", 4);
+		if (WorldGen.EarthlikeOn) gen.AddItem("Earthlike", 4);
 		var mode = new OptionButton { TooltipText = "Game mode" }; mode.AddItem("Creative"); mode.AddItem("Survival");
 		row.AddChild(name); row.AddChild(seed); row.AddChild(gen); row.AddChild(mode);
 		// how big the world is, and (Biomes worlds) how big its biomes are
@@ -291,13 +291,11 @@ public partial class Main
 		var size = NewSlider("World size", World.MinSize, World.MaxSize, World.SizeStep, World.DefaultSize, x => $"{(int)x} x {(int)x}");
 		var biomes = NewSlider("Biome size", World.MinBiomes, World.MaxBiomes, 0.25, 1, x => x == 1 ? "Normal" : $"x{x:0.##}");
 		biomes.TooltipText = "How big the biomes are (Biomes worlds)";
-		// (Earthlike: 1024 or 2048 across, no biome size, and the preview's warning)
-		var preview = Text("Playable early: Earthlike worlds are still being built, so yours may change or break in later updates.", 14);
-		preview.Visible = false; b.AddChild(preview);
+		// (Earthlike: 1024 or 2048 across, no biome size)
 		gen.ItemSelected += _ =>
 		{
 			bool earth = gen.GetSelectedId() == 4;
-			biomes.Editable = gen.GetSelectedId() == 3; preview.Visible = earth;
+			biomes.Editable = gen.GetSelectedId() == 3;
 			size.MinValue = earth ? 1024 : World.MinSize; size.Step = earth ? 1024 : World.SizeStep; size.Value = earth ? 2048 : World.DefaultSize;
 		};
 		row.AddChild(Btn("Create & play", () =>
@@ -318,7 +316,7 @@ public partial class Main
 			var info = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 			info.AddChild(Text(w.Name + (w.Id == current?.Id ? "  (open now)" : ""), 16));
 			string played = DateTimeOffset.FromUnixTimeMilliseconds(w.Played).ToLocalTime().ToString("g");
-			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 4 ? "Earthlike (preview)" : w.Gen == 3 ? "Biomes" : w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {(w.Gen == 4 ? w.S : World.ValidSize(w.S, w.H))} wide{(w.Gen == 3 && w.B != 1 ? $" · Biomes x{w.B}" : "")} · {(w.H == 640 ? 640 : 192)} tall · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
+			info.AddChild(Text($"Last played {played} · Seed {w.Seed} · {(w.Gen == 4 ? "Earthlike" : w.Gen == 3 ? "Biomes" : w.Gen == 2 ? "Rolling hills" : "Plateaus")} · {(w.Gen == 4 ? w.S : World.ValidSize(w.S, w.H))} wide{(w.Gen == 3 && w.B != 1 ? $" · Biomes x{w.B}" : "")} · {(w.H == 640 ? 640 : 192)} tall · {(w.Survival ? "Survival" : "Creative")}{(w.Ver != null ? " · v" + w.Ver : "")}", 12, 0.7f));
 			row.AddChild(info);
 			var id = w.Id;
 			row.AddChild(Btn("Play", () =>

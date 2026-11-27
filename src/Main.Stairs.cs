@@ -101,7 +101,8 @@ public partial class Main
 		int lx = Mathf.FloorToInt(lies.X), ly = Mathf.FloorToInt(lies.Y), lz = Mathf.FloorToInt(lies.Z);
 		Check($"  (on dry ground, and it stays: at {lies.X:0},{lies.Y:0},{lies.Z:0})", (world.GetBlock(lx, ly, lz) == 0 || world.Lazy && EarthRoomAt(lx, ly, lz)) && world.Solid(lx, ly - 1, lz) && !Blocks.IsWater(world.GetBlock(lx, ly - 1, lz)));
 		int extra0 = extraStairs.Count;
-		StairEvent(2, s); stairSearch?.Wait(); StairSearchDone();   // (gen 4: its new spot looked for away from the game)
+		StairEvent(2, s);   // (gen 4: its new spot looked for away from the game, looking again if need be)
+		while (stairSearch != null) { try { stairSearch.Wait(); } catch (AggregateException) { } StairSearchDone(); }
 		Check("the staircase is gone", !StairStanding(s) && world.GetBlock(x, y, z) == 0);
 		Check("and stands somewhere else", StairList.Count(StairStanding) == standing && (!world.Lazy || extraStairs.Count == extra0 + 1 && StairStanding(extraStairs[^1])));   // (gen 4: a new one, built)
 	}
@@ -217,24 +218,44 @@ public partial class Main
 	// (EarthCol.StairElsewhere: as the world's staircases are found, on the land drawn bare; never near a chunk with changes now);
 	// then, once found, its land grown and the staircase built there if it still fits (plants and snow in its way go)
 	System.Threading.Tasks.Task<int[]> stairSearch;
+	// (since Beta 0.1.6.0: no spot found, or the one found no longer fits once its land has grown, it looks again with a new
+	// seed and that spot's chunk avoided, up to 3 searches in all, so a moved staircase stands up again somewhere)
+	int stairSearchesLeft, stairFromX, stairFromZ; HashSet<int> stairAvoid;
 	void EarthStairElsewhere(WorldGen.StairSpot s, HashSet<int> changed)
 	{
 		if (stairSearch != null) return;
-		int sx = s.X, sz = s.Z, seed = rnd.Next();
-		var avoid = new HashSet<int>(changed);   // (and never within 2 chunks of a staircase the world already has)
-		foreach (var o in StairList) avoid.Add((o.Z / World.CS) * (World.WX / World.CS) + o.X / World.CS);
-		stairSearch = System.Threading.Tasks.Task.Run(() => { var d = Drawer(); try { return d.StairElsewhere(sx, sz, avoid, seed); } finally { drawers.Add(d); } });
+		stairAvoid = new HashSet<int>(changed);   // (and never within 2 chunks of a staircase the world already has)
+		foreach (var o in StairList) stairAvoid.Add((o.Z / World.CS) * (World.WX / World.CS) + o.X / World.CS);
+		stairFromX = s.X; stairFromZ = s.Z; stairSearchesLeft = 3;
+		StartStairSearch();
+	}
+	void StartStairSearch()
+	{
+		int sx = stairFromX, sz = stairFromZ, seed = rnd.Next(); var avoid = new HashSet<int>(stairAvoid);
+		stairSearchesLeft--;
+		bool miss = stairSearchesLeft == 2 && TestRun && OS.GetCmdlineUserArgs().Contains("--stairmiss");   // (test: the first finds nothing)
+		stairSearch = System.Threading.Tasks.Task.Run(() => { var d = Drawer(); try { return miss ? null : d.StairElsewhere(sx, sz, avoid, seed); } finally { drawers.Add(d); } });
 	}
 	void StairSearchDone()
 	{
 		if (stairSearch == null || !stairSearch.IsCompleted) return;
-		var st = stairSearch.IsCompletedSuccessfully ? stairSearch.Result : null; stairSearch = null;
-		if (TestRun) GD.Print($"STAIRMOVE {(st == null ? "none" : string.Join(",", st))}");
-		if (st == null || world == null) return;
+		var st = stairSearch.IsCompletedSuccessfully ? stairSearch.Result : null;
+		if (TestRun && stairSearch.IsFaulted) GD.Print($"STAIRMOVE search failed: {stairSearch.Exception?.InnerException?.Message}");
+		stairSearch = null;
+		if (TestRun) GD.Print($"STAIRMOVE {(st == null ? "none" : string.Join(",", st))}{(st == null && stairSearchesLeft > 0 ? " (looking again)" : "")}");
+		if (world == null) return;
+		if (st == null) { if (stairSearchesLeft > 0) StartStairSearch(); return; }
 		var o = new WorldGen.StairSpot { X = st[0], Y = st[1], Z = st[2], Dir = st[3], N = st[4], Mat = st[5], Placed = true };
 		GrowNow(o.X >> 4, o.Z >> 4, 1);
 		bool Clears(int b) => Blocks.IsSnow(b) || Blocks.Get(b)?.Shape is "plant" or "flat";
-		if (!WorldGen.StairFits(o, EarthStairGround, (x, y, z) => world.GetBlock(x, y, z) is var b && Clears(b) ? 0 : b, EarthCol.StairTop)) return;
+		bool misfit = stairSearchesLeft == 2 && TestRun && OS.GetCmdlineUserArgs().Contains("--stairmisfit");   // (test: the first spot doesn't fit)
+		if (misfit || !WorldGen.StairFits(o, EarthStairGround, (x, y, z) => world.GetBlock(x, y, z) is var b && Clears(b) ? 0 : b, EarthCol.StairTop))
+		{
+			if (TestRun) GD.Print($"STAIRMOVE it doesn't fit there now{(stairSearchesLeft > 0 ? " (looking again)" : "")}");
+			stairAvoid?.Add((o.Z / World.CS) * (World.WX / World.CS) + o.X / World.CS);
+			if (stairSearchesLeft > 0) StartStairSearch();
+			return;
+		}
 		var d = WorldGen.StairDirs[o.Dir];
 		for (int k = 0; k < o.N; k++)
 		{   // (the plants and snow in its way go first)

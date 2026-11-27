@@ -1,13 +1,17 @@
 # Takes the main menu's panorama: six pictures (panorama\0.jpg .. 5.jpg, a cube around one spot) that the main menu
 # slowly turns through, in both the desktop and web versions. Take a new one for each update, somewhere that shows off
-# what the update adds. It uses the desktop version (Godot) to grow a fresh Biomes world and take the pictures.
+# what the update adds. It uses the desktop version (Godot) to grow a fresh Biomes world (or, with -Earth, an Earthlike one)
+# and take the pictures.
 #
 #   .\make-panorama.ps1 -Seed pumpkin -At 503.5,80,170.5
+#   .\make-panorama.ps1 -Earth -Size 1024 -Seed 777 -At 515.5,400,513.5
 #
 #   -Seed   the world's seed, as you'd type it when making a world (text or a number)
 #   -At     where the camera stands: x,y,z (pick y a little above the ground, so you can see out over things)
 #   -Time   the time of day (0.3 = morning sun, 0.5 = noon)
-#   -Small  grow a 640 x 640 world instead of a 1280 x 1280 one
+#   -Small  grow a 640 x 640 world instead of a 1280 x 1280 one (Biomes)
+#   -Earth  an Earthlike world instead (its sea is at y 320), -Size 1024 or 2048 across (2048 if left out)
+#   -Stay   how many seconds to let the land grow first (8; 30 for Earthlike, whose land grows round the camera)
 #   -Godot  the Godot console .exe (found by itself if it's in your user folder's Tools\godot)
 # The old pictures are replaced. Open the game afterwards to see the new panorama behind the main menu.
 param(
@@ -15,6 +19,9 @@ param(
   [Parameter(Mandatory = $true)][string[]]$At,
   [double]$Time = 0.3,
   [switch]$Small,
+  [switch]$Earth,
+  [int]$Size = 2048,
+  [int]$Stay = 0,
   [string]$Godot
 )
 $ErrorActionPreference = 'Stop'
@@ -41,8 +48,10 @@ New-Item -ItemType Directory -Force $tmp | Out-Null
 $oldAppData = $env:APPDATA; $env:APPDATA = $tmp
 $culture = [Globalization.CultureInfo]::InvariantCulture
 $out = Join-Path $root 'panorama'
-$args2 = @('--path', $root, '--', "--seed=$n", '--biomes', '--play', "--at=$At,0,0", "--time=$($Time.ToString($culture))", '--stay=8', "--shot=$tmp\shot.png", "--panorama=$out")
-if ($Small) { $args2 += '--small' }
+if ($Stay -le 0) { $Stay = if ($Earth) { 30 } else { 8 } }
+$kind = if ($Earth) { @('--earth', "--size=$Size") } else { @('--biomes') }
+$args2 = @('--path', $root, '--', "--seed=$n") + $kind + @('--play', "--at=$At,0,0", "--time=$($Time.ToString($culture))", "--stay=$Stay", "--shot=$tmp\shot.png", "--panorama=$out")
+if ($Small -and -not $Earth) { $args2 += '--small' }
 try { $log = & $Godot @args2 2>&1 | Out-String } finally { $env:APPDATA = $oldAppData }
 if ($log -notmatch 'panorama saved') { Write-Host $log; throw 'The panorama was not taken (see above).' }
 

@@ -16,6 +16,10 @@ varying float v_torch;
 varying float v_sky;
 varying float v_depth;
 varying vec3 v_eye;
+// (since Beta 0.1.6.0, moving river water: where this pixel is in its picture, in blocks, and how fast the picture slides,
+// blocks a second along its columns and rows; 0, 0 = an ordinary water face, drawn as before)
+varying vec2 v_at;
+varying flat vec2 v_slide;
 
 void vertex() {
 	v_torch = UV2.x;
@@ -23,10 +27,21 @@ void vertex() {
 	VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_depth = -VERTEX.z;
 	v_eye = VERTEX;
+	v_at = CUSTOM0.xy;
+	v_slide = CUSTOM0.zw;
 }
 
 void fragment() {
-	vec4 t = texture(atlas, UV);
+	vec4 t;
+	if (v_slide.x != 0.0 || v_slide.y != 0.0) {
+		// a whole pixel at a time (1/16 of a block), wrapped inside the picture's own 16 x 16 place in the atlas, nearest pixel
+		vec2 moved = floor(TIME * v_slide * 16.0) / 16.0;
+		ivec2 px = ivec2(floor(fract(v_at - moved) * 16.0));
+		ivec2 corner = ivec2(floor(UV * vec2(textureSize(atlas, 0)) + 0.5));
+		t = texelFetch(atlas, corner + clamp(px, ivec2(0), ivec2(15)), 0);
+	} else {
+		t = texture(atlas, UV);
+	}
 	float held = held_light > 0.0 ? min(1.2, pow(max(0.0, held_light - length(v_eye)) / 14.0, 1.4)) : 0.0;
 	vec3 c = t.rgb * COLOR.rgb * max(day_tint * v_sky, max(v_torch, held) * torch_color);
 	float haze = (1.0 - exp(-fog_thickness * v_depth)) * fog_max;

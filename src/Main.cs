@@ -113,6 +113,40 @@ public partial class Main : Node3D
 				foreach (var (acx, acz) in lifeCols) foreach (int v in cols.Draw(acx, acz)) if (v > 0 && Life(v)) lc[v] = lc.GetValueOrDefault(v) + 1;
 				GD.Print("LIFECOUNT " + (lc.Count == 0 ? "none" : string.Join(" ", lc.Select(kv => $"{kv.Key}:{kv.Value}"))));
 			}
+			if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--startsurvey=")) is { } sva)
+			{   // (test: the ground's top blocks round the start, dry or under up to 3 of water, and the nearest of each kind)
+				int R = int.Parse(sva[14..]); var (ssx, ssz) = EarthSpawn(plan);
+				var tops = new System.Collections.Generic.SortedDictionary<int, int>(); var near = new System.Collections.Generic.Dictionary<string, double>(); var nearAt = new System.Collections.Generic.Dictionary<string, (int, int, int)>();
+				string Kind(int v) => v == 11 || v >= 5030 && v <= 5051 ? "gravel" : v == 63 ? "clay" : v == 3928 ? "cracked_clay" : v == 4805 || v == 4815 ? "clay_soil"
+					: v == 6 ? "sand" : Cubeland.Blocks.Get(v)?.Needs == "pickaxe" ? "rock" : null;
+				for (int acz = (ssz >> 4) - R; acz <= (ssz >> 4) + R; acz++) for (int acx = (ssx >> 4) - R; acx <= (ssx >> 4) + R; acx++)
+				{
+					if (acx < 0 || acz < 0 || acx >= ncx || acz >= ncx) continue;
+					var c = cols.Draw(acx, acz);
+					for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++)
+					{
+						int wet = 0, top = 0;
+						for (int y = cols.H - 1; y >= 0; y--)
+						{
+							int v = c[EarthCol.At(x, y, z)]; if (v == 0) continue; var b = Cubeland.Blocks.Get(v);
+							if (Cubeland.Blocks.IsWater(v))
+							{   // (and the nearest falling water and rapids, for pictures)
+								string wk = v == Cubeland.Blocks.FallingWater ? "falling" : v >= 3907 && v <= 3914 ? "rapids" : v >= 3899 && v <= 3906 ? "quick" : null;
+								if (wk != null && wet == 0) { double dx = acx * 16 + x - ssx, dz = acz * 16 + z - ssz, d = Math.Sqrt(dx * dx + dz * dz); if (!near.TryGetValue(wk, out var o) || d < o) { near[wk] = d; nearAt[wk] = (acx * 16 + x, y, acz * 16 + z); } }
+								wet++; continue;
+							}
+							if (b == null || b.NoCollide || b.Leaves || b.Log || Cubeland.Blocks.IsSnow(v)) continue;
+							top = v; break;
+						}
+						if (top == 0 || wet > 3) continue;
+						tops[top] = tops.GetValueOrDefault(top) + 1;
+						if (Kind(top) is { } k) { double dx = acx * 16 + x - ssx, dz = acz * 16 + z - ssz, d = Math.Sqrt(dx * dx + dz * dz); if (!near.TryGetValue(k, out var o) || d < o) near[k] = d; }
+					}
+				}
+				GD.Print($"STARTSURVEY within {R} chunks of {ssx},{ssz}: " + string.Join(" ", tops.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}:{kv.Value}")));
+				foreach (var wk in new[] { "falling", "rapids", "quick" }) if (nearAt.TryGetValue(wk, out var wat)) GD.Print($"STARTWATER {wk} at {wat.Item1},{wat.Item2},{wat.Item3}");
+				GD.Print("STARTNEAR " + string.Join(" ", new[] { "gravel", "clay", "cracked_clay", "clay_soil", "sand", "rock", "falling", "rapids", "quick" }.Select(k => $"{k}:{(near.TryGetValue(k, out var d) ? d.ToString("0") : "none")}")));
+			}
 			GD.Print($"COLHASH {h:x8} (seed {st}, {plan.Size} wide, {cols.H} tall; plan {planMs} ms, {sw.ElapsedMilliseconds / 25.0:0} ms a column; PLANHASH {plan.PlanHash:x8} KEEPHASH {plan.KeepHash:x8})");
 			// (and SPAWNHASH: the same over the 3 x 3 columns round where a new world's players start, Main.EarthSpawn, its column
 			// in the middle, rows of z then x)
@@ -941,8 +975,10 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			}
 			else
 			{
-				int top = world.Heights[z * World.WX + x];
-				GD.Print((world.GetBlock(x, top, z) == 12 ? "PASS" : "FAIL") + " tower came back");
+				// (the tower from the saved edits: an Earthlike world's start can land on top of it, which moves x)
+				var tower = world.Edits.Where(e => e.Value == 12).Select(e => World.FromIdx(e.Key)).ToList();
+				bool towerBack = tower.Count == 4 && tower.All(t => t.x == tower[0].x && t.z == tower[0].z && world.GetBlock(t.x, t.y, t.z) == 12);
+				GD.Print((towerBack ? "PASS" : "FAIL") + " tower came back");
 				GD.Print((world.PieceMap.Count > 0 ? "PASS" : "FAIL") + " piece came back");
 				GD.Print((MathF.Abs(sky.TimeOfDay - 0.3f) < 0.01f ? "PASS" : "FAIL") + " time of day came back");
 				GD.Print((MathF.Abs(player.Yaw - 1.0f) < 0.01f ? "PASS" : "FAIL") + " where you look came back");
@@ -1311,6 +1347,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			Check("the river itself never changes on its own (the trough is still all its water)", Enumerable.Range(1, 58).All(k => world.GetBlock(x0 + k, y0 + 1, z0) == R + 2 && world.GetBlock(x0 + k, y0 + 2, z0 - 2) == R + 2));
 			player.Pos = new Vector3(x0 + 30.5f, y0 + 9, z0 - 10.5f); player.Vel = Vector3.Zero;
 		}
+		if (args.Contains("--earthrecipes") && !earthRecipesTested && !menuOpen && shotTimer > 0.3f) EarthRecipeTest();   // (test, Beta 0.1.6.0: Main.Recipes.cs)
 		if (args.Contains("--earthlife") && !earthLifeTested && !menuOpen && shotTimer > 0.3f)
 		{   // (test, Beta 0.1.5.5: animals in an Earthlike world)
 			earthLifeTested = true;

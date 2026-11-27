@@ -577,7 +577,6 @@
       <label>World size <input type="range" id="new-size" min="256" max="2048" step="128" value="1280"><b id="new-size-v"></b></label>
       <label title="How big the biomes are (Biomes worlds)">Biome size <input type="range" id="new-biomes" min="0.5" max="4" step="0.25" value="1"><b id="new-biomes-v"></b></label>
     </div>
-    <div id="new-earth-note" style="font-size: var(--f1); margin-top: 8px" hidden>Playable early: Earthlike worlds are still being built, so yours may change or break in later updates.</div>
     <div class="bottom"><button id="worlds-import" title="Add a world from a .cubeland file">Import world</button><button id="worlds-close">Back</button></div>
   </div>
 </div>
@@ -605,7 +604,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.5.5"></script>
+<script src="textures.js?v=beta-0.1.6.0"></script>
 <!-- Earthlike worlds: the plan and the land drawing (the desktop version's C#, translated), run in a Worker (see Earthlike worlds) -->
 <script type="text/plain" id="earth-src">
 // (made by cs2js.py from the desktop plan code: do not edit by hand; fixes go in the translator or the overrides)
@@ -6059,7 +6058,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.5.5';
+const GAME_VERSION = 'Beta 0.1.6.0';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -6120,12 +6119,12 @@ const validBiomes = b => typeof b === "number" && b >= BIOMES_MIN && b <= BIOMES
 // knows (so a world made while testing, or one from a later version, is never grown differently). Both switches must match the
 // desktop version's (OreSpreadReady, EerieReady). (Test: ?orespread in the address gives new worlds the ore spread, ?eerieon the
 // staircases; ?eerieon also turns on the rare events, see Rare events.)
-const LAND_KNOWN = 9;   // (9: Earthlike worlds' land, gen 4 only: see EARTH_LAND)
+const LAND_KNOWN = 9;   // (9: Earthlike worlds' land, gen 4 only: see EARTH_LAND. Out for good from Beta 0.1.6.0, so what it grows must never change)
 const ORE_SPREAD_READY = false;
 const EERIE_READY = true;
 const EERIE_ON = EERIE_READY || /[?&]eerieon\b/.test(location.search);
-// Earthly Extravaganza: with EARTHLIKE_READY true (from Beta 0.1.5.3), Earthlike worlds can be made, as a preview ("Earthlike
-// (preview)" in the new-world menu, with its warning: they may change in later versions), and their blocks (earthlike in
+// Earthly Extravaganza: with EARTHLIKE_READY true (from Beta 0.1.5.3), Earthlike worlds can be made ("Earthlike" in the
+// new-world menu; a preview, which might still change, until Beta 0.1.6.0, when land 9 was frozen), and their blocks (earthlike in
 // data/blocks.json) are shown. (While it was false there were none, the blocks stayed hidden, and ?earthlike turned them on for
 // testing.) It must match the desktop version's (EarthlikeReady).
 const EARTHLIKE_READY = true;
@@ -6870,6 +6869,14 @@ addBlockRows(formRows(BLOCK_DATA.FORMS));   // (every piece, slab, stairs... ite
 const RIVER_WATER = 3891;   // (+ 8 x pace + flow: data/blocks.json RIVER_WATER)
 const RIVER_FALLING = 3915;   // (falling water: flow 8, pace 2)
 const isRiver = id => id >= RIVER_WATER && id <= RIVER_FALLING;   // a river's running water, or falling water (Earthlike)
+// (Beta 0.1.6.0) moving river tops: a running river's top shows its pace's picture (river_calm, river_quick, river_rapids) and
+// falling water's sides and top show river_falling, each slid along as the water runs: a top along its current (the 8 ways; a
+// diagonal slides along both at once, nothing is drawn turned), falling water down (its top, along its picture's up and down).
+// One seamless picture each, slid a whole pixel at a time by the water's own shader (see addWater, slideRivers and waterMat).
+// Still water, lakes, the sea, the river mouths and a running river's sides and bottom keep the water picture.
+const RIVER_TOP_TILES = [tile('river_calm'), tile('river_quick'), tile('river_rapids')], RIVER_FALL_TILE = tile('river_falling');
+const RIVER_SLIDE = 1;          // (how fast a top's picture slides, as a share of its current's speed, RIVER_SPEED)
+const RIVER_FALL_SLIDE = 3.0;   // (falling water's: blocks a second, down)
 // (Beta 0.1.5.4) a river's current: how fast it runs (blocks a second, by pace: gentle, quick, rapids) and which way (flow 0-7:
 // E, SE, S, SW, W, NW, N, NE; E = +x, S = +z). The same as the desktop version's
 const RIVER_SPEED = [0.75, 1.75, 3.0], RIVER_WAYS = [[1, 0], [Math.SQRT1_2, Math.SQRT1_2], [0, 1], [-Math.SQRT1_2, Math.SQRT1_2],
@@ -8784,7 +8791,39 @@ const groupsDirty = new Set();                                // groups to glue 
 // water is drawn after the solid blocks, see-through (using the texture's own transparency), and from both sides
 // so the surface still shows when you look up at it from underwater
 const waterMat = new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-waterMat.onBeforeCompile = material.onBeforeCompile;
+// (Beta 0.1.6.0) moving river tops: each slide's offset now, in pictures (0-1, a whole pixel at a time; see slideRivers), and
+// one picture's size in the atlas
+const RIVER_OFF = { value: Array.from({ length: 26 }, () => new THREE.Vector2()) };
+const RIVER_PIC = { value: new THREE.Vector2(TILE / (PW * ATLAS_COLS), TILE / (PW * ATLAS_ROWS)) };
+waterMat.onBeforeCompile = shader => {
+  material.onBeforeCompile(shader);
+  shader.uniforms.riverOff = RIVER_OFF;
+  shader.uniforms.riverPic = RIVER_PIC;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec3 slide;\nuniform vec2 riverOff[26];\nvarying vec4 vSlide;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nint rk = int(slide.z + 0.5);\nvSlide = rk > 0 ? vec4(slide.xy, riverOff[rk]) : vec4(-1.0);');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec4 vSlide;\nuniform vec2 riverPic;')
+    .replace('#include <map_fragment>', `
+      #ifdef USE_MAP
+        vec2 mapUv = vSlide.x >= 0.0 ? vSlide.xy + fract((vUv - vSlide.xy) / riverPic - vSlide.zw) * riverPic : vUv;
+        vec4 texelColor = texture2D(map, mapUv);
+        texelColor = mapTexelToLinear(texelColor);
+        diffuseColor *= texelColor;
+      #endif`);
+};
+// how far each slide has got: a running top's picture moves along its current (atlas u runs along -x on a top, v along +z),
+// falling water's down; whole pixels only
+let riverClock = 0;
+const pixelFrac = a => Math.floor((a - Math.floor(a)) * TILE) / TILE;
+function slideRivers(dt) {
+  riverClock += dt;
+  for (let pace = 0; pace < 3; pace++) for (let w = 0; w < 8; w++) {
+    const s = RIVER_SPEED[pace] * RIVER_SLIDE * riverClock, d = RIVER_WAYS[w];
+    RIVER_OFF.value[1 + pace * 8 + w].set(pixelFrac(-d[0] * s), pixelFrac(d[1] * s));
+  }
+  RIVER_OFF.value[25].set(0, pixelFrac(-RIVER_FALL_SLIDE * riverClock));
+}
 // Highest y that holds a block in each 16x16 column of chunks, so meshing skips the empty sky.
 // Measured after everything (including trees that spill into neighbouring chunks) is placed.
 if (!EARTH) recomputeHeights();
@@ -9216,7 +9255,7 @@ function buildChunk(cx, cy, cz) {
   const tn = [], tints = new Map();   // grass and leaves: how far the biome colour at each corner is from as-drawn (see grassTint)
   const tintAt = (x, z) => { const k = x * 65536 + z; let t = tints.get(k); if (!t) tints.set(k, t = grassTint(x, z)); return t; };
   const tint = { tn, at: tintAt };   // (for pieces of grass and leaves)
-  const wpos = [], wuv = [], wcol = [], wind = [], wlt = [], wsk = [];   // water goes in its own see-through mesh
+  const wpos = [], wuv = [], wcol = [], wind = [], wlt = [], wsk = [], wsl = [];   // water goes in its own see-through mesh (wsl: how its pictures slide)
   const p = [0, 0, 0], ao = [0, 0, 0, 0];
   const y0 = cy * CS, top = Math.min(y0 + CS, chunkTopAt(cx, cz));   // (nothing above the column's highest block)
   const anyLight = lightMap.size > 0;
@@ -9250,7 +9289,7 @@ function buildChunk(cx, cy, cz) {
     if (b.shape === 'fence') { addFence(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight ? LIGHT_CURVE(lightAt(x, y, z)) : 0, skyExposure(x, y, z, skyCache)); continue; }
     if (b.shape === 'flat') { addFlat(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
     if (b.shape === 'plant') { addPlant(x, y, z, b, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }
-    if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache); continue; }
+    if (b.liquid) { addWater(x, y, z, id, wpos, wuv, wcol, wlt, wsk, wind, anyLight, skyCache, wsl); continue; }
     if (id === PIECES) { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, undefined, tint); continue; }
     if (b.shape === 'half') { addPieces(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache, [id, id, 0, 0, id, id, 0, 0], tint); if (id === CUTTER) addSaw(x, y, z, pos, uv, col, lt, sk, ind, anyLight, skyCache); continue; }   // (drawn as its 4 bottom pieces, and the Cutter's saw blade on top)
     const h = b.shape === 'snow' ? b.layers / 8 : 1, ax = b.axis || 0;   // (snow: only as deep as its layers; a lying log: which way)
@@ -9300,9 +9339,9 @@ function buildChunk(cx, cy, cz) {
   }
   const k = chunkKey(cx, cy, cz);
   if (tn.length) while (tn.length < pos.length) tn.push(0);
-  const pack = (pos, uv, col, lt, sk, ind, tn) => ind.length ? { pos: new Float32Array(pos), uv: new Float32Array(uv), col: new Float32Array(col), lt: new Float32Array(lt), sk: new Float32Array(sk), ind: new Uint32Array(ind), tn: tn && tn.length ? new Float32Array(tn) : null } : null;
+  const pack = (pos, uv, col, lt, sk, ind, tn, sl) => ind.length ? { pos: new Float32Array(pos), uv: new Float32Array(uv), col: new Float32Array(col), lt: new Float32Array(lt), sk: new Float32Array(sk), ind: new Uint32Array(ind), tn: tn && tn.length ? new Float32Array(tn) : null, sl: sl && sl.some(Boolean) ? new Float32Array(sl) : null } : null;
   setChunkBuilt(k);
-  setChunkParts(k, ind.length || wind.length ? [pack(pos, uv, col, lt, sk, ind, tn), pack(wpos, wuv, wcol, wlt, wsk, wind)] : null);
+  setChunkParts(k, ind.length || wind.length ? [pack(pos, uv, col, lt, sk, ind, tn), pack(wpos, wuv, wcol, wlt, wsk, wind, null, wsl)] : null);
   groupsDirty.add(groupOf(k));
 }
 // glue a group's chunks into one mesh for the solid blocks and one for the water
@@ -9319,11 +9358,11 @@ function mergeGroup(g) {
     if (!parts.length) continue;
     let nv = 0, ni = 0;
     for (const p of parts) { nv += p.lt.length; ni += p.ind.length; }
-    const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3), lt = new Float32Array(nv), sk = new Float32Array(nv), tn = new Float32Array(nv * 3);
+    const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3), lt = new Float32Array(nv), sk = new Float32Array(nv), tn = new Float32Array(nv * 3), sl = w ? new Float32Array(nv * 3) : null;
     const ind = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
     let v = 0, i = 0;
     for (const p of parts) {
-      pos.set(p.pos, v * 3); uv.set(p.uv, v * 2); col.set(p.col, v * 3); lt.set(p.lt, v); sk.set(p.sk, v); if (p.tn) tn.set(p.tn, v * 3);
+      pos.set(p.pos, v * 3); uv.set(p.uv, v * 2); col.set(p.col, v * 3); lt.set(p.lt, v); sk.set(p.sk, v); if (p.tn) tn.set(p.tn, v * 3); if (sl && p.sl) sl.set(p.sl, v * 3);
       const pi = p.ind; for (let j = 0; j < pi.length; j++) ind[i + j] = pi[j] + v;
       v += p.lt.length; i += pi.length;
     }
@@ -9334,6 +9373,7 @@ function mergeGroup(g) {
     geo.setAttribute('torch', new THREE.BufferAttribute(lt, 1));
     geo.setAttribute('sky', new THREE.BufferAttribute(sk, 1));
     geo.setAttribute('tintOff', new THREE.BufferAttribute(tn, 3));
+    if (sl) geo.setAttribute('slide', new THREE.BufferAttribute(sl, 3));
     geo.setIndex(new THREE.BufferAttribute(ind, 1));
     geo.computeBoundingSphere(); geo.computeBoundingBox();
     for (const name in geo.attributes) geo.attributes[name].onUpload(releaseArray);
@@ -9503,7 +9543,7 @@ function waterCornerHeight(x, y, z, gx, gz) {
   }
   return n ? sum / n : waterHeight(getBlock(x, y, z), getBlock(x, y + 1, z));
 }
-function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
+function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache, sl) {
   const above = getBlock(x, y + 1, z), full = isWater(above);
   const ch = {};   // top-corner heights, worked out once per block
   const cornerH = (cx, cz) => full ? 1 : (ch[cx * 2 + cz] ??= waterCornerHeight(x, y, z, x + cx, z + cz));
@@ -9514,12 +9554,16 @@ function addWater(x, y, z, id, pos, uv, col, lt, sk, ind, anyLight, skyCache) {
     // (no wall of water at the edge of the world: seen through the sea it showed up as see-through panes)
     const ex = x + f.dir[0], ez = z + f.dir[2];
     if (ex < 0 || ez < 0 || ex >= WX || ez >= WZ) continue;
-    const tile = BLOCKS[id].t[0], base = pos.length / 3;
+    const run = id >= RIVER_WATER && id < RIVER_FALLING, top = f.dir[1] > 0;   // (Beta 0.1.6.0: moving river tops, see RIVER_TOP_TILES)
+    const slide = run && top ? 1 + id - RIVER_WATER : id === RIVER_FALLING && f.dir[1] >= 0 ? 25 : 0;
+    const tile = !slide ? BLOCKS[id].t[0] : run ? RIVER_TOP_TILES[(id - RIVER_WATER) >> 3] : RIVER_FALL_TILE, base = pos.length / 3;
+    const at = slide ? atlasUV(tile, 0, 0) : null;
     f.c.forEach(c => {
       const h = c[1] ? cornerH(c[0], c[2]) : 0;
       pos.push(x + c[0], y + h, z + c[2]);
       const v = f.dir[1] ? c[4] : c[4] ? h : 0;        // sides show only as much of the texture as the water is tall
       uv.push(...atlasUV(tile, c[3], v));
+      if (sl) { while (sl.length < base * 3) sl.push(0, 0, 0); sl.push(at ? at[0] : 0, at ? at[1] : 0, slide); }
       col.push(f.shade, f.shade, f.shade);
       lt.push(light); sk.push(sky);
     });
@@ -13930,14 +13974,15 @@ function needAxe(b, natural = false) {   // (natural: a block the world grew, wh
   nameEl.style.opacity = 1; nameTimer = 2;
   return true;
 }
-// survival: what breaking a whole block gives you. Dirt, grass, sand and gravel dug by hand (no shovel) give
-// 1-8 pieces of it instead of the whole block.
+// survival: what breaking a whole block gives you. A shovel's block with pieces of its own (Dirt, Grass, Sand, Gravel, Clay,
+// Mud, Peat) dug by hand (no shovel) gives 1-8 pieces of it instead of the whole block; one without (Earthlike's soils, ground
+// and gravels), the whole block.
 function collectBlock(b, x, y, z) {
   const id = dropFor(b), hand = BLOCKS[b] && BLOCKS[b].handDrop;
   if (SURVIVAL && hand && !holding('shovel')) {   // (Fireclay by hand: a few Fireclay Balls; a Dead Bush: a few Sticks. A shovel digs either up whole)
     for (let n = hand[1] + Math.floor(Math.random() * (hand[2] - hand[1] + 1)); n > 0; n--) collect(hand[0], x, y, z);
-  } else if (SURVIVAL && BLOCKS[b] && BLOCKS[b].shovel && !holding('shovel') && BLOCKS[PIECE_ITEM + id]) {
-    for (let n = 1 + Math.floor(Math.random() * 8); n > 0; n--) collect(PIECE_ITEM + id, x, y, z);
+  } else if (SURVIVAL && BLOCKS[b] && BLOCKS[b].shovel && !holding('shovel') && formItem('piece', id)) {   // (its own pieces: Beta 0.1.6.0, as the desktop version)
+    for (let n = 1 + Math.floor(Math.random() * 8); n > 0; n--) collect(formItem('piece', id), x, y, z);
   } else for (let n = STAGE_BREAKING && SURVIVAL && BLOCKS[b] && BLOCKS[b].pick && isNatural(x, y, z) ? BLOCKS[b].layer || 1 : 1; n > 0; n--) collect(id, x, y, z);   // (an ore: a Chunk for each layer down; 1 while stage breaking is held back)
 }
 function collect(id, x, y, z) {
@@ -15750,20 +15795,26 @@ function stairMove(s) {
 // Worker, away from the game (the engine's StairElsewhere: as the world's staircases are found, on the land drawn bare, never near
 // a chunk with changes now, nor near any staircase the world has: the land is drawn bare, so its own spots look free); then, once found, its land grown and the staircase built there if it still fits (the plants and snow
 // in its way go first), kept in the save as an extra spot. One search at a time. (Test: earthStairLast, what the last one found.)
+// (Since Beta 0.1.6.0, as the desktop version: no spot found, or the one found no longer fits once its land has grown, it looks
+// again with a new seed and that spot's chunk avoided, up to 3 searches in all, so a moved staircase stands up again somewhere.)
 let stairSearch = false, earthStairLast = null;
 function earthStairElsewhere(s, built) {
   if (stairSearch) return;
   stairSearch = true;
   const id = Worlds.current.id, skip = new Set(built);
   for (const o of stairSpots) skip.add(chunkOfIndex(idx(o.x, 0, o.z)));
-  Earth.elsewhere(s.x, s.z, [...skip], Math.floor(Math.random() * 2147483647)).then(async m => {
-    earthStairLast = { st: m.st, tested: m.tested, ms: m.ms, built: false };
-    if (!m.st || !worldLoaded || Worlds.current.id !== id) return;
+  const look = left => Earth.elsewhere(s.x, s.z, [...skip], Math.floor(Math.random() * 2147483647)).then(async m => {
+    earthStairLast = { st: m.st, tested: m.tested, ms: m.ms, built: false, searches: 3 - left };
+    if (!worldLoaded || Worlds.current.id !== id) return;
+    if (!m.st) return left > 0 ? look(left - 1) : undefined;   // (nothing found: look again)
     const [x, y, z, dir, n, mat] = m.st, o = { x, y, z, dir, n, mat, placed: true };
     await Earth.growNow(x >> 4, z >> 4, 1);
     if (!worldLoaded || Worlds.current.id !== id) return;
     const clears = b => isSnow(b) || !!(BLOCKS[b] && (BLOCKS[b].shape === 'plant' || BLOCKS[b].shape === 'flat'));
-    if (!stairFits(o, earthStairGround, (bx, by, bz) => { const b = getBlock(bx, by, bz); return clears(b) ? 0 : b; })) return;
+    if (!stairFits(o, earthStairGround, (bx, by, bz) => { const b = getBlock(bx, by, bz); return clears(b) ? 0 : b; })) {   // (it doesn't fit there now: look again, away from it)
+      skip.add(chunkOfIndex(idx(x, 0, z)));
+      return left > 0 ? look(left - 1) : undefined;
+    }
     const [dx, dz] = STAIR_DIRS[o.dir];
     for (let k = 0; k < o.n; k++) {   // (the plants and snow in its way go first)
       const cx = o.x + dx * k, cz = o.z + dz * k;
@@ -15771,7 +15822,8 @@ function earthStairElsewhere(s, built) {
     }
     buildStair(o, (bx, by, bz, b) => setBlock(bx, by, bz, b), earthStairGround);
     stairSpots.push(o); extraStairs.push(o); earthStairLast.built = true;
-  }).catch(() => {}).finally(() => { stairSearch = false; });
+  });
+  look(2).catch(() => {}).finally(() => { stairSearch = false; });
 }
 // (gen 4) the ground in a column under any trees, plants or snow
 function earthStairGround(c) {
@@ -16736,7 +16788,7 @@ function showWorlds(open) {
     const row = document.createElement('div'); row.className = 'world-row';
     const info = document.createElement('div');
     const nm = document.createElement('div'); nm.className = 'wname'; nm.textContent = w.name + (w.id === Worlds.current.id ? '  (open now)' : '');
-    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 4 ? 'Earthlike (preview)' : w.gen === 3 ? 'Biomes' : w.gen === 2 ? 'Rolling hills' : 'Plateaus'} · ${w.gen === 4 ? (w.s === 1024 ? 1024 : 2048) : validSize(w.s, w.h)} wide${w.gen === 3 && validBiomes(w.b) !== 1 ? ` · Biomes x${validBiomes(w.b)}` : ''} · ${w.h === 640 ? 640 : 192} tall · ${w.mode === 'survival' ? 'Survival' : 'Creative'}${w.ver ? ` · v${w.ver}` : ''}`;
+    const sub = document.createElement('div'); sub.className = 'wsub'; sub.textContent = `Last played ${new Date(w.played).toLocaleString()} · Seed ${w.seed} · ${w.gen === 4 ? 'Earthlike' : w.gen === 3 ? 'Biomes' : w.gen === 2 ? 'Rolling hills' : 'Plateaus'} · ${w.gen === 4 ? (w.s === 1024 ? 1024 : 2048) : validSize(w.s, w.h)} wide${w.gen === 3 && validBiomes(w.b) !== 1 ? ` · Biomes x${validBiomes(w.b)}` : ''} · ${w.h === 640 ? 640 : 192} tall · ${w.mode === 'survival' ? 'Survival' : 'Creative'}${w.ver ? ` · v${w.ver}` : ''}`;
     info.append(nm, sub);
     const playBtn = document.createElement('button'); playBtn.textContent = 'Play';
     playBtn.onclick = async () => {
@@ -16814,15 +16866,14 @@ document.getElementById('new-create').addEventListener('click', async () => {
 // the new-world sliders: show what they're set to (biome size only means something for Biomes worlds)
 {
   const size = document.getElementById('new-size'), biomes = document.getElementById('new-biomes'), gen = document.getElementById('new-gen');
-  // (Earthlike (preview), only while Earthlike is on: 1024 or 2048 across, no biome size, and the preview's warning)
-  if (EARTHLIKE_ON) { const o = document.createElement('option'); o.value = '4'; o.textContent = 'Earthlike (preview)'; gen.append(o); }
+  // (Earthlike, only while Earthlike is on: 1024 or 2048 across, no biome size)
+  if (EARTHLIKE_ON) { const o = document.createElement('option'); o.value = '4'; o.textContent = 'Earthlike'; gen.append(o); }
   let wasEarth = false;
   gen.addEventListener('change', () => {
     const earth = +gen.value === 4;
     if (earth === wasEarth) return;
     wasEarth = earth;
     if (earth) { size.min = 1024; size.step = 1024; size.value = 2048; } else { size.min = WORLD_MIN; size.step = WORLD_STEP; size.value = WORLD_DEFAULT; }
-    document.getElementById('new-earth-note').hidden = !earth;
   });
   const show = () => {
     document.getElementById('new-size-v').textContent = `${size.value} x ${size.value}`;
@@ -17292,7 +17343,7 @@ function frame(now) {
   if (worldLoaded && (locked || invOpen)) unsaved = true;      // playing = something may have changed since the last save
   if (worldLoaded && settings.autosave && performance.now() - lastSave > 30000) saveWorld();   // auto save every 30 seconds
   if (worldLoaded && (locked || invOpen || Net.hosting)) { tickDrying(dt); tickFurnaces(dt); tickTorches(dt); tickFarm(dt); }   // (not while paused)
-  if (worldLoaded) { tickEverSparks(dt); spinSaw(dt); tickDoorSwings(dt); }
+  if (worldLoaded) { tickEverSparks(dt); spinSaw(dt); tickDoorSwings(dt); slideRivers(dt); }
   pumpRebuildSoon();
   if (EARTH) Earth.tick(dt);   // (Earthlike: the land round the players)
 

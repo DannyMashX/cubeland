@@ -44,6 +44,13 @@ public class ChunkMesher
 		public readonly List<Vector2> Uv = new(), Uv2 = new();
 		public readonly List<Color> Col = new();
 		public readonly List<int> Ind = new();
+		// (water, since Beta 0.1.6.0: each corner's slide, x y = where it is in the picture, in blocks, z w = how fast the
+		// picture moves, blocks a second, along its columns and rows; 0, 0 = not sliding. Null in a part with no water)
+		public List<Vector4> Slide;
+		public void V(float x, float y, float z, Vector2 uv, float shade, float torch, float sky, Vector4 slide)
+		{
+			(Slide ??= new()).Add(slide); V(x, y, z, uv, shade, torch, sky);
+		}
 		// (COLOR: the shading times the biome tint; its alpha holds the plain shading, which the shader uses for every pixel that isn't green)
 		public void V(float x, float y, float z, Vector2 uv, float shade, float torch, float sky) => V(x, y, z, uv, shade, torch, sky, new Color(1, 1, 1));
 		public void V(float x, float y, float z, Vector2 uv, float shade, float torch, float sky, Color tint)
@@ -57,7 +64,12 @@ public class ChunkMesher
 		public static Part Join(List<Part> ps)
 		{
 			var j = new Part();
-			foreach (var p in ps) { int b = j.Pos.Count; j.Pos.AddRange(p.Pos); j.Uv.AddRange(p.Uv); j.Uv2.AddRange(p.Uv2); j.Col.AddRange(p.Col); foreach (int i in p.Ind) j.Ind.Add(i + b); }
+			bool slides = false; foreach (var p in ps) slides |= p.Slide != null;
+			foreach (var p in ps)
+			{
+				int b = j.Pos.Count; j.Pos.AddRange(p.Pos); j.Uv.AddRange(p.Uv); j.Uv2.AddRange(p.Uv2); j.Col.AddRange(p.Col); foreach (int i in p.Ind) j.Ind.Add(i + b);
+				if (slides) { j.Slide ??= new(); if (p.Slide != null) j.Slide.AddRange(p.Slide); else for (int k = 0; k < p.Pos.Count; k++) j.Slide.Add(Vector4.Zero); }
+			}
 			return j;
 		}
 		public ArrayMesh ToMesh()
@@ -71,7 +83,11 @@ public class ChunkMesher
 			arr[(int)Mesh.ArrayType.Color] = Col.ToArray();
 			arr[(int)Mesh.ArrayType.Index] = Ind.ToArray();
 			var m = new ArrayMesh();
-			m.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr);
+			if (Slide == null) { m.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr); return m; }
+			var cu = new float[Slide.Count * 4];   // (CUSTOM0 in the water shader, four floats a corner)
+			for (int i = 0; i < Slide.Count; i++) { cu[4 * i] = Slide[i].X; cu[4 * i + 1] = Slide[i].Y; cu[4 * i + 2] = Slide[i].Z; cu[4 * i + 3] = Slide[i].W; }
+			arr[(int)Mesh.ArrayType.Custom0] = cu;
+			m.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr, null, null, (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat << (int)Mesh.ArrayFormat.FormatCustom0Shift));
 			return m;
 		}
 	}
@@ -533,6 +549,7 @@ public class ChunkMesher
 		}
 		return n > 0 ? sum / n : Blocks.WaterHeight(W.GetBlock(x, y, z), W.GetBlock(x, y + 1, z));
 	}
+	const float FallSlide = 3;   // (falling water's picture: blocks a second; a river's top moves at its current's speed)
 	void AddWater(int x, int y, int z, int id, Part P, bool anyLight, Dictionary<long, float> sky)
 	{
 		bool full = Blocks.IsWater(W.GetBlock(x, y + 1, z));
@@ -547,11 +564,20 @@ public class ChunkMesher
 			int ex = x + f.Dir[0], ez = z + f.Dir[2];
 			if (ex < 0 || ez < 0 || ex >= World.WX || ez >= World.WZ) continue;
 			int tile = Blocks.B[id].T[0], bas = P.Pos.Count;
+			// (since Beta 0.1.6.0) a running river's top slides its pace's picture along the current; falling water's sides
+			// slide river_falling down, and its top toward the picture's bottom edge (rows run along z there)
+			float sx = 0, sz = 0;
+			if (f.Dir[1] == 1 && Blocks.RiverCurrent(id, out float cx, out float cz)) { tile = Atlas.RiverTiles[(id - Blocks.RiverWater) / 8]; sx = cx; sz = cz; }
+			else if (id == Blocks.FallingWater && f.Dir[1] != -1) { tile = Atlas.RiverTiles[3]; sz = FallSlide; }
+			bool slides = sx != 0 || sz != 0;
 			foreach (var c in f.C)
 			{
 				float h = c[1] != 0 ? CornerH(c[0], c[2]) : 0;
 				float v = f.Dir[1] != 0 ? c[4] : c[4] != 0 ? h : 0;
-				P.V(x + c[0], y + h, z + c[2], Atlas.UV(tile, c[3], v), f.Shade, light, s);
+				if (!slides) { P.V(x + c[0], y + h, z + c[2], Atlas.UV(tile, c[3], v), f.Shade, light, s, Vector4.Zero); continue; }
+				// (where the corner is in the picture: a top's x and z; a side's along-the-face and down from the block's top)
+				var at = f.Dir[1] != 0 ? new Vector2(c[0], c[2]) : new Vector2(c[3], 1 - (c[1] != 0 ? h : 0));
+				P.V(x + c[0], y + h, z + c[2], Atlas.UV(tile, 0, 1), f.Shade, light, s, new Vector4(at.X, at.Y, sx, sz));
 			}
 			P.Quad(bas);
 		}

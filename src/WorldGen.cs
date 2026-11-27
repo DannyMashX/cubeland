@@ -267,8 +267,9 @@ public class WorldGen
 	// Realistic worlds ("Earthlike", world type 4, land 9) are held back for Earthly Extravaganza: while EarthlikeReady is false none
 	// can be made, and everything built for them stays off. It must match EARTHLIKE_READY in the web game. (Test: `--earthlike`
 	// turns it on anyway.) The other world types never read it: they grow exactly the same land with it on or off.
-	// From Beta 0.1.5.3 (the first preview) it does two things: the world type is in the menu, as "Earthlike (preview)" with its
-	// "Playable early" note, and every Earthlike block shows (Blocks.Shown: the user's "Show all 163"; still no recipes for them).
+	// From Beta 0.1.5.3 (the first preview) it does two things: the world type is in the menu, and every Earthlike block shows
+	// (Blocks.Shown: the user's "Show all 163"). It was "Earthlike (preview)" with a "Playable early" note until Earthly
+	// Extravaganza (Beta 0.1.6.0), which froze land 9 and gave its blocks their recipes.
 	public const bool EarthlikeReady = true;
 	public static readonly bool EarthlikeOn = EarthlikeReady || Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--earthlike") >= 0;
 	public class StairSpot { public int X, Y, Z, Dir, N, Mat; public double Order; public bool Placed; }
