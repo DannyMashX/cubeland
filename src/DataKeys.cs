@@ -47,7 +47,10 @@ public static class DataKeys
 		if (d.Axis > 0) states.Add($"axis={d.Axis}");
 		if (d.Look > 0) states.Add($"look={d.Look}");
 		if (placed) states.Add("placed");
-		string slug = Snake(d.Name);
+		// (an ore in a rock is named for its rock, "Copper Ore in Granite", but keyed as "copper_ore#in=granite": the name's
+		// " in <its rock>" ending is left out, as its in says it; Beta 0.1.5.3. The same in the web version)
+		string name = d.In != null && d.Name.EndsWith(" in " + d.In, StringComparison.OrdinalIgnoreCase) ? d.Name[..^(" in " + d.In).Length] : d.Name;
+		string slug = Snake(name);
 		return states.Count == 0 ? slug : slug + "#" + string.Join(",", states);
 	}
 	static Dictionary<string, int> ids;

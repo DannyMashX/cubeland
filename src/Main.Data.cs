@@ -52,8 +52,9 @@ public partial class Main
 		string plain = System.Text.Json.JsonSerializer.Serialize(new Worlds.Save(), opts), wide = System.Text.Json.JsonSerializer.Serialize(new Worlds.Save { Pg = 8192 }, opts);
 		Check("a save without wide pieces has no Pg (byte for byte as before)", !plain.Contains("\"Pg\"") && plain == wide.Replace(",\"Pg\":8192", ""));
 		Check("a save with wide pieces says Pg 8192", wide.Contains("\"Pg\":8192") && System.Text.Json.JsonSerializer.Deserialize<Worlds.Save>(wide, opts).Pg == 8192 && System.Text.Json.JsonSerializer.Deserialize<Worlds.Save>(plain, opts).Pg == 0);
-		Check("Earthlike's blocks are hidden until it's ready (but the new rocks and gravels show, since Beta 0.1.5.2)", !Blocks.Shown(4800) && !Blocks.Shown(4480) && Blocks.Shown(3) && !Blocks.Items.Contains(4800) && !Blocks.ItemRows.Contains(726) && Blocks.Items.Contains(3) && Blocks.Shown(4403) && Blocks.Items.Contains(4403) && Blocks.Items.Contains(4766) && Blocks.Items.Contains(5030) && Blocks.Shown(4521) && Blocks.Shown(4471) && !Blocks.Shown(4010));
-		Check("Earthlike's keys", DataKeys.KeyOf(4480) == "copper_ore#in=granite" && DataKeys.KeyOf(3947) == "tall_grass#top" && DataKeys.KeyOf(3891) == "water#flow=0,pace=0" && DataKeys.KeyOf(3915) == "water#flow=8,pace=2" && DataKeys.KeyOf(3716) == "corn#stage=2,top");
+		Check("Earthlike's blocks are hidden until it's ready, then all show (but the new rocks and gravels show already, since Beta 0.1.5.2)", Blocks.Shown(3935) == WorldGen.EarthlikeOn && Blocks.Shown(4480) == WorldGen.EarthlikeOn && Blocks.Shown(3) && Blocks.Items.Contains(3935) == WorldGen.EarthlikeOn && Blocks.Items.Contains(3) && Blocks.Items.Contains(4800) == WorldGen.EarthlikeOn && Blocks.ItemRows.Contains(726) == WorldGen.EarthlikeOn && Blocks.ItemRows.Contains(4050) == WorldGen.EarthlikeOn && Blocks.Shown(4010) == WorldGen.EarthlikeOn && Blocks.Shown(4403) && Blocks.Items.Contains(4403) && Blocks.Items.Contains(4766) && Blocks.Items.Contains(5030) && Blocks.Shown(4521) && Blocks.Shown(4471));
+		Check("Earthlike's soils for planting (Beta 0.1.5.3): 4800-4809 bare (like Dirt), 4810-4819 their grassy tops (like Grass), 4814 unused", Enumerable.Range(4800, 20).All(i => i == 4814 ? Blocks.B[i] == null && !Blocks.PlantsLikeGrass(i) && !Blocks.PlantsLikeDirt(i) : i < 4810 ? Blocks.B[i] is { Earthlike: true } bd && !bd.Name.StartsWith("Grassy") && Blocks.PlantsLikeDirt(i) && !Blocks.PlantsLikeGrass(i) : Blocks.B[i] is { } gd && Blocks.B[i - 10] is { } pd && gd.Name == "Grassy " + pd.Name && Blocks.PlantsLikeGrass(i) && !Blocks.PlantsLikeDirt(i)) && Blocks.B[4815].Name == "Grassy Clay Soil" && Blocks.B[4805].Name == "Clay Soil");
+		Check("Earthlike's keys", DataKeys.KeyOf(4480) == "copper_ore#in=granite" && Blocks.B[4480].Name == "Copper Ore in Granite" && DataKeys.KeyOf(3947) == "tall_grass#top" && DataKeys.KeyOf(3891) == "water#flow=0,pace=0" && DataKeys.KeyOf(3915) == "water#flow=8,pace=2" && DataKeys.KeyOf(3716) == "corn#stage=2,top");
 		Check("the new gravels fall, and take the tint where they should", Falling.Falls.Contains(5030) && Falling.Falls.Contains(Blocks.Gravel) && !Falling.Falls.Contains(4403) && Blocks.TakesBiomeTint(4810) && Blocks.TakesBiomeTint(3945) && !Blocks.TakesBiomeTint(4800));
 	}
 
@@ -1058,12 +1059,12 @@ public partial class Main
 				if (Blocks.IsLeaves(id) != fd.Leaves) found.Add($"{at}: leaves in the game {Blocks.IsLeaves(id)}, in the file {fd.Leaves}");
 				if (Sound.MatOf(id) != (fd.Sound ?? "stone")) found.Add($"{at}: sounds like {Sound.MatOf(id)} in the game, {fd.Sound ?? "stone (left out)"} in the file");
 				if (string.Join(" ", Blocks.LooksOf(id)) is var gl && string.Join(" ", FileLooks(id)) is var fl && gl != fl) found.Add($"{at}: looks {gl} in the game, {fl} in the file");
-				if (fd.Inventory && fd.Snowed == 0 && (fd.Layer <= 1 || World.TallWorlds) && (WorldGen.EarthlikeReady || !fd.Earthlike)) fileItems.Add(id);
+				if (fd.Inventory && fd.Snowed == 0 && (fd.Layer <= 1 || World.TallWorlds) && (WorldGen.EarthlikeOn || !fd.Earthlike)) fileItems.Add(id);
 			}
 			string Ids(IEnumerable<int> ids) => string.Join(", ", ids.Order());
 			if (Ids(Blocks.Items) is var gi && Ids(fileItems) is var fi && gi != fi)
 				found.Add($"Items: the game's are [{Ids(Blocks.Items.Except(fileItems))}] beyond the file's, the file's [{Ids(fileItems.Except(Blocks.Items))}] beyond the game's");
-			var fileCreative = fileItems.Concat(all.Where(x => (x.r.item && (WorldGen.EarthlikeReady || !x.r.earthlike)) || x.r.shape == "torch" && x.r.wi == 0 && x.r.count == 1).Select(x => x.r.id)).ToHashSet();
+			var fileCreative = fileItems.Concat(all.Where(x => (x.r.item && (WorldGen.EarthlikeOn || !x.r.earthlike)) || x.r.shape == "torch" && x.r.wi == 0 && x.r.count == 1).Select(x => x.r.id)).ToHashSet();
 			if (Ids(AllCreative()) is var gc && Ids(fileCreative) is var fc && gc != fc)
 				found.Add($"the creative inventory: the game's has [{Ids(AllCreative().Except(fileCreative))}] beyond Items, the item rows and each kind of torch, which have [{Ids(fileCreative.Except(AllCreative()))}] beyond it");
 		}

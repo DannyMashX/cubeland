@@ -358,10 +358,12 @@ public partial class Main
 			{
 				if (o is not Dictionary<string, object> d || d.S("t") != "info" || done) return;
 				if (d.S("ver") != NetVersion) { Fail($"{d.S("host")} is playing version {d.S("ver")}, and you have {NetVersion}. You both need the same version."); return; }
+				// (a world this game can't make: a newer world type or land; with the same version it can't happen, but just in case)
+				if (d.I("gen") > 4 || d.I("land") > World.LandVersion) { Fail($"{d.S("host")}'s world is newer than your game can make."); return; }
 				done = true; joinTimer = 0;
 				NetStatus("Joining...");
 				p.Destroy(); peer = null;
-				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192, World.ValidSize(d.I("s"), d.I("h") == 640 ? 640 : 192), d.ContainsKey("b") ? World.ValidBiomes(d.F("b")) : 1, World.ValidLand(d.I("land")),
+				joinInfo = new JoinInfo(code, d.I("seed"), d.I("gen") == 0 ? 1 : d.I("gen"), d.S("mode"), d.S("host") ?? "Player", d.I("h") == 640 ? 640 : 192, (d.I("gen") == 4 ? (d.I("s") == 1024 ? 1024 : 2048) : World.ValidSize(d.I("s"), d.I("h") == 640 ? 640 : 192)), d.ContainsKey("b") ? World.ValidBiomes(d.F("b")) : 1, World.ValidLand(d.I("land")),
 					d.I("os") == 1 && d.GetValueOrDefault("osSkip") is List<object>, Worlds.TidyChunks((d.GetValueOrDefault("osSkip") as List<object> ?? new()).Select(v => BinaryPack.Num(v, -1)).Where(v => v == Math.Floor(v) && v >= 0 && v < int.MaxValue).Select(v => (int)v)));
 				SwitchWorld("join-" + code, true);
 			};
@@ -560,6 +562,7 @@ public partial class Main
 		foreach (long i in idxs) { var (x, y, z) = World.FromIdx(i); World.MarkDirty(x, y, z, dirtyNow); }
 		lock (dirty) foreach (int c in dirtyNow) dirty.Add(c);
 		player.Pos = new Vector3(d.F("x"), d.F("y"), d.F("z")); player.Yaw = d.F("yaw"); player.Vel = Vector3.Zero;
+		if (world.Lazy) GrowNow((int)Math.Floor(player.Pos.X) >> 4, (int)Math.Floor(player.Pos.Z) >> 4, 3);   // (gen 4: the land where the host puts you)
 		sky.TimeOfDay = d.F("time");
 		welcomed = true;
 		if (PlayerSkin.DataUrl != null) hostConn?.Send(SkinMsg(myId, PlayerSkin.DataUrl));   // your skin, for everyone here

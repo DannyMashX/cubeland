@@ -8,7 +8,7 @@ using Godot;
 namespace Cubeland;
 
 // Your worlds. The same seed always grows the same terrain, so a save only needs the seed plus what you changed.
-// The list (worlds.json) and each world's changes (<id>.json) live in the game's user folder:
+// The list (worlds.json, and worlds-earthlike.json for Earthlike's) and each world's changes (<id>.json) live in the game's user folder:
 // on Windows, %APPDATA%\Godot\app_userdata\CubeLand Alpha\worlds\.
 public static class Worlds
 {
@@ -47,14 +47,27 @@ public static class Worlds
 	static readonly string Dir = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--worlds="))?[9..] ?? "user://worlds";
 	static List<Info> list;
 
+	// Earthlike worlds (gen 4) are listed in a file of their own, worlds-earthlike.json, beside worlds.json (their saves sit with the
+	// others): versions before Earthlike read only worlds.json and don't know gen 4, so they'd grow other land in its place, put the
+	// saved changes in the wrong spots and save that over the world. This way they never see them. (The same idea as the web
+	// version's own list.)
+	const string EarthList = "/worlds-earthlike.json";
 	static void Load()
 	{
 		if (list != null) return;
 		DirAccess.MakeDirRecursiveAbsolute(Dir);
 		try { list = JsonSerializer.Deserialize<List<Info>>(FileAccess.GetFileAsString(Dir + "/worlds.json"), Opts); } catch { }
 		list ??= new();
+		List<Info> earth = null;
+		if (FileAccess.FileExists(Dir + EarthList)) try { earth = JsonSerializer.Deserialize<List<Info>>(FileAccess.GetFileAsString(Dir + EarthList), Opts); } catch { }
+		foreach (var w in earth ?? new()) if (w != null && !list.Any(o => o?.Id == w.Id)) list.Add(w);
+		list.RemoveAll(w => w == null);
 	}
-	static void SaveList() => Write(Dir + "/worlds.json", JsonSerializer.Serialize(list, Opts));
+	static void SaveList()
+	{
+		Write(Dir + "/worlds.json", JsonSerializer.Serialize(list.Where(w => w.Gen != 4).ToList(), Opts));
+		if (list.Any(w => w.Gen == 4) || FileAccess.FileExists(Dir + EarthList)) Write(Dir + EarthList, JsonSerializer.Serialize(list.Where(w => w.Gen == 4).ToList(), Opts));
+	}
 	// write to a spare file first, so a crash halfway through never leaves a broken save
 	static bool Write(string path, string text)
 	{
@@ -81,6 +94,7 @@ public static class Worlds
 		long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		var w = new Info { Id = Convert.ToString(now, 16) + Random.Shared.Next(0x1000, 0xffff).ToString("x"), Name = name == "" ? $"World {list.Count + 1}" : name,
 			Seed = SeedFrom(seedText), Gen = gen, Mode = mode == "survival" ? "survival" : "creative", Ver = Main.Version, Created = now, Played = now, H = World.TallWorlds ? 640 : 192, S = World.ValidSize(World.TallWorlds ? 640 : size, World.TallWorlds ? 640 : 192), B = World.ValidBiomes(biomes), Land = World.NewLand };
+		if (gen == 4) { w.H = 640; w.S = size == 1024 ? 1024 : 2048; w.B = 1; w.Land = 9; }   // (Earthlike: 640 tall, 1024 or 2048 across, land 9)
 		list.Add(w); SaveList();
 		return w;
 	}

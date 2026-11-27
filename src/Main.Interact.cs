@@ -61,8 +61,10 @@ public partial class Main
 	}
 	// saplings (data/numbers.json SAPLING): the chance leaves broken without a hoe drop theirs; the chance one Bone Ash grows one
 	static readonly double SaplingDrop = Nums.N.SAPLING.dropChance, BoneAshGrows = Nums.N.SAPLING.boneAshChance;
-	// the ground a sapling can be planted on (sand: one that grows on Sand too)
-	static bool SaplingGround(int b, bool sand) => Blocks.IsGrassy(b) || b == Blocks.Dirt || b == Blocks.Mud || b == Blocks.Peat || (sand && b == Blocks.Sand);
+	// the ground a sapling can be planted on (sand: one that grows on Sand too); and the ground a flower or other plant goes on, and
+	// a Hoe tills: Grass or Dirt (Earthlike's soils with them, since Beta 0.1.5.3: Blocks.PlantsLikeGrass / PlantsLikeDirt)
+	static bool SaplingGround(int b, bool sand) => PlantGround(b) || b == Blocks.Mud || b == Blocks.Peat || (sand && b == Blocks.Sand);
+	static bool PlantGround(int b) => Blocks.PlantsLikeGrass(b) || Blocks.PlantsLikeDirt(b);
 	// the tool block b can't be broken without in survival ("axe", "pickaxe"; null: any)
 	static string NeededTool(int b) => Blocks.Get(b)?.Needs;
 	// a shovel is block b's tool (and dug by hand it comes up as pieces, if it has a piece item)
@@ -214,11 +216,11 @@ public partial class Main
 		int ty = onCrop ? (Blocks.B[hb].Top ? y - 2 : y - 1) : y, target = onCrop ? world.GetBlock(x, ty, z) : hb;
 		if (inv.Holding("hoe"))
 		{
-			if ((!Blocks.IsGrassy(hb) && hb != Blocks.Dirt) || (above != 0 && !Blocks.IsWater(above) && !Blocks.IsFlower(above))) return false;
+			if (!PlantGround(hb) || (above != 0 && !Blocks.IsWater(above) && !Blocks.IsFlower(above))) return false;
 			if (Blocks.IsFlower(above)) { Collect(above, x, y + 1, z); world.SetBlock(x, y + 1, z, 0); }
 			world.SetBlock(x, y, z, Blocks.Tilled);
 			Sound.I?.Place(Blocks.Dirt); MobNoise(x, y, z); WearTool(1);
-			if (Blocks.IsGrassy(hb) && rnd.NextDouble() < SeedChance) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
+			if (Blocks.PlantsLikeGrass(hb) && rnd.NextDouble() < SeedChance) Collect(Blocks.GrainSeeds, x, y + 1, z);   // turned up some seeds
 			return true;
 		}
 		if (Blocks.Get(held)?.Plants is int crop and > 0)
@@ -338,15 +340,15 @@ public partial class Main
 				world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid); return;   // (on a layer of snow: it lies on it)
 			}
 			if (Blocks.B[pid].Grows != null)
-			{   // a sapling: on top of Grass, Dirt, Snowy Grass, Swamp Grass, Mud or Peat (Palm, Orange and Palo Verde on Sand too), into air
+			{   // a sapling: on top of Grass, Dirt, Snowy Grass, Swamp Grass, Mud or Peat, or an Earthlike soil (Palm, Orange and Palo Verde on Sand too), into air
 				if (by != h.Y + 1 || there != 0 || !SaplingGround(world.GetBlock(bx, by - 1, bz), Blocks.B[pid].Sand)) return;
 				world.SetBlock(bx, by, bz, pid); Placed(pid); return;
 			}
 			if (Blocks.B[pid].Shape == "plant")
-			{   // a flower: planted on top of grass or dirt (a Dead Bush on Sand or any Terracotta too)
+			{   // a flower: planted on top of grass or dirt, or an Earthlike soil (a Dead Bush on Sand or any Terracotta too)
 				int under = world.GetBlock(bx, by - 1, bz);
 				bool dry = pid == Blocks.DeadBush && (under == Blocks.Sand || Blocks.IsTerracotta(under));
-				if (by != h.Y + 1 || (!Blocks.IsGrassy(under) && under != Blocks.Dirt && !dry) || (there != 0 && there != Blocks.Snow)) return;
+				if (by != h.Y + 1 || (!PlantGround(under) && !dry) || (there != 0 && there != Blocks.Snow)) return;
 				world.SetBlock(bx, by, bz, Blocks.WithSnow(pid, there == Blocks.Snow ? 1 : 0)); Placed(pid); return;   // (into a layer of snow: it stays round the flower)
 			}
 			if (pid == Blocks.Furnace || pid == Blocks.Foundry)

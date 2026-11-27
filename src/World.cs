@@ -68,7 +68,7 @@ public partial class World
 	// & animals update's world growth (so far: the staircases, Biomes worlds). Until that update is out, more can still be added
 	// to lands 5 and 6. 7 and 8 = lands 5 and 6 with blobs of the new rocks in the Andesite (Earthly Extravaganza, every world type
 	// but Earthlike: WorldGen.RockBlobs). LandVersion: the newest this code knows.
-	public const int LandVersion = 8;
+	public const int LandVersion = 9;   // (9: Earthlike's, gen 4 only)
 	public static int ValidLand(int l) => Math.Clamp(l, 0, LandVersion);   // (a saved world keeps the land it was made with, up to the newest)
 	public static bool OreSpread(int land) => land == 2 || land == 4 || land == 6 || land == 8;   // (lands with the ore spread)
 	public static bool RockBlobs(int land) => land == 7 || land == 8;   // (lands with the rock blobs)
@@ -89,15 +89,18 @@ public partial class World
 	// height: 640 for tall worlds, 192 otherwise; size: how far across (see ValidSize); biomes: how big the biomes are
 	public World(long seed, int gen, int height = 192, int size = 640, double biomes = 1, int land = 0)
 	{
-		WY = height == 640 ? 640 : 192;
-		WX = ValidSize(size, WY);
-		Blocks = new BlockStore(WX, WY, WZ);
+		WY = gen == 4 || height == 640 ? 640 : 192;   // (gen 4: Earthlike, 640 tall, 1024 or 2048 across)
+		WX = gen == 4 ? (size == 1024 ? 1024 : 2048) : ValidSize(size, WY);
+		Lazy = gen == 4;
+		Blocks = new BlockStore(WX, WY, WZ, Lazy, Lazy ? Cubeland.Blocks.Bedrock : 0);
+		if (Lazy) Blocks.Away = i => Edits.TryGetValue(i, out int e) ? e : Cubeland.Blocks.Bedrock;
 		Heights = new int[WX * WZ]; ChunkTop = new int[NCX * NCZ]; SkyTop = new short[WX * WZ];
 		Gen = new WorldGen(this, seed, gen) { BiomeScale = ValidBiomes(biomes), Land = ValidLand(land) };
 	}
 
 	public void Generate(Action<float> progress)
 	{
+		if (Lazy) { GenerateEarth(progress); return; }
 		Gen.Progress = progress;
 		Raw = new byte[WX * WY * WZ];
 		Gen.Generate();
@@ -136,6 +139,32 @@ public partial class World
 			uint h3 = 2166136261;
 			for (long i = 0; i < Blocks.Length; i++) h3 = (h3 ^ (uint)Blocks[i]) * 16777619;
 			Godot.GD.Print($"FULLHASH {h3:x8}");
+			// (and, with --layerhash=<file>, the same per layer (y; z then x) and per chunk column (cx,cz; y, z, x), to find where
+			// two editions' worlds differ; with --spot=x,y,z,r the blocks round a spot too)
+			if (System.Linq.Enumerable.FirstOrDefault(Godot.OS.GetCmdlineUserArgs(), a => a.StartsWith("--layerhash=")) is { } lh)
+			{
+				var o = new System.Text.StringBuilder("LAYERS\n");
+				for (int y = 0; y < WY; y++) { uint hy = 2166136261; for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++) hy = (hy ^ (uint)Blocks[Idx(x, y, z)]) * 16777619; o.Append($"{y} {hy:x8}\n"); }
+				o.Append("COLUMNS\n");
+				for (int cz = 0; cz < NCZ; cz++) for (int cx = 0; cx < NCX; cx++)
+				{
+					uint hc = 2166136261;
+					for (int y = 0; y < WY; y++) for (int z = cz * CS; z < cz * CS + CS; z++) for (int x = cx * CS; x < cx * CS + CS; x++) hc = (hc ^ (uint)Blocks[Idx(x, y, z)]) * 16777619;
+					o.Append($"{cx},{cz} {hc:x8}\n");
+				}
+				if (System.Linq.Enumerable.FirstOrDefault(Godot.OS.GetCmdlineUserArgs(), a => a.StartsWith("--spot=")) is { } sp)
+				{
+					var q = sp[7..].Split(','); int sx = int.Parse(q[0]), sy = int.Parse(q[1]), sz = int.Parse(q[2]), r = int.Parse(q[3]);
+					o.Append($"SPOT {sx},{sy},{sz} r {r} (y, z, x: full ids)\n");
+					for (int y = sy - r; y <= sy + r; y++) for (int z = sz - r; z <= sz + r; z++)
+					{
+						o.Append($"{y} {z}:");
+						for (int x = sx - r; x <= sx + r; x++) o.Append(' ').Append(x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY ? -1 : Blocks[Idx(x, y, z)]);
+						o.Append('\n');
+					}
+				}
+				System.IO.File.WriteAllText(lh[12..], o.ToString());
+			}
 			// (and, with --storeread, how long reading every block once takes, row by row, twice: to see a change to the store doesn't slow it)
 			if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--storeread") >= 0)
 			for (int pass = 0; pass < 2; pass++)
@@ -198,6 +227,7 @@ public partial class World
 	{
 		if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0) return true;   // invisible walls at the world's edge
 		if (y >= WY) return false;
+		if (Lazy && !Blocks.Grown(x >> 4, z >> 4)) return true;   // (gen 4: and at the land not grown yet)
 		int b = Blocks.Get(x, y, z);
 		return b != 0 && !Cubeland.Blocks.B[b].NoCollide && !(Cubeland.Blocks.B[b].Shape == "door" && Cubeland.Blocks.B[b].Open == 1);   // (an open door can be walked past)
 	}
@@ -307,13 +337,102 @@ public partial class World
 		}
 	}
 
+	// ---- Earthlike worlds (gen 4): the land grows column by column (16 x 16, the full height) as players come near ----
+	// Nothing about the land is saved: the plan is made from the seed, the size and Room every time the world opens (or a friend
+	// joins), and a column is drawn from the plan alone (EarthCol), then its changes (Edits) put back. A column the players have
+	// left is dropped (its changes stay in Edits) and grown again on their return. The game decides which columns grow and drop
+	// (Main.Grow.cs); the drawing runs on worker threads, and InstallColumn / ReleaseColumn on the main thread.
+	public readonly bool Lazy;               // (gen 4)
+	public EarthPlan Plan;                   // (made by Generate)
+	public const int EarthRoom = 320;        // (the sea at y 320, 640 tall)
+	readonly Dictionary<int, List<long>> colEdits = new();   // each column's changed blocks (world indexes, maybe changed back since)
+	void NoteEdit(long i)
+	{
+		if (!Lazy) return;
+		var (x, _, z) = FromIdx(i); int k = (z >> 4) * NCX + (x >> 4);
+		if (!colEdits.TryGetValue(k, out var l)) colEdits[k] = l = new List<long>();
+		l.Add(i);
+	}
+	void GenerateEarth(Action<float> progress)
+	{
+		progress?.Invoke(0.05f);
+		Plan = new EarthPlan(Gen.Seed, WX, EarthRoom);
+		Array.Fill(SkyTop, (short)-1);
+		progress?.Invoke(1);
+	}
+	public bool ColumnGrown(int cx, int cz) => Blocks.Grown(cx, cz);
+	// a column drawn (EarthCol.Draw's blocks) goes in: its changes put back, its heights and sky worked out, its chunks (and its
+	// neighbours' edge chunks) built again
+	// a drawn column made ready to go in, on the worker that drew it: packed, with each spot's height (the top block, 0 if none)
+	// and sky top (the top block light can't pass, -1 if none), as InstallColumn would work them out
+	public sealed class GrownColumn { public BlockStore.Column C; public readonly int[] Heights = new int[256]; public readonly short[] Sky = new short[256]; public int Top; }
+	public static GrownColumn Prepare(int[] col)
+	{
+		var g = new GrownColumn { C = BlockStore.Pack(col, NCY) };
+		for (int s = 0; s < 256; s++)
+		{
+			int y = WY - 1; while (y > 0 && col[y * 256 + s] == 0) y--;
+			g.Heights[s] = y; g.Top = Math.Max(g.Top, y + 1);
+			int t = y; while (t >= 0 && (col[t * 256 + s] == 0 || Cubeland.Blocks.B[col[t * 256 + s]].Transparent)) t--;
+			g.Sky[s] = (short)t;
+		}
+		return g;
+	}
+	public void InstallColumn(int cx, int cz, int[] col) => InstallColumn(cx, cz, Prepare(col));
+	public void InstallColumn(int cx, int cz, GrownColumn g)
+	{
+		if (!Lazy || Blocks.Grown(cx, cz)) return;
+		Blocks.PutColumn(cx, cz, g.C);
+		int k = cz * NCX + cx, top = g.Top; bool torch = false;
+		for (int s = 0; s < 256; s++) { int c = (cz * CS + (s >> 4)) * WX + cx * CS + (s & 15); Heights[c] = g.Heights[s]; SkyTop[c] = g.Sky[s]; }
+		if (colEdits.TryGetValue(k, out var l))
+		{
+			var seen = new HashSet<long>(); var spots = new HashSet<int>();
+			foreach (long i in l)
+			{
+				if (!seen.Add(i) || !Edits.TryGetValue(i, out int id)) continue;
+				var (x, y, z) = FromIdx(i); Blocks.Set(x, y, z, id); spots.Add(z * WX + x);
+				if (Cubeland.Blocks.IsTorch(id)) torch = true;
+			}
+			foreach (int c in spots)   // (the spots changed: their height and sky top again)
+			{
+				int x = c % WX, z = c / WX, y = WY - 1; while (y > 0 && Blocks.Get(x, y, z) == 0) y--;
+				Heights[c] = y; top = Math.Max(top, y + 1);
+				SkyTop[c] = (short)ComputeSkyTop(x, z, y);
+			}
+		}
+		ChunkTop[k] = Math.Min(WY, top);
+		var dirty = ColumnChunks(cx, cz, true);
+		if (torch) Relight(dirty);
+		ChunksChanged?.Invoke(dirty);
+	}
+	// a column the players have left: its blocks go (its changes stay in Edits)
+	public void ReleaseColumn(int cx, int cz)
+	{
+		if (!Lazy || !Blocks.Grown(cx, cz)) return;
+		var dirty = ColumnChunks(cx, cz, false);
+		Blocks.DropColumn(cx, cz);
+		int k = cz * NCX + cx; ChunkTop[k] = 0;
+		for (int z = cz * CS; z < cz * CS + CS; z++) for (int x = cx * CS; x < cx * CS + CS; x++) { Heights[z * WX + x] = 0; SkyTop[z * WX + x] = -1; }
+		ChunksChanged?.Invoke(dirty);
+	}
+	// the chunks of a column up to its top (and, with sides, the chunks of the four columns beside it, whose faces it touches)
+	HashSet<int> ColumnChunks(int cx, int cz, bool sides)
+	{
+		var dirty = new HashSet<int>();
+		void Add(int x, int z) { if (x < 0 || z < 0 || x >= NCX || z >= NCZ) return; int t = (ChunkTop[z * NCX + x] + CS - 1) / CS; for (int cy = 0; cy < Math.Min(NCY, Math.Max(t, 1)); cy++) dirty.Add(ChunkKey(x, cy, z)); }
+		Add(cx, cz);
+		if (sides) { Add(cx - 1, cz); Add(cx + 1, cz); Add(cx, cz - 1); Add(cx, cz + 1); }
+		return dirty;
+	}
+
 	// ---- Changing blocks ----
 	public void SetBlock(int x, int y, int z, int id)
 	{
 		if (!Inside(x, y, z)) return;
 		long i = Idx(x, y, z); int old = Blocks.Get(x, y, z);
 		Blocks.Set(x, y, z, id);
-		Edits[i] = id; Grown.Remove(i);   // (changed: no longer as a sapling grew it)
+		Edits[i] = id; NoteEdit(i); Grown.Remove(i);   // (changed: no longer as a sapling grew it)
 		if (!Cubeland.Blocks.IsPieces(id)) PieceMap.Remove(i);
 		if (Cubeland.Blocks.IsTorch(old)) Torches.Remove(i);
 		if (Cubeland.Blocks.IsTorch(id)) Torches.Add(i);
@@ -368,7 +487,7 @@ public partial class World
 			if (Cubeland.Blocks.IsPieces(id) && !PieceMap.ContainsKey(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
 			if (!Cubeland.Blocks.IsPieces(id)) PieceMap.Remove(i);
 			var (x, y, z) = FromIdx(i);
-			Blocks.Set(x, y, z, id); Edits[i] = id;
+			Blocks.Set(x, y, z, id); Edits[i] = id; NoteEdit(i);
 			if (Cubeland.Blocks.IsTorch(id)) Torches.Add(i); else Torches.Remove(i);
 			if (BurnsDown(id)) TorchBurn[i] = BurnTime(Cubeland.Blocks.B[id].Burn); else TorchBurn.Remove(i);   // (then the save puts back how long each has left)
 			if (Cubeland.Blocks.Plain(id) == Cubeland.Blocks.ClayBallBlock) Drying[i] = DryTime; else Drying.Remove(i);
@@ -482,7 +601,7 @@ public partial class World
 				for (int k = Cubeland.Blocks.B[Blocks[i]].Count; k > 0; k--) Drop?.Invoke(Cubeland.Blocks.TorchDrop(Blocks[i]), x, y, z);
 				SetBlock(x, y, z, id); continue;
 			}
-			Blocks.Set(x, y, z, id); Edits[i] = id;
+			Blocks.Set(x, y, z, id); Edits[i] = id; NoteEdit(i);
 			int c = (z / CS) * NCX + x / CS;
 			if (id != 0) ChunkTop[c] = Math.Max(ChunkTop[c], y + 1);
 			MarkDirty(x, y, z, dirty);

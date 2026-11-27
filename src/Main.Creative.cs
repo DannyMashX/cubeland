@@ -14,11 +14,11 @@ public partial class Main
 	static (string name, int[] ids)[] creativeTabs;
 	public static (string name, int[] ids)[] CreativeTabs => creativeTabs ??=   // (made when first needed, once every block is in)
 		TabsFrom(GameData.Read<CreativeData>("creative") ?? throw new InvalidOperationException("data/creative.json is missing or can't be read"), World.TallWorlds);
-	// data/creative.json as the tabs (tall: with the deep layers' blocks and ores). Anything the creative inventory has that
-	// no tab lists goes at the end of Building.
+	// data/creative.json as the tabs (tall: with the deep layers' blocks and ores; a block that's hidden, Blocks.Shown, left out
+	// until it shows). Anything the creative inventory has that no tab lists goes at the end of Building.
 	public static (string name, int[] ids)[] TabsFrom(CreativeData d, bool tall)
 	{
-		var tabs = d.TABS.Select(t => (t.name, ids: t.forms != null ? ShapesIn(t.forms, tall) : t.items.SelectMany(e => TabEntry(e, tall)).ToArray())).ToArray();
+		var tabs = d.TABS.Select(t => (t.name, ids: t.forms != null ? ShapesIn(t.forms, tall) : t.items.SelectMany(e => TabEntry(e, tall)).Where(Blocks.Shown).ToArray())).ToArray();   // (a hidden block listed: left out until it shows)
 		var listed = new HashSet<int>(tabs.SelectMany(t => t.ids));
 		int b = Math.Max(0, Array.FindIndex(tabs, t => t.name == "Building"));
 		tabs[b].ids = tabs[b].ids.Concat(AllCreative().Where(i => !listed.Contains(i))).ToArray();

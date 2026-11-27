@@ -333,7 +333,7 @@ public partial class Main
 		if ((m.SowIn -= dt) <= 0)
 		{
 			m.SowIn = A.sowEvery;
-			if (m.Sow > 0 && rnd.NextDouble() < A.sowChance && Blocks.IsGrassy(world.GetBlock(x, y - 1, z)) && world.GetBlock(x, y, z) == 0 && World.Inside(x, y, z)
+			if (m.Sow > 0 && rnd.NextDouble() < A.sowChance && Blocks.PlantsLikeGrass(world.GetBlock(x, y - 1, z)) && world.GetBlock(x, y, z) == 0 && World.Inside(x, y, z)
 				&& world.SkyTop[z * World.WX + x] < y && !LogNear(x, y, z, A.sowClear, null) && !SaplingNear(x, y, z, A.sowClear))
 			{ world.SetBlock(x, y, z, m.Sow); world.Grown.Add(World.Idx(x, y, z)); }   // (planted by a deer: natural, like a tree a sapling grew)
 		}

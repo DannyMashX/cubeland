@@ -65,6 +65,427 @@ public partial class Main : Node3D
 		_ = WorldGen.OreVeins;   // (data/worldgen.json is read here, not first in the world-making thread, so a mistake in it stops the game at load like the other files)
 		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--atlasdump=")) is { } ad) { Atlas.Dump(ad[12..]); SetProcess(false); GetTree().Quit(); return; }   // (testing)
 		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--sheetcheck=")) is { } sc) { Atlas.SheetCheck(sc[13..]); SetProcess(false); GetTree().Quit(); return; }   // (testing)
+		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--colmap=")) is { } cm)
+		{   // (testing, 2b: the column drawing. COLHASH over a 5 x 5 grid of columns across the map, each column's blocks in cube order
+			// as 4-byte numbers (FNV-1a); the time per column; a top-down picture of 16 x 16 columns (--at=cx,cz their middle, in
+			// columns; --river: round the first river 8-20 blocks wide from the map's middle out) and a cut through its middle row)
+			string st = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--seed="))?[7..] ?? "pumpkin";
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+			var plan = new EarthPlan(Worlds.SeedFrom(st), ArgInt("--size=", 2048), ArgInt("--room=", 0));
+			long planMs = sw.ElapsedMilliseconds; var tw = OS.GetCmdlineUserArgs().Contains("--notrees") ? null : new World(Worlds.SeedFrom(st), 4, 640, plan.Size, 1, 9); var cols = new EarthCol(plan, tw?.Gen); int ncx = plan.Size / 16;   // (the trees: land 9, Earthlike's, trunks up into the leaves)
+			uint h = 2166136261; sw.Restart();
+			for (int kz = 0; kz < 5; kz++) for (int kx = 0; kx < 5; kx++)
+			{
+				int cx = (2 * kx + 1) * ncx / 10, cz = (2 * kz + 1) * ncx / 10;
+				foreach (int v in cols.Draw(cx, cz)) unchecked { h = (h ^ (uint)v) * 16777619; }
+			}
+			GD.Print($"COLHASH {h:x8} (seed {st}, {plan.Size} wide, {cols.H} tall; plan {planMs} ms, {sw.ElapsedMilliseconds / 25.0:0} ms a column; PLANHASH {plan.PlanHash:x8} KEEPHASH {plan.KeepHash:x8})");
+			// (and SPAWNHASH: the same over the 3 x 3 columns round where a new world's players start, Main.EarthSpawn, its column
+			// in the middle, rows of z then x)
+			var (spx, spz) = EarthSpawn(plan); uint hs = 2166136261;
+			for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
+			{
+				int cx = Math.Clamp((spx >> 4) + dx, 0, ncx - 1), cz = Math.Clamp((spz >> 4) + dz, 0, ncx - 1);
+				foreach (int v in cols.Draw(cx, cz)) unchecked { hs = (hs ^ (uint)v) * 16777619; }
+			}
+			GD.Print($"SPAWNHASH {hs:x8} (the start at block {spx},{spz}, column {spx >> 4},{spz >> 4})");
+			if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--probe=")) is { } pr)   // (test: what the plan has at blocks x,z;x,z...)
+				foreach (var one in pr[8..].Split(';'))
+				{
+					var q = one.Split(','); int px = int.Parse(q[0]), pz = int.Parse(q[1]), pi = Math.Clamp(pz / plan.Cell, 0, plan.N - 1) * plan.N + Math.Clamp(px / plan.Cell, 0, plan.N - 1);
+					int[] nv = null; double nd = 1e9;
+					foreach (var v in plan.Volcanoes) { double dd = Math.Sqrt(Math.Pow(v[0] * plan.Cell + plan.Cell / 2 - px, 2) + Math.Pow(v[1] * plan.Cell + plan.Cell / 2 - pz, 2)); if (dd < nd) { nd = dd; nv = v; } }
+					var gc = plan.ColAt(px, pz); int gy = plan.GroundAt(px, pz);
+					GD.Print($"PROBE {px},{pz}: biome {plan.Biome[pi]}, sub {plan.SubAt(px, pz)}, sea {plan.Sea[pi]}, lake {plan.Lake[pi]}, ground {gy} (sea {plan.Room}), top rock {plan.RockAt(gc, px, gy, pz, gy)}, 5 down {plan.RockAt(gc, px, gy - 5, pz, gy)}; nearest volcano {(nv == null ? "none" : $"kind {nv[2]} at block {nv[0] * plan.Cell + plan.Cell / 2},{nv[1] * plan.Cell + plan.Cell / 2}, {nd:0} blocks away")}");
+				}
+			int mx = ncx / 2, mz = ncx / 2;
+			if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--at=")) is { } atc) { var q2 = atc[5..].Split(','); mx = int.Parse(q2[0]); mz = int.Parse(q2[1]); }
+			else if (OS.GetCmdlineUserArgs().Contains("--river"))
+			{
+				int N = plan.N; double bestD = 1e18;
+				for (int i = 0; i < N * N; i++)
+				{
+					if (!plan.River(i)) continue; double w = plan.RiverWidth(i) / plan.Belt; if (w < 8 || w > 20) continue;
+					double dx = i % N - N / 2.0, dz = i / N - N / 2.0, d = dx * dx + dz * dz;
+					if (d < bestD) { bestD = d; mx = (int)(plan.RiverPX[i] / 16); mz = (int)(plan.RiverPZ[i] / 16); }
+				}
+			}
+			int n = 256, c0x = mx - 8, c0z = mz - 8; var img = Godot.Image.CreateEmpty(n, n, false, Godot.Image.Format.Rgb8);
+			int y0 = plan.Room - 48, y1 = plan.Room + 80; var cut = Godot.Image.CreateEmpty(n, y1 - y0, false, Godot.Image.Format.Rgb8);
+			var rockOf = new System.Collections.Generic.Dictionary<int, int>();
+			foreach (EarthPlan.Rock r in Enum.GetValues(typeof(EarthPlan.Rock))) rockOf.TryAdd(EarthCol.RockId(r), (int)r);
+			var own = new System.Collections.Generic.Dictionary<int, uint> {
+				[EarthIds.Water] = 0x2f62b8, [EarthIds.Ice] = 0xcfe4ff, [EarthIds.Grass] = 0x5f9f3a, [EarthIds.SnowyGrass] = 0xeef4f8, [EarthIds.SnowBlock] = 0xffffff,
+				[EarthIds.Sand] = 0xe3d39a, [EarthIds.Mud] = 0x5a4632, [EarthIds.Peat] = 0x3e2c1e, [EarthIds.Silt] = 0xa89a7a, [3931] = 0x3a2a1a,
+				[4810] = 0x8fae4a, [4811] = 0x557a4a, [4812] = 0x7a9a3a, [4813] = 0x9ab05a, [4815] = 0x6a9a4a, [4816] = 0x8aa860, [4817] = 0x7a8a5a,
+				[4818] = 0x4f7a3a, [4819] = 0x6f8f5a, [3920] = 0x8a9a6a, [3922] = 0xa8d0f0, [3923] = 0x6aa8ff, [3924] = 0xd8e0e8, [3925] = 0x8a8f96,
+				[3926] = 0xa0a888, [3927] = 0xf4f0e8, [3928] = 0xc0906a, [3929] = 0xa08a6a, [3934] = 0x6a8a4a, [3937] = 0xd0a090, [3938] = 0x5a7a5a,
+				[3939] = 0xb07a4a, [58] = 0x4f7a3a, [218] = 0xb5652e, [65] = 0x9a5a3a, [63] = 0x9aa0b0 };
+			for (int s = 380; s < 387; s++) own[s] = 0xf8fbff;
+			uint ColorOf(int id) => own.TryGetValue(id, out uint u) ? u : Cubeland.Blocks.IsLeaves(id) ? 0x2f7a2au : Cubeland.Blocks.B[id] is { } bd && bd.Name.EndsWith("Log") ? 0x6a4a2au : id >= 5030 && id <= 5051 || id == EarthIds.Gravel ? 0x8c8680u
+				: rockOf.TryGetValue(id, out int rk) ? EarthPlan.RockColors[rk] : 0xff00ffu;
+			Color Shade(uint rgb, float f) => new Color(Math.Min(1, ((rgb >> 16) & 255) / 255f * f), Math.Min(1, ((rgb >> 8) & 255) / 255f * f), Math.Min(1, (rgb & 255) / 255f * f));
+			var seen = new System.Collections.Generic.Dictionary<int, int>(); sw.Restart();
+			for (int q = 0; q < 16 * 16; q++)
+			{
+				int cx = c0x + q % 16, cz = c0z + q / 16; var col = cols.Draw(cx, cz);
+				for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++)
+				{
+					int y = cols.H - 1; while (y > 0 && col[EarthCol.At(x, y, z)] == 0) y--;
+					int id = col[EarthCol.At(x, y, z)]; seen[id] = seen.GetValueOrDefault(id) + 1;
+					img.SetPixel((cx - c0x) * 16 + x, (cz - c0z) * 16 + z, Shade(ColorOf(id), (float)Math.Clamp(0.6 + (y - plan.Room) / 120.0, 0.35, 1.2)));
+				}
+				if (cz == mz) for (int x = 0; x < 16; x++) for (int y = y0; y < y1; y++)
+				{
+					int id = col[EarthCol.At(x, y, 8)];
+					cut.SetPixel((cx - c0x) * 16 + x, y1 - 1 - y, id == 0 ? new Color(0.85f, 0.92f, 1f) : Shade(ColorOf(id), 1));
+				}
+			}
+			System.IO.Directory.CreateDirectory(cm[9..]); int zm = ArgInt("--zoom=", 3); img.Resize(n * zm, n * zm, Godot.Image.Interpolation.Nearest); cut.Resize(n * zm, (y1 - y0) * zm, Godot.Image.Interpolation.Nearest); img.SavePng($"{cm[9..]}/columns_top.png"); cut.SavePng($"{cm[9..]}/columns_cut.png");
+			GD.Print($"COLMAP columns {c0x}-{c0x + 15} x {c0z}-{c0z + 15} (blocks {c0x * 16},{c0z * 16} to {c0x * 16 + 255},{c0z * 16 + 255}; cut along block row z {mz * 16 + 8}, y {y0}-{y1 - 1}); {sw.ElapsedMilliseconds / 256.0:0} ms a column");
+			GD.Print("COLMAP tops: " + string.Join(", ", seen.OrderByDescending(kv => kv.Value).Take(24).Select(kv => $"{kv.Key} {kv.Value}")));
+			SetProcess(false); GetTree().Quit(); return;
+		}
+		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--planmap=")) is { } pm)
+		{   // (testing: pictures of an Earthlike world's plan: --planmap=<folder> [--seed=<text or number>] [--size=N] [--room=blocks above the sea] [--scale=N] [--subzoom=x,z,size])
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+			string st = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--seed="))?[7..] ?? "pumpkin";
+			EarthPlan.NoErode = HasArg("--noerode"); foreach (var (ev, set) in new (string, Action<double>)[] { ("G_MEET", v => EarthPlan.MeetChance = v), ("G_DRIFTGAP", v => EarthPlan.DriftGap = v), ("G_LAND", v => EarthPlan.LandShare = v), ("G_DRIFTEDGE", v => EarthPlan.DriftEdge = v), ("G_TURN", v => EarthPlan.DriftTurn = v), ("G_GROUPMAX", v => EarthPlan.GroupMax = v), ("G_LEAD", v => EarthPlan.LeadCost = v), ("G_SPREADP", v => EarthPlan.SpreadPasses = (int)v), ("G_SPREADR", v => EarthPlan.SpreadR = (int)v), ("G_SUPERW", v => EarthPlan.SuperWide = v), ("G_SPINMIN", v => EarthPlan.SpinMin = v), ("G_DIRDRIFT", v => EarthPlan.DirFromDrift = v > 0), ("G_LEADEDGE", v => EarthPlan.LeadEdge = v > 0), ("G_LEADTARGET", v => EarthPlan.LeadTarget = v), ("G_LEADMIN", v => EarthPlan.LeadMin = v), ("G_LEADWOB", v => EarthPlan.LeadWob = v), ("G_LEADACT", v => EarthPlan.LeadAct = v), ("G_LEADTHIN", v => EarthPlan.LeadThin = (int)v), ("G_LEADHMIN", v => EarthPlan.LeadHMin = v), ("G_LEADCOASTMIN", v => EarthPlan.LeadCoastMin = v), ("G_LEADLOCAL", v => EarthPlan.LeadLocal = v > 0), ("G_DRIFTREACH", v => EarthPlan.DriftReach = v), ("G_RHO8", v => EarthPlan.RiverRho8 = v > 0), ("G_RSMOOTH", v => EarthPlan.RiverSmooth = (int)v), ("G_ICELAKE", v => EarthPlan.IceLakeShare = v), ("G_LAKECAP", v => EarthPlan.LakeCap = v), ("G_ICEGENTLE", v => EarthPlan.IceGentle = v), ("G_ICEWIN", v => EarthPlan.IceWin = (int)v), ("G_JOINROOM", v => EarthPlan.JoinRoom = v), ("G_SUPERLEG", v => EarthPlan.SuperLeg = v), ("G_SUPERSPAN", v => EarthPlan.SuperSpan = v), ("G_SUPERBAY", v => EarthPlan.SuperBay = v), ("G_LOBEDEEP", v => EarthPlan.LobeDeep = v), ("G_AWAY", v => EarthPlan.AwayRest = v), ("G_SPINMAX", v => EarthPlan.SpinMax = v), ("G_SUPEREDGE", v => EarthPlan.SuperEdge = v), ("G_GROUPSP", v => EarthPlan.GroupSpeed = v), ("G_PULL", v => EarthPlan.MeetPull = v), ("G_FALL", v => EarthPlan.ShareFall = v), ("G_LAKEMIN", v => EarthPlan.LakeMinArea = v), ("G_BASINDEEP", v => EarthPlan.BasinDeep = v), ("G_PANDEEP", v => EarthPlan.PanDeep = v), ("G_LOESSSHARE", v => EarthPlan.LoessShare = v), ("G_WIDEMAX", v => EarthPlan.WideMax = v), ("G_KEEP", v => EarthPlan.KeepCells = v), ("G_YOUNGSEA", v => EarthPlan.YoungSeaChance = v), ("G_GAP", v => EarthPlan.GapShare = v), ("G_EDGELO", v => EarthPlan.EdgeLo = v), ("G_EDGEHI", v => EarthPlan.EdgeHi = v), ("G_ISLGAP", v => EarthPlan.IslandGap = v), ("G_EDGEFADE", v => EarthPlan.EdgeFade = v), ("G_JOINH", v => EarthPlan.JoinHigh = v), ("G_JOINW", v => EarthPlan.JoinWide = v), ("G_SUTH", v => EarthPlan.SutureHigh = v), ("G_SUTW", v => EarthPlan.SutureWide = v), ("G_ICEOLD", v => EarthPlan.IceOld = v > 0), ("G_ICECUT", v => EarthPlan.IceCut = v), ("G_ICEBROAD", v => EarthPlan.IceBroad = v), ("G_ICERAG", v => EarthPlan.IceRagged = v), ("G_ICEBW", v => EarthPlan.IceBroadW = v), ("G_ICERW", v => EarthPlan.IceRaggedW = v), ("G_ICETURN", v => EarthPlan.IceTurn = v > 0), ("G_ICESEAL", v => EarthPlan.IceSeal = v), ("G_ICESEALW", v => EarthPlan.IceSealW = v) }) if (System.Environment.GetEnvironmentVariable(ev) is { } evs) set(double.Parse(evs, System.Globalization.CultureInfo.InvariantCulture)); if (System.Environment.GetEnvironmentVariable("KRIVER") is { } kre) EarthPlan.KRiver = double.Parse(kre, System.Globalization.CultureInfo.InvariantCulture); if (System.Environment.GetEnvironmentVariable("KICE") is { } kie) EarthPlan.KIce = double.Parse(kie, System.Globalization.CultureInfo.InvariantCulture);   // (testing: the plan before erosion)
+			if (System.Environment.GetEnvironmentVariable("G_SPINTRY") is { } stv) EarthPlan.SpinTry = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(stv.Split(','), sx => double.Parse(sx, System.Globalization.CultureInfo.InvariantCulture)));
+			EarthPlan.KeepAll = true;   // (the pictures need every array)
+			var plan = new EarthPlan(Worlds.SeedFrom(st), ArgInt("--size=", 2048), ArgInt("--room=", 0));
+			GD.Print($"PLAN seed {st}, {plan.Size} wide, {plan.Room * 2} tall (sea at {plan.Room}), {plan.N} x {plan.N} cells of {plan.Cell}: made in {sw.ElapsedMilliseconds} ms; {plan.Plates} plates ({plan.Continents} continents, {plan.BigIslands} big islands); {plan.Volcanoes.Count} volcano spots; PLANHASH {plan.PlanHash:x8}; KEEPHASH {plan.KeepHash:x8} (not-a-number values {plan.KeepNaN})"); GD.Print($"PLANTIME {plan.StepTimes}"); GD.Print($"PLANHISTORY {plan.HistNote}; hot-spot trail points {plan.Trails.Count}");
+			if (System.Environment.GetEnvironmentVariable("KEEPCHECK") != null)
+			{   // (the freeze's test: everything play time reads from the plan, with every array kept and with the rest dropped: must match)
+				static uint PlayHash(EarthPlan p)
+				{
+					uint h = 2166136261; void Add(int v) { unchecked { h = (h ^ (uint)v) * 16777619; } }
+					void AddD(double v) => Add(BitConverter.SingleToInt32Bits((float)v));
+					for (int z = 0; z < p.N; z++) for (int x = 0; x < p.N; x++)
+					{
+						int bx = x * p.Cell + p.Cell / 2, bz = z * p.Cell + p.Cell / 2, i = z * p.N + x;
+						Add(p.SubAt(bx, bz)); Add(p.GroundAt(bx, bz)); Add(p.River(i) ? 1 : 0);
+						if ((x & 7) == 0 && (z & 7) == 0)
+						{
+							var c = p.ColAt(bx, bz); int yg = p.GroundAt(bx, bz);
+							foreach (int d in new[] { 0, 1, 10, 40, 120, 300 }) Add((int)p.RockAt(c, bx, yg - d, bz, yg));
+							var cl = p.ClimateAt(bx + 1.5, bz + 2.5); AddD(cl.temp); AddD(cl.swing); AddD(cl.rain); AddD(cl.season); AddD(cl.humid);
+							var w = p.WindAt(bx + 1.5, bz + 2.5, 1); AddD(w.x); AddD(w.z);
+							if (p.River(i)) { AddD(p.RiverWidth(i)); AddD(p.RiverDepth(i)); }
+						}
+					}
+					return h;
+				}
+				uint a = PlayHash(plan);
+				EarthPlan.KeepAll = false; var p2 = new EarthPlan(Worlds.SeedFrom(st), ArgInt("--size=", 2048), ArgInt("--room=", 0)); EarthPlan.KeepAll = true;
+				uint b = PlayHash(p2);
+				GD.Print($"PLANPLAYHASH {a:x8} (with the plan-only arrays dropped: {b:x8}, {(a == b && p2.KeepHash == plan.KeepHash && p2.PlanHash == plan.PlanHash ? "SAME" : "DIFFERENT")})");
+			}
+			if (plan.GravelRock != null)
+			{   // (testing: GravelRock, each cell's gravel rock: a fingerprint of the bytes alone, the shares on land and in rivers, and a picture)
+				int NNg = plan.N * plan.N; uint gh = 2166136261; var onLand = new int[256]; var inRiver = new int[256]; int nl = 0, nr = 0;
+				var gi = Godot.Image.CreateEmpty(plan.N, plan.N, false, Godot.Image.Format.Rgb8);
+				for (int i = 0; i < NNg; i++)
+				{
+					int g = plan.GravelRock[i]; unchecked { gh = (gh ^ (uint)g) * 16777619; }
+					if (!plan.Sea[i]) { onLand[g]++; nl++; if (plan.River(i)) { inRiver[g]++; nr++; } }
+					uint col = EarthPlan.RockColors[g]; double f = plan.Sea[i] ? 0.3 : plan.River(i) ? 1.0 : 0.75;
+					gi.SetPixel(i % plan.N, i / plan.N, new Color((float)(((col >> 16) & 255) / 255.0 * f), (float)(((col >> 8) & 255) / 255.0 * f), (float)((col & 255) / 255.0 * f)));
+				}
+				string Shares(int[] n, int tot) => string.Join(", ", System.Linq.Enumerable.Range(0, 256).Where(r => n[r] > 0).OrderByDescending(r => n[r]).ThenBy(r => r).Select(r => $"{(EarthPlan.Rock)r} {100.0 * n[r] / Math.Max(1, tot):0.0}"));
+				GD.Print($"PLANGRAVELHASH {gh:x8} (the GravelRock bytes alone; biggest catchment sum {plan.GravelMaxSum} quarter blocks)");
+				GD.Print($"PLANGRAVEL land: {Shares(onLand, nl)}");
+				GD.Print($"PLANGRAVEL rivers: {Shares(inRiver, nr)}");
+				System.IO.Directory.CreateDirectory(pm[10..]); gi.SavePng($"{pm[10..]}/gravelrock.png");
+			}
+			if (plan.Wear != null)
+			{   // (testing: what erosion did)
+				int NNe = plan.N * plan.N; double cut = 0, laid = 0, maxCut = 0; int land = 0, ice = 0, trough = 0, mor = 0, allu = 0, loess = 0, karst = 0, dune = 0, fj = 0, coast1 = 0, cliff = 0, head = 0, scree = 0;
+				for (int i = 0; i < NNe; i++)
+				{
+					if (plan.Fjord[i]) fj++; if (plan.Coast[i] == 1) coast1++; if (plan.Coast[i] == 2) cliff++;
+					if (plan.Sea[i]) continue; land++;
+					if (plan.Wear[i] > 0) cut += plan.Wear[i]; else laid -= plan.Wear[i]; maxCut = Math.Max(maxCut, plan.Wear[i]);
+					if (plan.IceWas[i] >= 0.3) ice++; if (plan.Trough[i] >= 3 * plan.Amp) trough++; if (plan.Moraine[i] >= 1.5 * plan.Amp) mor++; if (plan.Alluvium[i] >= 1.5) allu++;
+					if (plan.Loess[i] >= 1) loess++; if (plan.Karst[i] > 0.3) karst++; if (plan.Dune[i] > 0.6) dune++; if (plan.Head[i]) head++; if (plan.ScreeT[i] >= 3) scree++;
+				}
+				string P(int n) => $"{100.0 * n / Math.Max(1, land):0.0}%";
+				{   // (rivers always downhill: the water's level never rises from a river cell to the cell it runs into, nor does the ground)
+					int rc = 0, upW = 0, upG = 0;
+					for (int i = 0; i < NNe; i++)
+					{
+						if (!plan.River(i)) continue; rc++; int r = plan.Down[i]; if (r < 0) continue;
+						if (plan.Level[r] > plan.Level[i] + 1e-9) upW++;
+						if (!plan.Lake[r] && !plan.Sea[r] && plan.Elev[r] > plan.Elev[i] + 1e-9 && plan.Elev[i] >= plan.Level[i] - 1e-9) upG++;
+					}
+					GD.Print($"PLANRIVERCHECK river cells {rc}; water running uphill {upW}; ground rising under the river {upG}");
+					{ int w8 = 0, w16 = 0, w40 = 0, br = 0, im = -1; double wm = 0; for (int i = 0; i < NNe; i++) if (plan.River(i)) { double w = plan.RiverWidth(i), w2 = w / plan.Belt; if (w > wm) { wm = w; im = i; } if (w2 >= 8) w8++; if (w2 >= 16) w16++; if (w2 >= 40) w40++; if (plan.Braid[i] > 0.5) br++; }
+					  GD.Print($"PLANRIVERS widest {wm:0} blocks (depth {(im >= 0 ? plan.RiverDepth(im) : 0):0.0}); river cells as wide as 8+, 16+, 40+ in a 2048 world (x {plan.Belt:0.##} here): {w8}, {w16}, {w40}; braided {br}"); }
+					{ var cs = new List<double>(); for (int i = 0; i < NNe; i++) if (plan.River(i)) cs.Add(plan.Catchment(i)); cs.Sort(); if (cs.Count > 0) GD.Print($"PLANCATCH river catchments (square blocks of wet ground): median {cs[cs.Count / 2]:0}, 90% {cs[cs.Count * 9 / 10]:0}, 99% {cs[cs.Count * 99 / 100]:0}, most {cs[^1]:0}"); }
+					int drown = 0, drownFar = 0;
+					for (int i = 0; i < NNe; i++)
+						if (plan.Sea[i] && plan.Elev0[i] > 0 && !plan.Fjord[i] && plan.Coast[i] != 1) { drown++; if (plan.SeaDist != null) { int x = i % plan.N, z = i / plan.N; bool nearOld = false; for (int dz = -3; dz <= 3 && !nearOld; dz++) for (int dx = -3; dx <= 3; dx++) { int xx = x + dx, zz = z + dz; if (xx >= 0 && zz >= 0 && xx < plan.N && zz < plan.N && plan.Elev0[zz * plan.N + xx] <= 0) { nearOld = true; break; } } if (!nearOld) { drownFar++; } } }
+					GD.Print($"PLANDROWNED land cells now sea (not fjord, not cut back by waves): {drown}, of them more than 3 cells from the old sea: {drownFar}");
+				}
+				GD.Print($"PLANEROSION land worn {cut / Math.Max(1, land):0.0} blocks on average (most {maxCut:0}), laid down {laid / Math.Max(1, land):0.0}; of the land: under the old ice {P(ice)}, troughs {P(trough)}, cirques {P(head)}, moraines {P(mor)}, river fill {P(allu)}, loess {P(loess)}, karst {P(karst)}, sand seas {P(dune)}, scree {P(scree)}; fjord cells {fj}, coast cut back {coast1} cells, sea cliffs {cliff} cells");
+			}
+			int[] count = new int[EarthPlan.BiomeNames.Length]; foreach (var b in plan.Biome) count[b]++;
+			int landN = plan.Biome.Length - count[EarthPlan.Ocean];
+			GD.Print($"PLAN sea {100.0 * count[EarthPlan.Ocean] / plan.Biome.Length:0.0}% of the world; of the land: " + string.Join(", ", Enumerable.Range(0, count.Length).Where(k => count[k] > 0 && k != EarthPlan.Ocean).OrderByDescending(k => count[k]).Select(k => $"{EarthPlan.BiomeNames[k]} {100.0 * count[k] / landN:0.0}%")));
+			{   // (testing: how the land lies: in ranges, rifts, how many continents and how big the biggest)
+				int NNp = plan.N * plan.N, landC = 0, rangeC = 0, riftC = 0; var comp = new int[NNp]; for (int i = 0; i < NNp; i++) comp[i] = -1;
+				var sizes = new List<int>(); var zs = new List<double>(); var stack = new Stack<int>();
+				for (int i = 0; i < NNp; i++)
+				{
+					if (plan.Sea[i]) continue; landC++; if (plan.Lift[i] > 30 * plan.Tall) rangeC++; if (plan.Cut[i] > 8 * plan.Tall) riftC++;
+					if (comp[i] >= 0) continue;
+					int id = sizes.Count, n = 0; double zsum = 0; comp[i] = id; stack.Push(i);
+					while (stack.Count > 0)
+					{
+						int c = stack.Pop(); n++; zsum += c / plan.N; int cx = c % plan.N, cz = c / plan.N;
+						foreach (var (dx, dz) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+						{
+							int x = cx + dx, z = cz + dz; if (x < 0 || z < 0 || x >= plan.N || z >= plan.N) continue;
+							int j = z * plan.N + x; if (plan.Sea[j] || comp[j] >= 0) continue; comp[j] = id; stack.Push(j);
+						}
+					}
+					sizes.Add(n); zs.Add(zsum / n / plan.N);
+				}
+				var big = Enumerable.Range(0, sizes.Count).Where(k => sizes[k] >= 0.05 * landC).OrderByDescending(k => sizes[k]).ToList();
+				// (testing: the open sea between the big landmasses: for each, how far to the nearest other big one, in blocks)
+				var gaps = new List<double>(); var dist = new double[NNp]; var isBig = new HashSet<int>(big);
+				foreach (int bb in big)
+				{
+					for (int i = 0; i < NNp; i++) dist[i] = comp[i] == bb ? 0 : 1e9;
+					int Nn = plan.N;
+					for (int z = 0; z < Nn; z++) for (int x = 0; x < Nn; x++)
+					{
+						int i = z * Nn + x; double d = dist[i];
+						if (x > 0) d = Math.Min(d, dist[i - 1] + 1); if (z > 0) d = Math.Min(d, dist[i - Nn] + 1);
+						if (x > 0 && z > 0) d = Math.Min(d, dist[i - Nn - 1] + 1.4142); if (x + 1 < Nn && z > 0) d = Math.Min(d, dist[i - Nn + 1] + 1.4142);
+						dist[i] = d;
+					}
+					for (int z = Nn - 1; z >= 0; z--) for (int x = Nn - 1; x >= 0; x--)
+					{
+						int i = z * Nn + x; double d = dist[i];
+						if (x + 1 < Nn) d = Math.Min(d, dist[i + 1] + 1); if (z + 1 < Nn) d = Math.Min(d, dist[i + Nn] + 1);
+						if (x + 1 < Nn && z + 1 < Nn) d = Math.Min(d, dist[i + Nn + 1] + 1.4142); if (x > 0 && z + 1 < Nn) d = Math.Min(d, dist[i + Nn - 1] + 1.4142);
+						dist[i] = d;
+					}
+					double g = 1e9; for (int i = 0; i < NNp; i++) if (comp[i] >= 0 && comp[i] != bb && isBig.Contains(comp[i])) g = Math.Min(g, dist[i]);
+					if (g < 1e9) gaps.Add(g * plan.Cell);
+				}
+				GD.Print($"PLANGAPS big landmasses (5%+ of the land) by size: {string.Join(" ", big.Select(k => $"{100.0 * sizes[k] / Math.Max(1, landC):0}%"))}; each one's open sea to the nearest other (blocks): {string.Join(" ", gaps.Select(v => $"{v:0}"))}");
+				{   // (testing, Draft 2h: which continents make up each big landmass, and the narrowest crust gap between continents that don't touch)
+					int ncs = plan.Continents + plan.BigIslands; var inBig = big.Select(bb => new SortedSet<int>()).ToList();
+					for (int i = 0; i < NNp; i++) { int c = plan.ContId[i]; if (c < 0 || plan.Sea[i]) continue; int bi = big.IndexOf(comp[i]); if (bi >= 0) inBig[bi].Add(c); }
+					var gapC = new double[ncs, ncs]; int Nn = plan.N; var dd = new double[NNp];
+					for (int a0 = 0; a0 < ncs; a0++)
+					{
+						for (int i = 0; i < NNp; i++) dd[i] = plan.ContId[i] == a0 ? 0 : 1e9;
+						for (int z = 0; z < Nn; z++) for (int x = 0; x < Nn; x++) { int i = z * Nn + x; double d = dd[i]; if (x > 0) d = Math.Min(d, dd[i - 1] + 1); if (z > 0) d = Math.Min(d, dd[i - Nn] + 1); if (x > 0 && z > 0) d = Math.Min(d, dd[i - Nn - 1] + 1.4142); if (x + 1 < Nn && z > 0) d = Math.Min(d, dd[i - Nn + 1] + 1.4142); dd[i] = d; }
+						for (int z = Nn - 1; z >= 0; z--) for (int x = Nn - 1; x >= 0; x--) { int i = z * Nn + x; double d = dd[i]; if (x + 1 < Nn) d = Math.Min(d, dd[i + 1] + 1); if (z + 1 < Nn) d = Math.Min(d, dd[i + Nn] + 1); if (x + 1 < Nn && z + 1 < Nn) d = Math.Min(d, dd[i + Nn + 1] + 1.4142); if (x > 0 && z + 1 < Nn) d = Math.Min(d, dd[i + Nn - 1] + 1.4142); dd[i] = d; }
+						for (int b0 = 0; b0 < ncs; b0++) { double g = 1e9; for (int i = 0; i < NNp; i++) if (plan.ContId[i] == b0) g = Math.Min(g, dd[i]); gapC[a0, b0] = g; }
+					}
+					var pairs = new List<string>();
+					for (int a0 = 0; a0 < ncs; a0++) for (int b0 = a0 + 1; b0 < ncs; b0++) if (gapC[a0, b0] > 1.01 && gapC[a0, b0] < 0.05 * Nn) pairs.Add($"{a0}-{b0} {gapC[a0, b0] - 1:0} cells ({100.0 * (gapC[a0, b0] - 1) / Nn:0.0}%)");
+					GD.Print("PLANTHIN " + plan.ThinNote());
+					{ int cE = 0, cR = 0, cO = 0, cY = 0, cT = 0; for (int q = 0; q < plan.Crust.Length; q++) { if (!plan.Crust[q]) continue; cT++; if (!plan.Sea[q]) continue; if (plan.YoungSea != null && plan.YoungSea[q]) cY++; else if (plan.GOceanDist[q] <= EarthPlan.KeepCells) cE++; else if (plan.GRift0[q] > 0.7) cR++; else { int qx = q % plan.N, qz = q / plan.N; double eb = Math.Min(Math.Min(qx + 0.5, qz + 0.5), Math.Min(plan.N - qx - 0.5, plan.N - qz - 0.5)) * plan.Cell; if (eb < 1.6 * Math.Max(48, plan.Size * EarthPlan.EdgeFade)) cY++; else cO++; } } GD.Print($"PLANCRUSTSEA crust under the sea, of the crust: near the world edge {100.0 * cY / cT:0.0}%, within 1.5 cells of its edge {100.0 * cE / cT:0.0}%, rifts {100.0 * cR / cT:0.0}%, else {100.0 * cO / cT:0.0}%"); }
+GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length:0.0}% of the world; continents in each big landmass: {string.Join(" ", inBig.Select(t => "[" + string.Join(",", t) + "]"))}; crust gaps under 5% of the world between continents that don't touch: {(pairs.Count == 0 ? "none" : string.Join(", ", pairs))}; touching: {string.Join(" ", Enumerable.Range(0, ncs * ncs).Where(q => q / ncs < q % ncs && gapC[q / ncs, q % ncs] <= 1.01).Select(q => $"{q / ncs}-{q % ncs}"))}");
+				}
+				{   // (testing, Draft 2i: the land raised 30+ by each age of range, the strongest at each cell)
+					int ry = 0, rm2 = 0, ro = 0, ln = 0;
+					for (int i = 0; i < NNp; i++)
+					{
+						if (plan.Sea[i]) continue; ln++;
+						double y = plan.RangeYoung[i], m = plan.RangeMid[i], o = plan.RangeOld[i], mx = Math.Max(y, Math.Max(m, o));
+						if (y + m + o < 30 * plan.Tall) continue; if (y >= mx) ry++; else if (m >= mx) rm2++; else ro++;
+					}
+					{   // (testing, ecology draft: each biome's climate; growing days a year (of 24) with warmth = Temp + Swing s over 5 and over 12)
+						int nb = EarthPlan.BiomeNames.Length; var bc = new int[nb]; var bt = new double[nb]; var bs = new double[nb]; var br = new double[nb]; var bse = new double[nb]; var g5 = new double[nb]; var g12 = new double[nb];
+						static double Days(double T, double Sw, double th) { if (Sw < 1e-6) return T >= th ? 24 : 0; double c = (th - T) / Sw; return c <= -1 ? 24 : c >= 1 ? 0 : 24 * Math.Acos(c) / Math.PI; }
+						for (int q = 0; q < NNp; q++) { if (plan.Sea[q]) continue; int b = plan.Biome[q]; if (b >= nb) continue; bc[b]++; bt[b] += plan.Temp[q]; bs[b] += plan.Swing[q]; br[b] += plan.Rain[q]; bse[b] += plan.Season[q]; g5[b] += Days(plan.Temp[q], plan.Swing[q], 5); g12[b] += Days(plan.Temp[q], plan.Swing[q], 12); }
+						GD.Print("PLANECO " + string.Join("; ", Enumerable.Range(0, nb).Where(b => bc[b] > 0).Select(b => $"{EarthPlan.BiomeNames[b]} {100.0 * bc[b] / NNp:0.0}% T {bt[b] / bc[b]:0.0} S {bs[b] / bc[b]:0.0} R {br[b] / bc[b]:0.00} Se {bse[b] / bc[b]:0.00} g5 {g5[b] / bc[b]:0.0} g12 {g12[b] / bc[b]:0.0}")));
+					}
+					if (System.Environment.GetEnvironmentVariable("LEADDBG") != null)
+					{   // (testing, Draft 2l: the leading-edge plates)
+						int Nn = plan.N, k0 = plan.Majors + plan.Minors + plan.MicrosMade;
+						var dd = new int[NNp]; var qq = new Queue<int>();
+						for (int i = 0; i < NNp; i++)
+						{
+							int x = i % Nn, z = i / Nn, p0 = plan.Plate[i];
+							bool edge = x == 0 || z == 0 || x == Nn - 1 || z == Nn - 1 || plan.Plate[i - 1] != p0 || plan.Plate[i + 1] != p0 || plan.Plate[i - Nn] != p0 || plan.Plate[i + Nn] != p0;
+							dd[i] = edge ? 1 : 0; if (edge) qq.Enqueue(i);
+						}
+						while (qq.Count > 0)
+						{
+							int c = qq.Dequeue(), x = c % Nn, z = c / Nn;
+							foreach (int j in new[] { x > 0 ? c - 1 : -1, x < Nn - 1 ? c + 1 : -1, z > 0 ? c - Nn : -1, z < Nn - 1 ? c + Nn : -1 })
+								if (j >= 0 && dd[j] == 0 && plan.Plate[j] == plan.Plate[c]) { dd[j] = dd[c] + 1; qq.Enqueue(j); }
+						}
+						int sIsl = 0, sArc = 0, sArcOpen = 0, sSlide = 0, sThin = 99, sPl = 0;
+						var cdist = new int[NNp]; { var q2 = new Queue<int>(); for (int i = 0; i < NNp; i++) { cdist[i] = plan.Crust[i] ? 0 : 99999; if (plan.Crust[i]) q2.Enqueue(i); }
+							while (q2.Count > 0) { int c = q2.Dequeue(), x = c % Nn, z = c / Nn; foreach (int j in new[] { x > 0 ? c - 1 : -1, x < Nn - 1 ? c + 1 : -1, z > 0 ? c - Nn : -1, z < Nn - 1 ? c + Nn : -1 }) if (j >= 0 && cdist[j] > cdist[c] + 1) { cdist[j] = cdist[c] + 1; q2.Enqueue(j); } } }
+						for (int i = 0; i < NNp; i++) if (plan.Plate[i] >= k0 || plan.Other[i] >= k0 && plan.Edge[i] != 0) { if (plan.Edge[i] == 3) { sArc++; if (cdist[i] >= 12) sArcOpen++; } if (plan.Edge[i] == 5) sSlide++; }
+						for (int k = k0; k < plan.Plates; k++)
+						{
+							int n = 0, thick = 0, arc = 0; var nb = new Dictionary<int, int>();
+							for (int i = 0; i < NNp; i++)
+							{
+								if (plan.Plate[i] != k) continue; n++; thick = Math.Max(thick, dd[i]);
+								int x = i % Nn, z = i / Nn;
+								foreach (int j in new[] { x > 0 ? i - 1 : -1, x < Nn - 1 ? i + 1 : -1, z > 0 ? i - Nn : -1, z < Nn - 1 ? i + Nn : -1 })
+									if (j >= 0 && plan.Plate[j] != k) nb[plan.Plate[j]] = nb.GetValueOrDefault(plan.Plate[j]) + 1;
+							}
+							for (int i = 0; i < NNp; i++) if (plan.Edge[i] == 3 && (plan.Plate[i] == k || plan.Other[i] == k)) arc++;
+							int isl = plan.Islands.Count(v => (int)v[4] == k || (int)v[5] == k);
+							sIsl += isl; sThin = Math.Min(sThin, thick); sPl++;
+							double mx = 0, mz = 0; int x0 = Nn, x1 = 0, z0 = Nn, z1 = 0; for (int i = 0; i < NNp; i++) if (plan.Plate[i] == k) { int x = i % Nn, z = i / Nn; mx += x; mz += z; x0 = Math.Min(x0, x); x1 = Math.Max(x1, x); z0 = Math.Min(z0, z); z1 = Math.Max(z1, z); }
+							GD.Print($"DBGLEAD plate {k}: middle {mx / Math.Max(1, n) / Nn:0.00},{mz / Math.Max(1, n) / Nn:0.00} box x {x0}-{x1} z {z0}-{z1}; {n} cells, {thick} thick, v ({plan.VX[k]:0.00},{plan.VZ[k]:0.00}); next to {string.Join(" ", nb.OrderByDescending(e => e.Value).Select(e => $"{e.Key}{(plan.PlateGroup[e.Key] >= 0 ? "G" : "o")}:{e.Value}"))}; ocean-ocean edge cells {arc}; island-chain islands {isl}");
+						}
+						GD.Print($"DBGLEADSUM {sPl} leading-edge plates, the thinnest {sThin} deep; island-chain islands on them {sIsl}; ocean-ocean edge cells {sArc} ({sArcOpen} of them 12+ cells from land); sliding edge cells {sSlide}");
+						var img = Godot.Image.CreateEmpty(Nn, Nn, false, Godot.Image.Format.Rgb8);
+						for (int i = 0; i < NNp; i++)
+						{
+							int k = plan.Plate[i], e = plan.Edge[i]; bool lead = k >= k0 || (plan.Other[i] >= k0 && e != 0);
+							Godot.Color col = plan.Crust[i] ? new Godot.Color(0.5f, 0.5f, 0.5f) : plan.PlateGroup[k] >= 0 ? new Godot.Color(0.16f, 0.18f, 0.3f) : new Godot.Color(0.1f, 0.1f, 0.12f);
+							if (k >= k0) col = Godot.Color.FromHsv((k - k0) * 0.13f % 1f, 0.6f, plan.Crust[i] ? 0.5f : 0.85f);
+							if (e != 0)
+							{
+								var ec = e == 1 ? new Godot.Color(1, 0, 0) : e == 2 ? new Godot.Color(1, 0.55f, 0) : e == 3 ? new Godot.Color(1, 1, 0) : e == 4 ? new Godot.Color(0, 1, 1) : new Godot.Color(0.8f, 0.8f, 0.8f);
+								col = lead ? ec : col.Lerp(ec, 0.35f);
+							}
+							img.SetPixel(i % Nn, i / Nn, col);
+						}
+						img.Resize(Nn * 2, Nn * 2, Godot.Image.Interpolation.Nearest);
+						foreach (var v in plan.Islands) if ((int)v[4] >= k0 || (int)v[5] >= k0)
+							for (int dz = -3; dz <= 3; dz++) for (int dx = -3; dx <= 3; dx++) { int X = (int)(v[0] * 2) + dx, Z = (int)(v[1] * 2) + dz; if (X >= 0 && Z >= 0 && X < Nn * 2 && Z < Nn * 2 && Math.Max(Math.Abs(dx), Math.Abs(dz)) == 3) img.SetPixel(X, Z, new Godot.Color(1, 1, 1)); }
+						img.SavePng($"{pm[10..]}/leadplates.png");
+						if (System.Environment.GetEnvironmentVariable("DBGROW") is { } drw) foreach (var rw in drw.Split(';'))
+						{   // (testing: the plates along a row z from x0 to x1: plate/group/edge kind/crust)
+							var pr = rw.Split(','); int rz = int.Parse(pr[0]), rx0 = int.Parse(pr[1]), rx1 = int.Parse(pr[2]);
+							GD.Print($"DBGROW z {rz} x {rx0}-{rx1}: " + string.Join(" ", Enumerable.Range(rx0, rx1 - rx0 + 1).Select(x => { int i = rz * Nn + x; return $"{plan.Plate[i]}{(plan.PlateGroup[plan.Plate[i]] >= 0 ? "g" + plan.PlateGroup[plan.Plate[i]] : "")}{(plan.Edge[i] > 0 ? "e" + plan.Edge[i] : "")}{(plan.Crust[i] ? "C" : "")}"; })));
+						}
+					}
+					GD.Print($"PLANRANGES raised 30+ x Tall (share of the land): young {100.0 * ry / Math.Max(1, ln):0.0}%, middle-aged (joins) {100.0 * rm2 / Math.Max(1, ln):0.0}%, old (sutures) {100.0 * ro / Math.Max(1, ln):0.0}%; the leading coasts' ranges sized {plan.LeadSz:0.000}, strength {plan.LeadH:0.000}");
+				}
+				GD.Print($"PLANLAND land {100.0 * landC / NNp:0.0}%; in ranges (raised 30+ by plate edges) {100.0 * rangeC / Math.Max(1, landC):0.0}% of the land, in rifts (cut 8+) {100.0 * riftC / Math.Max(1, landC):0.0}%; landmasses 1%+ of the land: {sizes.Count(s => s >= 0.01 * landC)}, 5%+: {big.Count}; the biggest {100.0 * sizes.DefaultIfEmpty(0).Max() / Math.Max(1, landC):0.0}% of the land; the big ones' middles north to south: {string.Join(" ", big.Select(k => $"{zs[k]:0.00}"))}; {plan.ContNote}; shapes {plan.ShapeSize} cells ({plan.ShapeSize * plan.Cell} blocks), plates about {Math.Sqrt((double)NNp / plan.Plates) * plan.Cell:0} blocks across");
+			}
+			{   // (testing: the island chains: islands by the pair of plates they stand between; a chain is 2 or more)
+				var chains = plan.Islands.GroupBy(v => ((int)v[4], (int)v[5])).Where(g => g.Count() >= 2).OrderByDescending(g => g.Count()).ToList();
+				int above = 0; foreach (var v in plan.Islands) { int ci = (int)v[1] * plan.N + (int)v[0]; if (!plan.Sea[ci]) above++; }
+				var bestC = chains.FirstOrDefault();
+				string where = bestC == null ? "" : $"; the longest: {bestC.Count()} islands, cells x {bestC.Min(v => v[0]):0}-{bestC.Max(v => v[0]):0}, z {bestC.Min(v => v[1]):0}-{bestC.Max(v => v[1]):0}";
+				var arcPairs = Enumerable.Range(0, plan.N * plan.N).Where(i => plan.Edge[i] == 3).GroupBy(i => (Math.Min(plan.Plate[i], plan.Other[i]), Math.Max(plan.Plate[i], plan.Other[i]))).Where(g => g.Count() >= 10).ToList();
+				var chainPairs = chains.Select(g => (Math.Min(g.Key.Item1, g.Key.Item2), Math.Max(g.Key.Item1, g.Key.Item2))).ToHashSet();
+				GD.Print($"PLANISLANDS ocean-meets-ocean edges pushing together: {arcPairs.Count} ({arcPairs.Count(g => chainPairs.Contains(g.Key))} with a chain; edge cells {string.Join(" ", arcPairs.Select(g => g.Count()))}); {plan.Islands.Count} islands ({above} above the sea; tries skipped: far from the line {plan.IslSkip[0]}, by hash {plan.IslSkip[1]}, by the edge {plan.IslSkip[2]}, near a coast {plan.IslSkip[3]}), {chains.Count} chains (lengths {string.Join(" ", chains.Select(g => g.Count()))}){where}");
+			}
+			GD.Print($"PLAN wastes below rain {plan.ColdDry:0.000} (cold), {plan.HotDry:0.000} (hot); rivers: {Enumerable.Range(0, plan.N * plan.N).Count(plan.River)} cells; lakes {plan.Lake.Count(l => l)} cells");
+			if (HasArg("--plandump=0,0,0") || OS.GetCmdlineUserArgs().Any(a => a.StartsWith("--plandump="))) GD.Print("PLAN plates (number: radius in blocks, C continent or o ocean): " + string.Join(" ", Enumerable.Range(0, plan.Plates).Select(k => $"{k}:{plan.PlateR[k]:0}{(plan.Cont[k] ? "C" : "o")}")));
+			if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--plandump=")) is { } pd)   // (z,x0,x1: one row's numbers)
+			{
+				var q = pd[11..].Split(',').Select(int.Parse).ToArray();
+				for (int x = q[1]; x <= q[2]; x++) { int i = q[0] * plan.N + x; GD.Print($"PLANDUMP x {x}: elev {plan.Elev[i]:0.00} level {plan.Level[i]:0.00} plate {plan.Plate[i]} other {plan.Other[i]} bd {plan.Bd[i]:0.00} ds {plan.Ds[i]:0.00} lake {plan.Lake[i]}"); }
+			}
+			if (EarthPlan.SubNames.Length != EarthPlan.SubColors.Length || EarthPlan.SubNames.Length != EarthPlan.SubParent.Length || EarthPlan.BiomeNames.Length != EarthPlan.BiomeColors.Length)
+				GD.PrintErr("PLAN lists differ in length");
+			var subs = new Dictionary<int, int>();
+			for (int z = 0; z < plan.N; z++) for (int x = 0; x < plan.N; x++) { int s = plan.SubAt(x * plan.Cell + plan.Cell / 2, z * plan.Cell + plan.Cell / 2); subs[s] = subs.GetValueOrDefault(s) + 1; }
+			GD.Print("PLAN sub-biomes: " + string.Join(", ", subs.Where(k => k.Key >= EarthPlan.FirstSub).OrderByDescending(k => k.Value).Select(k => $"{EarthPlan.SubNames[k.Key - EarthPlan.FirstSub]} {100.0 * k.Value / (plan.N * plan.N):0.0}%")));
+			GD.Print($"PLAN missing sub-biomes: {string.Join(", ", Enumerable.Range(0, EarthPlan.SubNames.Length).Where(k => !subs.ContainsKey(EarthPlan.FirstSub + k)).Select(k => EarthPlan.SubNames[k]))}");
+			{   // (Draft 2n testing: the sea ice, new rule and the 2m one, by column: how deep from the map's edge, top and bottom)
+				int Nn = plan.N; var iceMask = new byte[Nn * Nn]; double dTop = 0, dBot = 0, oTop = 0, oBot = 0; int newC = 0, oldC = 0, minT = int.MaxValue, maxT = 0, minB = int.MaxValue, maxB = 0;
+				for (int x = 0; x < Nn; x++)
+				{
+					int nt = 0, nb = 0, ot = 0, ob = 0;
+					for (int z = 0; z < Nn; z++)
+					{
+						int i = z * Nn + x; bool ice = plan.SubAt(x * plan.Cell + plan.Cell / 2, z * plan.Cell + plan.Cell / 2) == EarthPlan.SeaIce; iceMask[i] = (byte)(ice ? 1 : 0);
+						bool old = plan.Sea[i] && !(plan.Fjord != null && plan.Fjord[i]) && plan.Temp[i] < -8;
+						if (ice) { newC++; if (z < Nn / 2) nt++; else nb++; }
+						if (old) { oldC++; if (z < Nn / 2) ot++; else ob++; }
+					}
+					dTop += nt; dBot += nb; oTop += ot; oBot += ob; minT = Math.Min(minT, nt); maxT = Math.Max(maxT, nt); minB = Math.Min(minB, nb); maxB = Math.Max(maxB, nb);
+				}
+				GD.Print($"PLANICE sea ice {100.0 * newC / (Nn * Nn):0.00}% of the map (2m rule {100.0 * oldC / (Nn * Nn):0.00}%, new/old {(double)newC / Math.Max(1, oldC):0.00}); ice cells per column top {dTop / Nn:0.0} (min {minT} max {maxT}; 2m {oTop / Nn:0.0}), bottom {dBot / Nn:0.0} (min {minB} max {maxB}; 2m {oBot / Nn:0.0}); cell {plan.Cell} blocks, grid {Nn}");
+				{   // (for web: the sea ice cells' count and an FNV-1a 32 over one byte a cell, 1 sea ice or 0, row by row from z 0, each row from x 0; SubAt at each cell's middle)
+					uint fh = 2166136261; foreach (byte bb in iceMask) { fh ^= bb; fh *= 16777619; }
+					GD.Print($"PLANICEHASH sea ice cells {newC} of {Nn * Nn}, mask FNV-1a {fh:x8}");
+				}
+				if (System.Environment.GetEnvironmentVariable("ICEROW") is { } irs)
+				{   // (testing: one row's temperature parts, z,x0,x1)
+					var q = irs.Split(',').Select(int.Parse).ToArray();
+					for (int x = q[1]; x <= q[2]; x++) { int i = q[0] * Nn + x; GD.Print($"PLANICEROW x {x}: T {plan.Temp[i]:0.00} cur {plan.Cur[i]:0.00} wob {plan.IceWob(x * plan.Cell + plan.Cell / 2, q[0] * plan.Cell + plan.Cell / 2):0.00} sea {plan.Sea[i]}"); }
+				}
+			}
+			if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--subzoom=")) is { } sz)   // (x,z,size in blocks: the sub-biomes block by block)
+			{
+				var q = sz[10..].Split(',').Select(int.Parse).ToArray();
+				plan.SaveSubZoom($"{pm[10..]}/subzoom.png", q[0], q[1], q[2]);
+			}
+			plan.SavePictures(pm[10..], ArgInt("--scale=", Math.Max(1, 1024 / plan.N)));
+			plan.SaveHistory(pm[10..]);
+			if (HasArg("--subdiff"))
+			{   // (testing: which sub-biomes erosion changed into which, sampled at each cell's middle)
+				EarthPlan.NoErode = true; var p0 = new EarthPlan(Worlds.SeedFrom(st), ArgInt("--size=", 2048), ArgInt("--room=", 0)); EarthPlan.NoErode = false;
+				var tally = new Dictionary<string, int>(); int nAll = 0;
+				for (int i = 0; i < plan.N * plan.N; i++)
+				{
+					int bx = (i % plan.N) * plan.Cell + plan.Cell / 2, bz = (i / plan.N) * plan.Cell + plan.Cell / 2;
+					int s0 = p0.SubAt(bx, bz), s1 = plan.SubAt(bx, bz); nAll++; if (s0 == s1) continue;
+					string N0(int q) => q >= EarthPlan.FirstSub ? EarthPlan.SubNames[q - EarthPlan.FirstSub] : EarthPlan.BiomeNames[q]; string k = N0(s0) + " -> " + N0(s1); tally[k] = tally.TryGetValue(k, out int v) ? v + 1 : 1;
+				}
+				var l = new List<KeyValuePair<string, int>>(tally); l.Sort((x, y) => y.Value.CompareTo(x.Value));
+				for (int k = 0; k < Math.Min(30, l.Count); k++) GD.Print($"SUBDIFF {100.0 * l[k].Value / nAll:0.00}% {l[k].Key}");
+			}
+			{   // (testing: the lakes, as groups of lake cells, by size)
+				int NNl = plan.N * plan.N; var seenL = new bool[NNl]; var st2 = new Stack<int>(); int[] bins = new int[5]; int nLakes = 0, lakeCells = 0, landCells = 0; int[] kinds = new int[4]; double lakeMost = 0, lakeDeep = 0;
+				for (int i = 0; i < NNl; i++) if (!plan.Sea[i]) landCells++;
+				for (int i0 = 0; i0 < NNl; i0++)
+				{
+					if (!plan.Lake[i0] || seenL[i0]) continue;
+					int n = 0, pit = i0; seenL[i0] = true; st2.Push(i0);
+					while (st2.Count > 0) { int c = st2.Pop(); n++; if (plan.Elev[c] < plan.Elev[pit] || plan.Elev[c] == plan.Elev[pit] && c < pit) pit = c; int cx = c % plan.N, cz = c / plan.N; for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) { int x = cx + dx, z = cz + dz; if (x < 0 || z < 0 || x >= plan.N || z >= plan.N) continue; int j = z * plan.N + x; if (plan.Lake[j] && !seenL[j]) { seenL[j] = true; st2.Push(j); } } }
+					nLakes++; lakeCells += n; double a2 = n * (double)plan.Cell * plan.Cell; if (a2 > lakeMost) lakeMost = a2; lakeDeep = Math.Max(lakeDeep, plan.Level[pit] - plan.Elev[pit]);
+					bins[a2 < 10000 ? 0 : a2 < 40000 ? 1 : a2 < 160000 ? 2 : a2 < 640000 ? 3 : 4]++;
+					kinds[plan.RiftZ != null && plan.RiftZ[pit] > 0.3 ? 0 : plan.Basin != null && plan.Basin[pit] > 0.5 ? 1 : plan.IceWas != null && plan.IceWas[pit] >= 0.3 ? 2 : 3]++;
+				}
+				GD.Print($"PLANLAKEBIG the biggest lake {lakeMost:0} square blocks (about {Math.Sqrt(lakeMost):0} across), the deepest {lakeDeep:0.0} deep; big from {plan.LakeBig:0} square blocks");
+				{ double hi = -1e9, lo = 1e9, hi0 = -1e9; var lv = new List<double>(); for (int i = 0; i < NNl; i++) { hi = Math.Max(hi, plan.Elev[i]); lo = Math.Min(lo, plan.Elev[i]); if (plan.Elev0 != null) hi0 = Math.Max(hi0, plan.Elev0[i]); if (plan.Elev[i] > 0) lv.Add(plan.Elev[i]); } lv.Sort(); double P(double f) => lv.Count > 0 ? lv[Math.Min(lv.Count - 1, (int)(f * lv.Count))] : 0; GD.Print($"PLANPEAKS the highest ground {hi:0} above the sea (before erosion {hi0:0}; room {plan.Room}, x {plan.Tall:0.00} of 2048's), the deepest sea floor {-lo:0} below; the land: half under {P(0.5):0}, 90% under {P(0.9):0}, 99% {P(0.99):0}, 99.9% {P(0.999):0}"); }
+				GD.Print($"PLANLAKES {nLakes} lakes, {100.0 * lakeCells / Math.Max(1, landCells):0.0}% of the land; by size (square blocks): under 10k {bins[0]}, 10-40k {bins[1]}, 40-160k {bins[2]}, 160-640k {bins[3]}, 640k up {bins[4]}; in a rift {kinds[0]}, a basin {kinds[1]}, where the old ice was {kinds[2]}, elsewhere (big ones) {kinds[3]}; ice-bowl lakes that gave way {plan.LakeGaveWay}");
+			}
+			if (HasArg("--soils"))
+			{   // (testing: the top block of every land cell: which soil, or bare rock)
+				var cnt = new Dictionary<string, int>(); int landc = 0;
+				for (int i = 0; i < plan.N * plan.N; i++)
+				{
+					if (plan.Sea[i] || plan.Lake[i]) continue; landc++;
+					int bx = (i % plan.N) * plan.Cell + plan.Cell / 2, bz = (i / plan.N) * plan.Cell + plan.Cell / 2, yg = plan.GroundAt(bx, bz);
+					var col = plan.ColAt(bx, bz); var r = plan.RockAt(col, bx, yg, bz, yg);
+					string k = r == EarthPlan.Rock.Air ? "(bare rock)" : r.ToString(); cnt[k] = cnt.TryGetValue(k, out int v) ? v + 1 : 1;
+				}
+				var parts = new List<string>(); foreach (var kv in cnt) parts.Add($"{kv.Key} {100.0 * kv.Value / landc:0.0}%");
+				parts.Sort(); GD.Print("GEOSOILS top of the land: " + string.Join(", ", parts));
+			}
+			if (HasArg("--rocks"))
+			{   // (testing, Draft 2i: the rock 25 blocks under the ground of every land cell; all the land, and the land within 60 x Belt blocks of an old suture or a join)
+				var cA = new Dictionary<string, int>(); var cS = new Dictionary<string, int>(); int nA = 0, nS = 0;
+				for (int i = 0; i < plan.N * plan.N; i++)
+				{
+					if (plan.Sea[i] || plan.Lake[i]) continue;
+					int bx = (i % plan.N) * plan.Cell + plan.Cell / 2, bz = (i / plan.N) * plan.Cell + plan.Cell / 2, yg = plan.GroundAt(bx, bz);
+					string k = plan.RockAt(plan.ColAt(bx, bz), bx, yg - 25, bz, yg).ToString();
+					nA++; cA[k] = cA.TryGetValue(k, out int v) ? v + 1 : 1;
+					if (plan.SutureDist[i] * plan.Cell < 60 * plan.Belt || plan.GJoinDist[i] * plan.Cell < 60 * plan.Belt) { nS++; cS[k] = cS.TryGetValue(k, out int w) ? w + 1 : 1; }
+				}
+				string Top(Dictionary<string, int> d, int n) { var l = new List<KeyValuePair<string, int>>(d); l.Sort((a, b) => b.Value != a.Value ? b.Value.CompareTo(a.Value) : string.CompareOrdinal(a.Key, b.Key)); var s = new List<string>(); for (int j = 0; j < Math.Min(9, l.Count); j++) s.Add($"{l[j].Key} {100.0 * l[j].Value / Math.Max(1, n):0.0}%"); return string.Join(", ", s); }
+				GD.Print($"GEOROCKS 25 under the ground, all the land: {Top(cA, nA)}");
+				GD.Print($"GEOROCKS 25 under, near old sutures and joins ({100.0 * nS / Math.Max(1, nA):0.0}% of the land): {Top(cS, nS)}");
+			}
+			if (HasArg("--rangecut")) { var rc = (System.Environment.GetEnvironmentVariable("RANGECUT") ?? "-1,-1").Split(','); plan.SaveRangeCut(pm[10..], int.Parse(rc[0]), int.Parse(rc[1])); }
+			if (HasArg("--geoslice")) { plan.SaveSlices(pm[10..], ArgInt("--georow=", -1)); plan.SaveSlices(pm[10..], -1, "_range", true); if (System.Environment.GetEnvironmentVariable("GEOCOL") is { } gc) foreach (var c in gc.Split(';')) { var q = c.Split(','); plan.DebugCol(int.Parse(q[0]), int.Parse(q[1])); } }
+			SetProcess(false); GetTree().Quit(); return;
+		}
 		Skin.Load();   // your font and gui_atlas.png, for every menu and label
 		blockMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://src/blocks.gdshader") };
 		waterMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://src/water.gdshader"), RenderPriority = 1 };
@@ -141,7 +562,13 @@ public partial class Main : Node3D
 						soon.Add(World.ChunkKey(cx, cy, cz));
 		};
 		for (int c = 0; c < World.NChunks; c++) { var (cx, cy, cz) = World.FromChunkKey(c); if (cy * World.CS < world.ChunkTop[cz * World.NCX + cx]) dirty.Add(c); }   // (chunks of empty sky have nothing to build)
-		player.Pos = spawnPoint = FindSpawn();
+		if (world.Lazy)
+		{   // (gen 4: the land round the start grows first; then round wherever the save puts you)
+			var (sx, sz) = EarthSpawn(); GrowNow(sx >> 4, sz >> 4, 3);
+			player.Pos = spawnPoint = FindSpawn(sx, sz);
+			if (TestRun) GD.Print($"EARTHSTART {player.Pos.X:0.0},{player.Pos.Y:0.##},{player.Pos.Z:0.0} (EarthSpawn {sx},{sz})");
+		}
+		else player.Pos = spawnPoint = FindSpawn();
 		outline = MakeOutline(); AddChild(outline);
 		ApplyPlayerSave();
 		// (test: `--at=x,y,z[,yaw,pitch]` puts you there, flying)
@@ -151,6 +578,7 @@ public partial class Main : Node3D
 			player.Pos = new Vector3(v[0], v[1], v[2]); player.Flying = true;
 			if (v.Length > 4) { player.Yaw = v[3]; player.Pitch = v[4]; }
 		}
+		if (world.Lazy) GrowNow((int)Math.Floor(player.Pos.X) >> 4, (int)Math.Floor(player.Pos.Z) >> 4, 3);
 		if (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--look=")) is { } lookArg)   // (test: then turn to face x,y,z)
 		{
 			var v = lookArg[7..].Split(',').Select(t => float.Parse(t, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
@@ -161,16 +589,17 @@ public partial class Main : Node3D
 		// tests go straight in; otherwise the main menu (or the Ready screen) is showing
 		if ((tempWorld || HasArg("--play")) && !menuOpen) Lock(); else Unlock();
 	}
-	Vector3 FindSpawn()
+	Vector3 FindSpawn(int cx = -1, int cz = -1)
 	{
-		// spiral out from the middle of the world until there's dry land
-		int cx = World.WX / 2, cz = World.WZ / 2;
+		// spiral out from the middle of the world (gen 4: from the plan's start) until there's dry land
+		if (cx < 0) { cx = World.WX / 2; cz = World.WZ / 2; }
 		for (int r = 0; r < World.WX / 2; r++)
 			for (int dz = -r; dz <= r; dz++) for (int dx = -r; dx <= r; dx++)
 			{
 				if (Math.Max(Math.Abs(dx), Math.Abs(dz)) != r) continue;
 				int x = cx + dx, z = cz + dz, h = world.Heights[z * World.WX + x];
 				int top = world.GetBlock(x, h, z);
+				if (world.Lazy && (Blocks.IsLeaves(top) || Blocks.IsLogBlock(top))) continue;   // (gen 4: on the ground, not in a tree's crown)
 				if (top != 0 && !Blocks.IsWater(top) && !Blocks.IsTorch(top)) return new Vector3(x + 0.5f, h + 1.01f, z + 0.5f);
 			}
 		return new Vector3(cx + 0.5f, World.WY - 2, cz + 0.5f);
@@ -190,8 +619,11 @@ public partial class Main : Node3D
 			if (genTask.IsCompleted) StartPlaying();
 			else { loading.Text = $"Making the world... {(int)(genProgress * 100)}%"; loading.Visible = !menuOpen; return; }
 		}
+		GrowTick(dt);   // (gen 4: the land round the players)
 		bool moving = Locked && !invOpen && !dead && (!netClient || welcomed);   // (a joined game waits for the host's blocks)
-		if (!dead && (moving || (inv.Survival && invOpen && (!netClient || welcomed))))   // (survival keeps falling while the inventory is open)
+		// (gen 4: held still while the land you're in hasn't grown, so you don't fall through it or get pushed up out of it)
+		bool held = world.Lazy && !world.ColumnGrown(Math.Clamp((int)Math.Floor(player.Pos.X) >> 4, 0, World.NCX - 1), Math.Clamp((int)Math.Floor(player.Pos.Z) >> 4, 0, World.NCZ - 1));
+		if (!dead && !held && (moving || (inv.Survival && invOpen && (!netClient || welcomed))))   // (survival keeps falling while the inventory is open)
 		{
 			var ev = player.Update(dt, !moving ? default : new Player.Keys
 			{
@@ -393,9 +825,20 @@ public partial class Main : Node3D
 	bool caveTested, caveFound;   // (--cavetest)
 	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone, netTested; float bagNetT, mixT; int mixStep;
 	// (test, --mixtest: the world as it stands, every block's full id in index order, as an FNV-1a fingerprint; and the changed blocks)
+	// (gen 4: over the 7 x 7 chunk columns round the plan's start, EarthSpawn's column, clamped to the map: y, then z, then x over
+	// the box's blocks; grown first, so both editions read the same land. A column not grown would read Bedrock.)
 	void MixLive(int n)
 	{
 		var sw = System.Diagnostics.Stopwatch.StartNew(); uint h = 2166136261;
+		if (world.Lazy)
+		{
+			var (sx, sz) = EarthSpawn(); int cx = sx >> 4, cz = sz >> 4;
+			int x0 = Math.Max(0, cx - 3) * 16, x1 = Math.Min(World.NCX - 1, cx + 3) * 16 + 15, z0 = Math.Max(0, cz - 3) * 16, z1 = Math.Min(World.NCZ - 1, cz + 3) * 16 + 15;
+			GrowNow(cx, cz, 3);
+			for (int y = 0; y < World.WY; y++) for (int z = z0; z <= z1; z++) for (int x = x0; x <= x1; x++) h = (h ^ (uint)world.Blocks.Get(x, y, z)) * 16777619;
+			GD.Print($"MIXLIVE {n} {(hosting ? "host" : "friend")}: {h:x8} (the 7 x 7 round the start, blocks {x0}-{x1}, {z0}-{z1}), {world.Edits.Count} changed blocks (read in {sw.ElapsedMilliseconds} ms)");
+			return;
+		}
 		for (int y = 0; y < World.WY; y++) for (int z = 0; z < World.WZ; z++) for (int x = 0; x < World.WX; x++) h = (h ^ (uint)world.Blocks.Get(x, y, z)) * 16777619;
 		GD.Print($"MIXLIVE {n} {(hosting ? "host" : "friend")}: {h:x8}, {world.Edits.Count} changed blocks (read in {sw.ElapsedMilliseconds} ms)");
 	} List<(Mob m, Vector3 at, float yaw, bool graze)> picHold;
@@ -717,6 +1160,28 @@ public partial class Main : Node3D
 			world.SetBlock(fx, y + 1, fz, 0);
 			Check("a harvest uses up one of the fertilizer's 2", world.FertLeft.GetValueOrDefault(World.Idx(fx, y, fz)) == 1);
 			Check("Flour by hand, Bread in the kiln, Bread is food", Inventory.Recipes.Any(r => r.Out == Blocks.Flour) && Kilns.Smelts.Any(s => s.Out == Blocks.Bread && s.From == Blocks.Flour) && Blocks.Get(Blocks.Bread)?.Food > 0);
+			{   // Earthlike's soils (Beta 0.1.5.3, "Make them count"): a row of the 9 grassy and 10 bare soils and a Stone, 3 blocks past
+				// the farm, each tilled by the hoe and planted with seeds; and a sapling, a flower and a Cantaloupe's fruit allowed on each
+				int[] soils = Enumerable.Range(4800, 20).Where(i => i != 4814).ToArray();
+				var r0 = c0 + fwd * 3f; int ry = world.Heights[(int)r0.Z * World.WX + (int)r0.X];
+				(int x, int z) RAt(int k) { var p = r0 + side * (k - 10); return ((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z)); }
+				for (int k = 0; k <= soils.Length; k++)
+				{
+					var (x, z) = RAt(k);
+					world.SetBlock(x, ry - 1, z, Blocks.Dirt); world.SetBlock(x, ry, z, k < soils.Length ? soils[k] : Blocks.Stone);
+					for (int u = 1; u < 4; u++) world.SetBlock(x, ry + u, z, 0);
+				}
+				for (int k = 0; k <= soils.Length; k++)
+				{
+					var (x, z) = RAt(k);
+					inv.SetSlot(0, hoe); SelectSlot(0); FarmUse(x, ry, z, world.GetBlock(x, ry, z));
+					inv.SetSlot(0, Blocks.GrainSeeds); FarmUse(x, ry, z, world.GetBlock(x, ry, z));
+				}
+				var (sx, sz) = RAt(soils.Length);
+				Check("the hoe tills all 19 Earthlike soils and seeds go in (Stone isn't tilled)", Enumerable.Range(0, soils.Length).All(k => { var (x, z) = RAt(k); return Blocks.IsSoil(world.GetBlock(x, ry, z)) && world.GetBlock(x, ry + 1, z) == Blocks.GrainStages[0]; }) && world.GetBlock(sx, ry, sz) == Blocks.Stone && world.GetBlock(sx, ry + 1, sz) == 0);
+				Check("saplings, flowers and a Cantaloupe's fruit go on every Earthlike soil (not on Stone)", soils.All(s => SaplingGround(s, false) && PlantGround(s) && Blocks.MelonGround(s)) && !SaplingGround(Blocks.Stone, true) && !PlantGround(Blocks.Stone) && !Blocks.MelonGround(Blocks.Stone));
+				Check("the grassy soils plant like Grass (Grain Seeds, deer), the bare ones like Dirt; IsGrassy (the world makers') unchanged", soils.All(s => Blocks.PlantsLikeGrass(s) == (s >= 4810) && Blocks.PlantsLikeDirt(s) == (s < 4810) && !Blocks.IsGrassy(s)) && Blocks.PlantsLikeGrass(Blocks.Grass) && Blocks.PlantsLikeGrass(Blocks.SnowyGrass) && Blocks.PlantsLikeGrass(Blocks.SwampGrass) && !Blocks.PlantsLikeGrass(Blocks.Dirt) && Blocks.PlantsLikeDirt(Blocks.Dirt) && !Blocks.PlantsLikeDirt(Blocks.Mud) && !Blocks.PlantsLikeGrass(4814) && !Blocks.PlantsLikeDirt(4814));
+			}
 			inv.SetSlot(0, Blocks.Bread); player.Pitch = -0.45f;
 		}
 		if (args.Contains("--bagtest") && !bagTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
@@ -1593,7 +2058,7 @@ public partial class Main : Node3D
 			void Stand(float x, float z) { player.Pos = new Vector3(x, y, z); player.Vel = Vector3.Zero; player.Flying = true; }
 			void Put(int x, float hitX) { inv.SetSlot(inv.Selected, cedar); PlaceDoor(new Player.Hit { X = x, Y = y - 1, Z = z0, Ny = 1, Sub = -1, Id = Blocks.Stone, Pt = new Vector3(hitX, y, z0 + 0.5f) }, cedar); }
 			bool Is(int x, int f, int g, bool o) => world.GetBlock(x, y, z0) == D(f, g, o, 0) && world.GetBlock(x, y + 1, z0) == D(f, g, o, 1);
-			Check("16 doors, each with an item and 32 states", Blocks.ItemRows.Count(i => Blocks.DoorFirst(i) > 0) == 16 && Blocks.DoorFirst(cedar) == cedar + 1 && Blocks.IsDoor(cedar + 32) && !Blocks.IsDoor(cedar + 33));
+			Check($"{(WorldGen.EarthlikeOn ? 20 : 16)} doors (16, and Earthlike's 4 since Beta 0.1.5.3), each with an item and 32 states", Blocks.ItemRows.Count(i => Blocks.DoorFirst(i) > 0) == (WorldGen.EarthlikeOn ? 20 : 16) && Blocks.ItemRows.Where(i => Blocks.DoorFirst(i) > 0).All(i => Enumerable.Range(0, 32).All(k => Blocks.IsDoor(Blocks.DoorFirst(i) + k))) && Blocks.DoorFirst(cedar) == cedar + 1 && Blocks.IsDoor(cedar + 32) && !Blocks.IsDoor(cedar + 33));
 			Check("a door's key names its facing, half, hinge and open", DataKeys.KeyOf(D(1, 0, true, 1)) == "cedar_door#facing=1,half=1,hinge=0,open=1" && DataKeys.KeyOf(cedar) == "cedar_door");
 			// one door, put down from the south (+z), clicked left of the middle: it faces you, hinge on the left
 			Stand(x0 + 0.5f, z0 + 3.5f); Put(x0, x0 + 0.3f);
@@ -2090,8 +2555,12 @@ public partial class Main : Node3D
 			else if (mixStep == 0 && mixT > 5)
 			{
 				mixStep = 1; MixLive(1);
+				// (gen 4: in the air over the start instead, EarthSpawn's block (sx, sz): the host's at y 400, z sz, x sx - 15 + k; the
+				// friend's at y 402, z sz + 2)
+				var (ex, ez) = world.Lazy ? EarthSpawn() : (615, 600);
 				for (int k = 0; k < 30; k++)
-					if (hosting) world.SetBlock(600 + k, 150, 600, k % 2 == 0 ? 5 : 2200); else world.SetBlock(600 + k, 152, 602, k % 2 == 0 ? 3 : 3760);
+					if (world.Lazy) { if (hosting) world.SetBlock(ex - 15 + k, 400, ez, k % 2 == 0 ? 5 : 2200); else world.SetBlock(ex - 15 + k, 402, ez + 2, k % 2 == 0 ? 3 : 3760); }
+					else if (hosting) world.SetBlock(600 + k, 150, 600, k % 2 == 0 ? 5 : 2200); else world.SetBlock(600 + k, 152, 602, k % 2 == 0 ? 3 : 3760);
 				if (hosting) world.SetBlock(World.WX - 1, World.WY - 2, World.WZ - 1, 7);
 				GD.Print($"MIXTEST {(hosting ? "host" : "friend")}: changes made");
 			}

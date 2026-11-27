@@ -12,9 +12,10 @@ public class WorldGen
 	public int Land;   // the land's version (see World.LandVersion): 1 = natural structures, and trunks up into the leaves
 	const byte RAW = 255;   // "land, decide grass/dirt/stone later"
 	static int Lift => World.Lift;   // (tall worlds: the land is lifted this far, with rock below)
-	public int SeaLevel => Lift + (gen == 1 ? 38 : 63);
+	public int SeaLevel => gen == 4 ? World.EarthRoom : Lift + (gen == 1 ? 38 : 63);   // (gen 4: Earthlike, the sea at Room)
 
 	public WorldGen(World w, long seed, int gen) { W = w; this.seed = seed; this.gen = gen; }
+	public long Seed => seed;
 
 	// ---- noise (matches the JavaScript bit for bit: Math.imul and >>> become unchecked int maths) ----
 	static int Imul(long a, int b) => unchecked((int)a * b);
@@ -266,7 +267,9 @@ public class WorldGen
 	// Realistic worlds ("Earthlike", world type 4, land 9) are held back for Earthly Extravaganza: while EarthlikeReady is false none
 	// can be made, and everything built for them stays off. It must match EARTHLIKE_READY in the web game. (Test: `--earthlike`
 	// turns it on anyway.) The other world types never read it: they grow exactly the same land with it on or off.
-	public const bool EarthlikeReady = false;
+	// From Beta 0.1.5.3 (the first preview) it does two things: the world type is in the menu, as "Earthlike (preview)" with its
+	// "Playable early" note, and every Earthlike block shows (Blocks.Shown: the user's "Show all 163"; still no recipes for them).
+	public const bool EarthlikeReady = true;
 	public static readonly bool EarthlikeOn = EarthlikeReady || Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--earthlike") >= 0;
 	public class StairSpot { public int X, Y, Z, Dir, N, Mat; public double Order; public bool Placed; }
 	// an older Biomes world given the staircases (see Worlds.OldStairs): no spot within 2 chunks of a chunk in its skip set

@@ -121,6 +121,12 @@ public static partial class Blocks
 	// Biomes (gen 3 worlds): Sandstone under desert sand, Snowy Grass in snowy lands, Ice on their frozen water, Swamp Grass in swamps
 	public const int Sandstone = 97, SnowyGrass = 98, Ice = 99, SwampGrass = 58;
 	public static bool IsGrassy(int b) => b == Grass || b == SnowyGrass || b == SwampGrass;   // grass of any biome (dirt underneath; flowers and hoes)
+	// ...and for what you plant and till, Earthlike's soils too (Beta 0.1.5.3, the user's "Make them count"): its 9 grassy soils
+	// (4810-4819; 4814 unused, as Desert Soil has no grassy top) count as Grass, its 10 bare soils (4800-4809) as Dirt. For saplings,
+	// flowers and plants, hoes (and the Grain Seeds tilling grass turns up), a Cantaloupe's fruit and a deer's sowing; only there:
+	// IsGrassy (the world makers', chickens', cows') is unchanged, so no land changes. The same in the web version.
+	public static bool PlantsLikeGrass(int b) => IsGrassy(b) || b is >= 4810 and <= 4819 and not 4814;
+	public static bool PlantsLikeDirt(int b) => b == Dirt || b is >= 4800 and <= 4809;
 	public static bool TakesBiomeTint(int b) => b == Grass || b == SwampGrass || IsLeaves(b) || B[b]?.Tint == true;   // coloured by the climate where they are (Biome worlds)
 	// Fir: the snowy biome's wood (Oak is the original wood: Log, Leaves, Planks and Stripped Log above)
 	public const int FirLog = 251, FirLeaves = 252, FirPlanks = 253, StrippedFirLog = 254;
@@ -233,7 +239,7 @@ public static partial class Blocks
 	public static int CropNext(int id) => IsCrop(id) ? id + 1 : Get(id) is { Crop: { } c } d ? CropBlock(c, d.Stage + 1) : 0;
 	public static CropNumbers CropNums(int id) => Get(id)?.Crop is { } c && Nums.N.CROPS != null && Nums.N.CROPS.TryGetValue(c, out var n) ? n : null;
 	// the ground a Cantaloupe grows on, beside its vine
-	public static bool MelonGround(int b) => b == Dirt || IsGrassy(b) || b == Sand || IsSoil(b);
+	public static bool MelonGround(int b) => PlantsLikeDirt(b) || PlantsLikeGrass(b) || b == Sand || IsSoil(b);
 	public static int SoilId(bool wet, bool fert) => Tilled + (wet ? 1 : 0) + (fert ? 2 : 0);
 	public static bool SoilWet(int id) => id == WetTilled || id == WetFertilized;
 	public static bool SoilFert(int id) => id == Fertilized || id == WetFertilized;
@@ -449,7 +455,7 @@ public static partial class Blocks
 	static readonly Dictionary<int, int[]> looks = new();
 	// a block the game shows (in Items, the creative inventory, search, the Shapes tab and recipes): all but Earthlike's, until
 	// it's ready
-	public static bool Shown(int id) => WorldGen.EarthlikeReady || B[id] is not { Earthlike: true };
+	public static bool Shown(int id) => WorldGen.EarthlikeOn || B[id] is not { Earthlike: true };   // (EarthlikeOn: so --earthlike tests what the release shows)
 
 	// ---- Doors: one for each wood (data/blocks.json's DOORS). The item puts down a door 2 blocks tall: 32 states (see DoorBlocks) ----
 	static readonly Dictionary<int, int> doorOf = new();
