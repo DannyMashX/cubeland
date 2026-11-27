@@ -1,5 +1,23 @@
 [
     {
+        "version": "Beta 0.1.6.0",
+        "title": "Earthly Extravaganza",
+        "folder": "beta-0.1.6.0",
+        "date": "2026-11-27",
+        "url": "https://github.com/DannyMashX/cubeland/releases/download/desktop-beta-0.1.6.0/CubeLand-Beta-0.1.6.0-windows.zip",
+        "size": 79204280,
+        "exe": "CubeLand-Beta-0.1.6.0-windows/CubeLand.exe",
+        "changes": [
+            "New: Earthlike worlds are finished. Choose \"Earthlike\" when you make a world for a world 640 blocks tall and 1024 or 2048 wide, with mountains, seas and rivers, 21 biomes, rocks and soils that fit their place, trees by climate, ground plants, wild crops and animals. They're no longer a preview: the \"Playable early\" note is gone, and their land won't change in later updates.",
+            "New: you can make the Earthlike blocks: the four new woods' planks, sticks, Crafting Bench, Cutter, doors and fences, as with the other woods; the 21 rocks back from their cobbled blocks in the Kiln; Bricks and Polished blocks (Polished Andesite too) at the Crafting Bench with a pickaxe; and Pink, Blue and White Dye from Fireweed, Gentian and Edelweiss.",
+            "New: survival in an Earthlike world: dig Earthlike gravel by hand for Rocks, the start of a Crude Axe; get Clay Balls from Clay Soil, Cracked Clay and Silt; and make Fireclay with any Earthlike gravel.",
+            "New: Burnt Logs burn as fuel in a Kiln or Foundry, and split into Sticks with an axe.",
+            "New: river water moves. Ripples slide downstream at the river's own pace, the rapids foam, and waterfalls stream down.",
+            "New: the main menu shows an Earthlike rainforest river.",
+            "Fixed: in the web version, digging Earthlike soils and ground by hand gave the wrong pieces; now you get the block itself. Mud and Peat dug by hand now give pieces, as they do in the desktop version."
+        ]
+    },
+    {
         "version": "Beta 0.1.5.5",
         "folder": "beta-0.1.5.5",
         "date": "2026-11-27",
