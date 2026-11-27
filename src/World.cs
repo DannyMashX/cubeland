@@ -33,25 +33,26 @@ public partial class World
 	public static int NGroups => NGX * NGY * NGZ;
 	public static int GroupOf(int k) { var (cx, cy, cz) = FromChunkKey(k); return (cy / GS * NGZ + cz / GS) * NGX + cx / GS; }
 	public static (int gx, int gy, int gz) FromGroupKey(int g) => (g % NGX, g / (NGX * NGZ), (g / NGX) % NGZ);
-	public static int Idx(int x, int y, int z) => (y * WZ + z) * WX + x;
-	public static (int x, int y, int z) FromIdx(int i) => (i % WX, i / (WX * WZ), (i / WX) % WZ);
+	// (a block's number is 64-bit: a world can hold more blocks than an int counts to; the same formula as always)
+	public static long Idx(int x, int y, int z) => ((long)y * WZ + z) * WX + x;
+	public static (int x, int y, int z) FromIdx(long i) => ((int)(i % WX), (int)(i / ((long)WX * WZ)), (int)(i / WX % WZ));
 
 	public readonly BlockStore Blocks;   // every block, chunk by chunk (see BlockStore)
 	public byte[] Raw;                   // (while the world grows: one byte per block, packed into Blocks when it's done)
 	public readonly int[] Heights;
 	public readonly int[] ChunkTop;   // highest block +1 in each 16x16 column of chunks
 	public readonly short[] SkyTop;
-	public readonly Dictionary<int, int[]> PieceMap = new();   // world index -> which block fills each of its 8 piece spots
-	public readonly Dictionary<int, int> Edits = new();          // every block you've changed (what gets saved)
-	public readonly HashSet<int> Torches = new();
-	public Dictionary<int, int> LightMap = new();               // world index -> torch light level (only lit cells)
+	public readonly Dictionary<long, int[]> PieceMap = new();   // world index -> which block fills each of its 8 piece spots
+	public readonly Dictionary<long, int> Edits = new();          // every block you've changed (what gets saved)
+	public readonly HashSet<long> Torches = new();
+	public Dictionary<long, int> LightMap = new();               // world index -> torch light level (only lit cells)
 	public readonly WorldGen Gen;
 	public int SeaLevel => Gen.SeaLevel;
 
 	// called when blocks change, so the game can rebuild the chunks (a set of chunk numbers)
 	public Action<HashSet<int>> ChunksChanged;
 	public Action<int, int, int> NearbyRebuild;   // (x, z): chunks around here need their sky light redone soon
-	public Action<int, int, int, int> BlockChanged;   // (index, old, new, ...) for the game's own bookkeeping
+	public Action<long, int, int, int> BlockChanged;   // (index, old, new, ...) for the game's own bookkeeping
 
 	// The sizes a world can be made (the slider when you make one): 256 to 2048 across, in steps of 128. Worlds made before
 	// you could choose are 1280 (or, before that, 640). A tall world is always 640 across. (The same as the web version.)
@@ -112,8 +113,21 @@ public partial class World
 			var (bytes, uniform) = Blocks.Usage();
 			Godot.GD.Print($"BLOCKSTORE {bytes / 1048576.0:0.0} MB (was {Blocks.Length / 1048576.0:0.0} MB), {uniform} chunks all one block, packed in {packTime.ElapsedMilliseconds} ms");
 			uint h2 = 2166136261; var count = new SortedDictionary<int, int>();
-			for (int i = 0; i < Blocks.Length; i++) { int b = Blocks[i]; h2 = (h2 ^ (byte)b) * 16777619; if (b >= 2200 && b < 3700) count[b] = count.GetValueOrDefault(b) + 1; }
+			for (long i = 0; i < Blocks.Length; i++) { int b = Blocks[i]; h2 = (h2 ^ (byte)b) * 16777619; if (b >= 2200 && b < 3700) count[b] = count.GetValueOrDefault(b) + 1; }
 			Godot.GD.Print($"PACKEDHASH {h2:x8}");
+			// (the same over every block's full id, as the world stands once the late list is in: the same as --mixtest's LIVE at
+			// the world's birth, and the web version's "packed")
+			uint h3 = 2166136261;
+			for (long i = 0; i < Blocks.Length; i++) h3 = (h3 ^ (uint)Blocks[i]) * 16777619;
+			Godot.GD.Print($"FULLHASH {h3:x8}");
+			// (and, with --storeread, how long reading every block once takes, row by row, twice: to see a change to the store doesn't slow it)
+			if (System.Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--storeread") >= 0)
+			for (int pass = 0; pass < 2; pass++)
+			{
+				var readTime = System.Diagnostics.Stopwatch.StartNew(); long sum = 0;
+				for (int y = 0; y < WY; y++) for (int z = 0; z < WZ; z++) for (int x = 0; x < WX; x++) sum += Blocks.Get(x, y, z);
+				Godot.GD.Print($"STOREREAD pass {pass + 1}: every block read in {readTime.ElapsedMilliseconds} ms ({sum % 997})");
+			}
 			// (and how many of each block of the Trees and Leaves woods there are: to compare with the web version's)
 			var parts = new List<string>(); foreach (var (b, n) in count) parts.Add($"{Cubeland.Blocks.B[b].Name} {b}: {n}");
 			Godot.GD.Print("TREECOUNT " + string.Join(" | ", parts));
@@ -205,12 +219,12 @@ public partial class World
 		SkyWeights = new float[SkyDirs.Length];
 		for (int i = 0; i < SkyDirs.Length; i++) { SkyWeights[i] = SkyDirs[i][1] == 0 ? 2.5f : 1; SkyTotal += SkyWeights[i]; }
 	}
-	public float SkyExposure(int x, int y, int z, Dictionary<int, float> cache)
+	public float SkyExposure(int x, int y, int z, Dictionary<long, float> cache)
 	{
 		if (x < 0 || z < 0 || x >= WX || z >= WZ || y >= WY) return 1;
 		if (y < 0) return 0;
 		if (y > SkyTop[z * WX + x]) return 1;
-		int key = Idx(x, y, z);
+		long key = Idx(x, y, z);
 		if (cache != null && cache.TryGetValue(key, out var hit)) return hit;
 		float open = 0;
 		for (int di = 0; di < SkyDirs.Length; di++)
@@ -237,7 +251,7 @@ public partial class World
 	public int LightAt(int x, int y, int z) => !Inside(x, y, z) ? 0 : LightMap.TryGetValue(Idx(x, y, z), out var l) ? l : 0;
 	public bool NearTorch(int x, int y, int z)
 	{
-		foreach (int i in Torches)
+		foreach (long i in Torches)
 		{
 			var (tx, ty, tz) = FromIdx(i);
 			if (Math.Abs(tx - x) <= MaxLight && Math.Abs(ty - y) <= MaxLight && Math.Abs(tz - z) <= MaxLight) return true;
@@ -247,9 +261,9 @@ public partial class World
 	static readonly int[][] Steps6 = { new[] { 1, 0, 0 }, new[] { -1, 0, 0 }, new[] { 0, 1, 0 }, new[] { 0, -1, 0 }, new[] { 0, 0, 1 }, new[] { 0, 0, -1 } };
 	public void Relight(HashSet<int> dirty)
 	{
-		var old = LightMap; var nm = new Dictionary<int, int>();
+		var old = LightMap; var nm = new Dictionary<long, int>();
 		var q = new List<(int x, int y, int z, int l)>();
-		foreach (int ti in Torches)
+		foreach (long ti in Torches)
 		{
 			var tb = Cubeland.Blocks.B[Blocks[ti]];
 			if (tb.Burn == 2) continue;   // burnt: no light
@@ -258,14 +272,14 @@ public partial class World
 			q.Clear(); q.Add((x0, y0, z0, tb.Burn == 1 ? (int)Math.Round(full / 2.0, MidpointRounding.AwayFromZero) : full));
 			for (int h = 0; h < q.Count; h++)
 			{
-				var (x, y, z, l) = q[h]; int i = Idx(x, y, z);
+				var (x, y, z, l) = q[h]; long i = Idx(x, y, z);
 				if (nm.TryGetValue(i, out var have) && have >= l) continue;
 				nm[i] = l;
 				if (l > 1) foreach (var d in Steps6) if (LightPasses(x + d[0], y + d[1], z + d[2])) q.Add((x + d[0], y + d[1], z + d[2], l - 1));
 			}
 		}
 		foreach (var (i, l) in nm) if (!old.TryGetValue(i, out var o) || o != l) { var (x, y, z) = FromIdx(i); MarkDirty(x, y, z, dirty); }
-		foreach (int i in old.Keys) if (!nm.ContainsKey(i)) { var (x, y, z) = FromIdx(i); MarkDirty(x, y, z, dirty); }
+		foreach (long i in old.Keys) if (!nm.ContainsKey(i)) { var (x, y, z) = FromIdx(i); MarkDirty(x, y, z, dirty); }
 		LightMap = nm;
 	}
 	public static void MarkDirty(int x, int y, int z, HashSet<int> dirty)   // the chunk holding (x, y, z) plus any neighbour chunk touching it
@@ -281,7 +295,7 @@ public partial class World
 	public void SetBlock(int x, int y, int z, int id)
 	{
 		if (!Inside(x, y, z)) return;
-		int i = Idx(x, y, z), old = Blocks.Get(x, y, z);
+		long i = Idx(x, y, z); int old = Blocks.Get(x, y, z);
 		Blocks.Set(x, y, z, id);
 		Edits[i] = id; Grown.Remove(i);   // (changed: no longer as a sapling grew it)
 		if (!Cubeland.Blocks.IsPieces(id)) PieceMap.Remove(i);
@@ -328,12 +342,12 @@ public partial class World
 	}
 
 	// ---- Loading a save: the blocks you changed, put back on top of the freshly grown terrain (before any chunk is built) ----
-	public void ApplyEdits(IList<int> idxs, IList<int> ids)
+	public void ApplyEdits(IList<long> idxs, IList<int> ids)
 	{
 		var cols = new HashSet<int>();
 		for (int k = 0; k < idxs.Count && k < ids.Count; k++)
 		{
-			int i = idxs[k], id = ids[k];
+			long i = idxs[k]; int id = ids[k];
 			if (i < 0 || i >= Blocks.Length || (id != 0 && Cubeland.Blocks.Get(id) == null)) continue;
 			if (Cubeland.Blocks.IsPieces(id) && !PieceMap.ContainsKey(i)) continue;   // (pieces with nothing saved for them: leave the spot as it grew)
 			if (!Cubeland.Blocks.IsPieces(id)) PieceMap.Remove(i);
@@ -359,15 +373,15 @@ public partial class World
 	// ---- Torches burn down a stage when their time runs out (lit -> smoldering -> burnt); Clay Balls dry into Bricks ----
 	public static readonly float[][] BurnTimes = Nums.N.BURN_TIMES;   // lit 15-25 min, smoldering 5-10 min
 	public const float DryTime = 120;
-	public readonly Dictionary<int, float> TorchBurn = new(), Drying = new();
+	public readonly Dictionary<long, float> TorchBurn = new(), Drying = new();
 	static readonly Random burnRnd = new();
 	public static float BurnTime(int burn) => BurnTimes[burn][0] + (float)burnRnd.NextDouble() * (BurnTimes[burn][1] - BurnTimes[burn][0]);
 	public static bool BurnsDown(int id) => Cubeland.Blocks.IsTorch(id) && Cubeland.Blocks.B[id].Burn < 2;   // (burnt is done; Ever Torches never burn down)
 	public void TickTimers(float dt)
 	{
-		var done = new List<int>();
-		foreach (var i in new List<int>(TorchBurn.Keys)) { float left = TorchBurn[i] - dt; if (left > 0) TorchBurn[i] = left; else done.Add(i); }
-		foreach (int i in done)
+		var done = new List<long>();
+		foreach (var i in new List<long>(TorchBurn.Keys)) { float left = TorchBurn[i] - dt; if (left > 0) TorchBurn[i] = left; else done.Add(i); }
+		foreach (long i in done)
 		{
 			int id = Blocks[i];
 			if (!BurnsDown(id)) { TorchBurn.Remove(i); continue; }
@@ -375,8 +389,8 @@ public partial class World
 			SetBlock(x, y, z, Cubeland.Blocks.WithSnow(Cubeland.Blocks.TorchVariant(b.Wi, b.Count, b.Burn + 1), b.Snowed));   // (starts the next stage's timer, or ends it once burnt)
 		}
 		done.Clear();
-		foreach (var i in new List<int>(Drying.Keys)) { float left = Drying[i] - dt; if (left > 0) Drying[i] = left; else done.Add(i); }
-		foreach (int i in done)
+		foreach (var i in new List<long>(Drying.Keys)) { float left = Drying[i] - dt; if (left > 0) Drying[i] = left; else done.Add(i); }
+		foreach (long i in done)
 		{
 			Drying.Remove(i);
 			var (x, y, z) = FromIdx(i);
@@ -389,7 +403,7 @@ public partial class World
 	// Still water stays put. Water pours down into empty space below it, and spreads sideways across solid ground,
 	// getting one step weaker per block until it runs out after 7. Take away what feeds it and it drains away.
 	// Running water washes torches off. Only spots near a change are checked, a few times a second.
-	public readonly HashSet<int> WaterQueue = new();
+	public readonly HashSet<long> WaterQueue = new();
 	float waterTimer;
 	public Action<int, int, int, int> Drop;   // (item, x, y, z): something fell out of the world (a washed-off torch...)
 	public bool NoWater;   // (in a joined game the host's game runs the water)
@@ -401,7 +415,7 @@ public partial class World
 	}
 	// a block changed here: it and the blocks next to it get checked for loose Sand, Gravel and Dirt (see Falling).
 	// Not when a save is loaded, so land that floats stays put until something next to it changes.
-	public readonly HashSet<int> FallQueue = new();
+	public readonly HashSet<long> FallQueue = new();
 	public void WakeFall(int x, int y, int z)
 	{
 		if (NoWater) return;   // (in a joined game the host's game does this)
@@ -435,7 +449,7 @@ public partial class World
 		// look at every waiting spot first, then change them all at once, so water spreads one block per step
 		var changes = new List<(int x, int y, int z, int id)>();
 		int n = 0;
-		foreach (int i in new List<int>(WaterQueue))
+		foreach (long i in new List<long>(WaterQueue))
 		{
 			WaterQueue.Remove(i);
 			var (x, y, z) = FromIdx(i); int cur = Blocks[i];
@@ -446,7 +460,7 @@ public partial class World
 		var dirty = new HashSet<int>();
 		foreach (var (x, y, z, id) in changes)
 		{
-			int i = Idx(x, y, z);
+			long i = Idx(x, y, z);
 			if (Cubeland.Blocks.IsTorch(Blocks[i]))
 			{   // water puts a torch out and washes it away (it drops as Burnt Torches); that also changes the light
 				for (int k = Cubeland.Blocks.B[Blocks[i]].Count; k > 0; k--) Drop?.Invoke(Cubeland.Blocks.TorchDrop(Blocks[i]), x, y, z);
@@ -490,7 +504,7 @@ public partial class World
 	public bool SetSpots(int x, int y, int z, int mask, int id)
 	{
 		if (!Inside(x, y, z)) return false;
-		int i = Idx(x, y, z), cur = Blocks.Get(x, y, z);
+		long i = Idx(x, y, z); int cur = Blocks.Get(x, y, z);
 		int[] a = Cubeland.Blocks.IsPieces(cur) && PieceMap.TryGetValue(i, out var have) ? have : null;
 		if (a == null)
 		{
@@ -513,7 +527,7 @@ public partial class World
 	public bool SetPiece(int x, int y, int z, int s, int id)
 	{
 		if (!Inside(x, y, z)) return false;
-		int i = Idx(x, y, z), cur = Blocks.Get(x, y, z);
+		long i = Idx(x, y, z); int cur = Blocks.Get(x, y, z);
 		int[] a = Cubeland.Blocks.IsPieces(cur) && PieceMap.TryGetValue(i, out var have) ? have : null;
 		if (a == null)
 		{

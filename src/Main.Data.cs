@@ -32,7 +32,24 @@ public partial class Main
 		if (args.FirstOrDefault(a => a.StartsWith("--blockdump=")) is { } bd) { BlockDump(bd[12..]); any = true; }
 		if (args.FirstOrDefault(a => a.StartsWith("--listdump=")) is { } ld) { ListDump(ld[11..]); any = true; }
 		if (args.Contains("--datacheck")) { DataCheck(); any = true; }
+		if (args.FirstOrDefault(a => a.StartsWith("--resave=")) is { } rs) { Resave(rs[9..]); any = true; }
 		return any;
+	}
+
+	// (testing) every saved world in a folder (a copy: never the real worlds folder) read and written back into its out/ folder,
+	// with a fingerprint of each, to compare before and after a change to the save's types
+	static void Resave(string dir)
+	{
+		var outDir = System.IO.Path.Combine(dir, "out"); System.IO.Directory.CreateDirectory(outDir);
+		foreach (var f in System.IO.Directory.GetFiles(dir, "*.json").OrderBy(f => f, StringComparer.Ordinal))
+		{
+			var name = System.IO.Path.GetFileName(f);
+			if (name == "worlds.json") continue;
+			string text = System.IO.File.ReadAllText(f), again = Worlds.Reserialize(text);
+			System.IO.File.WriteAllText(System.IO.Path.Combine(outDir, name), again);
+			uint h = 2166136261; foreach (char c in again) h = (h ^ c) * 16777619;
+			GD.Print($"RESAVE {name}: {again.Length} letters, {h:x8}, {(again == text ? "the same as the file" : "differs from the file (fields added since it was saved)")}");
+		}
 	}
 
 	// every picture the atlas holds, by name (sorted), with a fingerprint of its pixels: the same before and after a change

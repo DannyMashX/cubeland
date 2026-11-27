@@ -46,7 +46,11 @@ public partial class Main
 		else if (netClient && welcomed && hostConn?.IsOpen == true) hostConn.Send(SkinMsg(myId, PlayerSkin.DataUrl));
 	}
 	readonly Dictionary<string, (DataConnection conn, string name, int hue, float seen)> friends = new();
-	readonly List<int> pending = new();
+	// block numbers in a welcome go as 8 bytes (with "i8") in an Earthlike world (gen 4: it can be past 4 bytes), or with the
+	// --idx8 test in any world (the web version's ?idx8), so the 8-byte way is tried on old worlds too
+	static readonly bool Idx8Test = OS.GetCmdlineUserArgs().Contains("--idx8");
+	bool Idx8 => Idx8Test || (current?.Gen ?? 0) >= 4;
+	readonly List<long> pending = new();   // (block number, block id, ...: 64-bit, as block numbers are; they go out as plain numbers)
 	readonly HashSet<int> goneMobs = new();
 	Dictionary<string, object> earlyWelcome;
 	float Now => Time.GetTicksMsec() / 1000f;
@@ -125,7 +129,7 @@ public partial class Main
 	}
 
 	// ---------------- block changes ----------------
-	void NetBlockChanged(int i, int id)
+	void NetBlockChanged(long i, int id)
 	{
 		if (hosting ? friends.Count > 0 : (netClient && !applying)) { pending.Add(i); pending.Add(id); }
 	}
@@ -157,25 +161,27 @@ public partial class Main
 		inv.Give(id, Inventory.WearOk(id, w) ? w : 0, data);   // (wear checked too: more than wears it out, or on what doesn't wear, is none)
 	}
 	static List<int> Ints(List<object> l) => l?.Select(o => (int)BinaryPack.Num(o)).ToList() ?? new();
-	void ApplyNetPieces(List<int> list)
+	static List<long> Longs(List<object> l) => l?.Select(o => o is long n ? n : (long)BinaryPack.Num(o)).ToList() ?? new();   // (lists holding block numbers)
+	static int IdIn(long v) => v < 0 || v > int.MaxValue ? -1 : (int)v;   // (a block id from a list of block numbers and ids: -1 if it can't be one)
+	void ApplyNetPieces(List<long> list)
 	{
 		for (int k = 0; k + 8 < list.Count; k += 9)
 		{
 			var a = new int[8];
-			for (int j = 0; j < 8; j++) { int id = list[k + 1 + j], b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id >= 0 && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
+			for (int j = 0; j < 8; j++) { int id = IdIn(list[k + 1 + j]), b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id >= 0 && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
 			if (a.Any(v => v != 0)) world.PieceMap[list[k]] = a;
 		}
 	}
 	// apply block changes from someone else (without sending them back out again, unless you're the host)
-	void ApplySets(List<int> list, List<int> pcs)
+	void ApplySets(List<long> list, List<long> pcs)
 	{
 		applying = true;
-		var before = new Dictionary<int, int[]>(world.PieceMap);
+		var before = new Dictionary<long, int[]>(world.PieceMap);
 		ApplyNetPieces(pcs);
 		for (int k = 0; k + 1 < list.Count; k += 2)
 		{
-			int i = list[k], id = list[k + 1];
-			if (i < 0 || i >= world.Blocks.Length || (id != 0 && Blocks.Get(id) == null) || (world.Blocks[i] == id && !Blocks.IsPieces(id))) continue;
+			long i = list[k]; int id = IdIn(list[k + 1]);
+			if (i < 0 || i >= world.Blocks.Length || id < 0 || (id != 0 && Blocks.Get(id) == null) || (world.Blocks[i] == id && !Blocks.IsPieces(id))) continue;
 			if (Blocks.IsPieces(id) && !world.PieceMap.ContainsKey(i)) continue;
 			if (Blocks.IsPieces(id) && world.Blocks[i] == id && before.TryGetValue(i, out var was) && was.SequenceEqual(world.PieceMap[i])) continue;
 			var (x, y, z) = World.FromIdx(i);
@@ -188,7 +194,7 @@ public partial class Main
 		if (pending.Count == 0) return;
 		var p = new List<object>();
 		for (int k = 0; k < pending.Count; k += 2)
-			if (Blocks.IsPieces(pending[k + 1]) && world.PieceMap.TryGetValue(pending[k], out var a)) { p.Add(pending[k]); foreach (var v in a) p.Add(v); }
+			if (Blocks.IsPieces((int)pending[k + 1]) && world.PieceMap.TryGetValue(pending[k], out var a)) { p.Add(pending[k]); foreach (var v in a) p.Add(v); }
 		var msg = new Dictionary<string, object> { ["t"] = "sets", ["l"] = pending.Cast<object>().ToList(), ["p"] = p };
 		pending.Clear();
 		if (hosting) foreach (var f in friends.Values) f.conn.Send(msg);
@@ -253,18 +259,12 @@ public partial class Main
 			friends[conn.PeerId] = (conn, name, hue, Now);
 			GD.Print($"net: {name} joined");
 			SetOther(conn.PeerId, name, hue, player.Pos.X + 1, player.Pos.Y, player.Pos.Z, 0);
-			// the blocks you've changed: 4 bytes for each index, and 1 byte for each block id ("ids"), or 4 if any id is past 255 ("idw")
-			bool wide = world.Edits.Values.Any(id => id > 255);
-			var idxs = new byte[world.Edits.Count * 4]; var ids = new byte[world.Edits.Count * (wide ? 4 : 1)]; int k = 0;
-			foreach (var (i, id) in world.Edits)
-			{
-				BitConverter.TryWriteBytes(idxs.AsSpan(k * 4), (uint)i);
-				if (wide) BitConverter.TryWriteBytes(ids.AsSpan(k * 4), (uint)id); else ids[k] = (byte)id;
-				k++;
-			}
 			var pcs = new List<object>(); foreach (var (i, a) in world.PieceMap) { pcs.Add(i); foreach (var v in a) pcs.Add(v); }
-			conn.Send(new Dictionary<string, object> { ["t"] = "welcome", ["id"] = conn.PeerId, ["idxs"] = idxs, [wide ? "idw" : "ids"] = ids, ["pieces"] = pcs, ["time"] = sky.TimeOfDay,
-				["x"] = player.Pos.X + 1, ["y"] = player.Pos.Y, ["z"] = player.Pos.Z, ["yaw"] = player.Yaw });
+			var wm = new Dictionary<string, object> { ["t"] = "welcome", ["id"] = conn.PeerId };
+			PutBlockList(wm, world.Edits, Idx8);
+			wm["pieces"] = pcs; wm["time"] = sky.TimeOfDay; wm["x"] = player.Pos.X + 1; wm["y"] = player.Pos.Y; wm["z"] = player.Pos.Z; wm["yaw"] = player.Yaw;
+			if (Idx8) wm["i8"] = true;
+			conn.Send(wm);
 			// everyone's skins: yours, and the other friends'
 			if (PlayerSkin.DataUrl != null) conn.Send(SkinMsg("host", PlayerSkin.DataUrl));
 			foreach (var (sid, s) in skins) if (sid != conn.PeerId && friends.ContainsKey(sid)) conn.Send(SkinMsg(sid, s));
@@ -272,7 +272,7 @@ public partial class Main
 		}
 		else if (!known) return;
 		else if (t == "me") SetOther(conn.PeerId, f.name, f.hue, d.F("x"), d.F("y"), d.F("z"), d.F("yaw"), d.I("h"), Ints(d.L("g")).ToArray(), d.I("hf") == 1);
-		else if (t == "sets" && d.L("l") is { } l) ApplySets(Ints(l), Ints(d.L("p")));
+		else if (t == "sets" && d.L("l") is { } l) ApplySets(Longs(l), Longs(d.L("p")));
 		else if (t == "skin")
 		{   // a friend's skin: shown on them here, and passed on to everyone else
 			string s = PlayerSkin.Valid(d.S("s")) ? d.S("s") : null;
@@ -480,7 +480,7 @@ public partial class Main
 			}
 			foreach (var fb in falling.All.ToArray()) if (!seenF.Contains(fb.K)) falling.Remove(fb);
 		}
-		else if (t == "sets" && d.L("l") is { } l) ApplySets(Ints(l), Ints(d.L("p")));
+		else if (t == "sets" && d.L("l") is { } l) ApplySets(Longs(l), Longs(d.L("p")));
 		else if (t == "give") GotGive(d);
 		else if (t == "knock") Knock(new Vector3(d.F("vx"), 0, d.F("vz")));   // hit by a Snowball
 		else if (t == "splat") Splat(new Vector3(d.F("x"), d.F("y"), d.F("z")));
@@ -489,17 +489,75 @@ public partial class Main
 			if (PlayerSkin.Valid(d.S("s"))) skins[sid] = d.S("s"); else skins.Remove(sid);
 		}
 	}
+	// The blocks you've changed, in a welcome: "idxs", 4 bytes for each block number (little-endian, unsigned), or 8 when the
+	// welcome says "i8" (little-endian, signed: an Earthlike world always, or the --idx8 test); and 1 byte for each block id
+	// ("ids"), or 4 if any id is past 255 ("idw"). (The same as the web version.)
+	static void PutBlockList(Dictionary<string, object> m, ICollection<KeyValuePair<long, int>> edits, bool i8)
+	{
+		bool wide = edits.Any(e => e.Value > 255);
+		var idxs = new byte[edits.Count * (i8 ? 8 : 4)]; var ids = new byte[edits.Count * (wide ? 4 : 1)]; int k = 0;
+		foreach (var (i, id) in edits)
+		{
+			if (i8) System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(idxs.AsSpan(k * 8), i);
+			else System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(idxs.AsSpan(k * 4), (uint)i);
+			if (wide) System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(ids.AsSpan(k * 4), (uint)id); else ids[k] = (byte)id;
+			k++;
+		}
+		m["idxs"] = idxs; m[wide ? "idw" : "ids"] = ids;
+	}
+	static (List<long> idxs, List<int> ids) GetBlockList(Dictionary<string, object> d)
+	{
+		var ib = d.B("idxs") ?? Array.Empty<byte>(); var idw = d.B("idw"); var idb = idw ?? d.B("ids") ?? Array.Empty<byte>();
+		int n = idw != null ? idb.Length / 4 : idb.Length;
+		bool i8 = d.TryGetValue("i8", out var i8v) && i8v is true; int nb = i8 ? 8 : 4;
+		var idxs = new List<long>(); var ids = new List<int>();
+		for (int k = 0; k < n && k * nb + nb - 1 < ib.Length; k++)
+		{
+			idxs.Add(i8 ? System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(ib.AsSpan(k * 8)) : System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(ib.AsSpan(k * 4)));
+			ids.Add(idw != null ? (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(idb.AsSpan(k * 4)) : idb[k]);
+		}
+		return (idxs, ids);
+	}
+	// (test, --nettest) the blocks you've changed go into a welcome, through the packer and back, the same: with 4-byte block numbers
+	// and with 8 ("i8"); and numbers past 4 bytes, in 8 and in a "sets" list
+	void NetTest()
+	{
+		void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+		int x = (int)player.Pos.X + 3, z = (int)player.Pos.Z, y = world.Heights[z * World.WX + x] + 1;
+		world.SetBlock(x, y, z, Blocks.Stone); world.SetBlock(x, y + 1, z, Blocks.Cobblestone); world.SetBlock(x + 1, y, z, Blocks.Cantaloupe);
+		world.SetPiece(x + 2, y, z, 0, Blocks.Cobblestone);
+		foreach (bool i8 in new[] { false, true })
+		{
+			var m = new Dictionary<string, object>(); PutBlockList(m, world.Edits, i8); if (i8) m["i8"] = true;
+			var back = BinaryPack.Unpack(BinaryPack.Pack(m)) as Dictionary<string, object>;
+			var (idxs, ids) = GetBlockList(back);
+			Check($"{(i8 ? 8 : 4)}-byte block numbers: the {world.Edits.Count} changed blocks come back the same, in order", world.Edits.Count >= 3 && idxs.SequenceEqual(world.Edits.Keys) && ids.SequenceEqual(world.Edits.Values));
+		}
+		var small = new Dictionary<long, int> { [10] = 1, [4294967295L] = 255, [0] = 7 };
+		var sm = new Dictionary<string, object>(); PutBlockList(sm, small, false);
+		var (si, sd) = GetBlockList(BinaryPack.Unpack(BinaryPack.Pack(sm)) as Dictionary<string, object>);
+		Check("4-byte block numbers with 1-byte ids (up to the last 4-byte number)", si.SequenceEqual(small.Keys) && sd.SequenceEqual(small.Values) && sm.ContainsKey("ids"));
+		var big = new Dictionary<long, int> { [5_000_000_000L] = 300, [4294967296L] = 1, [0] = 7, [(1L << 53) - 1] = 3 };
+		var bm = new Dictionary<string, object> { ["i8"] = true }; PutBlockList(bm, big, true);
+		var (bi, bd) = GetBlockList(BinaryPack.Unpack(BinaryPack.Pack(bm)) as Dictionary<string, object>);
+		Check("8-byte block numbers past 4 bytes come back the same (up to 2^53, as far as the web version counts exactly)", bi.SequenceEqual(big.Keys) && bd.SequenceEqual(big.Values));
+		var sets = new Dictionary<string, object> { ["t"] = "sets", ["l"] = new List<object> { 5_000_000_000L, 300, 12L, 3, (1L << 53) - 1, 1 } };
+		var sl = Longs((BinaryPack.Unpack(BinaryPack.Pack(sets)) as Dictionary<string, object>).L("l"));
+		Check("a sets list carries block numbers past 4 bytes", sl.SequenceEqual(new long[] { 5_000_000_000L, 300, 12, 3, (1L << 53) - 1, 1 }));
+		Check("welcomes use 8 bytes only with --idx8 (or, later, in an Earthlike world)", Idx8 == OS.GetCmdlineUserArgs().Contains("--idx8"));
+		var (fx, fy, fz) = World.FromIdx(World.Idx(World.WX - 1, World.WY - 1, World.WZ - 1));
+		Check("block numbers go both ways at the world's far corner", fx == World.WX - 1 && fy == World.WY - 1 && fz == World.WZ - 1 && World.Idx(World.WX - 1, World.WY - 1, World.WZ - 1) == world.Blocks.Length - 1);
+		long far = ((long)2047 * 32768 + 32767) * 32768 + 32767;   // (a 32768 x 2048 x 32768 world's last block: past 4 bytes, and within 2^53)
+		Check("a 32768 x 2048 x 32768 world's last block number fits (and within 2^53)", far == 32768L * 2048 * 32768 - 1 && far < (1L << 53));
+	}
 	void ApplyWelcome(Dictionary<string, object> d)
 	{
 		myId = d.S("id") ?? myId;
-		ApplyNetPieces(Ints(d.L("pieces")));
-		var ib = d.B("idxs") ?? Array.Empty<byte>(); var idw = d.B("idw"); var idb = idw ?? d.B("ids") ?? Array.Empty<byte>();
-		int n = idw != null ? idb.Length / 4 : idb.Length;   // (4-byte ids when the world has blocks past 255)
-		var idxs = new List<int>(); var ids = new List<int>();
-		for (int k = 0; k < n && k * 4 + 3 < ib.Length; k++) { idxs.Add((int)BitConverter.ToUInt32(ib, k * 4)); ids.Add(idw != null ? (int)BitConverter.ToUInt32(idb, k * 4) : idb[k]); }
+		ApplyNetPieces(Longs(d.L("pieces")));
+		var (idxs, ids) = GetBlockList(d);
 		world.ApplyEdits(idxs, ids);
 		var dirtyNow = new HashSet<int>();
-		foreach (int i in idxs) { var (x, y, z) = World.FromIdx(i); World.MarkDirty(x, y, z, dirtyNow); }
+		foreach (long i in idxs) { var (x, y, z) = World.FromIdx(i); World.MarkDirty(x, y, z, dirtyNow); }
 		lock (dirty) foreach (int c in dirtyNow) dirty.Add(c);
 		player.Pos = new Vector3(d.F("x"), d.F("y"), d.F("z")); player.Yaw = d.F("yaw"); player.Vel = Vector3.Zero;
 		sky.TimeOfDay = d.F("time");

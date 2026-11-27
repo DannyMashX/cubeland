@@ -391,7 +391,14 @@ public partial class Main : Node3D
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
-	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone; float bagNetT; List<(Mob m, Vector3 at, float yaw, bool graze)> picHold;
+	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone, netTested; float bagNetT, mixT; int mixStep;
+	// (test, --mixtest: the world as it stands, every block's full id in index order, as an FNV-1a fingerprint; and the changed blocks)
+	void MixLive(int n)
+	{
+		var sw = System.Diagnostics.Stopwatch.StartNew(); uint h = 2166136261;
+		for (int y = 0; y < World.WY; y++) for (int z = 0; z < World.WZ; z++) for (int x = 0; x < World.WX; x++) h = (h ^ (uint)world.Blocks.Get(x, y, z)) * 16777619;
+		GD.Print($"MIXLIVE {n} {(hosting ? "host" : "friend")}: {h:x8}, {world.Edits.Count} changed blocks (read in {sw.ElapsedMilliseconds} ms)");
+	} List<(Mob m, Vector3 at, float yaw, bool graze)> picHold;
 	void TestShot(float dt)
 	{
 		var args = OS.GetCmdlineUserArgs();
@@ -410,6 +417,7 @@ public partial class Main : Node3D
 		if (args.Contains("--host") && peer == null && !hosting && !netTried) { netTried = true; Host(); }
 		var jn = args.FirstOrDefault(a => a.StartsWith("--join="));
 		if (jn != null && peer == null && !netClient && !netTried) { netTried = true; Join(jn[7..]); }
+		if (args.Contains("--nettest") && !netTested && !menuOpen && shotTimer > 0.3f) { netTested = true; NetTest(); }
 		if (args.Contains("--savetest") && !savetestDone)
 		{   // run twice: the first time builds a little tower and saves; the second time checks it came back
 			savetestDone = true;
@@ -1498,7 +1506,7 @@ public partial class Main : Node3D
 			for (int x = x0; x < x0 + 20; x++) { world.SetBlock(x, y, pz, 0); world.SetBlock(x, y - 1, pz, Blocks.Grass); }
 			Check("(and stops counting when it's gone)", !world.Saplings.ContainsKey(World.Idx(x0, y, pz)));
 			// growing: an Oak sapling grows by itself into the tree the world grows there; another under a block waits for room
-			int gi = World.Idx(x0, y, z0), nx = x0 + 10, ni = World.Idx(nx, y, z0);
+			long gi = World.Idx(x0, y, z0); int nx = x0 + 10; long ni = World.Idx(nx, y, z0);
 			string want = world.Gen.BiomeOf(x0, z0) == WorldGen.Plains ? "prairie_oak" : "oak";
 			var plan = world.Gen.PlanTree(want, x0, y - 1, z0, (a, b, c) => World.Idx(a, b, c) == gi ? 0 : world.GetBlock(a, b, c), (a, c) => y - 1);
 			var roomy = world.Gen.PlanTree("oak", nx, y - 1, z0, (a, b, c) => World.Idx(a, b, c) == ni ? 0 : world.GetBlock(a, b, c), (a, c) => y - 1);
@@ -1559,7 +1567,7 @@ public partial class Main : Node3D
 			if (qx < 0) Check("a plains spot to try an Oak sapling in (a Biomes world: --biomes)", false);
 			else
 			{
-				int qy = world.Heights[qz * World.WX + qx] + 1, qi = World.Idx(qx, qy, qz);
+				int qy = world.Heights[qz * World.WX + qx] + 1; long qi = World.Idx(qx, qy, qz);
 				Field(qx - 5, qz - 5, 11, 11, qy, 16); world.SetBlock(qx, qy, qz, oak);
 				var prairie = world.Gen.PlanTree("prairie_oak", qx, qy - 1, qz, (a, b, c) => World.Idx(a, b, c) == qi ? 0 : world.GetBlock(a, b, c), (a, c) => qy - 1);
 				Check($"an Oak sapling in the plains grows a prairie oak ({prairie?.Count} blocks)", world.GrowSapling(qx, qy, qz) == World.Growth.Grew && prairie != null && prairie.All(p => world.GetBlock(p.x, p.y, p.z) == p.id));
@@ -2068,6 +2076,26 @@ public partial class Main : Node3D
 			GD.Print($"OSNET {(hosting ? "host" : "friend")}: land {current.Land}, os {current.Os}, skip [{string.Join(",", current.OsSkip ?? Array.Empty<int>())}], {world.Gen.StairSpots.Count} spots, placed {Placed()}");
 			if (netClient) GD.Print((current.Os && world.Gen.Os && world.Gen.StairSpots.Any(o => o.Placed && StairStanding(o)) ? "PASS " : "FAIL ") + "friend: the host's older world grows its staircases here too, told in \"info\" before the world grew");
 		}
+		// (test, mixed editions: --mixtest, as the host or the friend. From the friend's arrival (the host: a friend joined; the
+		// friend: welcomed): at 5 s prints LIVE (every block's full id, in index order, as the world stands: an FNV-1a fingerprint)
+		// and the changed-block count, then makes this side's changes (the host: 30 at y 150, z 600, x 600-629, 5 and 2200 in turn,
+		// and 7 at the far corner WX-1, WY-2, WZ-1; the friend: 30 at y 152, z 602, x 600-629, 3 and 3760 in turn); at 25 s prints
+		// them again, so both editions' worlds can be compared. --mixlook: only the first reading, no changes: a friend joining late,
+		// to see the whole welcome come in)
+		if ((args.Contains("--mixtest") || args.Contains("--mixlook")) && ready && !menuOpen && (hosting && friends.Count > 0 || netClient && welcomed))
+		{
+			mixT += (float)dt;
+			if (mixStep == 0 && mixT > 5 && args.Contains("--mixlook")) { mixStep = 2; MixLive(1); }
+			else if (mixStep == 0 && mixT > 5)
+			{
+				mixStep = 1; MixLive(1);
+				for (int k = 0; k < 30; k++)
+					if (hosting) world.SetBlock(600 + k, 150, 600, k % 2 == 0 ? 5 : 2200); else world.SetBlock(600 + k, 152, 602, k % 2 == 0 ? 3 : 3760);
+				if (hosting) world.SetBlock(World.WX - 1, World.WY - 2, World.WZ - 1, 7);
+				GD.Print($"MIXTEST {(hosting ? "host" : "friend")}: changes made");
+			}
+			else if (mixStep == 1 && mixT > 25) { mixStep = 2; MixLive(2); }
+		}
 		// (test, two games: --bagnet --host holds a full Linen Bag and drops an empty and a full one; --bagnet --join=CODE holds a
 		// full one too, checks the host's drops and hand show the right pictures, and is the picture; the host checks the friend's hand)
 		if (args.Contains("--bagnet"))
@@ -2367,7 +2395,7 @@ public partial class Main : Node3D
 				world.SetBlock(fx + dx, fy, fz + dz, dx != 0 || dz != 0 ? Blocks.FireclayCasing : 0);
 			}
 			world.SetBlock(fx, fy, fz + 1, Blocks.Foundry);   // facing +z: the middle is behind it
-			var fk = new Kilns(world) { Survival = false }; int fi = World.Idx(fx, fy, fz + 1);
+			var fk = new Kilns(world) { Survival = false }; long fi = World.Idx(fx, fy, fz + 1);
 			bool built = fk.FoundryBuilt(fi);
 			world.SetBlock(fx - 1, fy, fz, 0);
 			fk.Of(fi).Queue.Add(Blocks.MetalBrick["bronite"]);
@@ -2468,7 +2496,7 @@ public partial class Main : Node3D
 		// kiln (creative: no fuel needed)
 		int x = (int)player.Pos.X, y = (int)player.Pos.Y + 5, z = (int)player.Pos.Z;
 		world.SetBlock(x, y, z, Blocks.Furnace);
-		var kl = new Kilns(world) { Survival = false }; int i = World.Idx(x, y, z);
+		var kl = new Kilns(world) { Survival = false }; long i = World.Idx(x, y, z);
 		kl.Of(i).Queue.Add(Blocks.Brick);
 		kl.Tick(0.1f, null);
 		Check("kiln lights up while smelting", Blocks.B[world.Blocks[i]].Lit);
@@ -2870,7 +2898,7 @@ public partial class Main : Node3D
 
 	// ---- Ever Torches give off little fire essence sparks (your fire_essence picture) that drift up and fade ----
 	const float SparkLife = 1.6f, SparkEvery = 0.35f, SparkSize = 0.14f, SparkRange = 40; const int SparkMax = 300;
-	readonly List<(int i, int x, int y, int z, float[] t)> everNear = new();
+	readonly List<(long i, int x, int y, int z, float[] t)> everNear = new();
 	readonly List<(Sprite3D s, float age, Vector3 v)> sparks = new();
 	float everScan; Texture2D sparkTex;
 	void TickEverSparks(float dt)
@@ -2878,7 +2906,7 @@ public partial class Main : Node3D
 		if ((everScan -= dt) <= 0)
 		{
 			everScan = 1; everNear.Clear();
-			foreach (int i in world.Torches)
+			foreach (long i in world.Torches)
 			{
 				if (Blocks.B[world.Blocks[i]].Burn != 3) continue;
 				var (x, y, z) = World.FromIdx(i);

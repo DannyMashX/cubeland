@@ -604,7 +604,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.5.0"></script>
+<script src="textures.js?v=beta-0.1.5.1"></script>
 <script>
 // ===================== Version =====================
 // Versions are named by you from Alpha 0.0.1.0 on (Alpha 0.0.1.1, ..., later maybe Beta ...).
@@ -612,7 +612,7 @@
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.5.0';
+const GAME_VERSION = 'Beta 0.1.5.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -791,71 +791,106 @@ const CS = 16;                        // chunk size: chunks are 16x16x16 cubes
 const NCX = WX / CS, NCZ = WZ / CS, NCY = WY / CS;
 const chunkKey = (cx, cy, cz) => (cy * NCZ + cz) * NCX + cx;
 const idx = (x, y, z) => (y * WZ + z) * WX + x;
-// The world's blocks, kept chunk by chunk (16x16x16 cubes). Each chunk has a palette: the list of the block ids in it, as
-// full numbers (so there's no limit of 256 kinds of block), and each of its 4096 blocks stores only its place in that
-// list: 1 byte, or 2 bytes once a chunk has held more than 256 kinds of block. A chunk that's all one block (open sky,
-// solid rock) shares one list of places with every other such chunk until something in it changes, so it costs almost
-// nothing. world.get(i) / world.set(i, id) use the world index (idx); world.at(x, y, z) / world.put(x, y, z, id) use x, y, z.
-// The world grows in `raw` (one byte per block, the same as the desktop version), which is packed in here once it's grown.
+// The world's blocks, kept COLUMN by column: a column is 16 x 16 blocks across and the world's full height, cut into 16x16x16
+// chunks. Each chunk has a palette: the list of the block ids in it, as full numbers (so there's no limit of 256 kinds of
+// block), and each of its 4096 blocks stores only its place in that list: 1 byte, or 2 bytes once a chunk has held more than
+// 256 kinds of block. A chunk that's all one block (open sky, solid rock) shares one list of places with every other such
+// chunk until something in it changes, so it costs almost nothing. world.get(i) / world.set(i, id) use the world index (idx);
+// world.at(x, y, z) / world.put(x, y, z, id) use x, y, z.
+// A column also keeps what's known about each of its 256 spots, so nothing the size of the whole world is needed once it's
+// grown (the same as the desktop version): its height (the highest block it grew with: colHeight), its sky top (the highest
+// block that hides the sky: colSkyTop), its biome (colBiome), plus the column's top (one above its highest block: chunkTopAt)
+// and which of its chunks have been built into meshes (and their pieces). Plateaus, Rolling hills and Biomes worlds grow
+// whole, up front, in `raw` (one byte per block, the same as the desktop version) with the whole-map `heights` and `biomeMap`,
+// and every column is filled from those once the world has grown (then they're let go).
 let raw = new Uint8Array(WX * WY * WZ);
 let growing = null;   // a sapling growing into a tree: the tree's blocks (index -> block), which the tree code puts here instead (see treeShape)
 const world = (() => {
-  const NCY = WY / CS, N = NCX * NCY * NCZ, SHARED = new Uint8Array(4096), WIDE = 256;
-  const pal = new Array(N), pn = new Int32Array(N), place = new Array(N);
-  for (let k = 0; k < N; k++) { pal[k] = new Int32Array(1); pn[k] = 1; place[k] = SHARED; }
-  const chunkOf = (x, y, z) => ((y >> 4) * NCZ + (z >> 4)) * NCX + (x >> 4);
-  const local = (x, y, z) => ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
+  // cols[c]: column c's chunks, bottom up, as [palette, places, palette, places, ...] (kept flat, since at() is the busiest
+  // thing in the game); info[c]: everything else about the column (its palettes' lengths, and what's known about its spots)
+  const NCOL = NCX * NCZ, SHARED = new Uint8Array(4096), WIDE = 256;
+  const cols = new Array(NCOL), info = new Array(NCOL);
+  for (let c = 0; c < NCOL; c++) {
+    const a = new Array(2 * NCY);
+    for (let cy = 0; cy < NCY; cy++) { a[2 * cy] = new Int32Array(1); a[2 * cy + 1] = SHARED; }
+    cols[c] = a;
+    info[c] = { pn: new Int32Array(NCY).fill(1), h: new Int32Array(256), sky: new Int16Array(256), bio: new Uint8Array(256), top: 0,
+      built: new Uint8Array(NCY), parts: new Array(NCY).fill(null) };
+  }
   function at(x, y, z) {   // (written out in full: it's called millions of times)
-    const k = ((y >> 4) * NCZ + (z >> 4)) * NCX + (x >> 4);
-    return pal[k][place[k][((y & 15) << 8) | ((z & 15) << 4) | (x & 15)]];
+    const c = cols[(z >> 4) * NCX + (x >> 4)], j = (y >> 4) << 1;
+    return c[j][c[j + 1][((y & 15) << 8) | ((z & 15) << 4) | (x & 15)]];
   }
   function put(x, y, z, id) {
-    const k = chunkOf(x, y, z), a = pal[k], n = pn[k];
+    const k = (z >> 4) * NCX + (x >> 4), c = cols[k], pn = info[k].pn, cy = y >> 4, j = cy << 1, a = c[j], n = pn[cy];
     let p = -1;
-    for (let j = 0; j < n; j++) if (a[j] === id) { p = j; break; }
-    if (place[k] === SHARED) {
+    for (let i = 0; i < n; i++) if (a[i] === id) { p = i; break; }
+    if (c[j + 1] === SHARED) {
       if (p === 0) return;   // (already that block)
-      place[k] = new Uint8Array(4096);
+      c[j + 1] = new Uint8Array(4096);
     }
     if (p < 0) {
-      if (n === WIDE && place[k] instanceof Uint8Array) place[k] = Uint16Array.from(place[k]);   // (more than 256 kinds: 2-byte places)
-      if (n === a.length) { const b = new Int32Array(n * 2); b.set(a); pal[k] = b; }
-      pal[k][n] = id; pn[k] = n + 1; p = n;
+      if (n === WIDE && c[j + 1] instanceof Uint8Array) c[j + 1] = Uint16Array.from(c[j + 1]);   // (more than 256 kinds: 2-byte places)
+      if (n === a.length) { const b = new Int32Array(n * 2); b.set(a); c[j] = b; }
+      c[j][n] = id; pn[cy] = n + 1; p = n;
     }
-    place[k][local(x, y, z)] = p;
+    c[j + 1][((y & 15) << 8) | ((z & 15) << 4) | (x & 15)] = p;
   }
   // by world index: (y * WZ + z) * WX + x
-  function get(i) { const r = (i / WX) | 0, x = i - r * WX, y = (r / WZ) | 0; return at(x, y, r - y * WZ); }
-  function set(i, id) { const r = (i / WX) | 0, x = i - r * WX, y = (r / WZ) | 0; put(x, y, r - y * WZ, id); }
-  // fills every chunk from the freshly grown world (one byte per block, in world-index order)
+  function get(i) { const r = Math.floor(i / WX), x = i - r * WX, y = Math.floor(r / WZ); return at(x, y, r - y * WZ); }
+  function set(i, id) { const r = Math.floor(i / WX), x = i - r * WX, y = Math.floor(r / WZ); put(x, y, r - y * WZ, id); }
+  // fills every column from the freshly grown world (one byte per block, in world-index order)
   function load(src) {
     const map = new Int16Array(256);
-    for (let k = 0; k < N; k++) {
-      const cx = k % NCX, cz = Math.floor(k / NCX) % NCZ, cy = Math.floor(k / (NCX * NCZ));
-      map.fill(-1);
-      let a = new Int32Array(8), n = 0;
-      const b = new Uint8Array(4096);
-      for (let ly = 0; ly < CS; ly++) for (let lz = 0; lz < CS; lz++) {
-        const row = ((cy * CS + ly) * WZ + cz * CS + lz) * WX + cx * CS, l = (ly << 8) | (lz << 4);
-        for (let lx = 0; lx < CS; lx++) {
-          const id = src[row + lx];
-          let p = map[id];
-          if (p < 0) { if (n === a.length) { const g = new Int32Array(n * 2); g.set(a); a = g; } a[n] = id; map[id] = p = n++; }
-          b[l | lx] = p;
+    for (let cz = 0; cz < NCZ; cz++) for (let cx = 0; cx < NCX; cx++) {
+      const c = cols[cz * NCX + cx], pn = info[cz * NCX + cx].pn;
+      for (let cy = 0; cy < NCY; cy++) {
+        map.fill(-1);
+        let a = new Int32Array(8), n = 0;
+        const b = new Uint8Array(4096);
+        for (let ly = 0; ly < CS; ly++) for (let lz = 0; lz < CS; lz++) {
+          const row = ((cy * CS + ly) * WZ + cz * CS + lz) * WX + cx * CS, l = (ly << 8) | (lz << 4);
+          for (let lx = 0; lx < CS; lx++) {
+            const id = src[row + lx];
+            let p = map[id];
+            if (p < 0) { if (n === a.length) { const g = new Int32Array(n * 2); g.set(a); a = g; } a[n] = id; map[id] = p = n++; }
+            b[l | lx] = p;
+          }
         }
+        if (n === 1) { c[2 * cy] = Int32Array.of(a[0]); pn[cy] = 1; c[2 * cy + 1] = SHARED; }
+        else { c[2 * cy] = a; pn[cy] = n; c[2 * cy + 1] = b; }
       }
-      if (n === 1) { pal[k] = Int32Array.of(a[0]); pn[k] = 1; place[k] = SHARED; }
-      else { pal[k] = a; pn[k] = n; place[k] = b; }
     }
   }
   // (for testing) how much memory the blocks take, in bytes, and how many chunks are all one block
   function usage() {
     let bytes = 0, uniform = 0;
-    for (let k = 0; k < N; k++) { bytes += 48 + pal[k].length * 4; if (place[k] === SHARED) uniform++; else bytes += place[k].byteLength; }
+    for (const c of cols) for (let cy = 0; cy < NCY; cy++) {
+      bytes += 48 + c[2 * cy].length * 4;
+      if (c[2 * cy + 1] === SHARED) uniform++; else bytes += c[2 * cy + 1].byteLength;
+    }
     return { bytes, uniform };
   }
-  return { at, put, get, set, load, usage, length: WX * WY * WZ };
+  // what's known about a column (see info), by a block's x and z, or by the column's number (z / 16 * columns across + x / 16);
+  // and (for testing) a column's chunks
+  const col = (x, z) => info[(z >> 4) * NCX + (x >> 4)], colAt = c => info[c], chunksAt = c => cols[c];
+  return { at, put, get, set, load, usage, col, colAt, chunksAt, length: WX * WY * WZ };
 })();
+// what's known about each spot of the ground (see world): while a world grows up front, from its whole-map arrays; once it's
+// grown, from its columns. colSpot = a block's place among its column's 256 spots.
+const colSpot = (x, z) => ((z & 15) << 4) | (x & 15);
+function colHeight(x, z) { return heights ? heights[z * WX + x] : world.col(x, z).h[colSpot(x, z)]; }
+function setColHeight(x, z, v) { if (heights) heights[z * WX + x] = v; else world.col(x, z).h[colSpot(x, z)] = v; }
+function colBiome(x, z) { return biomeMap ? biomeMap[z * WX + x] : world.col(x, z).bio[colSpot(x, z)]; }
+function colSkyTop(x, z) { return world.col(x, z).sky[colSpot(x, z)]; }
+function setColSkyTop(x, z, v) { world.col(x, z).sky[colSpot(x, z)] = v; }
+const chunkTopAt = (cx, cz) => world.colAt(cz * NCX + cx).top;
+function raiseChunkTop(x, z, y) { const c = world.col(x, z); if (y + 1 > c.top) c.top = y + 1; }   // (a block at y: the column's top is above it)
+// a chunk's meshing state, by its key (see chunkKey: the column's number is k % (NCX * NCZ), its chunk in the column k / (NCX * NCZ))
+const chunkBuiltAt = k => world.colAt(k % (NCX * NCZ)).built[Math.floor(k / (NCX * NCZ))];
+function setChunkBuilt(k) { world.colAt(k % (NCX * NCZ)).built[Math.floor(k / (NCX * NCZ))] = 1; }
+const chunkPartsAt = k => world.colAt(k % (NCX * NCZ)).parts[Math.floor(k / (NCX * NCZ))];
+function setChunkParts(k, p) { world.colAt(k % (NCX * NCZ)).parts[Math.floor(k / (NCX * NCZ))] = p; }
 
 // ===================== Pictures =====================
 // Pictures are known by NAME: the file's name in textures/blocks or textures/items, without .png (e.g. 'log_side').
@@ -1870,7 +1905,7 @@ function climate(x, z, e) {
   return { snowy: cold, taiga: cool - cold, desert: mild * hot * arid, badlands: mild * hot * (1 - arid) * bad, swamp: mild * (1 - hot) * wet,
     plains: mild * (1 - hot) * dry, meadow: mild * (1 - hot) * (1 - dry) * mead };
 }
-const biomeMap = new Uint8Array(WX * WZ);   // every column's biome (biome worlds; all Woods otherwise)
+let biomeMap = new Uint8Array(WX * WZ);   // every column's biome while the world grows (biome worlds; all Woods otherwise): then kept in its columns (see colBiome)
 if (GEN === 3) for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) biomeMap[z * WX + x] = biomeAt(x, z);
 const grassy = b => b === 1 || b === SNOWY_GRASS || b === SWAMP_GRASS;   // grass of any biome (dirt underneath; flowers and hoes)
 const takesBiomeTint = b => b === 1 || b === SWAMP_GRASS || isLeaves(b);    // grass and leaves: coloured by the climate where they are
@@ -1953,7 +1988,7 @@ function generateFloatingIslands() {
   }
 }
 
-const heights = new Int32Array(WX * WZ);
+let heights = new Int32Array(WX * WZ);   // every column's height while the world grows: then kept in its columns (see colHeight)
 function recomputeHeights() {
   for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
     let y = WY - 1;
@@ -2750,8 +2785,8 @@ const STAIR_MIN_UP = 6;   // how far above the sea the ground must be at least (
 const STAIR_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const STAIR_MASKS = [0x33 | 0x88, 0x33 | 0x44, 0x33 | 0xC0, 0x33 | 0x0C];   // (the step's high half faces the way it climbs)
 const stairSpots = [];    // { x, y, z, dir, n, mat, order, placed }
-const stairForest = (x, z) => x >= 0 && z >= 0 && x < WX && z < WZ && (biomeMap[z * WX + x] === WOODS || biomeMap[z * WX + x] === TAIGA) && heights[z * WX + x] > SEA_LEVEL;
-const stairMat = (x, z) => hash(x, z, 7704) < 1 / 3 ? 8 : biomeMap[z * WX + x] === TAIGA ? FIR_PLANKS : 7;
+const stairForest = (x, z) => x >= 0 && z >= 0 && x < WX && z < WZ && (colBiome(x, z) === WOODS || colBiome(x, z) === TAIGA) && colHeight(x, z) > SEA_LEVEL;
+const stairMat = (x, z) => hash(x, z, 7704) < 1 / 3 ? 8 : colBiome(x, z) === TAIGA ? FIR_PLANKS : 7;
 // can a staircase stand here? (ground from groundAt(column), blocks from get(x, y, z); also used on the grown world)
 function stairFits(s, groundAt, get) {
   const [dx, dz] = STAIR_DIRS[s.dir];
@@ -2775,7 +2810,7 @@ function buildStair(s, set, groundAt) {
     for (let b = 0; b < 8; b++) if (STAIR_MASKS[s.dir] & (1 << b)) a[b] = s.mat;
     pieceMap.set(idx(cx, s.y + k, cz), a);
     set(cx, s.y + k, cz, PIECES);
-    heights[cz * WX + cx] = Math.max(heights[cz * WX + cx], s.y + k);
+    setColHeight(cx, cz, Math.max(colHeight(cx, cz), s.y + k));
   }
 }
 // (an old world: lands 0-4, once EERIE_READY is on; os: 1 once its skipped chunks are settled. Never a land 5/6 world)
@@ -3112,8 +3147,8 @@ const FACES = [
 // glued together in 32x32x32 groups (2x2x2 chunks, one mesh each), because every separate mesh costs time to draw.
 const GS = 2, NGX = NCX / GS, NGY = NCY / GS, NGZ = NCZ / GS;
 const groupOf = k => (Math.floor(k / (NCX * NCZ) / GS) * NGZ + Math.floor(Math.floor(k / NCX) % NCZ / GS)) * NGX + Math.floor(k % NCX / GS);
-const chunkParts = new Array(NCX * NCY * NCZ).fill(null);    // each chunk's built pieces: [solid, water] (null when empty)
-const chunkBuilt = new Uint8Array(NCX * NCY * NCZ);          // 1 once a chunk has been built (even if it came out empty)
+// (each chunk's built pieces, [solid, water] or null when empty, and whether it's been built, even if it came out empty, are
+// kept in its column: see chunkPartsAt and chunkBuiltAt)
 const groupMeshes = new Array(NGX * NGY * NGZ).fill(null), groupWater = new Array(NGX * NGY * NGZ).fill(null);
 const groupsDirty = new Set();                                // groups to glue back together before the next frame is drawn
 // water is drawn after the solid blocks, see-through (using the texture's own transparency), and from both sides
@@ -3146,11 +3181,13 @@ for (let k = 0; k < lateKept.length; k += 2) {
   const c = i % (WX * WZ), y = Math.floor(i / (WX * WZ));
   if (y > heights[c]) heights[c] = y;   // (snow on top: the column's highest block)
 }
-const chunkTop = new Int32Array(NCX * NCZ);
+// every column takes its spots' heights and biomes, and its top, from the growth's whole-map arrays, which are then let go
 for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) {
-  const k = Math.floor(z / CS) * NCX + Math.floor(x / CS);
-  chunkTop[k] = Math.max(chunkTop[k], Math.min(WY, heights[z * WX + x] + 1));
+  const c = world.col(x, z), s = colSpot(x, z), h = heights[z * WX + x];
+  c.h[s] = h; c.bio[s] = biomeMap[z * WX + x];
+  c.top = Math.max(c.top, Math.min(WY, h + 1));
 }
+heights = null; biomeMap = null;
 
 // Soft shadows in corners (ambient occlusion), smoothly blended across each face.
 // index = how open the corner is: 0 = tucked into an inside corner, 3 = nothing nearby
@@ -3199,12 +3236,12 @@ function relight(dirty) {      // recompute all torch light, mark chunks whose l
 }
 // ---- Sky light: how much open sky a spot can see. Tunnels and caves fade to dark the deeper you go. ----
 const opaqueAt = (x, y, z) => { const b = world.at(x, y, z); return b !== 0 && !BLOCKS[b].transparent; };
-const skyTop = new Int16Array(WX * WZ);   // highest see-through-blocking block in each column (-1 = none)
-function computeSkyTop(x, z, from = heights[z * WX + x]) {
+// (each spot's sky top, the highest see-through-blocking block above it or -1 for none, is kept in its column: see colSkyTop)
+function computeSkyTop(x, z, from = colHeight(x, z)) {
   for (let y = Math.min(WY - 1, from); y >= 0; y--) if (opaqueAt(x, y, z)) return y;
   return -1;
 }
-for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) skyTop[z * WX + x] = computeSkyTop(x, z);
+for (let z = 0; z < WZ; z++) for (let x = 0; x < WX; x++) setColSkyTop(x, z, computeSkyTop(x, z));
 // rays shot from a spot toward the sky: straight up, 8 steep, 8 shallow, and 8 sideways
 // (the sideways ones stand in for light bouncing in, so undersides and overhangs aren't black)
 const SKY_DIRS = [[0, 1, 0]];
@@ -3219,7 +3256,7 @@ const SKY_STEP = 0.6, SKY_STEPS = 32;     // rays travel up to ~19 blocks
 function skyExposure(x, y, z, cache) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y >= WY) return 1;
   if (y < 0) return 0;
-  if (y > skyTop[z * WX + x]) return 1;  // nothing solid above: full sky
+  if (y > colSkyTop(x, z)) return 1;  // nothing solid above: full sky
   const key = idx(x, y, z);
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
@@ -3230,7 +3267,7 @@ function skyExposure(x, y, z, cache) {
       fx += d[0] * SKY_STEP; fy += d[1] * SKY_STEP; fz += d[2] * SKY_STEP;
       const ix = Math.floor(fx), iy = Math.floor(fy), iz = Math.floor(fz);
       // a ray that gets out counts less the further it had to travel (so long tunnels still fade to dark)
-      if (ix < 0 || iz < 0 || ix >= WX || iz >= WZ || iy >= WY || iy > skyTop[iz * WX + ix]) { open += SKY_WEIGHTS[di] * (1 - 0.6 * s / SKY_STEPS); break; }
+      if (ix < 0 || iz < 0 || ix >= WX || iz >= WZ || iy >= WY || iy > colSkyTop(ix, iz)) { open += SKY_WEIGHTS[di] * (1 - 0.6 * s / SKY_STEPS); break; }
       if (iy >= 0 && opaqueAt(ix, iy, iz)) break;
     }
   });
@@ -3250,7 +3287,7 @@ function queueNearbyRebuilds(x, y, z) {
 }
 function pumpRebuildSoon() {
   let n = 0;
-  for (const k of rebuildSoon) { rebuildSoon.delete(k); if (chunkBuilt[k]) { buildChunkKey(k); if (++n >= 4) break; } }
+  for (const k of rebuildSoon) { rebuildSoon.delete(k); if (chunkBuiltAt(k)) { buildChunkKey(k); if (++n >= 4) break; } }
 }
 
 function markDirty(x, y, z, dirty) {  // the chunk holding (x, y, z) plus any neighbour chunk touching it
@@ -3462,7 +3499,7 @@ function tickDoorSwings(dt) {
     dropDoorSwing(s); doorSwings.splice(i, 1);
     const dirty = new Set();   // (the chunk draws it again, in its new pose)
     markDirty(s.x, s.y, s.z, dirty); markDirty(s.x, s.y + 1, s.z, dirty);
-    for (const k of dirty) { if (chunkBuilt[k]) buildChunkKey(k); rebuildSoon.delete(k); }
+    for (const k of dirty) { if (chunkBuiltAt(k)) buildChunkKey(k); rebuildSoon.delete(k); }
   }
 }
 function buildChunk(cx, cy, cz) {
@@ -3472,7 +3509,7 @@ function buildChunk(cx, cy, cz) {
   const tint = { tn, at: tintAt };   // (for pieces of grass and leaves)
   const wpos = [], wuv = [], wcol = [], wind = [], wlt = [], wsk = [];   // water goes in its own see-through mesh
   const p = [0, 0, 0], ao = [0, 0, 0, 0];
-  const y0 = cy * CS, top = Math.min(y0 + CS, chunkTop[cz * NCX + cx]);   // (nothing above the column's highest block)
+  const y0 = cy * CS, top = Math.min(y0 + CS, chunkTopAt(cx, cz));   // (nothing above the column's highest block)
   const anyLight = lightMap.size > 0;
   const skyCache = new Map();
   for (let y = y0; y < top; y++) for (let z = cz * CS; z < cz * CS + CS; z++) for (let x = cx * CS; x < cx * CS + CS; x++) {
@@ -3555,8 +3592,8 @@ function buildChunk(cx, cy, cz) {
   const k = chunkKey(cx, cy, cz);
   if (tn.length) while (tn.length < pos.length) tn.push(0);
   const pack = (pos, uv, col, lt, sk, ind, tn) => ind.length ? { pos: new Float32Array(pos), uv: new Float32Array(uv), col: new Float32Array(col), lt: new Float32Array(lt), sk: new Float32Array(sk), ind: new Uint32Array(ind), tn: tn && tn.length ? new Float32Array(tn) : null } : null;
-  chunkBuilt[k] = 1;
-  chunkParts[k] = ind.length || wind.length ? [pack(pos, uv, col, lt, sk, ind, tn), pack(wpos, wuv, wcol, wlt, wsk, wind)] : null;
+  setChunkBuilt(k);
+  setChunkParts(k, ind.length || wind.length ? [pack(pos, uv, col, lt, sk, ind, tn), pack(wpos, wuv, wcol, wlt, wsk, wind)] : null);
   groupsDirty.add(groupOf(k));
 }
 // glue a group's chunks into one mesh for the solid blocks and one for the water
@@ -3566,7 +3603,7 @@ function mergeGroup(g) {
   for (const w of [0, 1]) {
     const meshes = w ? groupWater : groupMeshes, parts = [];
     for (let dy = 0; dy < GS; dy++) for (let dz = 0; dz < GS; dz++) for (let dx = 0; dx < GS; dx++) {
-      const p = chunkParts[chunkKey(gx * GS + dx, gy * GS + dy, gz * GS + dz)];
+      const p = chunkPartsAt(chunkKey(gx * GS + dx, gy * GS + dy, gz * GS + dz));
       if (p && p[w]) parts.push(p[w]);
     }
     if (meshes[g]) { scene.remove(meshes[g]); meshes[g].geometry.dispose(); meshes[g] = null; }
@@ -3834,7 +3871,7 @@ function pumpChunkBuilds(budgetMs) {
     const S = CS * GS, pgx = Math.floor(player.x / S), pgy = Math.floor(player.y / S), pgz = Math.floor(player.z / S);
     buildQueue = [];
     for (let cz = 0; cz < NCZ; cz++) for (let cx = 0; cx < NCX; cx++) for (let cy = 0; cy < NCY; cy++) {
-      if (cy * CS >= chunkTop[cz * NCX + cx]) { chunkBuilt[chunkKey(cx, cy, cz)] = 1; continue; }   // (empty sky: nothing to build yet)
+      if (cy * CS >= chunkTopAt(cx, cz)) { setChunkBuilt(chunkKey(cx, cy, cz)); continue; }   // (empty sky: nothing to build yet)
       const gx = Math.floor(cx / GS), gy = Math.floor(cy / GS), gz = Math.floor(cz / GS);
       buildQueue.push([cx, cy, cz, (gx - pgx) ** 2 + (gy - pgy) ** 2 + (gz - pgz) ** 2, groupOf(chunkKey(cx, cy, cz))]);
     }
@@ -3844,7 +3881,7 @@ function pumpChunkBuilds(budgetMs) {
   const start = performance.now();
   while (buildDone < buildQueue.length && performance.now() - start < budgetMs) {
     const e = buildQueue[buildDone++], [cx, cy, cz] = e;
-    if (chunkBuilt[chunkKey(cx, cy, cz)]) continue;
+    if (chunkBuiltAt(chunkKey(cx, cy, cz))) continue;
     if (!groupInRange(e[4])) { farBuilds.push(e); continue; }   // (too far to see: built once you come near)
     buildChunk(cx, cy, cz);
   }
@@ -3869,14 +3906,13 @@ function setBlock(x, y, z, id) {
   farmChanged(i, old, id);
   if (isFurnace(old) && !isFurnace(id)) emptyFurnace(i);   // broken: what was in it falls out
   // keep the sky map up to date, and relight nearby chunks if what can see the sky changed
-  const col = z * WX + x, wasOpaque = old && !BLOCKS[old].transparent, isOpaque = id && !BLOCKS[id].transparent;
+  const wasOpaque = old && !BLOCKS[old].transparent, isOpaque = id && !BLOCKS[id].transparent;
   if (wasOpaque !== isOpaque) {
-    if (isOpaque && y > skyTop[col]) skyTop[col] = y;
-    else if (!isOpaque && y === skyTop[col]) skyTop[col] = computeSkyTop(x, z, y);
+    if (isOpaque && y > colSkyTop(x, z)) setColSkyTop(x, z, y);
+    else if (!isOpaque && y === colSkyTop(x, z)) setColSkyTop(x, z, computeSkyTop(x, z, y));
     queueNearbyRebuilds(x, y, z);
   }
-  const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
-  if (id) chunkTop[cz * NCX + cx] = Math.max(chunkTop[cz * NCX + cx], y + 1);
+  if (id) raiseChunkTop(x, z, y);
   const dirty = new Set();
   markDirty(x, y, z, dirty);
   if (blockBatch) {   // (many blocks changing at once: their chunks are built once, afterwards; see changeMany)
@@ -3966,14 +4002,13 @@ function updateWater(dt) {
       setBlock(x, y, z, id); continue;
     }
     world.set(i, id); edits.set(i, id);
-    const c = Math.floor(z / CS) * NCX + Math.floor(x / CS);
-    if (id) chunkTop[c] = Math.max(chunkTop[c], y + 1);
+    if (id) raiseChunkTop(x, z, y);
     markDirty(x, y, z, dirty);
     wakeWater(x, y, z);
     wakeFall(x, y, z);
     Net.blockChanged(i, id);
   }
-  for (const k of dirty) { if (chunkBuilt[k]) buildChunkKey(k); rebuildSoon.delete(k); }
+  for (const k of dirty) { if (chunkBuiltAt(k)) buildChunkKey(k); rebuildSoon.delete(k); }
 }
 // when a block is removed, torches standing on it or stuck to its sides fall off
 function dropTorchesAround(x, y, z) {
@@ -5014,7 +5049,7 @@ function panorama(dt) {
   if (panoYaw === null) panoYaw = pano.ready ? 0 : player.yaw;
   panoYaw += dt * PANO_TURN;
   const x = Math.min(WX - 1, Math.max(0, Math.floor(player.x))), z = Math.min(WZ - 1, Math.max(0, Math.floor(player.z)));
-  camera.position.y = Math.max(player.y + EYE, heights[z * WX + x] + 3.5);
+  camera.position.y = Math.max(player.y + EYE, colHeight(x, z) + 3.5);
   camera.rotation.y = panoYaw;
   camera.rotation.x = -0.1;
   if (pano.cam.fov !== camera.fov || pano.cam.aspect !== camera.aspect) { pano.cam.fov = camera.fov; pano.cam.aspect = camera.aspect; pano.cam.updateProjectionMatrix(); }
@@ -6727,7 +6762,7 @@ function spawnAnimals() {
   const a = Math.random() * Math.PI * 2, r = none ? 12 + Math.random() * 20 : 30 + Math.random() * 30;
   const x = Math.floor(player.x + Math.cos(a) * r), z = Math.floor(player.z + Math.sin(a) * r);
   if (x < 3 || z < 3 || x >= WX - 3 || z >= WZ - 3) return;
-  const bi = biomeMap[z * WX + x], about = type => mobs.filter(m => m.type === type && !m.dead && (m.x - player.x) ** 2 + (m.z - player.z) ** 2 < 80 * 80).length;
+  const bi = colBiome(x, z), about = type => mobs.filter(m => m.type === type && !m.dead && (m.x - player.x) ** 2 + (m.z - player.z) ** 2 < 80 * 80).length;
   const kinds = Object.keys(ANIMALS).filter(t => MOB_TYPES[t] && (window.MODELS || {})[t] && ANIMAL_BIOMES[t].includes(bi) && about(t) < ANIMALS[t].nearMax);
   if (!kinds.length) return;
   let w = Math.random() * kinds.reduce((s, t) => s + ANIMALS[t].spawnWeight, 0), type = kinds[kinds.length - 1];
@@ -6944,7 +6979,7 @@ function deerWork(m, dt, x, y, z) {
   if (m.baby > 0) return;
   if ((m.sowIn = (m.sowIn ?? A.sowEvery) - dt) <= 0) {
     m.sowIn = A.sowEvery;
-    if (m.sow && Math.random() < A.sowChance && grassy(getBlock(x, y - 1, z)) && !getBlock(x, y, z) && skyTop[z * WX + x] < y && !logNear(x, y, z, A.sowClear, null) && !saplingNear(x, y, z, A.sowClear)) {
+    if (m.sow && Math.random() < A.sowChance && grassy(getBlock(x, y - 1, z)) && !getBlock(x, y, z) && colSkyTop(x, z) < y && !logNear(x, y, z, A.sowClear, null) && !saplingNear(x, y, z, A.sowClear)) {
       setBlock(x, y, z, m.sow); grown.add(idx(x, y, z));   // (planted by a deer: natural, like a tree a sapling grew)
     }
   }
@@ -7304,7 +7339,7 @@ function updateMobs(dt) {
     // burning: in daylight with open sky straight above its head (and not in water). The host's game does the damage.
     const hx = Math.floor(m.x), hz = Math.floor(m.z);
     m.burning = t.burns && !m.dead && skyDay > 0.6 && hx >= 0 && hz >= 0 && hx < WX && hz < WZ &&
-      Math.floor(m.y + m.height) > skyTop[hz * WX + hx] && !waterAt(m.x, m.y + 0.5, m.z);
+      Math.floor(m.y + m.height) > colSkyTop(hx, hz) && !waterAt(m.x, m.y + 0.5, m.z);
     if (m.burning) {
       if (!Net.client && (m.burnIn = (m.burnIn ?? 1) - dt) <= 0) { m.burnIn = 1; hurtMob(m, 1); }
       m.light.lerp(new THREE.Color(1, 0.55, 0.15), 0.35 + 0.2 * Math.sin(performance.now() / 60));   // orange flicker
@@ -9500,7 +9535,7 @@ function saplingGrow(x, y, z, justLook = false) {
     if (!sq) return 'four';
     [gx, gz] = sq;
     cells = [idx(gx, y, gz), idx(gx + 1, y, gz), idx(gx, y, gz + 1), idx(gx + 1, y, gz + 1)];
-  } else if (tree === 'oak' && GEN === 3 && biomeMap[z * WX + x] === PLAINS) tree = 'prairie_oak';
+  } else if (tree === 'oak' && GEN === 3 && colBiome(x, z) === PLAINS) tree = 'prairie_oak';
   const fit = [];
   for (const [i, bid] of treeShape(tree, gx, y - 1, gz)) {
     const there = cells.includes(i) ? 0 : world.get(i);
@@ -9803,7 +9838,7 @@ function stairEvent(which, s) {
 // the ground in a column, under any trees or plants
 function stairGround(c) {
   const x = c % WX, z = Math.floor(c / WX);
-  let y = Math.min(WY - 1, heights[c] + 8);
+  let y = Math.min(WY - 1, colHeight(x, z) + 8);
   while (y > 0) {
     const b = getBlock(x, y, z);
     if (b === 0 || isLeaves(b) || (BLOCKS[b] && (BLOCKS[b].needs === 'axe' || BLOCKS[b].shape === 'plant' || BLOCKS[b].shape === 'flat'))) y--; else break;
@@ -9938,8 +9973,7 @@ const DOOR_BLOCK = 61;   // Stripped Oak Log
 function setLooks(x, y, z, id) {
   if (x < 0 || z < 0 || x >= WX || z >= WZ || y < 0 || y >= WY) return;
   world.put(x, y, z, id);
-  const c = Math.floor(z / CS) * NCX + Math.floor(x / CS);
-  if (id) chunkTop[c] = Math.max(chunkTop[c], y + 1);
+  if (id) raiseChunkTop(x, z, y);
   const dirty = new Set();
   markDirty(x, y, z, dirty);
   for (const k of dirty) { buildChunkKey(k); rebuildSoon.delete(k); }
@@ -10002,15 +10036,15 @@ function settleOldStairs(s) {
   if (s && s.os === 1 && Array.isArray(s.osSkip)) skip = stairSkipSet(s.osSkip);
   else {
     skip = new Set();
-    if (s && s.idxs) for (const i of new Uint32Array(s.idxs)) if (i < world.length) skip.add(chunkOfIndex(i));
+    if (s && s.idxs) for (const i of readIdxs(s.idxs, s.i8)) if (i < world.length) skip.add(chunkOfIndex(i));
   }
   Worlds.mark({ os: 1, osSkip: [...skip].sort((a, b) => a - b) });
   const cols = new Set();
   placeStairs(stairCands, skip, (x, y, z, id) => {
     world.set(idx(x, y, z), id); cols.add(z * WX + x);
-    const c = Math.floor(z / CS) * NCX + Math.floor(x / CS); chunkTop[c] = Math.max(chunkTop[c], y + 1);
+    raiseChunkTop(x, z, y);
   }, c => stairGround0.get(c));
-  for (const c of cols) skyTop[c] = computeSkyTop(c % WX, Math.floor(c / WX), WY - 1);
+  for (const c of cols) { const x = c % WX, z = Math.floor(c / WX); setColSkyTop(x, z, computeSkyTop(x, z, WY - 1)); }
   stairCands = null; stairGround0.clear();
 }
 const saveExtraStairs = () => extraStairs.flatMap(o => [o.x, o.y, o.z, o.dir, o.n, o.mat]);
@@ -10024,16 +10058,33 @@ function loadExtraStairs(a) {
 
 // ===================== Saving & loading =====================
 let worldLoaded = false, saving = false, lastSave = performance.now();
+// Block numbers (world indices, see idx) are plain whole numbers in the game, exact up to 2^53, so they're right in a world of any
+// size. Saves and messages carry a list of them (idxs) as 4-byte numbers, or, marked i8, as 8-byte ones (little-endian signed,
+// the desktop version's long) for worlds whose blocks can number past 2^32: Earthlike worlds always use those, the first three
+// world types never do. (The same as the desktop version. Test: ?idx8 makes any world use 8-byte ones.)
+const IDX8 = GEN >= 4 || /[?&]idx8\b/.test(location.search);
+function packIdxs(list) {   // (a list of block numbers -> the bytes a save or message carries)
+  if (!IDX8) return Uint32Array.from(list).buffer;
+  const a = new BigInt64Array(list.length);
+  for (let k = 0; k < list.length; k++) a[k] = BigInt(list[k]);
+  return a.buffer;
+}
+function readIdxs(buf, i8) {   // (and back: i8 = they're 8-byte numbers)
+  if (!i8) return new Uint32Array(buf);
+  const a = new BigInt64Array(buf), out = new Float64Array(a.length);
+  for (let k = 0; k < a.length; k++) out[k] = Number(a[k]);
+  return out;
+}
 function gatherSave() {
   settleFalls();
   // the blocks you've changed: 1 byte for each block id, or 4 (wide) if any id is past 255
   let wide = false; for (const id of edits.values()) if (id > 255) { wide = true; break; }
-  const idxs = new Uint32Array(edits.size), ids = wide ? new Uint32Array(edits.size) : new Uint8Array(edits.size);
+  const idxs = new Array(edits.size), ids = wide ? new Uint32Array(edits.size) : new Uint8Array(edits.size);
   let k = 0;
   for (const [i, id] of edits) { idxs[k] = i; ids[k++] = id; }
   return {
     version: 1, seed, savedAt: Date.now(),
-    idxs: idxs.buffer, ids: ids.buffer, ...(wide ? { wide: true } : {}),
+    idxs: packIdxs(idxs), ...(IDX8 ? { i8: true } : {}), ids: ids.buffer, ...(wide ? { wide: true } : {}),
     pieces: gatherPieces(),
     stairs: saveExtraStairs(),
     ...(Worlds.current.os === 1 ? { os: 1, osSkip: Worlds.current.osSkip } : {}),   // (an old world's staircases: see step 9 of the world's growth)
@@ -10093,7 +10144,7 @@ function applyPieces(list) {
 function applySave(s) {
   applyPieces(s.pieces);
   loadExtraStairs(s.stairs);
-  applyEdits(new Uint32Array(s.idxs), s.wide ? new Uint32Array(s.ids) : new Uint8Array(s.ids));
+  applyEdits(readIdxs(s.idxs, s.i8), s.wide ? new Uint32Array(s.ids) : new Uint8Array(s.ids));
   for (const [i, left] of s.drying || []) if (drying.has(i)) drying.set(i, Math.max(0, +left || 0));
   for (const [i, left] of s.torchBurn || []) if (torchBurn.has(i)) torchBurn.set(i, Math.max(0, +left || 0));
   for (const [i, f] of s.furnaces || []) if (isFurnace(world.get(i)) && f) furnaces.set(i, f);
@@ -10120,9 +10171,9 @@ function applyEdits(idxs, ids) {
     farmChanged(i, 0, id, true);
     wakeWater(x, y, z);                 // water that was still flowing when you saved carries on
     cols.add(z * WX + x);
-    if (id) { const c = Math.floor(z / CS) * NCX + Math.floor(x / CS); chunkTop[c] = Math.max(chunkTop[c], y + 1); }
+    if (id) raiseChunkTop(x, z, y);
   }
-  for (const c of cols) skyTop[c] = computeSkyTop(c % WX, Math.floor(c / WX), WY - 1);
+  for (const c of cols) { const x = c % WX, z = Math.floor(c / WX); setColSkyTop(x, z, computeSkyTop(x, z, WY - 1)); }
   if (torches.size) relight(new Set());
 }
 function applyPlayerSave(s) {
@@ -10371,7 +10422,7 @@ addEventListener('pagehide', () => autoSave());
       friends.set(conn.peer, { conn, name, hue, seen: performance.now() });
       setOther(conn.peer, { name, hue, x: player.x + 1, y: player.y, z: player.z, yaw: 0 });
       const save = gatherSave();
-      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, [save.wide ? 'idw' : 'ids']: save.ids, pieces: save.pieces, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
+      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ...(save.i8 ? { i8: true } : {}), [save.wide ? 'idw' : 'ids']: save.ids, pieces: save.pieces, time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
       // everyone's skins: yours, and the other friends' here already
       if (PlayerSkin.url) conn.send(skinMsg('host', PlayerSkin.url));
       for (const [id, s] of skins) if (id !== conn.peer && friends.has(id)) conn.send(skinMsg(id, s));
@@ -10505,7 +10556,7 @@ addEventListener('pagehide', () => autoSave());
     else if (d.t === 'welcome') {
       myId = d.id;
       applyPieces(d.pieces);
-      applyEdits(new Uint32Array(toBuf(d.idxs)), d.idw ? new Uint32Array(toBuf(d.idw)) : new Uint8Array(toBuf(d.ids)));   // (idw: 4-byte ids, when the world has blocks past 255)
+      applyEdits(readIdxs(toBuf(d.idxs), d.i8), d.idw ? new Uint32Array(toBuf(d.idw)) : new Uint8Array(toBuf(d.ids)));   // (idw: 4-byte ids, when the world has blocks past 255; i8: 8-byte block numbers)
       Object.assign(player, { x: d.x, y: d.y, z: d.z, yaw: d.yaw || 0, vx: 0, vy: 0, vz: 0 });
       timeOfDay = d.time;
       worldLoaded = true;
@@ -10779,7 +10830,7 @@ function showWorlds(open) {
 // ---- Exporting and importing worlds: a .cubeland file holds a world's details and its save, to back it up or move it ----
 // (The save's buffers, like the changed blocks, are written as base64 text so the file is plain JSON.)
 const WORLD_FILE = 'cubeland-world';
-const FILE_TYPED = { Uint8Array, Int8Array, Uint16Array, Int16Array, Uint32Array, Int32Array, Float32Array, Float64Array };
+const FILE_TYPED = { Uint8Array, Int8Array, Uint16Array, Int16Array, Uint32Array, Int32Array, Float32Array, Float64Array, BigInt64Array };
 function bytesToB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
 function b64ToBytes(b64) { const s = atob(b64), u8 = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i); return u8; }
 function packForFile(v) {

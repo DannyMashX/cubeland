@@ -27,18 +27,19 @@ public static class Worlds
 	public class Save
 	{
 		public int Version = 1, Seed; public long SavedAt;
-		public int[] Idxs = Array.Empty<int>(), Ids = Array.Empty<int>(), Pieces = Array.Empty<int>();   // pieces: index, 8 block ids, index, ...
+		public long[] Idxs = Array.Empty<long>(); public int[] Ids = Array.Empty<int>();
+		public long[] Pieces = Array.Empty<long>();   // pieces: index, 8 block ids, index, ... (64-bit, as block numbers are; old saves' numbers read the same)
 		public PlayerSave Player; public float Time;
 		public int[] Hotbar, Counts, Wear; public int Selected, OffSel; public Dictionary<int, Inventory.PackData> Data;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();
 		public int[] Stairs = Array.Empty<int>();   // staircases that moved somewhere the world had no spot for (x, y, z, way, steps, block, ...)
 		public bool Os; public int[] OsSkip;        // (kept here too, as in the world's list: see Info and OldStairs)
-		public Dictionary<int, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: lucky ticks so far in each stage)
-		public Dictionary<int, int> Fert = new();   // fertilized soil -> harvests left
-		public Dictionary<int, float> Grazed = new();   // grass a cow ate -> seconds until it grows back
-		public Dictionary<int, float> Saplings = new();   // saplings: lucky ticks so far
-		public int[] Grown = Array.Empty<int>();          // the blocks saplings grew (natural, not put there)
-		public Dictionary<int, Kilns.Kiln> Kilns = new();
+		public Dictionary<long, float> Drying = new(), TorchBurn = new(), Crops = new();   // (crops: lucky ticks so far in each stage)
+		public Dictionary<long, int> Fert = new();   // fertilized soil -> harvests left
+		public Dictionary<long, float> Grazed = new();   // grass a cow ate -> seconds until it grows back
+		public Dictionary<long, float> Saplings = new();   // saplings: lucky ticks so far
+		public long[] Grown = Array.Empty<long>();          // the blocks saplings grew (natural, not put there)
+		public Dictionary<long, Kilns.Kiln> Kilns = new();
 	}
 	static readonly JsonSerializerOptions Opts = new() { IncludeFields = true };
 	// (testing: --worlds=<folder> keeps test worlds away from your real ones)
@@ -102,6 +103,9 @@ public static class Worlds
 		if (!FileAccess.FileExists(p)) return null;
 		return JsonSerializer.Deserialize<Save>(FileAccess.GetFileAsString(p), Opts);
 	}
+	// (testing: a save's text read and written back, as the game would write it: --resave checks a change to the save's types
+	//  writes old saves the same)
+	public static string Reserialize(string text) => JsonSerializer.Serialize(JsonSerializer.Deserialize<Save>(text, Opts), Opts);
 	public static bool WriteSave(Info w, Save s)
 	{
 		if (Get(w.Id) == null) return false;   // (deleted)
@@ -125,7 +129,7 @@ public static class Worlds
 		{
 			int size = World.ValidSize(w.S, w.H == 640 ? 640 : 192), n = size / World.CS;
 			var skip = new SortedSet<int>();
-			foreach (int i in s?.Idxs ?? Array.Empty<int>()) if (i >= 0) skip.Add(i / size % size / World.CS * n + i % size / World.CS);
+			foreach (long i in s?.Idxs ?? Array.Empty<long>()) if (i >= 0) skip.Add((int)(i / size % size / World.CS * n + i % size / World.CS));
 			w.OsSkip = skip.ToArray();
 		}
 		w.Os = true;

@@ -33,7 +33,7 @@ public partial class Main
 	Label nameLabel; float nameTimer;
 	bool invOpen;
 	Control dim, invPanel, benchPanel, kilnPanel;
-	int kilnAt = -1;
+	long kilnAt = -1;
 
 	static StyleBox PanelStyle() => Skin.Panel();   // (the menu box from gui_atlas.png)
 	static Label Text(string t, int size = 14, float alpha = 1)

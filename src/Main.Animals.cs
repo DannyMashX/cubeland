@@ -483,7 +483,7 @@ public partial class Main
 	}
 	// ---- Ducks help the field: a crop on wet tilled soil grows the duck's duckRate times as fast while a grown duck swims within
 	// duckReach blocks of it across (both ways: a square) and 2 up or down. More ducks don't add up. (World asks, for soil i.) ----
-	bool DuckNear(int i)
+	bool DuckNear(long i)
 	{
 		if (!MobTypes.TryGetValue("duck", out var dt) || dt.A == null) return false;
 		var (x, y, z) = World.FromIdx(i); int r = dt.A.duckReach;

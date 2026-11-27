@@ -60,7 +60,7 @@ public class WorldGen
 	}
 
 	byte[] world => W.Raw;   // (the world grows one byte per block; World packs it into chunks afterwards)
-	static int Idx(int x, int y, int z) => World.Idx(x, y, z);
+	static int Idx(int x, int y, int z) => (int)World.Idx(x, y, z);   // (gens 1 to 3 grow a whole world at once, one byte a block: never past an int)
 	static int WX => World.WX; static int WZ => World.WZ;
 	static int WY => World.WY;
 	void Put(int x, int y, int z, int id, bool onlyAir = false)
@@ -169,6 +169,11 @@ public class WorldGen
 	// don't run. It must match EERIE_READY in the web game's index.html. (Test: `--eerieon` turns it on anyway.)
 	public const bool EerieReady = true;
 	public static readonly bool EerieOn = EerieReady || Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--eerieon") >= 0;
+	// Realistic worlds ("Earthlike", world type 4, from land 7) are held back for Beta 0.2.0.0: while EarthlikeReady is false none
+	// can be made, and everything built for them stays off. It must match EARTHLIKE_READY in the web game. (Test: `--earthlike`
+	// turns it on anyway.) The other world types never read it: they grow exactly the same land with it on or off.
+	public const bool EarthlikeReady = false;
+	public static readonly bool EarthlikeOn = EarthlikeReady || Array.IndexOf(Godot.OS.GetCmdlineUserArgs(), "--earthlike") >= 0;
 	public class StairSpot { public int X, Y, Z, Dir, N, Mat; public double Order; public bool Placed; }
 	// an older Biomes world given the staircases (see Worlds.OldStairs): no spot within 2 chunks of a chunk in its skip set
 	public bool Os; HashSet<int> osSkip;

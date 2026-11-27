@@ -98,7 +98,7 @@ public partial class Main
 		float k = Math.Clamp(s.T / DoorSwingTime, 0, 1), a = k * MathF.PI / 2, c = MathF.Cos(a), sn = MathF.Sin(a);
 		// (a turn: the new pose is the old one turned a quarter, so each part goes old * cos + new * sin, the pivot about the pin)
 		var pivot = s.Pin + (s.From.p - s.Pin) * c + (s.To.p - s.Pin) * sn; var w = s.From.w * c + s.To.w * sn; var n = s.From.n * c + s.To.n * sn;
-		var part = new ChunkMesher.Part(); var sky = new System.Collections.Generic.Dictionary<int, float>();
+		var part = new ChunkMesher.Part(); var sky = new System.Collections.Generic.Dictionary<long, float>();
 		ChunkMesher.DoorPanel(part, Blocks.B[s.Bottom], new Vector3(s.X, s.Y, s.Z), pivot, w, n, World.LightCurve(world.LightAt(s.X, s.Y, s.Z)), world.SkyExposure(s.X, s.Y, s.Z, sky));
 		if (s.Top != 0) ChunkMesher.DoorPanel(part, Blocks.B[s.Top], new Vector3(s.X, s.Y + 1, s.Z), pivot, w, n, World.LightCurve(world.LightAt(s.X, s.Y + 1, s.Z)), world.SkyExposure(s.X, s.Y + 1, s.Z, sky));
 		s.Node.Mesh = part.ToMesh();

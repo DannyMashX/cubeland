@@ -416,7 +416,7 @@ public partial class Main
 		{
 			Seed = current.Seed, SavedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
 			Idxs = world.Edits.Keys.ToArray(), Ids = world.Edits.Values.ToArray(),
-			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => (int)v))).ToArray(),
+			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => (long)v))).ToArray(),
 			Stairs = SaveExtraStairs(), Os = current.Os, OsSkip = current.OsSkip,
 			Player = new() { X = player.Pos.X, Y = player.Pos.Y, Z = player.Pos.Z, Yaw = player.Yaw, Pitch = player.Pitch, Fly = player.Flying, Health = health, Gloom = gloom, DarkTime = darkTime, LightTime = lightTime },
 			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Wear = inv.Wear.ToArray(), Selected = inv.Selected, OffSel = inv.OffSel,
@@ -446,7 +446,7 @@ public partial class Main
 			for (int k = 0; k + 8 < s.Pieces.Length; k += 9)
 			{
 				var a = new int[8];
-				for (int j = 0; j < 8; j++) { int id = s.Pieces[k + 1 + j], b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
+				for (int j = 0; j < 8; j++) { long v = s.Pieces[k + 1 + j]; int id = v < 0 || v > int.MaxValue ? 0 : (int)v, b = World.SpotBlock(id); var d = Blocks.Get(b); a[j] = d != null && !d.Item && !Blocks.IsPieces(b) && id / World.GroupMul <= 15 ? id : 0; }   // (block + group)
 				if (a.Any(v => v != 0)) world.PieceMap[s.Pieces[k]] = a;
 			}
 			world.ApplyEdits(s.Idxs, s.Ids);
@@ -457,7 +457,7 @@ public partial class Main
 			if (s.Fert != null) foreach (var (i, n) in s.Fert) if (world.FertLeft.ContainsKey(i)) world.FertLeft[i] = Math.Max(1, n);
 			if (s.Grazed != null) foreach (var (i, left) in s.Grazed) if (i >= 0 && i < world.Blocks.Length && world.Blocks[i] == Blocks.Dirt) world.Grazed[i] = Math.Max(0, left);
 			if (s.Saplings != null) foreach (var (i, n) in s.Saplings) if (world.Saplings.ContainsKey(i)) world.Saplings[i] = Math.Clamp(n, 0, World.SaplingHits - 1);
-			if (s.Grown != null) foreach (int i in s.Grown) if (world.Edits.ContainsKey(i)) world.Grown.Add(i);
+			if (s.Grown != null) foreach (long i in s.Grown) if (world.Edits.ContainsKey(i)) world.Grown.Add(i);
 			pendingSave = s;
 		}
 		catch (Exception e) { GD.PrintErr("Could not load the world (it will still play, but may not save): " + e.Message); }

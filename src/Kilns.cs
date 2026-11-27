@@ -28,15 +28,15 @@ public class Kilns
 		public int Fuel, FuelN, Heat; public List<int> Queue = new(); public float T; public bool Burning;
 		public SortedDictionary<int, int> Done = new();
 	}
-	public readonly Dictionary<int, Kiln> All = new();   // world index -> kiln
+	public readonly Dictionary<long, Kiln> All = new();   // world index -> kiln
 	readonly World W;
 	public bool Survival;
 	public Kilns(World w) { W = w; }
-	public Kiln Of(int i) { if (!All.TryGetValue(i, out var k)) All[i] = k = new Kiln(); return k; }
+	public Kiln Of(long i) { if (!All.TryGetValue(i, out var k)) All[i] = k = new Kiln(); return k; }
 
-	public void Tick(float dt, Action<int> changed)
+	public void Tick(float dt, Action<long> changed)
 	{
-		foreach (var (i, f) in new List<KeyValuePair<int, Kiln>>(All))
+		foreach (var (i, f) in new List<KeyValuePair<long, Kiln>>(All))
 		{
 			if (!Blocks.IsFurnace(W.Blocks[i])) { All.Remove(i); continue; }
 			// the Foundry only works while it's all built: until then it waits (what's burning keeps its place)
@@ -65,7 +65,7 @@ public class Kilns
 	}
 	// The Foundry: a 3x3x3 with a hollow middle. Bottom: 9 Fireclay Terracotta; middle: the Furnace in the middle of one side
 	// (its front facing out) and 7 Fireclay Casing around the empty centre; top: 9 Fireclay Bricks.
-	public bool FoundryBuilt(int i)
+	public bool FoundryBuilt(long i)
 	{
 		var (x, y, z) = World.FromIdx(i); var fr = Blocks.B[W.Blocks[i]].Front; int cx = x - fr[0], cz = z - fr[1];
 		for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++)
@@ -78,7 +78,7 @@ public class Kilns
 		return true;
 	}
 	// a kiln that's broken: its fuel, anything waiting to be smelted and what it made fall out
-	public void Empty(int i, Action<int, int, int, int> collect)
+	public void Empty(long i, Action<int, int, int, int> collect)
 	{
 		if (!All.Remove(i, out var f)) return;
 		var (x, y, z) = World.FromIdx(i);

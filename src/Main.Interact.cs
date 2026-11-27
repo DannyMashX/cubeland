@@ -159,7 +159,7 @@ public partial class Main
 		// Stone, ores and logs (survival): each swing breaks a few stages; the block only comes out at its last stage
 		if (Survival && staged && Blocks.Stages(hb) is int total and > 0)
 		{
-			int si = World.Idx(h.X, h.Y, h.Z), done = stages.TryGetValue(si, out var st) && st.block == hb ? st.done : 0;
+			long si = World.Idx(h.X, h.Y, h.Z); int done = stages.TryGetValue(si, out var st) && st.block == hb ? st.done : 0;
 			done += Blocks.StagesPerSwing(hb, inv.Held);
 			if (done < total) { stages[si] = (hb, done); Sound.I?.Break(hb); return; }
 			stages.Remove(si);

@@ -725,7 +725,7 @@ public partial class Main
 	(string, float, float, float, float)? NearestTorchGoal(Mob m, float range)
 	{
 		(string, float, float, float, float)? best = null; float bd = range;
-		foreach (int i in world.Torches)
+		foreach (long i in world.Torches)
 		{
 			if (Blocks.B[world.Blocks[i]].Burn == 2) continue;   // (a burnt torch gives no light)
 			var (x, y, z) = World.FromIdx(i);
@@ -973,7 +973,7 @@ public partial class Main
 		if ((m.SnuffCheck -= dt) > 0) return null;
 		m.SnuffCheck = 2;
 		float bd = 20;
-		foreach (int i in world.Torches)
+		foreach (long i in world.Torches)
 		{
 			if (Blocks.B[world.Blocks[i]].Burn >= 2) continue;   // (lit or smoldering only: not burnt, and not an Ever Torch)
 			var (x, y, z) = World.FromIdx(i);

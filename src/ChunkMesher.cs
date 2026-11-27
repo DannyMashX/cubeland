@@ -85,7 +85,7 @@ public class ChunkMesher
 		var P = new Part(); var Wt = new Part();
 		int y0 = cy * World.CS, top = Math.Min(y0 + World.CS, W.ChunkTop[cz * World.NCX + cx]);   // (nothing above the column's highest block)
 		bool anyLight = W.LightMap.Count > 0;
-		var sky = new Dictionary<int, float>();
+		var sky = new Dictionary<long, float>();
 		var p = new int[3]; var q = new int[3]; var ao = new int[4];
 		var tints = new Dictionary<int, Color>();   // grass and leaves: the biome colour at each corner (x, z)
 		Color TintAt(int x, int z) { int k = x * 65536 + z; if (!tints.TryGetValue(k, out var c)) tints[k] = c = W.Gen.GrassTint(x, z); return c; }
@@ -217,7 +217,7 @@ public class ChunkMesher
 			return torchCache[id] = new TorchShape { Sticks = sticks, Box = box };
 		}
 	}
-	void AddTorch(int x, int y, int z, int id, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddTorch(int x, int y, int z, int id, Part P, bool anyLight, Dictionary<long, float> sky)
 	{
 		var b = Blocks.B[id]; float lo = 6 / 16f, hi = 10 / 16f;
 		// a lit torch is always fully lit; a smoldering one glows dimly; a burnt one is lit like anything else around it
@@ -241,7 +241,7 @@ public class ChunkMesher
 	// ---- doors: a 4-pixel panel. Its pose: where its hinge is (in its block, x and z), the way it reaches from the hinge to its
 	// free edge (w), and the way its front faces (n). Its big faces show its picture with the picture's left edge at the hinge
 	// (so a door hinged on the right is mirrored, and its back is the mirror of its front); its edges show the planks ----
-	public static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> Swinging = new();   // (doors Main draws while they swing)
+	public static readonly System.Collections.Concurrent.ConcurrentDictionary<long, byte> Swinging = new();   // (doors Main draws while they swing)
 	// (shut: across the middle of the block; open: turned a quarter about its hinge pin, reaching out of the block's back: see Blocks.DoorPose)
 	public static (Vector2 pivot, Vector2 w, Vector2 n) DoorPose(int facing, int hinge, bool open) => Blocks.DoorPose(facing, hinge, open);
 	public static void DoorPanel(Part P, BlockDef b, Vector3 at, Vector2 pivot, Vector2 w, Vector2 n, float light, float sky)
@@ -267,7 +267,7 @@ public class ChunkMesher
 	// ---- a fence (see Blocks.FenceBoxes): its post and rails, each face showing the planks by its place in the block (so the
 	// grain lines up with the planks'), in the block's own light, with no corner shadows. Faces nothing could see are left out:
 	// a rail's end against the post, a rail's far end against what it joins, the post's top and bottom against whole blocks ----
-	void AddFence(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddFence(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<long, float> sky)
 	{
 		int mask = Blocks.FenceMask(W.GetBlock, x, y, z);
 		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, sk = W.SkyExposure(x, y, z, sky);
@@ -309,7 +309,7 @@ public class ChunkMesher
 		P.Quad(bas);
 	}
 	// something lying flat on the ground (a rock): its picture just above the block under it, turned a random way
-	void AddFlat(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky, float lift = 0)
+	void AddFlat(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<long, float> sky, float lift = 0)
 	{
 		double a = W.Gen.Hash(x, z, y + 4242) * Math.PI * 2; float ca = (float)Math.Cos(a) * 0.5f, sa = (float)Math.Sin(a) * 0.5f;
 		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, s = W.SkyExposure(x, y, z, sky);
@@ -323,7 +323,7 @@ public class ChunkMesher
 	}
 	// the Cutter's saw blade: the top half of the cutter_saw picture, standing up across the middle of the block above its half-tall base,
 	// seen from both sides
-	void AddSaw(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddSaw(int x, int y, int z, Part P, bool anyLight, Dictionary<long, float> sky)
 	{
 		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, s = W.SkyExposure(x, y, z, sky);
 		int bas = P.Pos.Count;
@@ -333,7 +333,7 @@ public class ChunkMesher
 	}
 	// a plant (a flower): its picture twice, standing up and crossed like an X, seen from both sides.
 	// Nudged a little off-centre at random (always the same for the same spot) so a patch doesn't look like a grid.
-	void AddPlant(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddPlant(int x, int y, int z, BlockDef b, Part P, bool anyLight, Dictionary<long, float> sky)
 	{
 		float light = anyLight ? World.LightCurve(W.LightAt(x, y, z)) : 0, s = W.SkyExposure(x, y, z, sky);
 		float ox = (float)(W.Gen.Hash(x, z, y + 777) - 0.5) * 0.3f, oz = (float)(W.Gen.Hash(x, z, y + 999) - 0.5) * 0.3f, r = 0.45f;
@@ -384,7 +384,7 @@ public class ChunkMesher
 	// A pieces space's faces are lit the way whole blocks' faces are, at half-block size: each corner is shaded by the 3 half-cells
 	// touching it in front of the face, and takes the torch and sky light of the open ones (each by the block it's in) and of the
 	// half-cell in front, averaged. Grass and leaves take the biome tint. (The same as the web version.)
-	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky, Func<int, int, Color> tintAt, int[] a = null)
+	void AddPieces(int x, int y, int z, Part P, bool anyLight, Dictionary<long, float> sky, Func<int, int, Color> tintAt, int[] a = null)
 	{
 		bool given = a != null;
 		if (a == null && !W.PieceMap.TryGetValue(World.Idx(x, y, z), out a)) return;
@@ -468,7 +468,7 @@ public class ChunkMesher
 	// spot: on the floor under an empty bottom spot (where what's below holds snow), on top of a bottom-layer piece with
 	// nothing above it, and on top of a top-layer piece (sticking 1/8 up into the space above, if that's air or something
 	// you walk through that isn't water or snow). Same as the web version.
-	void AddSnowUnder(int x, int y, int z, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddSnowUnder(int x, int y, int z, Part P, bool anyLight, Dictionary<long, float> sky)
 	{
 		if (!W.PieceMap.TryGetValue(World.Idx(x, y, z), out var a)) return;
 		var sb = Blocks.B[Blocks.Snow]; float h = 1 / 8f, depth = 0.75f + 0.25f * Math.Min(1, y / 20f);
@@ -533,7 +533,7 @@ public class ChunkMesher
 		}
 		return n > 0 ? sum / n : Blocks.WaterHeight(W.GetBlock(x, y, z), W.GetBlock(x, y + 1, z));
 	}
-	void AddWater(int x, int y, int z, int id, Part P, bool anyLight, Dictionary<int, float> sky)
+	void AddWater(int x, int y, int z, int id, Part P, bool anyLight, Dictionary<long, float> sky)
 	{
 		bool full = Blocks.IsWater(W.GetBlock(x, y + 1, z));
 		var ch = new float[4]; var got = new bool[4];

@@ -165,7 +165,7 @@ public partial class Main
 		}
 		stairFall = true; stairOn = -1;
 		// (never within 2 chunks of a chunk with anything changed in it now)
-		var changed = new HashSet<int>(world.Edits.Keys.Select(i => i / World.WX % World.WZ / World.CS * (World.WX / World.CS) + i % World.WX / World.CS));
+		var changed = new HashSet<int>(world.Edits.Keys.Select(i => (int)(i / World.WX % World.WZ / World.CS * (World.WX / World.CS) + i % World.WX / World.CS)));
 		// and stand it up again in another high forest, somewhere it still fits: one of the spots the world kept for it...
 		foreach (var o in StairList.Where(o => o != s && Math.Abs(o.X - s.X) + Math.Abs(o.Z - s.Z) > World.WX / 10).OrderBy(_ => rnd.Next()))
 		{

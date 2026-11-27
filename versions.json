@@ -1,5 +1,14 @@
 [
     {
+        "version":  "Beta 0.1.5.1",
+        "folder":  "beta-0.1.5.1",
+        "date":  "2026-11-26",
+        "notes":  "Behind the scenes: worlds are now stored in a new way, ready for much bigger worlds. Your worlds look and play the same, and stay playable in older versions.",
+        "changes":  [
+                        "Behind the scenes: worlds are now stored in a new way, ready for much bigger worlds. Your worlds look and play the same, and stay playable in older versions."
+                    ]
+    },
+    {
         "version":  "Beta 0.1.5.0",
         "title":  "Fields and Flocks",
         "folder":  "beta-0.1.5.0",

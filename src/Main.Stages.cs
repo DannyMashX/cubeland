@@ -12,8 +12,8 @@ namespace Cubeland;
 // for now: see StageBreakingReady and TreeFellingReady.)
 public partial class Main
 {
-	readonly Dictionary<int, (int block, int done)> stages = new();
-	readonly Dictionary<int, (MeshInstance3D mesh, int frame)> cracks = new();
+	readonly Dictionary<long, (int block, int done)> stages = new();
+	readonly Dictionary<long, (MeshInstance3D mesh, int frame)> cracks = new();
 	static Texture2D[] crackPics;
 	const float SwingTime = 0.28f;
 	float holdSwing;
@@ -23,7 +23,7 @@ public partial class Main
 	{
 		foreach (var i in stages.Keys.ToArray())
 		{
-			int x = i % World.WX, z = i / World.WX % World.WZ, y = i / (World.WX * World.WZ);
+			var (x, y, z) = World.FromIdx(i);
 			if (world.GetBlock(x, y, z) != stages[i].block) stages.Remove(i);   // (it changed: start again)
 		}
 		foreach (var i in cracks.Keys.ToArray()) if (!stages.ContainsKey(i)) { cracks[i].mesh.QueueFree(); cracks.Remove(i); }
@@ -31,7 +31,7 @@ public partial class Main
 		{
 			int frame = Math.Clamp((int)MathF.Ceiling(8f * done / Blocks.Stages(block)), 1, 8);
 			if (cracks.TryGetValue(i, out var c) && c.frame == frame) continue;
-			int x = i % World.WX, z = i / World.WX % World.WZ, y = i / (World.WX * World.WZ);
+			var (x, y, z) = World.FromIdx(i);
 			var mesh = c.mesh ?? new MeshInstance3D { Mesh = new BoxMesh { Size = Vector3.One * 1.004f }, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Position = new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) };
 			if (c.mesh == null) mobRoot.AddChild(mesh);
 			mesh.MaterialOverride = CrackMaterial(frame);
@@ -83,7 +83,7 @@ public partial class Main
 	// leaves (a building) stays up.
 	void Fell(int x0, int y0, int z0)
 	{
-		var logs = new List<(int x, int y, int z)>(); var seen = new HashSet<int>();
+		var logs = new List<(int x, int y, int z)>(); var seen = new HashSet<long>();
 		var todo = new Queue<(int x, int y, int z)>(); todo.Enqueue((x0, y0, z0)); seen.Add(World.Idx(x0, y0, z0));
 		bool leafy = false;
 		bool InWorld(int x, int y, int z) => x >= 0 && z >= 0 && y > 0 && x < World.WX && z < World.WZ && y < World.WY;
@@ -103,7 +103,7 @@ public partial class Main
 			foreach (var (dx, dy, dz) in sides) if (InWorld(x + dx, y + dy, z + dz) && Blocks.IsLeaves(world.GetBlock(x + dx, y + dy, z + dz)) && Natural(x + dx, y + dy, z + dz)) leafy = true;
 		if (!leafy) return;
 		// the leaves: joined to the logs through other leaves, up to 6 away
-		var leaves = new List<(int x, int y, int z)>(); var lseen = new HashSet<int>();
+		var leaves = new List<(int x, int y, int z)>(); var lseen = new HashSet<long>();
 		var front = new Queue<(int x, int y, int z, int d)>();
 		foreach (var (x, y, z) in logs) front.Enqueue((x, y, z, 0));
 		while (front.Count > 0 && leaves.Count < 2048)
@@ -147,6 +147,6 @@ public partial class Main
 	public static readonly bool TreeFellingOn = TreeFellingReady || Array.IndexOf(OS.GetCmdlineUserArgs(), "--treefell") >= 0;
 	// as the world grew it: nobody has put a block down there or changed it (a half-broken block is still natural)
 	// (a sapling's tree is natural too: it grew)
-	bool Natural(int x, int y, int z) { int i = World.Idx(x, y, z); return !world.Edits.ContainsKey(i) || world.Grown.Contains(i); }
+	bool Natural(int x, int y, int z) { long i = World.Idx(x, y, z); return !world.Edits.ContainsKey(i) || world.Grown.Contains(i); }
 	bool NaturalLog(int x, int y, int z) => y >= 0 && Blocks.IsLogBlock(world.GetBlock(x, y, z)) && Natural(x, y, z);
 }

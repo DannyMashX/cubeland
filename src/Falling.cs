@@ -71,7 +71,7 @@ public partial class Falling : Node3D
 		{
 			// loose blocks come away
 			int n = 0;
-			foreach (int i in new List<int>(W.FallQueue))
+			foreach (long i in new List<long>(W.FallQueue))
 			{
 				W.FallQueue.Remove(i);
 				if (++n > 4000) break;
