@@ -41,6 +41,19 @@ public sealed class NumbersData
 	public SaplingNumbers SAPLING;
 	public Dictionary<string, int> DURABILITY, ARMOR_DURABILITY, PICK_TIER, STRATA_PICKAXE, PICK_STAGES, AXE_STAGES;
 	public float[] ARMOR_SHARE;
+	public ClockNumbers CLOCK;       // (Beta 0.1.6.1)
+	public WeatherNumbers WEATHER;
+}
+// the day and the calendar (Beta 0.1.6.1): see data/numbers.json's _notes
+public sealed class ClockNumbers
+{
+	public double day, light, lightSwing, poleSwing, newWorldT, skip, moonDays, nodeDays, anomDays, moonLean, moonBig;
+	public float[] moonlight;
+}
+// the weather and the seasons: S24 = the season through the 24-day year (see Sky.S1024)
+public sealed class WeatherNumbers
+{
+	public int[] S24;
 }
 // saplings: the chance leaves drop theirs; growTime seconds a sapling takes on average, in growHits lucky ticks; the chance
 // one Bone Ash grows it at once
@@ -188,6 +201,8 @@ public sealed class BlockRow
 	public string of;                  // FENCES: the planks it's made of, by key
 	public string plants, returns;     // items: the crop a seed puts down; what's left in your hand after eating it (by key)
 	public bool bag; public string full;   // a bag (holds a mix of things, up to one stack's worth); its picture while it holds anything
+	public int stack;                  // how many fit in a slot, when it isn't STACK_MAX (0: STACK_MAX)
+	public string live; public string[] frames;   // its picture follows the sky ("clock": by the part of the day, "season": by the season): these pictures
 	public bool soil, wet, fert;       // tilled soils (desktop: Blocks.Tilled + wet + 2 * fert; the check compares)
 	public string needs, sound;        // needs: the tool it can't be broken without ("axe", "pickaxe"); sound: its dig, step and place sound (left out: "stone")
 	public bool? shovel, leaves, inventory;   // (true, or left out) a shovel's block; leaves; you can have it in your inventory

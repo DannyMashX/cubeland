@@ -50,6 +50,7 @@ public static partial class Blocks
 		Food = r.food, Tool = r.tool, Material = r.material, Damage = r.damage, Log = r.log, Grows = r.grows, Sand = r.sand,
 		Crop = r.crop, Stage = r.stage, Top = r.top,
 		Bag = r.bag, Full = r.full != null ? pics(new[] { r.full })[0] : -1,
+		Stack = r.stack, Live = r.live, Frames = r.frames != null ? pics(r.frames) : null,
 		Earthlike = r.earthlike, Falls = r.falls, Tint = r.tint, Water = r.water, In = r.@in, Flow = r.flow ?? -1, Pace = r.pace,
 	};
 	// the key a row goes by: DataKeys' rules, from the block it makes (a flat block is "#placed" when its drop is the item of the

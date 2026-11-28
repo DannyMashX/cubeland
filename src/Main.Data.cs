@@ -34,8 +34,12 @@ public partial class Main
 		if (args.Contains("--datacheck")) { DataCheck(); any = true; }
 		if (args.FirstOrDefault(a => a.StartsWith("--resave=")) is { } rs) { Resave(rs[9..]); any = true; }
 		if (args.Contains("--packtest")) { PackTest(); any = true; }
+		if (args.Contains("--clocktest")) { Sky.ClockTest(); any = true; }
 		return any;
 	}
+	// (Beta 0.1.6.1) the place the sky is drawn for: yours (in an Earthlike world the seasons reach it by its distance from the equator)
+	bool clockArgDone;
+	void SetSkyPlace() { var (k, south) = Sky.PlaceOf(world != null && world.Lazy, player?.Pos.Z ?? 0, World.WZ); sky.PlaceK = k; sky.PlaceSouth = south; sky.Seed = world != null ? unchecked((int)world.Gen.Seed) : 0; }
 
 	// (testing) pieces packed as block + 8192 x group, and saves' old packing (block + 4096 x group, or "Pg": 8192 only when a
 	// piece's block is 4096 or more): see World.GroupMul
@@ -610,6 +614,7 @@ public partial class Main
 		if (fi.Name == "T") return v is int[] t ? string.Join(" ", t.Select(x => x >= 0 && x < Atlas.NT ? Atlas.Names[x] : "?")) : "";
 		if (fi.Name == "Icon") return d.Icon >= 0 ? (d.Icon < Atlas.NT ? Atlas.Names[d.Icon] : "?") : "-1";
 		if (fi.Name == "Full") return d.Full >= 0 ? (d.Full < Atlas.NT ? Atlas.Names[d.Full] : "?") : "-1";
+		if (fi.Name == "Frames") return v is int[] fr ? string.Join(" ", fr.Select(x => x >= 0 && x < Atlas.NT ? Atlas.Names[x] : "?")) : "";
 		return v switch
 		{
 			null => "",
@@ -747,7 +752,11 @@ public partial class Main
 			string ficon = r.icon ?? "-1", gi = BlockVal(typeof(BlockDef).GetField("Icon"), game);
 			if (ficon != gi) found.Add($"{t} {r.id} ({r.name}) icon: file {ficon}; game {gi}");
 			if ((r.full ?? "-1") is var ffull && BlockVal(typeof(BlockDef).GetField("Full"), game) is var gfull && ffull != gfull) found.Add($"{t} {r.id} ({r.name}) full: file {ffull}; game {gfull}");
-			foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon" or "Full")))
+			if (string.Join(" ", r.frames ?? Array.Empty<string>()) is var ffr && BlockVal(typeof(BlockDef).GetField("Frames"), game) is var gfr && ffr != gfr) found.Add($"{t} {r.id} ({r.name}) frames: file {ffr}; game {gfr}");
+			if ((r.live == null) != (r.frames == null) || r.live is not (null or "clock" or "season") || r.live == "clock" && r.frames.Length != 8 || r.live == "season" && r.frames.Length != 4 || r.live != null && !r.item) found.Add($"{t} {r.id} ({r.name}): live is clock (8 frames) or season (4 frames), on an item, and only with frames");
+			if (r.frames is { Length: > 0 } && Blocks.RowPictures(r).Any(p => p != r.frames[0])) found.Add($"{t} {r.id} ({r.name}): frames[0] should be its picture ({string.Join(" ", Blocks.RowPictures(r))})");
+			if (r.stack is < 0 or > 63) found.Add($"{t} {r.id} ({r.name}): stack is a whole number 1-63 (left out: a full stack)");
+			foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon" or "Full" or "Frames")))
 				if (BlockVal(fi, want) is var f && BlockVal(fi, game) is var g && f != g) found.Add($"{t} {r.id} ({r.name}).{fi.Name}: file {f}, game {g}");
 			if (Blocks.RowKey(r, want, itemSlugs) is var rk && DataKeys.KeyOf(r.id) is var gk && rk != gk) found.Add($"{t} {r.id} ({r.name}): its key is \"{rk}\", but the game's block {r.id} is \"{gk}\"");
 			// (fields only the families have, which desktop finds by number: only on the blocks that are those)
@@ -947,7 +956,7 @@ public partial class Main
 				if (fp != gp) found.Add($"{at} pictures: file {fp}; game {gp}");
 				string ficon = innerRow.icon ?? "-1", gi = BlockVal(typeof(BlockDef).GetField("Icon"), game);
 				if (ficon != gi) found.Add($"{at} icon: file {ficon}; game {gi}");
-				foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon" or "Full")))
+				foreach (var fi in typeof(BlockDef).GetFields().Where(fi => fi.Name is not ("T" or "Icon" or "Full" or "Frames")))
 					if (BlockVal(fi, want) is var fv && BlockVal(fi, game) is var gv && fv != gv) found.Add($"{at}.{fi.Name}: file {fv}, game {gv}");
 				if ($"snowy:{s.inner}" is var sk && DataKeys.KeyOf(s.id) is var gk && sk != gk) found.Add($"{at}: its key is \"{sk}\", but the game's block {s.id} is \"{gk}\"");
 				// (breaking it gives what it holds, not itself: only a torch or pieces drop nothing here, the code gives theirs)

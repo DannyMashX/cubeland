@@ -262,7 +262,7 @@ public partial class Main
 			var pcs = new List<object>(); foreach (var (i, a) in world.PieceMap) { pcs.Add(i); foreach (var v in a) pcs.Add(v); }
 			var wm = new Dictionary<string, object> { ["t"] = "welcome", ["id"] = conn.PeerId };
 			PutBlockList(wm, world.Edits, Idx8);
-			wm["pieces"] = pcs; wm["pg"] = World.GroupMul; wm["time"] = sky.TimeOfDay; wm["x"] = player.Pos.X + 1; wm["y"] = player.Pos.Y; wm["z"] = player.Pos.Z; wm["yaw"] = player.Yaw;
+			wm["pieces"] = pcs; wm["pg"] = World.GroupMul; wm["time"] = sky.TimeOfDay; wm["clock"] = sky.Clock; wm["x"] = player.Pos.X + 1; wm["y"] = player.Pos.Y; wm["z"] = player.Pos.Z; wm["yaw"] = player.Yaw;
 			if (Idx8) wm["i8"] = true;
 			conn.Send(wm);
 			// everyone's skins: yours, and the other friends'
@@ -328,7 +328,7 @@ public partial class Main
 			float fx = player.Pos.X, fz = player.Pos.Z, r = RenderBlocks;
 			if (others.TryGetValue(id, out var o)) { fx = o.X; fz = o.Z; }
 			var near = ms.Where(e => (e.m.X - fx) * (e.m.X - fx) + (e.m.Z - fz) * (e.m.Z - fz) < r * r).Select(e => e.l).ToList();
-			f.conn.Send(new Dictionary<string, object> { ["t"] = "tick", ["time"] = sky.TimeOfDay, ["players"] = players, ["mobs"] = near, ["drops"] = ds, ["rocks"] = rs, ["falls"] = fs });
+			f.conn.Send(new Dictionary<string, object> { ["t"] = "tick", ["time"] = sky.TimeOfDay, ["clock"] = sky.Clock, ["players"] = players, ["mobs"] = near, ["drops"] = ds, ["rocks"] = rs, ["falls"] = fs });
 		}
 	}
 
@@ -410,7 +410,7 @@ public partial class Main
 		else if (t == "welcome") { if (ready) ApplyWelcome(d); else earlyWelcome = d; }
 		else if (t == "tick" && welcomed)
 		{
-			sky.TimeOfDay = d.F("time");
+			if (d.ContainsKey("clock")) sky.Clock = d.Db("clock"); else sky.TimeOfDay = d.F("time");   // (the host's clock; friends follow it)
 			var seenP = new HashSet<string>();
 			foreach (var o in d.L("players") ?? new())
 			{
@@ -563,7 +563,8 @@ public partial class Main
 		lock (dirty) foreach (int c in dirtyNow) dirty.Add(c);
 		player.Pos = new Vector3(d.F("x"), d.F("y"), d.F("z")); player.Yaw = d.F("yaw"); player.Vel = Vector3.Zero;
 		if (world.Lazy) GrowNow((int)Math.Floor(player.Pos.X) >> 4, (int)Math.Floor(player.Pos.Z) >> 4, 3);   // (gen 4: the land where the host puts you)
-		sky.TimeOfDay = d.F("time");
+		SetSkyPlace();
+		if (d.ContainsKey("clock")) sky.Clock = d.Db("clock"); else sky.TimeOfDay = d.F("time");
 		welcomed = true;
 		if (PlayerSkin.DataUrl != null) hostConn?.Send(SkinMsg(myId, PlayerSkin.DataUrl));   // your skin, for everyone here
 		RefreshNetUi();

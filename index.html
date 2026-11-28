@@ -44,7 +44,7 @@
   #tool-row .slot { width: 36px; height: 36px; }
   #tool-row .slot canvas { margin: 0; }
   #tool-row .slot .wear { left: 4px; right: 4px; bottom: 2px; }
-  #blockname { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); color: #fff; font-size: var(--f1); text-shadow: 0 1px 2px #000; transition: opacity .4s; }
+  #blockname { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); color: #fff; font-size: var(--f1); text-shadow: 0 1px 2px #000; transition: opacity .4s; white-space: pre; text-align: center; }
   #info { position: fixed; top: 8px; left: 8px; color: #fff; font-size: var(--f1); line-height: 1.5; text-shadow: 0 1px 2px #000; white-space: pre; }
   /* full-screen menus: the main menu (title screen) and the pause screen (#overlay) */
   .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; text-align: center; z-index: 15; }
@@ -604,7 +604,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- the ?v= number changes with every update (publish-update.ps1 sets it), so browsers fetch the new textures instead of an old saved copy -->
 <!-- (textures.js also holds the shared data files, data/*.json, as window.GAME_DATA: see build-textures.ps1) -->
-<script src="textures.js?v=beta-0.1.6.0"></script>
+<script src="textures.js?v=beta-0.1.6.1"></script>
 <!-- Earthlike worlds: the plan and the land drawing (the desktop version's C#, translated), run in a Worker (see Earthlike worlds) -->
 <script type="text/plain" id="earth-src">
 // (made by cs2js.py from the desktop plan code: do not edit by hand; fixes go in the translator or the overrides)
@@ -6058,7 +6058,7 @@ function EarthPlan(seed, size, room = 0, __from = null) {
 // the very first were 26.11.14_1, _2, _3).
 // publish-update.bat sets this for you each time you publish (don't edit it by hand).
 // Every published version stays playable in versions/<folder>/ (see versions.html).
-const GAME_VERSION = 'Beta 0.1.6.0';
+const GAME_VERSION = 'Beta 0.1.6.1';
 // compare two versions: negative if a is older than b, 0 if the same, positive if a is newer.
 // The old date versions come first, then Alpha, then Beta, then any other name; within those, by the numbers.
 function compareVersions(a, b) {
@@ -6232,6 +6232,7 @@ const Worlds = (() => {
       return w;
     },
     async remove(id) {
+      try { localStorage.removeItem('cubeland-clock-' + id); } catch (e) {}   // (Beta 0.1.6.1: its clock's side store)
       list = list.filter(w => w.id !== id); saveList();
       try { await tx('readwrite', st => st.delete(id)); } catch (e) {}
     },
@@ -6470,11 +6471,12 @@ function rowIdFor(k, by) {
 }
 function addBlockRows(rows) {
   for (const row of rows) {
-    const { id, name, pictures, icon, full, ...r } = row;
+    const { id, name, pictures, icon, full, frames, ...r } = row;
     if (BLOCKS[id]) throw new Error(`The game's data (data/blocks.json) has block ${id} twice`);
     BLOCKS[id] = { name, t: typeof pictures === 'string' ? P3(pictures) : P(...pictures), ...r };
     if (icon !== undefined) BLOCKS[id].icon = tile(icon);
     if (full !== undefined) BLOCKS[id].full = tile(full);   // (a Linen Bag's picture while it holds something)
+    if (frames !== undefined) BLOCKS[id].frames = frames.map(tile);   // (Beta 0.1.6.1: a Clock's or Calendar's pictures; see liveTile)
     blockRows.set(id, row);
   }
   rowIds = new Map();
@@ -6747,7 +6749,7 @@ const isTool = id => !!(BLOCKS[id] && BLOCKS[id].tool);
 const isAxe = id => !!(BLOCKS[id] && BLOCKS[id].tool === 'axe');
 const holding = kind => !!(BLOCKS[HOTBAR[act]] && BLOCKS[HOTBAR[act]].tool === kind);
 const isBag = id => !!(BLOCKS[id] && BLOCKS[id].bag);   // (the Linen Bag: see "The Linen Bag" below)
-const stackMax = id => isTool(id) || isGear(id) || isBag(id) ? 1 : STACK_MAX;
+const stackMax = id => (BLOCKS[id] && BLOCKS[id].stack) || (isTool(id) || isGear(id) || isBag(id) ? 1 : STACK_MAX);   // (stack: data/blocks.json, the Clock's and Calendar's 1)
 // ---- Pieces: every cube block can be split into 8 pieces (an eighth of a block each: half as wide, tall and deep)
 // at the Crafting Bench. Pieces are placed one at a time, and one block space can hold pieces of different blocks.
 // A space holding pieces is block 70 in the world; which block fills each of its 8 spots is kept in pieceMap.
@@ -8638,7 +8640,6 @@ function withHaze(mat) {
 }
 
 // ===================== Day and night =====================
-const DAY_LENGTH = 12 * 60;    // seconds for one full day + night
 let skyDay = 1, nightMusic = false;
 let camSky = 1, camSkyTarget = 1, camSkyTimer = 0;   // how much sky the camera can see (darkens the haze)
 let timeOfDay = 0.08;        // 0 = sunrise, 0.25 = noon, 0.5 = sunset, 0.75 = midnight
@@ -8646,6 +8647,125 @@ const SKY_DAY = new THREE.Color(SKY), SKY_NIGHT = new THREE.Color(0x000000), SKY
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const skyNow = new THREE.Color(), tmpColor = new THREE.Color();
 const SKY_DIST = 900;          // sun, moon and stars sit just inside the camera's far limit
+// (Beta 0.1.6.1) THE WORLD CLOCK, as the desktop version: game seconds since the world's day 0 began, saved (and kept in a side
+// store too, see clockSide) and shared in multiplayer, where the host's wins. A day is CLOCK.day seconds (40 minutes) and starts at
+// sunrise. Its daylight D changes with the season and, in Earthlike worlds, with how far you are from the equator (none at the
+// equator, the most near the poles; the south has its seasons 12 days on). The season is read from S24, whole numbers both versions
+// share exactly (never a cos), so the two always agree on the day, the season and anything that follows them.
+// timeOfDay (0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight) is worked out from the clock, so whatever read it reads it as before.
+const CLOCK = NUMBERS.CLOCK, S24 = NUMBERS.WEATHER.S24, SEASON_NAMES = ['Spring', 'Summer', 'Autumn', 'Winter'];
+let worldClock = CLOCK.newWorldT;
+const clockDay = c => Math.floor(c / CLOCK.day);
+// (the pure maths, for any world: earth = an Earthlike world, wz = its size north to south)
+const seasonDlFor = (day, z, earth, wz) => (day + (earth && z >= wz / 2 ? 12 : 0)) % 24;   // the day of the year here (0-23)
+function s1024For(c, z, earth, wz) {   // the season now: +1024 midsummer, -1024 midwinter, blended through the day by the minute
+  const day = clockDay(c), m = Math.floor(c / 60) - 40 * day, dl = seasonDlFor(day, z, earth, wz);
+  return Math.floor((S24[dl] * (40 - m) + S24[(dl + 1) % 24] * m) / 40);
+}
+function dayLightFor(day, z, earth, wz) {   // D: the day's daylight in seconds (fixed for the whole day, so the sun never jumps)
+  const k = earth ? CLOCK.poleSwing * Math.min(1, Math.abs(z - wz / 2) / (wz / 2)) : 1;
+  return CLOCK.light + CLOCK.lightSwing * k * S24[seasonDlFor(day, z, earth, wz)] / 1024;
+}
+const sunFrac = (T, D) => T < D ? 0.5 * T / D : 0.5 + 0.5 * (T - D) / (CLOCK.day - D);   // seconds into the day -> timeOfDay
+const sunTime = (f, D) => f < 0.5 ? 2 * f * D : D + 2 * (f - 0.5) * (CLOCK.day - D);     // and back
+function dateTextFor(c, z, earth, wz) { const day = clockDay(c), dl = seasonDlFor(day, z, earth, wz); return `Day ${dl % 6 + 1} of ${SEASON_NAMES[Math.floor(dl / 6)]}, Year ${Math.floor(day / 24) + 1}`; }
+// (Beta 0.1.6.1) the Clock and the Calendar, as the desktop version. The part of the day by the sun (the Clock's picture), and
+// the Clock's words: the part, then the minutes of daylight left by day or the minutes to sunrise by night (rounded up)
+const PART_NAMES = ['Dawn', 'Morning', 'Midday', 'Afternoon', 'Dusk', 'Evening', 'Midnight', 'Late night'];
+const partOfDay = f => Math.floor(8 * f + 0.5) % 8;
+function clockWordsFor(c, z, earth, wz) {
+  const day = clockDay(c), T = c - CLOCK.day * day, D = dayLightFor(day, z, earth, wz), up = T < D, n = Math.ceil(up ? (D - T) / 60 : (CLOCK.day - T) / 60);
+  return `${PART_NAMES[partOfDay(sunFrac(T, D))]}: ${n} minute${n === 1 ? '' : 's'} ${up ? 'of daylight left' : 'to sunrise'}`;
+}
+// their pictures follow the sky at your own spot, wherever they're drawn (slots, the hand, others' hands, dropped ones): live =
+// "clock" shows frames[part of the day], "season" frames[season]. 0 before a world is open (frames[0], the row's pictures)
+var LIVE_I = 0, LIVE_S = 0;
+function liveTile(id) { const b = BLOCKS[id]; return b && b.frames ? b.frames[b.live === 'season' ? LIVE_S : LIVE_I] : undefined; }
+function updateLive() {   // (each frame: what shows them is redrawn only when one changes)
+  const i = partOfDay(timeOfDay), sn = Math.floor(seasonDlFor(clockDay(worldClock), player.z, EARTH, WZ) / 6);
+  if (i === LIVE_I && sn === LIVE_S) return;
+  LIVE_I = i; LIVE_S = sn;
+  drawHotbarIcons(); drawHeld(); drawInventoryIcons();   // (the hotbar, offhand, tool row, open lists; the cursor; the creative grid)
+}
+// their words, in the note line above the hotbar while one is in your hand (the selected hotbar slot, or the picked offhand slot
+// in survival): steady, refreshed once a second; a passing note takes the line for its time, then they come back; the Clock's
+// line on top
+var wordsAt = 0, wordsShown = '';
+function updateItemWords(dt) {
+  wordsAt -= dt;
+  if (nameTimer > 0) { wordsShown = ''; return; }
+  const ids = !player || !worldLoaded || player.dead ? [] : [HOTBAR[selected] | 0, SURVIVAL ? HOTBAR[OFF0 + offSel] | 0 : 0];
+  const kinds = ids.map(id => BLOCKS[id] && BLOCKS[id].live), lines = [];
+  if (kinds.includes('clock')) lines.push(clockWordsFor(worldClock, player.z, EARTH, WZ));
+  if (kinds.includes('season')) lines.push(dateTextFor(worldClock, player.z, EARTH, WZ));
+  if (!lines.length) { if (wordsShown) { nameEl.style.opacity = 0; wordsShown = ''; } return; }
+  if (wordsShown && wordsAt > 0) return;
+  wordsAt = 1; wordsShown = lines.join('\n');
+  nameEl.textContent = wordsShown; nameEl.style.opacity = 1;
+}
+// (the moon's own path, as the desktop version: it falls behind the sun by a whole turn every CLOCK.moonDays days, its path leans
+// off the sun's by a lean that turns every nodeDays days (so eclipses come only when a new or full moon falls near a crossing, and
+// drift through the years), and it comes nearer and goes away every anomDays days (up to a quarter bigger). Each world starts its
+// own way, from the seed (salts 7320-7322))
+const frac = x => x - Math.floor(x);
+function hashSeeded(sd, x, z, s) {   // (the land's hash for a given seed: hash(), with any seed)
+  let h = (Math.imul(x, 374761393) + Math.imul(z, 668265263) + Math.imul(sd + s, 1442695041)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+const moonStarts = sd => [7320, 7321, 7322].map(salt => Math.floor(65536 * hashSeeded(sd, 0, 0, salt)));
+function moonState(c, starts) {   // el (how far behind the sun, in turns: 0 new, 0.5 full), node, anom; and as whole numbers EL, NODE, AN
+  const P = [CLOCK.moonDays, CLOCK.nodeDays, CLOCK.anomDays].map(d => d * CLOCK.day), f = Math.floor(c);
+  const w = P.map((p, i) => (Math.floor(f * 65536 / p) + starts[i]) % 65536);
+  return { el: frac(c / P[0] + starts[0] / 65536), node: frac(c / P[1] + starts[1] / 65536), anom: frac(c / P[2] + starts[2] / 65536), EL: w[0], NODE: w[1], AN: w[2] };
+}
+const moonLitOf = el => (1 - Math.cos(2 * Math.PI * el)) / 2;            // how much of it is lit
+const moonPhaseOf = el => Math.floor(8 * el + 0.5) % 8;                  // 0 new, 2 first quarter, 4 full, 6 last quarter
+const moonScaleOf = anom => 1 + CLOCK.moonBig * (1 + Math.cos(2 * Math.PI * anom)) / 2;
+function moonDirOf(a, m) {   // where it is, from the sun's angle a: behind it by el turns, its path leaning off the sun's
+  const b = a - 2 * Math.PI * m.el, x = Math.cos(b), y = Math.sin(b), z = 0.25 + CLOCK.moonLean * Math.sin(2 * Math.PI * (m.el - m.node)), len = Math.sqrt(x * x + y * y + z * z);
+  return [x / len, y / len, z / len];
+}
+// (this world)
+const dayLight = (day, z) => dayLightFor(day, z, EARTH, WZ);
+const timeAt = (c, z) => { const day = clockDay(c); return sunFrac(c - CLOCK.day * day, dayLight(day, z)); };
+function dayCurve(f) {   // 0 at night, 1 in full day: the sky's own curve (updateSky)
+  const a = f * Math.PI * 2, x = Math.cos(a), y = Math.sin(a), len = Math.sqrt(x * x + y * y + 0.0625);
+  return smooth(-0.18, 0.22, y / len);
+}
+const skyDayAt = (x, z) => dayCurve(timeAt(worldClock, z));   // the daylight at a place (Earthlike: by its own latitude)
+function setSunTime(f) { const day = clockDay(worldClock); worldClock = day * CLOCK.day + sunTime(f, dayLight(day, player.z)); }   // (the date stays)
+// (the side store: the clock kept apart from the save, which an older version would save over without it)
+const clockSideKey = id => 'cubeland-clock-' + id;
+function clockSide(id) { try { const v = JSON.parse(localStorage.getItem(clockSideKey(id)) || 'null'); return v && isFinite(v.clock) ? v : null; } catch (e) { return null; } }
+function loadClock(s, p) {   // a save's clock; one saved by an older version: the date from the side store (else day 0), the time of day from the save
+  if (isFinite(s.clock)) return s.clock;
+  const side = clockSide(Worlds.current.id), day = side ? clockDay(side.clock) : 0, z = isFinite(p.z) ? p.z : WZ / 2;
+  return day * CLOCK.day + (isFinite(s.time) ? sunTime(s.time, dayLight(day, z)) : CLOCK.newWorldT);
+}
+// (tests: the same lines as the desktop version's --clocktest)
+window.__clockLines = () => {
+  const out = ['SEASON S24 ' + S24.join(',')];
+  const places = [['other', false, 0, 0], ['earth1024z100', true, 100, 1024], ['earth1024z512', true, 512, 1024], ['earth1024z900', true, 900, 1024], ['earth2048z40', true, 40, 2048]];
+  for (const [name, earth, z, wz] of places) for (const c of [0, 240, 1499.5, 2399.9, 8200, 22200, 52200, 72123, 129634]) {
+    const day = clockDay(c), m = Math.floor(c / 60) - 40 * day, D = dayLightFor(day, z, earth, wz);
+    out.push(`CLOCK ${name} c=${c.toFixed(1)} day=${day} m=${m} dl=${seasonDlFor(day, z, earth, wz)} s=${s1024For(c, z, earth, wz)} D=${String(D)} f=${sunFrac(c - CLOCK.day * day, D).toFixed(5)} date=${dateTextFor(c, z, earth, wz)}`);
+  }
+  // the moon's path for three seeds (the sun as in other world types), then a hash of its whole numbers over 1000 clocks
+  for (const sd of [5, 777, 12345]) { const st = moonStarts(sd); for (const c of [0, 240, 1499.5, 2399.9, 8200, 22200, 52200, 72123, 129634]) {
+    const day = clockDay(c), D = dayLightFor(day, 0, false, 0), a = 2 * Math.PI * sunFrac(c - CLOCK.day * day, D), m = moonState(c, st);
+    out.push(`SKY seed=${sd} c=${c.toFixed(1)} EL=${m.EL} NODE=${m.NODE} AN=${m.AN} el=${String(m.el)} a=${String(a)} b=${String(a - 2 * Math.PI * m.el)} lit=${moonLitOf(m.el).toFixed(3)}`);
+  } }
+  let h = 2166136261;
+  for (const sd of [5, 777, 12345]) { const st = moonStarts(sd); for (let k = 0; k < 1000; k++) { const m = moonState(1237 * k, st); for (const v of [m.EL, m.NODE, m.AN]) h = Math.imul(h ^ v, 16777619) >>> 0; } }
+  out.push('SKYHASH ' + h.toString(16).padStart(8, '0'));
+  for (const [name, earth, z, wz] of places) for (const c of [0, 240, 1499.5, 2399.9, 8200, 22200, 52200, 72123, 129634]) {
+    const day = clockDay(c), D = dayLightFor(day, z, earth, wz);
+    out.push(`ITEMWORDS ${name} c=${c.toFixed(1)} i=${partOfDay(sunFrac(c - CLOCK.day * day, D))} s=${Math.floor(seasonDlFor(day, z, earth, wz) / 6)} clock="${clockWordsFor(c, z, earth, wz)}" calendar="${dateTextFor(c, z, earth, wz)}"`);
+  }
+  return out;
+};
 function skyRng(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
 function skyBody(color, size) {   // a flat square that always faces the camera (sun or moon)
@@ -8659,6 +8779,22 @@ const sun = skyBody(0xfff2b0, 70);
 const sunGlow = skyBody(0xffd27a, 120); sunGlow.material.opacity = 0.25;
 const moon = skyBody(0xdde4f0, 100);
 const moonGlow = skyBody(0xaab8e0, 190); moonGlow.material.opacity = 0.12;
+// (Beta 0.1.6.1) the moon's phase: lit columns = round(16 x lit), from the right while it waxes (phases 1-3), from the left while it
+// wanes (5-7); the dark part at 15% of its colour
+const moonPix = new Uint8Array(16 * 16 * 4), moonTex = new THREE.DataTexture(moonPix, 16, 16, THREE.RGBAFormat);
+moonTex.magFilter = moonTex.minFilter = THREE.NearestFilter;
+moon.material.map = moonTex; moon.material.needsUpdate = true;
+let moonDrawn = -1;
+moon.renderOrder = -1; moonGlow.renderOrder = -1.5;   // (after the sun, so it can pass in front of it)
+function drawMoon(key) {   // key = lit columns, + 100 while it wanes
+  const lit = key % 100, wax = key < 100;
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const v = (wax ? x >= 16 - lit : x < lit) ? 255 : 38, i = (y * 16 + x) * 4;
+    moonPix[i] = moonPix[i + 1] = moonPix[i + 2] = v; moonPix[i + 3] = 255;
+  }
+  moonTex.needsUpdate = true; moonDrawn = key;
+}
+let MOON0 = null;   // (this world's moon starts, from its seed)
 
 // stars: random points on a big sphere around the player, visible only at night
 const starGeo = new THREE.BufferGeometry();
@@ -8725,7 +8861,9 @@ for (let i = 0; i < 9; i++) {
 let cloudDrift = 0;
 
 function updateSky(dt) {
-  timeOfDay = (timeOfDay + dt / DAY_LENGTH) % 1;
+  worldClock += dt;
+  timeOfDay = timeAt(worldClock, player ? player.z : WZ / 2);
+  if (player) updateLive();   // (Beta 0.1.6.1: the Clock's and Calendar's pictures)
   const ang = timeOfDay * Math.PI * 2;
   const sunDir = new THREE.Vector3(Math.cos(ang), Math.sin(ang), 0.25).normalize(); // rises in the east (+x), sets in the west
   const height = sunDir.y;
@@ -8744,11 +8882,20 @@ function updateSky(dt) {
   const cam = camera.position;
   sun.position.copy(cam).addScaledVector(sunDir, SKY_DIST);
   sunGlow.position.copy(cam).addScaledVector(sunDir, SKY_DIST + 5);
-  moon.position.copy(cam).addScaledVector(sunDir, -SKY_DIST);
-  moonGlow.position.copy(cam).addScaledVector(sunDir, -SKY_DIST - 5);
+  if (!MOON0) MOON0 = moonStarts(seed);
+  const mo = moonState(worldClock, MOON0), md = moonDirOf(ang, mo), mlit = moonLitOf(mo.el), msc = moonScaleOf(mo.anom);
+  moon.position.set(cam.x + md[0] * (SKY_DIST - 20), cam.y + md[1] * (SKY_DIST - 20), cam.z + md[2] * (SKY_DIST - 20));
+  moonGlow.position.set(cam.x + md[0] * (SKY_DIST - 15), cam.y + md[1] * (SKY_DIST - 15), cam.z + md[2] * (SKY_DIST - 15));
+  moon.scale.setScalar(msc); moonGlow.scale.setScalar(msc);
   for (const m of [sun, sunGlow, moon, moonGlow]) m.quaternion.copy(camera.quaternion);   // face the screen, never tilted
   sun.visible = sunGlow.visible = height > -0.2;   // hidden once well below the horizon
-  moon.visible = moonGlow.visible = height < 0.2;
+  moon.visible = moonGlow.visible = md[1] > -0.2;   // (by its own height now)
+  // (Beta 0.1.6.1) moonlight: near the full moon a faint blue on what's open to the sky (the day tint lights only that), only while
+  // the moon is up; it never counts as day (skyDay), so night mobs still come
+  const ml = CLOCK.moonlight, mlight = mlit * (1 - day) * smooth(-0.05, 0.1, md[1]);
+  DAY_TINT.value.r += ml[0] * mlight; DAY_TINT.value.g += ml[1] * mlight; DAY_TINT.value.b += ml[2] * mlight;
+  const mkey = Math.round(16 * mlit) + (mo.el < 0.5 ? 0 : 100);
+  if (mkey !== moonDrawn) drawMoon(mkey);
   sun.material.color.setRGB(1, 0.95 - dusk * 0.25, 0.7 - dusk * 0.35);
   moon.material.opacity = 1 - day * 0.7;
   moonGlow.material.opacity = 0.12 * (1 - day);
@@ -11028,7 +11175,7 @@ addEventListener('keydown', e => {
     else lastSpaceTap = now;
   }
   if (e.code === 'KeyM') { Sound.toggleMute(); applySettings(); }
-  if (e.code === 'KeyT') timeOfDay = (timeOfDay + 0.125) % 1;   // skip ahead 1/8 of a day
+  if (e.code === 'KeyT') worldClock += CLOCK.skip;   // skip ahead 1/8 of a day (5 minutes; a friend's goes back at the host's next tick)
   const num = e.code.match(/^Digit(\d)$/);
   if (num) selectSlot(num[1] === '0' ? 9 : +num[1] - 1);
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
@@ -11727,8 +11874,9 @@ function setGear(b, gear) {
 }
 function setHeld(b, id, full = false) {   // (full: a Linen Bag with something in it, shown full)
   id = id | 0;
-  if (b.heldId === id && !!b.heldFull === full) return;
-  b.heldId = id; b.heldFull = full;
+  const lt = liveTile(id);   // (a Clock or Calendar: its picture now)
+  if (b.heldId === id && !!b.heldFull === full && b.heldLive === lt) return;
+  b.heldId = id; b.heldFull = full; b.heldLive = lt;
   if (b.heldMesh) {
     b.heldMesh.parent.remove(b.heldMesh); if (!b.heldMesh.userData.sharedGeo) b.heldMesh.geometry.dispose();
     b.mats.splice(b.mats.indexOf(b.heldMesh.material), 1); b.heldMesh.material.dispose(); b.heldMesh = null;
@@ -11847,9 +11995,9 @@ function updateHand(dt) {
   }
   hand.root.visible = !player.dead && !mainMenuOpen;   // (no hand in the main menu's panorama)
   const id = HOTBAR[selected] | 0, full = bagFull(id, HOTBAR_DATA[selected]);
-  if (id !== hand.id || full !== !!hand.full) {
+  if (id !== hand.id || full !== !!hand.full || liveTile(id) !== hand.live) {
     if (hand.id !== -1 && id !== hand.id) hand.dip = 1;   // (not for a bag only filling up or emptying)
-    hand.id = id; hand.full = full;
+    hand.id = id; hand.full = full; hand.live = liveTile(id);
     setHeld(hand.body, id, full);
     const m = hand.body.heldMesh;   // facing you, instead of side-on like other players'
     if (m && m.userData.cube) { m.position.set(0, -8.5 / 16, 0); m.rotation.set(-1.55, Math.PI / 4, 0); }   // (upright, its top tipped toward you)
@@ -13209,7 +13357,7 @@ function updateMobs(dt) {
     if (t.faint) m.light.setRGB(Math.max(m.light.r, t.faint), Math.max(m.light.g, t.faint), Math.max(m.light.b, t.faint));
     // burning: in daylight with open sky straight above its head (and not in water). The host's game does the damage.
     const hx = Math.floor(m.x), hz = Math.floor(m.z);
-    m.burning = t.burns && !m.dead && skyDay > 0.6 && hx >= 0 && hz >= 0 && hx < WX && hz < WZ &&
+    m.burning = t.burns && !m.dead && skyDayAt(m.x, m.z) > 0.6 && hx >= 0 && hz >= 0 && hx < WX && hz < WZ &&
       Math.floor(m.y + m.height) > colSkyTop(hx, hz) && !waterAt(m.x, m.y + 0.5, m.z);
     if (m.burning) {
       if (!Net.client && (m.burnIn = (m.burnIn ?? 1) - dt) <= 0) { m.burnIn = 1; hurtMob(m, 1); }
@@ -13440,7 +13588,7 @@ const drops = [];
 const dropTexCache = {};
 // an item's flat picture as a texture for things in the world (dropped items, thrown Rocks)
 function iconTexture(id, full = false) {   // (full: a Linen Bag's picture while it holds something)
-  const k = full ? id + 'full' : id;
+  const lt = liveTile(id), k = (full ? id + 'full' : id) + (lt !== undefined ? '@' + lt : '');
   if (!dropTexCache[k]) {
     const c = document.createElement('canvas'); c.width = c.height = TILE;
     drawIcon(c, id, true, full);   // (flat: it's shown in the world)
@@ -13451,15 +13599,15 @@ function iconTexture(id, full = false) {   // (full: a Linen Bag's picture while
   return dropTexCache[k];
 }
 function dropItem(id, x, y, z) {
-  iconTexture(id);
+  const pic = iconTexture(id);
   // blocks, slabs, stairs, pieces and torches drop as a little 3D model of themselves; other things as their picture
   const box = iconBoxes(id) && boxModel(id);
-  const mat = withHaze(new THREE.MeshBasicMaterial({ map: box ? box.tex : dropTexCache[id], alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: !!box }));
+  const mat = withHaze(new THREE.MeshBasicMaterial({ map: box ? box.tex : pic, alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: !!box }));
   const mesh = new THREE.Mesh(box ? box.geo : new THREE.PlaneGeometry(0.4, 0.4), mat);
   if (box) { mesh.scale.setScalar(0.25); mesh.userData.sharedGeo = true; }
   scene.add(mesh);
   const a = Math.random() * Math.PI * 2;
-  const d = { k: ++dropCount, id, x, y, z, vx: Math.cos(a) * 1.5, vy: 4, vz: Math.sin(a) * 1.5, age: 0, spin: Math.random() * 6, mesh, light: 0 };
+  const d = { k: ++dropCount, id, x, y, z, vx: Math.cos(a) * 1.5, vy: 4, vz: Math.sin(a) * 1.5, age: 0, spin: Math.random() * 6, mesh, light: 0, live: liveTile(id) };
   drops.push(d);
   return d;
 }
@@ -13473,6 +13621,7 @@ function updateDrops(dt) {
     d.age += dt;
     // a bag holding something looks full (netFull: in a friend's game, the host's tick says so)
     if (isBag(d.id) && (bagFull(d.id, d.data) || !!d.netFull) !== !!d.full) { d.full = !d.full; d.mesh.material.map = iconTexture(d.id, d.full); d.mesh.material.needsUpdate = true; }
+    if (d.live !== undefined && liveTile(d.id) !== d.live) { d.live = liveTile(d.id); d.mesh.material.map = iconTexture(d.id); d.mesh.material.needsUpdate = true; }   // (a Clock or Calendar)
     if (Net.client) {
       // joined game: the host's game moves drops around; walking into one asks the host for it
       const a = Math.min(1, dt * 10);
@@ -14003,7 +14152,7 @@ const hotbarIcons = [], hotbarCounts = [], hotbarWears = [];
 function drawIcon(canvas, id, flat, full = false) {   // (full: a Linen Bag holding something: its "full" picture)
   if (!id) { drawIconPlain(canvas, 0, flat); return; }
   full = full && BLOCKS[id] && BLOCKS[id].full !== undefined;
-  const cache = drawIcon.cache || (drawIcon.cache = new Map()), key = (flat ? -id : id) + (full ? 'full' : '');
+  const cache = drawIcon.cache || (drawIcon.cache = new Map()), lt = liveTile(id), key = (flat ? -id : id) + (full ? 'full' : '') + (lt !== undefined ? '@' + lt : '');
   let c = cache.get(key);
   if (!c) { c = document.createElement('canvas'); drawIconPlain(c, id, flat, full); cache.set(key, c); }
   if (canvas.width !== c.width || canvas.height !== c.height) { canvas.width = c.width; canvas.height = c.height; }
@@ -14028,7 +14177,7 @@ function drawIconPlain(canvas, id, flat, full) {
     else ctx.drawImage(atlas, sx, h, TILE, h, 0, h, TILE, h);                   // the bottom half...
     if (form === 'stairs') ctx.drawImage(atlas, sx + h, 0, h, h, h, 0, h, h);  // ...plus the step
   }
-  else if (id) ctx.drawImage(atlas, (full ? BLOCKS[id].full : BLOCKS[id].icon ?? BLOCKS[id].t[0]) * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
+  else if (id) ctx.drawImage(atlas, (liveTile(id) ?? (full ? BLOCKS[id].full : BLOCKS[id].icon ?? BLOCKS[id].t[0])) * TILE, 0, TILE, TILE, 0, 0, TILE, TILE);
 }
 // ordinary whole blocks (not items, shapes, liquids, pieces, slabs or stairs, nor ones with a picture of their own)
 // (a block with a front face, like the kiln, is a cube too even though it has a picture of its own; torches are a
@@ -14657,6 +14806,7 @@ function cycleOffhand() {
   offSel = (offSel + 1) % offCount();
   drawOffhand();
   const id = HOTBAR[OFF0 + offSel];
+  if (id && BLOCKS[id].live) { nameTimer = 0; wordsAt = 0; wordsShown = ''; return; }   // (a Clock or Calendar: its words, at once)
   showNote(`Offhand ${offSel + 1}: ${id ? BLOCKS[id].name : 'Empty'}`);
 }
 function swapOffhand() {
@@ -15652,6 +15802,7 @@ function selectSlot(i) {
   selected = i; handShown = HOTBAR[i];
   if (!clicking) act = i;
   [...hotbarEl.children].forEach((s, j) => s.classList.toggle('sel', j === i));
+  if (HOTBAR[i] && BLOCKS[HOTBAR[i]].live) { nameTimer = 0; wordsAt = 0; wordsShown = ''; return; }   // (a Clock or Calendar: its words, at once)
   nameEl.textContent = HOTBAR[i] ? BLOCKS[HOTBAR[i]].name : 'Empty';
   nameEl.style.opacity = 1; nameTimer = 1.5;
 }
@@ -15703,7 +15854,7 @@ function updateStairs() {
 function stairEvent(which, s) {
   if (which === 0) {          // the time of day jumps
     const t = Math.random();
-    if (Net.client) Net.toHost({ t: 'stime', time: t }); else timeOfDay = t;
+    if (Net.client) Net.toHost({ t: 'stime', time: t }); else setSunTime(t);
   } else if (which === 1) {   // you're somewhere else
     if (EARTH) {   // (Earthlike: somewhere the plan picks, grown first)
       const id = Worlds.current.id;
@@ -16047,7 +16198,7 @@ function gatherSave() {
     ...(Worlds.current.os === 1 ? { os: 1, osSkip: Worlds.current.osSkip } : {}),   // (an old world's staircases: see step 9 of the world's growth)
     player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, fly: player.fly, health: player.health,
               gloom: player.gloom, darkTime: player.darkTime, lightTime: player.lightTime },
-    time: timeOfDay,
+    time: timeAt(worldClock, player.z), clock: worldClock,   // (Beta 0.1.6.1: the clock; time, from it, stays for older versions)
     ...carried(), offSel, selected,   // (hotbar, counts, wear, data: with a stack held on the cursor counted as put back)
     mobs: mobs.filter(m => !m.dead).map(m => ({ type: m.type, x: m.x, y: m.y, z: m.z, yaw: m.yaw, health: m.health, ...(m.layer > 1 ? { layer: m.layer } : {}),
       ...(MOB_TYPES[m.type].cow ? { baby: m.baby, fed: m.fed, happy: Math.round(m.happy), room: m.room, mateCool: Math.round(m.mateCool) } : {}),
@@ -16070,7 +16221,7 @@ async function saveWorld() {
   // (not if it was just deleted, or if it's a friend's world you joined: their game saves it)
   if (!worldLoaded || saving || discarding || !Worlds.list().some(w => w.id === Worlds.current.id)) return;
   saving = true; lastSave = performance.now();
-  try { await Worlds.save(Worlds.current.id, gatherSave()); Worlds.touch(); unsaved = false; }
+  try { await Worlds.save(Worlds.current.id, gatherSave()); Worlds.touch(); unsaved = false; try { localStorage.setItem(clockSideKey(Worlds.current.id), JSON.stringify({ clock: worldClock, at: Date.now() })); } catch (e) {} }
   catch (e) { console.warn('Could not save the world', e); }
   saving = false;
 }
@@ -16153,7 +16304,7 @@ function applyPlayerSave(s) {
   if (p.health > 0) player.health = Math.min(MAX_HEALTH, p.health);
   if (player.gloom >= player.health) player.gloom = Math.max(0, player.health - 1);   // (never load straight into a gloom death)
   drawHearts();
-  if (isFinite(s.time)) timeOfDay = s.time;
+  worldClock = loadClock(s, p); timeOfDay = timeAt(worldClock, player.z);   // (Beta 0.1.6.1: the clock; see loadClock)
   // (worlds saved before Pack & Plate have just the hotbar's 10 slots, later ones all NS: either comes back, the same as the desktop
   // version's. Before Beta 0.1.5.2 only 10 did, so a saved world's slots never came back: a survival world's were lost.
   // Any block the game knows comes back, as in the desktop version, so one hidden from the creative inventory stays too)
@@ -16398,7 +16549,7 @@ addEventListener('pagehide', () => autoSave());
       friends.set(conn.peer, { conn, name, hue, seen: performance.now() });
       setOther(conn.peer, { name, hue, x: player.x + 1, y: player.y, z: player.z, yaw: 0 });
       const save = gatherSave();
-      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ...(save.i8 ? { i8: true } : {}), [save.wide ? 'idw' : 'ids']: save.ids, pieces: save.pieces, ...(save.pg ? { pg: save.pg } : {}), time: timeOfDay, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
+      conn.send({ t: 'welcome', id: conn.peer, idxs: save.idxs, ...(save.i8 ? { i8: true } : {}), [save.wide ? 'idw' : 'ids']: save.ids, pieces: save.pieces, ...(save.pg ? { pg: save.pg } : {}), time: timeOfDay, clock: worldClock, x: player.x + 1, y: player.y, z: player.z, yaw: player.yaw });
       // everyone's skins: yours, and the other friends' here already
       if (PlayerSkin.url) conn.send(skinMsg('host', PlayerSkin.url));
       for (const [id, s] of skins) if (id !== conn.peer && friends.has(id)) conn.send(skinMsg(id, s));
@@ -16428,7 +16579,7 @@ addEventListener('pagehide', () => autoSave());
         if (!ate) conn.send({ t: 'give', id });
       }
     } else if (d.t === 'stime') {   // (a friend's staircase)
-      timeOfDay = Math.min(1, Math.max(0, +d.time || 0));
+      setSunTime(Math.min(1, Math.max(0, +d.time || 0)));
     } else if (d.t === 'sdrop') {
       stairDrop(d.id | 0, d.n | 0, d.w | 0, null, [+d.x || 0, +d.y || 0, +d.z || 0]);
     } else if (d.t === 'pickup') {
@@ -16459,7 +16610,7 @@ addEventListener('pagehide', () => autoSave());
       // (each friend is only sent the mobs within the render distance of them)
       const p = others.get(id) || player;
       const near = ms.filter(([m]) => Math.hypot(m.x - p.x, m.z - p.z) < r).map(e => e[1]);
-      if (f.conn.open) f.conn.send({ t: 'tick', time: timeOfDay, players, mobs: near, drops: ds, rocks: rs, falls: fs });
+      if (f.conn.open) f.conn.send({ t: 'tick', time: timeOfDay, clock: worldClock, players, mobs: near, drops: ds, rocks: rs, falls: fs });
     }
   }
 
@@ -16536,14 +16687,14 @@ addEventListener('pagehide', () => autoSave());
       applyPieces(d.pieces, d.pg || 4096);
       applyEdits(readIdxs(toBuf(d.idxs), d.i8), d.idw ? new Uint32Array(toBuf(d.idw)) : new Uint8Array(toBuf(d.ids)));   // (idw: 4-byte ids, when the world has blocks past 255; i8: 8-byte block numbers)
       Object.assign(player, { x: d.x, y: d.y, z: d.z, yaw: d.yaw || 0, vx: 0, vy: 0, vz: 0 });
-      timeOfDay = d.time;
+      timeOfDay = d.time; if (isFinite(d.clock)) worldClock = d.clock;
       if (EARTH) Earth.joined(() => { worldLoaded = true; refreshUI(); }); else worldLoaded = true;   // (Earthlike: once the land round you has grown)
       if (PlayerSkin.url) hostConn.send(skinMsg(null, PlayerSkin.url));   // your skin, for everyone here
       refreshUI();
     } else if (d.t === 'skin') {
       if (PlayerSkin.valid(d.s)) skins.set(d.id, d.s); else skins.delete(d.id);
     } else if (d.t === 'tick' && worldLoaded) {
-      timeOfDay = d.time;
+      timeOfDay = d.time; if (isFinite(d.clock)) worldClock = d.clock;
       const seenP = new Set();
       for (const p of d.players) { if (p.id === myId) continue; seenP.add(p.id); setOther(p.id, p); }
       for (const id of [...others.keys()]) if (!seenP.has(id)) removeOther(id);
@@ -17496,6 +17647,7 @@ function frame(now) {
   }
 
   if (nameTimer > 0) { nameTimer -= dt; if (nameTimer <= 0) nameEl.style.opacity = 0; }
+  updateItemWords(dt);   // (a Clock or Calendar in your hand)
 
   updateHand(dt);
 
@@ -17535,7 +17687,7 @@ if (/[?&]datacheck\b/.test(location.search)) {
   }
   HOTBAR[act] = keep;
   table('numbers', { STACK_MAX, SMELT_TIME, BURN_TIMES, FARM, CROPS: CROP, SAPLING, DURABILITY, ARMOR_DURABILITY, ARMOR_SHARE, PICK_TIER, STRATA_PICKAXE, PICK_STAGES,
-    AXE_STAGES: axeStages, LOG_STAGES, STONE_STAGES, HEARTS });
+    AXE_STAGES: axeStages, LOG_STAGES, STONE_STAGES, HEARTS, CLOCK, WEATHER: { S24 } });
   // smelting: the fuel and the smelts by key, in the Kiln's and Foundry's order (the deep layers' smelts, tall: true, are
   // in SMELTS only while tall worlds are on, so they're also checked on their own against the strata)
   const S = D.smelting, key = id => blockKey(id) || `(no block ${id})`, sd = [];
@@ -17658,10 +17810,10 @@ if (/[?&]datacheck\b/.test(location.search)) {
   const BLOCK_FIELDS = ['id', 'name', 'pictures', 'icon', 'transparent', 'noCollide', 'liquid', 'shape', 'box', 'drop', 'places', 'handDrop', 'item', 'food',
     'tool', 'material', 'damage', 'pick', 'layer', 'level', 'front', 'facing', 'lit', 'wall', 'wi', 'count', 'burn', 'axis', 'layers', 'soil', 'wet', 'fert',
     'stage', 'dye', 'armor', 'pack', 'belt', 'tools', 'piece', 'form', 'of', 'snowed', 'inner', 'needs', 'shovel', 'leaves', 'sound', 'inventory', 'look', 'log', 'fruit', 'hinge', 'open', 'half', 'grows', 'sand', 'sapling',
-    'crop', 'top', 'plants', 'returns', 'bag', 'full', 'earthlike', 'falls', 'tint', 'water', 'flow', 'pace', 'in'];
+    'crop', 'top', 'plants', 'returns', 'bag', 'full', 'earthlike', 'falls', 'tint', 'water', 'flow', 'pace', 'in', 'stack', 'live', 'frames'];
   const blockAsData = id => {
     const b = BLOCKS[id]; if (!b) return undefined;
-    return Object.fromEntries(Object.entries(b).map(([f, v]) => f === 't' ? ['pictures', v.map(t => TILE_NAMES[t])] : f === 'icon' || f === 'full' ? [f, TILE_NAMES[v]]
+    return Object.fromEntries(Object.entries(b).map(([f, v]) => f === 't' ? ['pictures', v.map(t => TILE_NAMES[t])] : f === 'icon' || f === 'full' ? [f, TILE_NAMES[v]] : f === 'frames' ? [f, v.map(t => TILE_NAMES[t])]
       : ['drop', 'places', 'piece', 'of', 'inner', 'dye', 'fruit', 'sapling', 'plants', 'returns'].includes(f) ? [f, key(v)] : f === 'handDrop' ? [f, [key(v[0]), v[1], v[2]]] : [f, v]));
   };
   const rowAsData = ({ id, pictures, ...r }) => ({ ...r, pictures: typeof pictures === 'string' ? [pictures, pictures, pictures] : pictures });
@@ -17716,6 +17868,9 @@ if (/[?&]datacheck\b/.test(location.search)) {
         if (r.water !== undefined && (r.water !== true || table !== 'EARTH_PLANTS' || r.shape !== 'plant')) bd.push(`${at}: water is true, on an EARTH_PLANTS plant`);
         if (r.shape === 'fence' && !['FENCES', 'EARTH_FENCES'].includes(table)) bd.push(`${at}: a fence is in FENCES or EARTH_FENCES`);
         for (const f of ['falls', 'tint']) if (r[f] !== undefined && r[f] !== true) bd.push(`${at}: ${f} is true or left out`);
+        if (r.stack !== undefined && !(Number.isInteger(r.stack) && r.stack >= 1 && r.stack < STACK_MAX)) bd.push(`${at}: stack is a whole number from 1 to ${STACK_MAX - 1}`);
+        if ((r.live !== undefined || r.frames !== undefined) && !(r.item === true && Array.isArray(r.frames) && r.frames.every(n => typeof n === 'string') && r.frames[0] === r.pictures
+            && (r.live === 'clock' && r.frames.length === 8 || r.live === 'season' && r.frames.length === 4))) bd.push(`${at}: live (clock, with 8 frames, or season, with 4) and frames go together on an item, frames[0] being its pictures`);
       }
     }
     if ((BL.RIVER_WATER || []).length !== 25) bd.push(`blocks.RIVER_WATER: should be the 25 rows ${RIVER_WATER}-${RIVER_WATER + 24} (8 ways and falling, 3 paces; falling only at pace 2)`);

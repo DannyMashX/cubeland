@@ -124,6 +124,7 @@ public static class BinaryPack
 	// reading values out of unpacked messages
 	public static double Num(object o, double fallback = 0) => o switch { long l => l, double d => d, bool b => b ? 1 : 0, _ => fallback };
 	public static float F(this Dictionary<string, object> m, string k) => m.TryGetValue(k, out var v) ? (float)Num(v) : 0;
+	public static double Db(this Dictionary<string, object> m, string k) => m.TryGetValue(k, out var v) ? Num(v) : 0;   // (a whole double: the clock)
 	public static int I(this Dictionary<string, object> m, string k) => m.TryGetValue(k, out var v) ? (int)Num(v) : 0;
 	public static string S(this Dictionary<string, object> m, string k) => m.TryGetValue(k, out var v) ? v as string ?? v?.ToString() : null;
 	public static List<object> L(this Dictionary<string, object> m, string k) => m.TryGetValue(k, out var v) ? v as List<object> : null;

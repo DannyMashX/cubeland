@@ -430,7 +430,7 @@ public partial class Main
 			Pieces = world.PieceMap.SelectMany(p => new[] { p.Key }.Concat(p.Value.Select(v => wide ? v : World.SpotOut(v)))).ToArray(), Pg = wide ? World.GroupMul : 0,
 			Stairs = SaveExtraStairs(), Os = current.Os, OsSkip = current.OsSkip,
 			Player = new() { X = player.Pos.X, Y = player.Pos.Y, Z = player.Pos.Z, Yaw = player.Yaw, Pitch = player.Pitch, Fly = player.Flying, Health = health, Gloom = gloom, DarkTime = darkTime, LightTime = lightTime },
-			Time = sky.TimeOfDay, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Wear = inv.Wear.ToArray(), Selected = inv.Selected, OffSel = inv.OffSel,
+			Time = sky.TimeOfDay, Clock = sky.Clock, Hotbar = inv.Id.ToArray(), Counts = inv.Count.ToArray(), Wear = inv.Wear.ToArray(), Selected = inv.Selected, OffSel = inv.OffSel,
 			Data = Enumerable.Range(0, Inventory.NS).Where(i => inv.Data[i] != null).ToDictionary(i => i, i => inv.Data[i]),
 			Mobs = mobList.Where(m => m.Dead == 0).Select(m => new Worlds.MobSave { Type = m.Type, X = m.X, Y = m.Y, Z = m.Z, Yaw = m.Yaw, Health = m.Health, Layer = m.Layer,
 				Baby = m.Baby, Happy = MathF.Round(m.Happy), Room = MathF.Round(Math.Max(0, m.Room) * 100) / 100, MateCool = MathF.Round(m.MateCool), Fed = m.Fed,
@@ -491,7 +491,19 @@ public partial class Main
 			if (p.Health > 0) health = Math.Min(MaxHealth, p.Health);
 			if (gloom >= health) gloom = Math.Max(0, health - 1);   // (never load straight into a gloom death)
 		}
-		if (float.IsFinite(s.Time)) sky.TimeOfDay = s.Time;
+		// the clock (Beta 0.1.6.1): the save's own; or, if an older version saved over it, the date from the side file and the time
+		// of day from the save; or (a world from before the clock) the first day of spring, at its time of day
+		SetSkyPlace();
+		string clockFrom = "save";
+		if (s.Clock is double clock && double.IsFinite(clock) && clock >= 0) sky.Clock = clock;
+		else
+		{
+			double? side = Worlds.ReadClock(current.Id, current.Seed); clockFrom = side != null ? "side file" : "none";
+			long day = side is double sc ? Sky.DayOf(sc) : 0;
+			sky.Clock = day * Sky.DayLength;
+			if (float.IsFinite(s.Time)) sky.TimeOfDay = s.Time;
+		}
+		GD.Print(string.Format(System.Globalization.CultureInfo.InvariantCulture, "CLOCKLOAD from {0}: Clock {1:F1}, day {2}, {3}", clockFrom, sky.Clock, sky.Day, Sky.DateText(sky.Day, sky.PlaceSouth)));
 		if (s.Hotbar?.Length is Inventory.Slots or Inventory.NS)   // (worlds saved before Pack & Plate have just the hotbar)
 		{
 			for (int i = 0; i < s.Hotbar.Length; i++)

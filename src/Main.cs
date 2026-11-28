@@ -745,6 +745,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 		cam.Rotation = new Vector3(player.Pitch, player.Yaw, 0);
 		Panorama(dt);
 		if (!cam.IsInsideTree()) return;   // (the scene is being swapped for another world)
+		SetSkyPlace();
 		sky.Tick(dt, cam);
 		UpdateSkyAndWater(dt);
 		UpdateHealth(dt);
@@ -922,6 +923,24 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 	// for testing: `-- --shot=file.png` saves a picture of the screen once the world has loaded, then quits
 	(int x, int g, int z)? fallAt;   // (--falltest)
 	bool caveTested, caveFound;   // (--cavetest)
+	bool clockItemsTested, mixClockGiven;   // (--clockitems; --mixtest: the host's Clock)
+	// (test, Beta 0.1.6.1: --mixtest) the shared clock on this side, the same line as the web version's: drift = the clock less the
+	// wall time (Unix seconds; the same on both sides once a friend has snapped to the host's clock), the date and the part of the day
+	// here, the moon, what's held, and the live pictures this side shows for a Clock or Calendar (its own hand, other players' hands,
+	// dropped ones)
+	void Mix8(string tag)
+	{
+		var ic = System.Globalization.CultureInfo.InvariantCulture;
+		double wall = Time.GetUnixTimeFromSystem();
+		int i = Sky.PartOf(sky.TimeOfDay), s = Sky.SeasonOf(sky.Day, sky.PlaceSouth);
+		string Pic(int id) => $"\"{id}:{Atlas.Names[Blocks.B[id].Frames[Atlas.LiveFrame(id)]]}\"";
+		var shown = new List<int>();
+		if (handBody?.HeldMesh != null && Blocks.IsLive(handBody.HeldId)) shown.Add(handBody.HeldId);
+		foreach (var o in others.Values) if (o.Av?.HeldMesh != null && Blocks.IsLive(o.Av.HeldId)) shown.Add(o.Av.HeldId);
+		foreach (var d in drops.All) if (Blocks.IsLive(d.Id)) shown.Add(d.Id);
+		GD.Print(string.Format(ic, "MIX8{0} {{\"ver\":\"{1}\",\"drift\":{2:F1},\"clock\":{3:F1},\"date\":\"{4}\",\"part\":\"{5}\",\"live\":[{6},{7}],\"el\":{8:F4},\"held\":{9},\"clockPics\":[{10}]}}",
+			tag, Version, sky.Clock - wall, sky.Clock, Sky.CalendarWords(sky.Clock, sky.PlaceSouth), Sky.Parts[i], i, s, sky.MoonEl, inv.Id[inv.Selected], string.Join(",", shown.Select(Pic).Distinct())));
+	}
 	float shotTimer; bool timeArgDone, skinTested, dropsTested, farmTested, cowsTested, snowTested, cutTested, throwTested, throwShown, hudTested, stageTested, testGear, heldTested, heldPlaced, longChecked, doorTested, saplingTested, cropTested, wildTested, fenceTested, animalTested, clothShown, neckTested, cowShown, animalChecked, bagTested, bagShown, bagNetSet, bagNetDone, osTested, osNetDone, netTested, earthLifeTested; float bagNetT, mixT; int mixStep;
 	(int x, int y, int z, int id) mixRefill;   // (Beta 0.1.5.4: the river spot an Earthlike host refills in --mixtest)
 	// (test, --mixtest: the world as it stands, every block's full id in index order, as an FNV-1a fingerprint; and the changed blocks)
@@ -986,6 +1005,17 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			}
 		}
 		if (args.Contains("--play") && menuOpen) { ShowMainMenu(false); Lock(); }   // menus closed, as if playing
+		if (!clockArgDone)
+		{   // (test, Beta 0.1.6.1: --clock=SECONDS, --day=N (keeping the time of day), --season=spring|summer|autumn|winter (its first day, for where you are))
+			clockArgDone = true; var inv0 = System.Globalization.CultureInfo.InvariantCulture;
+			if (args.FirstOrDefault(a => a.StartsWith("--clock=")) is { } ca) sky.Clock = double.Parse(ca[8..], inv0);
+			if (args.FirstOrDefault(a => a.StartsWith("--day=")) is { } da) sky.Clock = long.Parse(da[6..], inv0) * Sky.DayLength + (sky.Clock - sky.Day * Sky.DayLength);
+			if (args.FirstOrDefault(a => a.StartsWith("--season=")) is { } sa && sa.Length > 9 && Array.IndexOf(Sky.Seasons, char.ToUpper(sa[9]) + sa[10..]) is int si and >= 0)
+			{
+				SetSkyPlace(); long day = sky.Day; int dl = Sky.DayOfYear(day, sky.PlaceSouth);
+				sky.Clock += ((si * 6 - dl) % 24 + 24) % 24 * Sky.DayLength;
+			}
+		}
 		var timeArg = args.FirstOrDefault(a => a.StartsWith("--time="));   // (test: the time of day again, after the world loaded its own)
 		if (timeArg != null && !timeArgDone) { timeArgDone = true; sky.TimeOfDay = float.Parse(timeArg[7..], System.Globalization.CultureInfo.InvariantCulture); }
 		var holdArg = args.FirstOrDefault(a => a.StartsWith("--hold="));   // (test: put item ID in the first hotbar slot and hold it)
@@ -1449,6 +1479,111 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 				Check("the grassy soils plant like Grass (Grain Seeds, deer), the bare ones like Dirt; IsGrassy (the world makers') unchanged", soils.All(s => Blocks.PlantsLikeGrass(s) == (s >= 4810) && Blocks.PlantsLikeDirt(s) == (s < 4810) && !Blocks.IsGrassy(s)) && Blocks.PlantsLikeGrass(Blocks.Grass) && Blocks.PlantsLikeGrass(Blocks.SnowyGrass) && Blocks.PlantsLikeGrass(Blocks.SwampGrass) && !Blocks.PlantsLikeGrass(Blocks.Dirt) && Blocks.PlantsLikeDirt(Blocks.Dirt) && !Blocks.PlantsLikeDirt(Blocks.Mud) && !Blocks.PlantsLikeGrass(4814) && !Blocks.PlantsLikeDirt(4814));
 			}
 			inv.SetSlot(0, Blocks.Bread); player.Pitch = -0.45f;
+		}
+		if (args.Contains("--clockitems") && !clockItemsTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
+		{   // (test, Beta 0.1.6.1: the Clock and the Calendar, the user's answers C1-C4, with the rules agreed with the web version)
+			clockItemsTested = true;
+			void Check(string what, bool ok) => GD.Print((ok ? "PASS " : "FAIL ") + what);
+			int K(string key) => DataKeys.IdOf(key);
+			int Clk = Blocks.Clock, Cal = Blocks.Calendar, Off = Inventory.Off0 + inv.OffSel;
+			// the data
+			Check("the Clock is 744 (key clock) and the Calendar 745 (key calendar), items, one to a slot, live, not put down",
+				K("clock") == 744 && K("calendar") == 745 && Clk == 744 && Cal == 745 && Blocks.B[Clk].Name == "Clock" && Blocks.B[Cal].Name == "Calendar"
+				&& Blocks.B[Clk].Item && Blocks.B[Cal].Item && Blocks.StackMaxOf(Clk) == 1 && Blocks.StackMaxOf(Cal) == 1
+				&& Blocks.B[Clk].Live == "clock" && Blocks.B[Cal].Live == "season" && Blocks.B[Clk].Frames.Length == 8 && Blocks.B[Cal].Frames.Length == 4
+				&& !CanPutDown(Clk) && !CanPutDown(Cal) && Blocks.B[Clk].Tool == null && Blocks.B[Cal].Tool == null);
+			Check("their pictures: clock_0..clock_7 and calendar_spring/summer/autumn/winter, in the atlas",
+				string.Join(" ", Blocks.B[Clk].Frames.Select(t => Atlas.Names[t])) == "clock_0 clock_1 clock_2 clock_3 clock_4 clock_5 clock_6 clock_7"
+				&& string.Join(" ", Blocks.B[Cal].Frames.Select(t => Atlas.Names[t])) == "calendar_spring calendar_summer calendar_autumn calendar_winter");
+			var pics = Blocks.B[Clk].Frames.Concat(Blocks.B[Cal].Frames).ToArray();
+			var files = pics.Select(t => Atlas.Names[t]).Where(n => ResourceLoader.Exists($"res://textures/items/{n}.png")).Count();
+			var looks = pics.Select(t => Convert.ToBase64String(Atlas.Image.GetRegion(new Rect2I(t * Atlas.TILE, 0, Atlas.TILE, Atlas.TILE)).GetData())).Distinct().Count();
+			Check($"the 12 pictures are drawn (textures/items: {files} of 12 files) and all different ({looks} different)", files == 12 && looks == 12);
+			// the recipes (the user's C1: a tin clock; a linen calendar), both at the bench, made one at a time and one to a slot
+			var rc = Inventory.Recipes.Where(r => r.Out == Clk).ToList(); var rl = Inventory.Recipes.Where(r => r.Out == Cal).ToList();
+			Check("the Clock: 2 Tin Bricks + 1 Glass at the bench; the Calendar: 2 Linen + 1 Stick at the bench (one recipe each)",
+				rc.Count == 1 && rc[0].At == "bench" && rc[0].N == 1 && string.Join(",", rc[0].Needs.Select(n => $"{n.n} {DataKeys.KeyOf(n.id)}")) == "2 tin_brick,1 glass"
+				&& rl.Count == 1 && rl[0].At == "bench" && rl[0].N == 1 && string.Join(",", rl[0].Needs.Select(n => $"{n.n} {DataKeys.KeyOf(n.id)}")) == "2 linen,1 stick");
+			for (int i = 0; i < Inventory.Armor0; i++) inv.SetSlot(i, 0);
+			ClearHeld();
+			inv.SetSlot(Inventory.Pocket0, K("tin_brick"), 4); inv.SetSlot(Inventory.Pocket0 + 1, Blocks.Glass, 2);
+			inv.SetSlot(Inventory.Pocket0 + 2, K("linen"), 2); inv.SetSlot(Inventory.Pocket0 + 3, Blocks.Stick, 1);
+			bool c1 = inv.Craft(rc[0]) == true, c2 = inv.Craft(rc[0]) == true, c3 = inv.Craft(rc[0]) == true, l1 = inv.Craft(rl[0]) == true;
+			int Slots(int id) => Enumerable.Range(0, Inventory.Armor0).Count(i => inv.Id[i] == id && inv.Count[i] == 1);
+			Check($"crafted: 2 Clocks in 2 slots (a third needs more tin), 1 Calendar; the bricks, glass, linen and stick used up",
+				c1 && c2 && !c3 && l1 && Slots(Clk) == 2 && Slots(Cal) == 1 && inv.CountOf(K("tin_brick")) == 0 && inv.CountOf(Blocks.Glass) == 0 && inv.CountOf(K("linen")) == 0 && inv.CountOf(Blocks.Stick) == 0);
+			for (int i = 0; i < Inventory.Armor0; i++) inv.SetSlot(i, 0);
+			// the pictures follow the sky at your spot, in place: one texture each, redrawn when the part of the day or the season changes
+			bool SameTile(Image a, int tile)
+			{   // (the image the live texture is redrawn from: a headless run's dummy renderer can't read a redrawn texture back)
+				if (a == null || a.GetWidth() != Atlas.TILE) return false;
+				for (int y = 0; y < Atlas.TILE; y++) for (int x = 0; x < Atlas.TILE; x++) if (!a.GetPixel(x, y).IsEqualApprox(Atlas.Image.GetPixel(tile * Atlas.TILE + x, y))) return false;
+				return true;
+			}
+			var tc = Atlas.IconTexture(Clk); var tl = Atlas.IconTexture(Cal);
+			bool picsOk = true; var seen = new List<string>();
+			for (int part = 0; part < 8; part++)
+			{   // (each part of the day: the middle of it, by the sun at your spot)
+				double f = part / 8.0; long day = sky.Day;
+				sky.Clock = day * Sky.DayLength + Sky.SecondsAt(f, day, sky.PlaceK, sky.PlaceSouth);
+				TickHud(0.01f);
+				int i = Sky.PartOf(sky.TimeOfDay);
+				bool ok = i == part && Atlas.LiveFrame(Clk) == part && Atlas.IconTexture(Clk) == tc && SameTile(Atlas.Icon(Clk), Blocks.B[Clk].Frames[part]);
+				picsOk &= ok; seen.Add($"{part}:{i}/{Atlas.LiveFrame(Clk)}{(ok ? "" : "!")}");
+			}
+			Check($"the Clock's picture is frames[i] at each of the 8 parts of the day, the same texture redrawn in place ({string.Join(" ", seen)})", picsOk);
+			bool seasOk = true; seen.Clear();
+			for (int s = 0; s < 4; s++)
+			{
+				sky.Clock = (s * 6 + 2) * Sky.DayLength + 600;   // (the third day of each season)
+				TickHud(0.01f);
+				bool ok = Sky.SeasonOf(sky.Day, sky.PlaceSouth) == s && Atlas.LiveFrame(Cal) == s && Atlas.IconTexture(Cal) == tl && SameTile(Atlas.Icon(Cal), Blocks.B[Cal].Frames[s]);
+				seasOk &= ok; seen.Add($"{s}:{Atlas.LiveFrame(Cal)}{(ok ? "" : "!")}");
+			}
+			Check($"the Calendar's picture is frames[the season] in each season, the same texture redrawn in place ({string.Join(" ", seen)})", seasOk);
+			if (DisplayServer.GetName() != "headless")
+			{   // (on a real screen: the redrawn textures themselves, read back)
+				long dd = sky.Day; bool r1, r2, r3;
+				sky.Clock = dd * Sky.DayLength + Sky.SecondsAt(6 / 8.0, dd, sky.PlaceK, sky.PlaceSouth); TickHud(0.01f); r1 = SameTile(tc.GetImage(), Blocks.B[Clk].Frames[6]);
+				sky.Clock = dd * Sky.DayLength + Sky.SecondsAt(2 / 8.0, dd, sky.PlaceK, sky.PlaceSouth); TickHud(0.01f); r2 = SameTile(tc.GetImage(), Blocks.B[Clk].Frames[2]);
+				sky.Clock = 20 * Sky.DayLength + 600; TickHud(0.01f); r3 = SameTile(tl.GetImage(), Blocks.B[Cal].Frames[3]);
+				Check($"on screen, the textures themselves are redrawn: the Clock at midnight then midday, the Calendar in winter ({r1}, {r2}, {r3})", r1 && r2 && r3);
+			}
+			// everywhere it's drawn shows that one texture: a hotbar slot, the hand, a dropped one
+			sky.Clock = 2 * Sky.DayLength + 300; TickHud(0.01f);
+			inv.SetSlot(0, Clk); inv.SetSlot(1, Cal); DrawHotbar(); SelectSlot(0); UpdateHand(0.01f);
+			var dr = drops.Add(Cal, player.Pos.X + 3, player.Pos.Y + 1, player.Pos.Z);
+			bool handPic = handBody?.HeldMesh?.MaterialOverride is ShaderMaterial hm && (Texture2D)hm.GetShaderParameter("tex") == tc;
+			Check($"the hotbar shows them, the hand holds the Clock's texture, a dropped Calendar shows its texture (hand {(handBody?.HeldMesh != null ? "drawn" : "none")})",
+				hotSlots[0].Pic.Texture == tc && hotSlots[1].Pic.Texture == tl && (handBody?.HeldMesh == null || handPic) && dr?.Mat != null && (Texture2D)dr.Mat.GetShaderParameter("tex") == tl);
+			// the words: at once when picked, steady while held, both hands, a passing note, refreshed once a second, gone when not held
+			string ClockW() => Sky.ClockWords(sky.Clock, sky.PlaceK, sky.PlaceSouth); string CalW() => Sky.CalendarWords(sky.Clock, sky.PlaceSouth);
+			TickHud(0.01f);
+			Check($"picking the Clock shows its words at once, not its name (\"{nameLabel.Text}\")", nameLabel.Text == ClockW() && nameLabel.Text.EndsWith("of daylight left") && nameLabel.Modulate == Colors.White && nameTimer <= 0);
+			inv.SetSlot(Off, Cal); TickHud(0.01f);
+			Check($"the Calendar in the offhand too: the Clock's line on top, the Calendar's under it (\"{nameLabel.Text.Replace("\n", " | ")}\")", nameLabel.Text == ClockW() + "\n" + CalW() && CalW().StartsWith("Day 3 of Spring, Year 1"));
+			ShowNote("Your Stone Axe broke", 2); TickHud(0.01f);
+			bool noteShown = nameLabel.Text == "Your Stone Axe broke";
+			TickHud(2.1f); TickHud(0.01f);
+			Check($"a passing note takes over for its time, then the words come back (\"{nameLabel.Text.Replace("\n", " | ")}\")", noteShown && nameLabel.Text == ClockW() + "\n" + CalW() && nameLabel.Modulate == Colors.White);
+			string was = nameLabel.Text; sky.Clock += 61; TickHud(0.5f);
+			bool stale = nameLabel.Text == was; TickHud(0.6f);
+			Check($"refreshed once a second: the minutes count down (\"{was.Split('\n')[0]}\" then \"{nameLabel.Text.Split('\n')[0]}\")", stale && nameLabel.Text == ClockW() + "\n" + CalW() && nameLabel.Text != was);
+			sky.Clock = sky.Day * Sky.DayLength + Sky.SecondsAt(0.75, sky.Day, sky.PlaceK, sky.PlaceSouth); TickHud(1.1f);
+			Check($"by night: \"... minutes to sunrise\" (\"{nameLabel.Text.Split('\n')[0]}\")", nameLabel.Text.StartsWith("Midnight: ") && nameLabel.Text.Split('\n')[0].EndsWith(" to sunrise"));
+			inv.SetSlot(0, 0); TickHud(0.01f);
+			Check($"the Clock put away: only the offhand Calendar's words (\"{nameLabel.Text}\")", nameLabel.Text == CalW());
+			inv.SetSlot(Off, 0); TickHud(0.01f);
+			Check($"neither held: the words go at once (\"{nameLabel.Text}\")", nameLabel.Text == "");
+			inv.SetSlot(Off, Clk); inv.OffSel = (inv.OffSel + 1) % Math.Max(1, inv.OffCount); TickHud(0.01f);
+			Check($"a Clock in an offhand slot that isn't the selected one shows nothing (offhand slots {inv.OffCount})", inv.OffCount == 1 ? nameLabel.Text == ClockW() : nameLabel.Text == "");
+			for (int i = 0; i < Inventory.Armor0; i++) inv.SetSlot(i, 0);
+			if (args.Contains("--keepitems"))
+			{   // (for the picture: the Clock in hand, the Calendar in the offhand, in the morning of a summer day)
+				sky.Clock = 8 * Sky.DayLength + 500; inv.OffSel = 0;
+				inv.SetSlot(0, Clk); inv.SetSlot(1, Cal); inv.SetSlot(Inventory.Off0, Cal); DrawHotbar(); SelectSlot(0);
+			}
+			GD.Print("CLOCKITEMS done");
 		}
 		if (args.Contains("--bagtest") && !bagTested && !menuOpen && inv.Survival && shotTimer > 0.3f)
 		{   // (test: the Linen Bag, the user's (2026-11-25), with the rules agreed with the web version)
@@ -2826,13 +2961,17 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 		// and 7 at the far corner WX-1, WY-2, WZ-1; the friend: 30 at y 152, z 602, x 600-629, 3 and 3760 in turn); at 25 s prints
 		// them again, so both editions' worlds can be compared. --mixlook: only the first reading, no changes: a friend joining late,
 		// to see the whole welcome come in)
+		if (args.Contains("--mixtest") && hosting && ready && !menuOpen && !mixClockGiven)
+		{   // (the host holds a Clock from the start)
+			mixClockGiven = true; inv.SetSlot(inv.Selected, Blocks.Clock); DrawHotbar();
+		}
 		if ((args.Contains("--mixtest") || args.Contains("--mixlook")) && ready && !menuOpen && (hosting && friends.Count > 0 || netClient && welcomed))
 		{
 			mixT += (float)dt;
 			if (mixStep == 0 && mixT > 5 && args.Contains("--mixlook")) { mixStep = 2; MixLive(1); }
 			else if (mixStep == 0 && mixT > 5)
 			{
-				mixStep = 1; MixLive(1);
+				mixStep = 1; MixLive(1); Mix8("A");
 				// (gen 4: in the air over the start instead, EarthSpawn's block (sx, sz): the host's at y 400, z sz, x sx - 15 + k; the
 				// friend's at y 402, z sz + 2)
 				var (ex, ez) = world.Lazy ? EarthSpawn() : (615, 600);
@@ -2842,7 +2981,12 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 				if (hosting) world.SetBlock(World.WX - 1, World.WY - 2, World.WZ - 1, 7);
 				GD.Print($"MIXTEST {(hosting ? "host" : "friend")}: changes made");
 			}
-			else if (mixStep == 1 && mixT > 25) { mixStep = 2; MixLive(2); }
+			else if (mixStep == 1 && mixT > 25)
+			{
+				mixStep = 2;
+				if (hosting) { sky.Clock += Nums.N.CLOCK.skip; GD.Print("MIX8 host: T (+300 to the clock)"); }   // (as the T key: the friend should follow)
+				MixLive(2);
+			}
 			// (Beta 0.1.5.4, in a river: an Earthlike host's refill, then the third and fourth readings on both sides)
 			else if (mixStep == 2 && hosting && world.Lazy && mixT > 26)
 			{
@@ -2867,7 +3011,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 				GD.Print("MIXTEST host: the Andesite taken out");
 			}
 			else if (mixStep is 2 or 4 && (!hosting || !world.Lazy || mixStep == 4) && mixT > 40) { mixStep = 5; MixLive(3); if (mixRefill.id > 0) GD.Print($"MIXTEST host: the refilled spot holds {world.GetBlock(mixRefill.x, mixRefill.y, mixRefill.z)}"); }
-			else if (mixStep == 5 && mixT > 55) { mixStep = 6; MixLive(4); }
+			else if (mixStep == 5 && mixT > 55) { mixStep = 6; MixLive(4); Mix8("B"); }
 		}
 		// (test, two games: --bagnet --host holds a full Linen Bag and drops an empty and a full one; --bagnet --join=CODE holds a
 		// full one too, checks the host's drops and hand show the right pictures, and is the picture; the host checks the friend's hand)
@@ -3820,7 +3964,7 @@ GD.Print($"PLANCRUST crust {100.0 * plan.Crust.Count(q => q) / plan.Crust.Length
 			}
 			if (menuOpen || pauseMenu.Visible || AnyPanel || dead) return;
 			if (k.PhysicalKeycode == Key.M) { settings.Muted = !settings.Muted; ApplySettings(); ShowNote(settings.Muted ? "Sound off" : "Sound on"); }
-			else if (k.PhysicalKeycode == Key.T && locked) sky.TimeOfDay = (sky.TimeOfDay + 0.125f) % 1;   // skip ahead 1/8 of a day
+			else if (k.PhysicalKeycode == Key.T && locked) sky.Clock += Nums.N.CLOCK.skip;   // skip ahead 1/8 of a day (5 minutes)
 			else if (k.PhysicalKeycode == Key.F && locked && inv.Survival) SwapOffhand();   // survival: swap the offhand item with your hand
 			else if (k.PhysicalKeycode == Key.F && locked) { player.Flying = !player.Flying; player.Vel.Y = 0; }
 			else if (k.PhysicalKeycode == Key.R && invOpen) { if (tipSlot != null && GodotObject.IsInstanceValid(tipSlot) && tipSlot.IsVisibleInTree() && tipSlot.ShownId != 0) ShowHowTo(tipSlot.ShownId); }   // R over an item: how to make it

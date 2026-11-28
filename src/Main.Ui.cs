@@ -549,7 +549,8 @@ public partial class Main
 	{
 		inv.Selected = ((i % Inventory.Slots) + Inventory.Slots) % Inventory.Slots;
 		for (int k = 0; k < Inventory.Slots; k++) hotSlots[k].Selected = k == inv.Selected;
-		ShowNote(inv.Held != 0 ? Blocks.B[inv.Held].Name : "Empty");
+		if (Blocks.IsLive(inv.Held)) { nameTimer = 0; liveKey = 0; }   // (the Clock and the Calendar: their words at once, not their name)
+		else ShowNote(inv.Held != 0 ? Blocks.B[inv.Held].Name : "Empty");
 	}
 	// survival: right-click a hotbar slot (inventory open) to throw that stack out in front of you
 	void ThrowSlot(int i)
@@ -565,8 +566,31 @@ public partial class Main
 	// a short note above the hotbar (the selected block's name, "Lit the torch again"...)
 	void ShowNote(string text, float secs = 1.5f) { nameLabel.Text = text; nameLabel.Modulate = Colors.White; nameTimer = secs; }
 	float kilnRedraw;
+	// (Beta 0.1.6.1) the Clock and the Calendar: held in your main hand, or your selected offhand slot (survival), their words stay in
+	// the note line (the Clock's on top), refreshed once a second; a passing note takes over for its time, then they come back
+	float liveTick; int liveKey;
+	int LiveKey()
+	{
+		if (world == null || menuOpen || dead) return 0;
+		int main = inv.Held, off = inv.Survival ? inv.Id[Inventory.Off0 + inv.OffSel] : 0;
+		return (main == Blocks.Clock || off == Blocks.Clock ? 1 : 0) | (main == Blocks.Calendar || off == Blocks.Calendar ? 2 : 0);
+	}
+	string LiveWords(int key)
+	{
+		string c = (key & 1) != 0 ? Sky.ClockWords(sky.Clock, sky.PlaceK, sky.PlaceSouth) : null, d = (key & 2) != 0 ? Sky.CalendarWords(sky.Clock, sky.PlaceSouth) : null;
+		return c != null && d != null ? c + "\n" + d : c ?? d;
+	}
 	void TickHud(float dt)
 	{
+		if (world != null)
+		{   // their pictures, from your own spot's sky
+			Atlas.SetLive(Blocks.Clock, Sky.PartOf(sky.TimeOfDay));
+			Atlas.SetLive(Blocks.Calendar, Sky.SeasonOf(sky.Day, sky.PlaceSouth));
+		}
+		int key = LiveKey();
+		if (nameTimer > 0) liveKey = 0;   // (a note is showing: the words come back after it)
+		else if (key != 0) { if (key != liveKey || (liveTick -= dt) <= 0) { nameLabel.Text = LiveWords(key); nameLabel.Modulate = Colors.White; liveKey = key; liveTick = 1; } }
+		else if (liveKey != 0) { nameLabel.Text = ""; liveKey = 0; }
 		if (nameTimer > 0) { nameTimer -= dt; if (nameTimer < 0.5f) nameLabel.Modulate = new Color(1, 1, 1, Math.Max(0, nameTimer / 0.5f)); }
 		if (kilnAt >= 0 && invOpen && (kilnRedraw -= dt) <= 0) { kilnRedraw = 0.25f; DrawKilnStatus(); }
 	}

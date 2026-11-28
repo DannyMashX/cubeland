@@ -246,6 +246,18 @@ public static class Atlas
 	public static Image LoadImage(string path) => Skin.LoadImage(path);
 
 	static readonly Dictionary<int, ImageTexture> iconCache = new();
+	// (Beta 0.1.6.1) live pictures (blocks.json live + frames: the Clock and the Calendar): each keeps ONE texture, redrawn in place
+	// when its frame changes, so every slot, recipe, hand and dropped one showing it changes with it
+	static readonly Dictionary<int, int> liveAt = new();
+	public static int LiveFrame(int id) => liveAt.TryGetValue(id, out int f) ? f : 0;
+	public static void SetLive(int id, int frame)
+	{
+		if (Blocks.Get(id) is not { Frames: { Length: > 0 } fr } || Image == null) return;
+		frame = Math.Clamp(frame, 0, fr.Length - 1);
+		if (LiveFrame(id) == frame && liveAt.ContainsKey(id)) return;
+		liveAt[id] = frame;
+		if (iconCache.TryGetValue(id, out var t)) t.Update(Icon(id));
+	}
 	public static ImageTexture IconTexture(int id)
 	{
 		if (!iconCache.TryGetValue(id, out var t)) iconCache[id] = t = ImageTexture.CreateFromImage(Icon(id));
@@ -454,7 +466,7 @@ public static class Atlas
 		}
 		else
 		{
-			int tile = b.Icon >= 0 ? b.Icon : b.T[0];
+			int tile = b.Frames is { Length: > 0 } fr ? fr[Math.Clamp(LiveFrame(id), 0, fr.Length - 1)] : b.Icon >= 0 ? b.Icon : b.T[0];
 			icon.BlitRect(Image, new Rect2I(tile * TILE, 0, TILE, TILE), Vector2I.Zero);
 		}
 		return icon;

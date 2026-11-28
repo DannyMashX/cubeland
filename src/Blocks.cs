@@ -40,6 +40,8 @@ public class BlockDef
 	public int Stage;
 	public bool Top;
 	public bool Bag; public int Full = -1;   // a bag (see Inventory's bag rules); its picture while it holds anything (its atlas place, -1 none)
+	public int Stack;              // how many fit in a slot, when it isn't StackMax (0: StackMax)
+	public string Live; public int[] Frames;   // (Beta 0.1.6.1) its picture follows the sky: "clock" by the part of the day, "season" by the season (Atlas.SetLive); its pictures (atlas places)
 	public int Plants, Returns;    // an item: the crop it plants on tilled soil; what's left in your hand after eating it
 	public int Inner, Snowed;      // snow-logged: the torch or flower it holds, and how many layers of snow are round it
 	public bool Log;               // a tree's log, standing (lying ones: see Blocks.IsLogBlock)
@@ -170,6 +172,7 @@ public static partial class Blocks
 	public const int Snowball = 706;
 	public static int SnowballsFor(int layers, Random r) { int n = 0; for (int k = 0; k < layers; k++) n += 2 + r.Next(3); return n; }
 	public static bool IsLeaves(int b) => Get(b)?.Leaves == true;
+	public const int Clock = 744, Calendar = 745;   // (Beta 0.1.6.1: items you hold to read the time and the date)
 	public const int Chocolate = 200, Stick = 201, Rock = 212, CrudeAxe = 213, ClayBall = 215, Brick = 216, FireEssence = 217;
 	public const int Bone = 620, BoneAsh = 621, GloomWisp = 622;   // Fear & Foes (items 620+; 600-611 are the dyes)
 	// Till & Tend (farming Grain; see Farm.cs): items 623-626, soil blocks 93-96, Grain growing 42-49 (49 = ripe)
@@ -495,7 +498,8 @@ public static partial class Blocks
 	public static int TorchMax(int wi) => wi > 0 ? 2 : 4;
 	public static int WallIndex(int dx, int dz) { for (int i = 1; i < 5; i++) if (TorchWalls[i][0] == dx && TorchWalls[i][1] == dz) return i; return -1; }
 	public static int TorchDrop(int id) => B[id].Burn == 3 ? EverTorch : BurntTorch;
-	public static int StackMaxOf(int id) => IsTool(id) || IsGear(id) || IsBag(id) ? 1 : StackMax;
+	public static int StackMaxOf(int id) => IsTool(id) || IsGear(id) || IsBag(id) ? 1 : Get(id) is { Stack: > 0 } b ? b.Stack : StackMax;
+	public static bool IsLive(int id) => Get(id)?.Live != null;   // (the Clock and the Calendar)
 	public static bool IsBag(int id) => Get(id)?.Bag == true;
 	// how high the water's surface sits in its block (water with more water on top fills the whole block)
 	public static float WaterHeight(int id, int above) => IsWater(above) ? 1 : IsStillWater(id) ? 0.875f : Math.Max(0.15f, 0.875f * (8 - WaterLevel(id)) / 8f);

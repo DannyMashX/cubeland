@@ -936,7 +936,7 @@ public partial class Main
 			if (t.Faint > 0) light = new Vector3(Math.Max(light.X, t.Faint), Math.Max(light.Y, t.Faint), Math.Max(light.Z, t.Faint));
 			// burning: in daylight with open sky straight above its head (and not in water). The host's game does the damage.
 			int hx = (int)MathF.Floor(m.X), hz = (int)MathF.Floor(m.Z);
-			m.Burning = t.Burns && m.Dead == 0 && sky.SkyDay > 0.6f && hx >= 0 && hz >= 0 && hx < World.WX && hz < World.WZ &&
+			m.Burning = t.Burns && m.Dead == 0 && (world.Lazy ? sky.SkyDayAt(true, m.Z, World.WZ) : sky.SkyDay) > 0.6f && hx >= 0 && hz >= 0 && hx < World.WX && hz < World.WZ &&
 				(int)MathF.Floor(m.Y + m.Height) > world.SkyTop[hz * World.WX + hx] && !player.WaterAt(m.X, m.Y + 0.5f, m.Z);
 			if (m.Burning)
 			{

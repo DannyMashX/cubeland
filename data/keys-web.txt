@@ -523,6 +523,8 @@
 723	truffle
 724	linen_bag
 726	flint
+744	clock
+745	calendar
 1001	slab:grass
 1002	slab:dirt
 1003	slab:andesite

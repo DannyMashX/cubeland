@@ -348,6 +348,8 @@
     { "out": "leather_backpack", "n": 1, "needs": [["leather", 5]], "at": "bench" },
     { "out": "leather_utility_belt", "n": 1, "needs": [["leather", 3]], "at": "bench" },
     { "out": "linen_bag", "n": 1, "needs": [["linen", 3], ["string", 1]], "at": "bench" },
+    { "out": "clock", "n": 1, "needs": [["tin_brick", 2], ["glass", 1]], "at": "bench" },
+    { "out": "calendar", "n": 1, "needs": [["linen", 2], ["stick", 1]], "at": "bench" },
     { "out": "copper_helmet", "n": 1, "needs": [["copper_brick", 3]], "at": "bench" },
     { "out": "copper_chestplate", "n": 1, "needs": [["copper_brick", 5]], "at": "bench" },
     { "out": "copper_leggings", "n": 1, "needs": [["copper_brick", 4]], "at": "bench" },

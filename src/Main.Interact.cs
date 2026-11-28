@@ -108,7 +108,8 @@ public partial class Main
 		inv.OffSel = (inv.OffSel + 1) % inv.OffCount;
 		int id = inv.Id[Inventory.Off0 + inv.OffSel];
 		DrawHotbar();
-		ShowNote($"Offhand {inv.OffSel + 1}: {(id != 0 ? Blocks.B[id].Name : "Empty")}");
+		if (Blocks.IsLive(id)) { nameTimer = 0; liveKey = 0; }   // (the Clock and the Calendar: their words at once)
+		else ShowNote($"Offhand {inv.OffSel + 1}: {(id != 0 ? Blocks.B[id].Name : "Empty")}");
 	}
 	void SwapOffhand()
 	{

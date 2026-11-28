@@ -31,6 +31,7 @@ public static class Worlds
 		public long[] Pieces = Array.Empty<long>();   // pieces: index, 8 block ids, index, ... (64-bit, as block numbers are; old saves' numbers read the same)
 		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public int Pg;   // (how Pieces' spots are packed: 8192, or left out for 4096: see World.GroupMul)
 		public PlayerSave Player; public float Time;
+		[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? Clock;   // (Beta 0.1.6.1: game seconds since day 0; Time is still written, for older versions)
 		public int[] Hotbar, Counts, Wear; public int Selected, OffSel; public Dictionary<int, Inventory.PackData> Data;
 		public List<MobSave> Mobs = new(); public List<DropSave> Drops = new();
 		public int[] Stairs = Array.Empty<int>();   // staircases that moved somewhere the world had no spot for (x, y, z, way, steps, block, ...)
@@ -125,8 +126,19 @@ public static class Worlds
 	{
 		if (Get(w.Id) == null) return false;   // (deleted)
 		bool ok = Write($"{Dir}/{w.Id}.json", JsonSerializer.Serialize(s, Opts));
+		if (ok && s.Clock is double c) Write($"{Dir}/{w.Id}.clock.json", JsonSerializer.Serialize(new ClockSide { Clock = c, Seed = s.Seed, SavedAt = s.SavedAt }, Opts));
 		if (ok) MarkOpened(w);
 		return ok;
+	}
+	// (Beta 0.1.6.1) the calendar, also kept in a small file of its own beside the save: an older version doesn't know the save's
+	// Clock and saves over it, but never touches this file, so coming back the world keeps its date (the days played in the
+	// older version aren't counted). The same as the web version's own storage key.
+	public class ClockSide { public double Clock; public int Seed; public long SavedAt; }
+	public static double? ReadClock(string id, int seed)
+	{
+		string p = $"{Dir}/{id}.clock.json";
+		try { if (!FileAccess.FileExists(p)) return null; var c = JsonSerializer.Deserialize<ClockSide>(FileAccess.GetFileAsString(p), Opts); return c != null && c.Seed == seed && double.IsFinite(c.Clock) && c.Clock >= 0 ? c.Clock : null; }
+		catch { return null; }
 	}
 	// An older Biomes world (land 0 to 4) grows the staircases too, as new worlds do, but none within 2 chunks of a chunk that held
 	// any change (block) when it was first opened in a version with them. That's decided once, here, and kept in the list and the
@@ -157,5 +169,6 @@ public static class Worlds
 	{
 		Load(); list.RemoveAll(w => w.Id == id); SaveList();
 		DirAccess.RemoveAbsolute($"{Dir}/{id}.json");
+		if (FileAccess.FileExists($"{Dir}/{id}.clock.json")) DirAccess.RemoveAbsolute($"{Dir}/{id}.clock.json");
 	}
 }

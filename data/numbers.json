@@ -16,7 +16,9 @@
     "AXE_STAGES": "stage breaking: stages of a log each swing breaks, by the axe's material (none: by hand or another tool)",
     "LOG_STAGES": "stage breaking: stages in a log",
     "STONE_STAGES": "stage breaking: stages in Stone, ores, Sandstone and Terracotta, for each layer down",
-    "HEARTS": "hearts of health (each one 4 quarters)"
+    "HEARTS": "hearts of health (each one 4 quarters)",
+    "CLOCK": "the day and the calendar (Beta 0.1.6.1): day = game seconds in a day (each day starts at sunrise); light = seconds of daylight on average; lightSwing = how many seconds longer midsummer days are (and shorter midwinter ones), in Earthlike worlds times poleSwing x the distance from the equator (none at the equator, all of it at the poles); the moon goes its own way (Beta 0.1.6.1): it falls behind the sun by a whole turn every moonDays days (new moon to new moon), its path leans moonLean off the sun's and the lean turns every nodeDays days (eclipses only where the paths cross), and its distance swings every anomDays days (up to moonBig bigger at its closest); moonlight = the faint blue the full moon adds outdoors at night (red, green, blue; never counts as day); newWorldT = the seconds after sunrise a new world starts at; skip = seconds the T key moves the clock on",
+    "WEATHER": "the weather and the seasons (Beta 0.1.6.1 on): S24 = the season through the 24-day year, round(1024 x cos(2 pi (day - 9) / 24)) for day 0 (the first day of northern spring) to 23; midsummer is day 9, midwinter day 21; in a day it is blended toward the next day by the game minute, in whole numbers"
   },
   "STACK_MAX": 64,
   "SMELT_TIME": 5,
@@ -39,5 +41,7 @@
   "AXE_STAGES": { "none": 1, "crude": 2, "stone": 4, "copper": 8, "iron": 8, "bronite": 8, "rosium": 8, "steel": 8 },
   "LOG_STAGES": 8,
   "STONE_STAGES": 4,
-  "HEARTS": 5
+  "HEARTS": 5,
+  "CLOCK": { "day": 2400, "light": 1200, "lightSwing": 600, "poleSwing": 1, "moonDays": 8, "nodeDays": 23, "anomDays": 7, "moonLean": 0.09, "moonBig": 0.25, "moonlight": [0.045, 0.06, 0.11], "newWorldT": 240, "skip": 300 },
+  "WEATHER": { "S24": [-724, -512, -265, 0, 265, 512, 724, 887, 989, 1024, 989, 887, 724, 512, 265, 0, -265, -512, -724, -887, -989, -1024, -989, -887] }
 }
